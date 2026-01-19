@@ -1672,6 +1672,10 @@ TEST_WITHOUT_COMPILED_AUTOGRAD: bool = TestEnvironment.def_flag(
     "TEST_WITHOUT_COMPILED_AUTOGRAD",
     env_var="PYTORCH_TEST_WITHOUT_COMPILED_AUTOGRAD",
 )
+TEST_WITH_PYTHONIFY: bool = TestEnvironment.def_flag(
+    "TEST_WITH_PYTHONIFY",
+    env_var="PYTORCH_TEST_PYTHONIFY",
+)
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -3348,7 +3352,7 @@ class TestCase(expecttest.TestCase):
         test_cls = super_run.__self__  # type: ignore[attr-defined]
 
         # Are we compiling?
-        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR
+        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR or TEST_WITH_PYTHONIFY
         # Is the class strict and compiling?
         strict_default = False
         should_reset_dynamo = False
@@ -3415,7 +3419,16 @@ class TestCase(expecttest.TestCase):
         )
 
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors), maybe_disable_size_asserts:
-            if TEST_WITH_AOT_EAGER:
+            if TEST_WITH_PYTHONIFY:
+                # Pythonify mode: wrap with torch._dynamo.optimize using a temp file path.
+                # This generates Python source code for the compiled function.
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as f:
+                    pythonify_path = f.name
+                super_run = torch._dynamo.optimize(
+                    "inductor", nopython=nopython, pythonify=pythonify_path
+                )(super_run)
+            elif TEST_WITH_AOT_EAGER:
                 super_run = self.compile_fn(super_run, "aot_eager_decomp_partition", nopython)
             elif TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR:
                 if TEST_WITH_TORCHINDUCTOR:

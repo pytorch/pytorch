@@ -1075,6 +1075,17 @@ class AOTDedupeWrapper(CompilerWrapper):
 
         if ok:
             self.needs_post_compile = False
+            # Store dedupe metadata in TracingContext for pythonify.
+            # When needs_post_compile is False, there are no duplicates to handle.
+            tracing_context = TracingContext.try_get()
+            if tracing_context is not None:
+                if tracing_context.dispatch_wrappers_metadata is None:
+                    tracing_context.dispatch_wrappers_metadata = {}
+                tracing_context.dispatch_wrappers_metadata["AOTDedupeWrapper"] = {
+                    "keep_arg_mask": [],
+                    "add_dupe_map": [],
+                    "needs_post_compile": False,
+                }
             return flat_fn, leaf_flat_args, leaf_flat_args_descs, fw_metadata
 
         if requires_subclass_dispatch(leaf_flat_args, fw_metadata):
@@ -1141,6 +1152,19 @@ class AOTDedupeWrapper(CompilerWrapper):
 
         self.keep_arg_mask = keep_arg_mask
         self.add_dupe_map = add_dupe_map
+
+        # Store dedupe metadata in TracingContext for pythonify.
+        # This allows _extract_wrapper_metadata_for_pythonify to capture the
+        # actual wrapper metadata instead of empty placeholders.
+        tracing_context = TracingContext.try_get()
+        if tracing_context is not None:
+            if tracing_context.dispatch_wrappers_metadata is None:
+                tracing_context.dispatch_wrappers_metadata = {}
+            tracing_context.dispatch_wrappers_metadata["AOTDedupeWrapper"] = {
+                "keep_arg_mask": list(keep_arg_mask),
+                "add_dupe_map": list(add_dupe_map),
+                "needs_post_compile": True,
+            }
 
         deduped_flat_args = self.remove_dupe_args(flat_args)
         # TODO: instead of arbitrarily removing args, it might be useful to
@@ -1298,6 +1322,18 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         # Happy path: we don't need synthetic bases
         if synthetic_base_info is None:
             self.needs_post_compile = False
+            # Store synthetic base metadata in TracingContext for pythonify.
+            # When synthetic_base_info is None, no aliased inputs need merging.
+            tracing_context = TracingContext.try_get()
+            if tracing_context is not None:
+                if tracing_context.dispatch_wrappers_metadata is None:
+                    tracing_context.dispatch_wrappers_metadata = {}
+                tracing_context.dispatch_wrappers_metadata["AOTSyntheticBaseWrapper"] = {
+                    "synthetic_base_info": None,
+                    "aliased_arg_idx_with_metadata_mutations": [],
+                    "needs_post_compile": False,
+                    "is_inference": is_inference,
+                }
             return flat_fn, flat_args, flat_args_descs, fw_metadata
 
         # export path: ban synthetic bases for now, add later if requested.
@@ -1340,6 +1376,40 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
         )
+
+        # Store synthetic base metadata in TracingContext for pythonify.
+        # This allows _extract_wrapper_metadata_for_pythonify to capture actual
+        # wrapper metadata. We serialize synthetic_base_info in a JSON-compatible
+        # format: int indices stay as ints, tuples (base_idx, view_tensor) become
+        # dicts with tensor properties needed to reconstruct views.
+        tracing_context = TracingContext.try_get()
+        if tracing_context is not None:
+            if tracing_context.dispatch_wrappers_metadata is None:
+                tracing_context.dispatch_wrappers_metadata = {}
+
+            # Serialize synthetic_base_info for pythonify.
+            serialized_synthetic_base_info = []
+            for item in synthetic_base_info:
+                if isinstance(item, int):
+                    serialized_synthetic_base_info.append(item)
+                else:
+                    # item is (base_idx, view_tensor)
+                    base_idx, view_tensor = item
+                    serialized_synthetic_base_info.append({
+                        "base_idx": base_idx,
+                        "view_size": list(view_tensor.size()),
+                        "view_stride": list(view_tensor.stride()),
+                        "view_storage_offset": view_tensor.storage_offset(),
+                        "view_requires_grad": view_tensor.requires_grad,
+                    })
+
+            tracing_context.dispatch_wrappers_metadata["AOTSyntheticBaseWrapper"] = {
+                "synthetic_base_info": serialized_synthetic_base_info,
+                "aliased_arg_idx_with_metadata_mutations": list(aliased_arg_idx_with_metadata_mutations),
+                "needs_post_compile": True,
+                "is_inference": is_inference,
+            }
+
         replay_views = config.view_replay_for_aliased_outputs
 
         def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> list[Any]:

@@ -2548,6 +2548,7 @@ def compile(
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
+    pythonify: str | None = None,
 ) -> _Callable[_InputT, _RetT]: ...
 
 
@@ -2561,6 +2562,7 @@ def compile(
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
+    pythonify: str | None = None,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
@@ -2573,6 +2575,7 @@ def compile(
     mode: str | None = None,
     options: dict[str, str | builtins.int | builtins.bool | _Callable] | None = None,
     disable: builtins.bool = False,
+    pythonify: str | None = None,
 ) -> (
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]
     | _Callable[_InputT, _RetT]
@@ -2663,6 +2666,12 @@ def compile(
 
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
+       pythonify (str or None): If provided, generates explicit Python code representing all runtime
+        machinery to the specified file path instead of executing directly. The generated file contains
+        argument extraction, guard evaluation, AOT Autograd wrapping, and compiled callable invocation
+        in a readable, inspectable format. The file can be executed with exec() to produce the same
+        results as normal torch.compile execution. This is useful for debugging, understanding the
+        compilation process, and creating standalone compiled code.
 
     Example::
 
@@ -2700,6 +2709,7 @@ def compile(
                 mode=mode,
                 options=options,
                 disable=disable,
+                pythonify=pythonify,
             )
 
         return fn
@@ -2710,6 +2720,36 @@ def compile(
         )
     if mode is None and options is None:
         mode = "default"
+
+    # Validate pythonify parameter - must be a valid writable file path if provided
+    if pythonify is not None:
+        import os
+
+        if not isinstance(pythonify, (str, os.PathLike)):
+            raise TypeError(
+                f"pythonify must be a string or path-like object, got {type(pythonify).__name__}"
+            )
+        pythonify_path = os.fspath(pythonify)
+        pythonify_dir = os.path.dirname(pythonify_path)
+        if pythonify_dir and not os.path.exists(pythonify_dir):
+            raise ValueError(
+                f"pythonify directory does not exist: {pythonify_dir}"
+            )
+        if pythonify_dir and not os.access(pythonify_dir, os.W_OK):
+            raise ValueError(
+                f"pythonify directory is not writable: {pythonify_dir}"
+            )
+
+        from torch._dynamo.pythonify.warnings import emit_pythonify_warnings
+
+        emit_pythonify_warnings(
+            backend=backend,
+            mode=mode,
+            options=options,
+            fullgraph=fullgraph,
+            dynamic=dynamic,
+            disable=disable,
+        )
 
     from torch._inductor.compiler_bisector import CompilerBisector
 
@@ -2756,6 +2796,7 @@ def compile(
         dynamic=dynamic,
         disable=disable,
         guard_filter_fn=guard_filter_fn,
+        pythonify=pythonify,
     )(model)  # type: ignore[return-value]
 
 
