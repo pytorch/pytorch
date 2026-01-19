@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 from collections.abc import Callable, Sequence
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -51,7 +51,7 @@ def _is_supported_placement(placement: Placement) -> bool:
 
 
 def _validate_placements(
-    placements: tuple[PlacementType, ...],
+    placements: Any,
     context: str,
 ) -> None:
     """Raises ValueError if any placement is unsupported for variance tracking."""
@@ -321,7 +321,7 @@ def _local_map_wrapped(
         flat_out, out_spec = pytree.tree_flatten(out)
 
         flat_dist_out = []
-        out_placements_tuple: tuple[PlacementType, ...] = (  # type: ignore[assignment]
+        out_placements_tuple = (
             out_placements if isinstance(out_placements, tuple) else (out_placements,)
         )
         assert len(flat_out) == len(out_placements_tuple), (

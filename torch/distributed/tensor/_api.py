@@ -521,11 +521,9 @@ class DTensor(torch.Tensor):
             self, grad_placements
         )  # pyre-ignore[16]: autograd func
 
-        if not track_variant_dims:
-            return local_tensor
-
-        # wrap output of to_local in LTensor to track variant axes
-        ltensor = LTensor(local_tensor, **LTensor.compute_metadata_from_dtensor(self))
+        if track_variant_dims:
+            # wrap output of to_local in LTensor to track variant axes
+            ltensor = LTensor(local_tensor, **LTensor.compute_metadata_from_dtensor(self))
         return ltensor
 
     def redistribute(
