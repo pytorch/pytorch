@@ -42,6 +42,7 @@
 #include <ATen/ops/_foreach_neg_native.h>
 #include <ATen/ops/_foreach_norm_native.h>
 #include <ATen/ops/_foreach_pow_native.h>
+#include <ATen/ops/_foreach_powsum_native.h>
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
 #include <ATen/ops/_foreach_rsqrt_native.h>
@@ -56,6 +57,7 @@
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
 #include <ATen/ops/copy.h>
+#include <ATen/ops/linalg_powsum.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max.h>
 #include <ATen/ops/maximum.h>

@@ -112,6 +112,7 @@
 #include <ATen/ops/linalg_tensorsolve_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/linalg_vector_norm_native.h>
+#include <ATen/ops/linalg_powsum_native.h>
 #include <ATen/ops/log2.h>
 #include <ATen/ops/logdet_native.h>
 #include <ATen/ops/matmul.h>
@@ -2910,8 +2911,8 @@ Tensor linalg_powsum(
     self_ = self;
   }
 
-  // Compute result shape using meta::make_reduction_from_out_ty
-  auto result = meta::make_reduction_from_out_ty(self_, dim, keepdim, toRealValueType(compute_dtype)).first;
+  // Create output tensor with the correct shape
+  auto result = create_reduction_result(self_, opt_dim, keepdim, toRealValueType(compute_dtype));
 
   if (result.numel() == 0) {
     // For empty reductions, powsum returns 0
