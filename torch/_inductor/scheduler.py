@@ -1312,7 +1312,9 @@ def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
     flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
     def _is_tensor_ir(x) -> bool:  # type: ignore[no-untyped-def]
-        return isinstance(x, ir.IRNode) and not isinstance(x, ir.GeneratorState)
+        return isinstance(x, ir.IRNode) and not isinstance(
+            x, (ir.GeneratorState, ir.OpaqueObjectState)
+        )
 
     cache_key = str(
         (python_kernel_name,)
@@ -5723,7 +5725,7 @@ class Scheduler:
                 inp = V.graph.graph_inputs[name]
                 if isinstance(inp, ir.TorchBindObject):
                     V.graph.wrapper_code.codegen_free(inp)
-                elif isinstance(inp, ir.GeneratorState):
+                elif isinstance(inp, (ir.GeneratorState, ir.OpaqueObjectState)):
                     continue
                 else:
                     storage = inp.data
