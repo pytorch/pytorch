@@ -37,10 +37,10 @@ IF "%CUDA_PATH_V128%"=="" (
 )
 
 IF "%BUILD_VISION%" == "" (
-    set TORCH_CUDA_ARCH_LIST=7.0;7.5;8.0;8.6;9.0;10.0;12.0
+    set TORCH_CUDA_ARCH_LIST=7.5;8.0;8.6;9.0;10.0;12.0
     set TORCH_NVCC_FLAGS=-Xfatbin -compress-all
 ) ELSE (
-    set NVCC_FLAGS=-D__CUDA_NO_HALF_OPERATORS__ --expt-relaxed-constexpr -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=compute_80 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_90,code=compute_90 -gencode=arch=compute_100,code=compute_100 -gencode=arch=compute_120,code=compute_120
+    set NVCC_FLAGS=-D__CUDA_NO_HALF_OPERATORS__ --expt-relaxed-constexpr -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_80,code=compute_80 -gencode=arch=compute_86,code=compute_86 -gencode=arch=compute_90,code=compute_90 -gencode=arch=compute_100,code=compute_100 -gencode=arch=compute_120,code=compute_120
 )
 
 set "CUDA_PATH=%CUDA_PATH_V128%"
