@@ -31,17 +31,43 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
         wrapped = some_wrapper(kernel_fn)
         capture_triton(wrapped)[grid](...)
 
-    TODO: This check is best effort. It does *not* handle the case where the triton
-    kernel is hidden behind recursive function calls.
+    It also recursively analyzes called functions to find triton kernels hidden
+    behind helper function calls.
+
+    That said, it is best effort. There are cases (e.g., recursion > MAX_RECURSION_DEPTH)
+    that are not accounted for, so keep that in mind.
     """
 
-    def find_triton_kernels(fn: Callable[..., Any]) -> list[object]:
+    # prevent infinite recursion
+    MAX_RECURSION_DEPTH = 5
+
+    def find_triton_kernels(
+        fn: Callable[..., Any],
+        visited_fns: set[int] | None = None,
+        depth: int = 0,
+    ) -> list[object]:
         try:
             from triton.runtime.autotuner import Autotuner
             from triton.runtime.jit import JITFunction
         except ImportError:
             logger.warning("Triton not available, find_triton_kernels = []")
             return []
+
+        # init visited set and check for cycles/depth limit
+        if visited_fns is None:
+            visited_fns = set()
+
+        fn_id = id(fn)
+        if fn_id in visited_fns:
+            return []
+        if depth > MAX_RECURSION_DEPTH:
+            logger.debug(
+                "reached max recursion depth (%s) in find_triton_kernels",
+                MAX_RECURSION_DEPTH,
+            )
+            return []
+
+        visited_fns.add(fn_id)
 
         try:
             source = inspect.getsource(fn)
@@ -60,6 +86,8 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 self.triton_kernels: list[Any] = []
                 # track local variable assignments: var_name -> list of RHS expressions
                 self.assignments: dict[str, list[ast.expr]] = {}
+                # track function calls
+                self.called_functions: list[str] = []
 
             def visit_Assign(self, node: ast.Assign) -> None:
                 for target in node.targets:
@@ -71,22 +99,33 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 triton_func_names = ("capture_triton", "wrap_triton")
                 if isinstance(node.func, ast.Attribute):
                     attr = node.func
-                    if (
-                        isinstance(attr.value, ast.Attribute)
-                        and isinstance(attr.value.value, ast.Name)
-                        and attr.value.value.id == "torch"
-                        and attr.value.attr == "_library"
-                        and attr.attr in triton_func_names
-                    ):
-                        if node.args and isinstance(node.args[0], ast.Name):
-                            self.triton_kernels.append(node.args[0].id)
-
+                    if isinstance(attr.value, ast.Attribute):
+                        if (
+                            isinstance(attr.value.value, ast.Name)
+                            and attr.value.value.id == "torch"
+                            and attr.value.attr == "_library"
+                            and attr.attr in triton_func_names
+                        ):
+                            if node.args and isinstance(node.args[0], ast.Name):
+                                self.triton_kernels.append(node.args[0].id)
+                        elif (
+                            isinstance(attr.value.value, ast.Attribute)
+                            and isinstance(attr.value.value.value, ast.Name)
+                            and attr.value.value.value.id == "torch"
+                            and attr.value.value.attr == "ops"
+                        ):
+                            self.called_functions.append(
+                                f"{attr.value.attr}::{attr.attr}"
+                            )
                 # Catch capture_triton, wrap_triton that's been
                 # imported directly
                 elif isinstance(node.func, ast.Name):
                     if node.func.id in triton_func_names:
                         if node.args and isinstance(node.args[0], ast.Name):
                             self.triton_kernels.append(node.args[0].id)
+                    else:
+                        # track regular function calls for recursive analysis
+                        self.called_functions.append(node.func.id)
 
                 self.generic_visit(node)
 
@@ -144,7 +183,7 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
             if name in visited:
                 return []
 
-            visited = visited | {name}
+            visited.add(name)
 
             # try direct resolution from globals
             if name in all_globals:
@@ -204,6 +243,40 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 if obj_id not in seen_ids:
                     seen_ids.add(obj_id)
                     resolved.append(obj)
+
+        for func_name in collector.called_functions:
+            # try resolving the function from globals or closure
+            func_obj = None
+            if func_name in all_globals:
+                func_obj = all_globals[func_name]
+            elif func_name in closure_vars.nonlocals:
+                func_obj = closure_vars.nonlocals[func_name]
+
+            if func_obj is None:
+                from torch._library.custom_ops import OPDEFS
+
+                if func_name in OPDEFS:
+                    func_obj = OPDEFS[func_name]._abstract_fn
+
+            # skip if not a callable or if it's a triton kernel itself
+            if func_obj is None or not callable(func_obj):
+                continue
+
+            # skip built-in functions and C extensions (they can't contain triton kernels)
+            if not hasattr(func_obj, "__code__"):
+                continue
+
+            try:
+                nested_kernels = find_triton_kernels(func_obj, visited_fns, depth + 1)
+                for kernel in nested_kernels:
+                    kernel_id = id(kernel)
+                    if kernel_id not in seen_ids:
+                        seen_ids.add(kernel_id)
+                        resolved.append(kernel)
+            except Exception:
+                logger.debug(
+                    "failed to analyze called function %s", func_name, exc_info=True
+                )
 
         return resolved
 
