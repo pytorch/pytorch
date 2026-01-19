@@ -35,9 +35,7 @@ struct ParamsEqual {
   static_assert(std::is_standard_layout_v<Params>, "Params is not POD");
 
   bool operator()(const Params& a, const Params& b) const noexcept {
-    auto ptr1 = reinterpret_cast<const uint8_t*>(&a);
-    auto ptr2 = reinterpret_cast<const uint8_t*>(&b);
-    return memcmp(ptr1, ptr2, sizeof(Params)) == 0;
+    return memcmp(&a, &b, sizeof(Params)) == 0;
   }
 };
 
@@ -68,9 +66,7 @@ struct ParamsWrapper {
   inline friend bool operator==(
       const ParamsWrapper& lhs,
       const ParamsWrapper& rhs) noexcept {
-    auto ptr1 = reinterpret_cast<const uint8_t*>(&(lhs.pod));
-    auto ptr2 = reinterpret_cast<const uint8_t*>(&(rhs.pod));
-    return memcmp(ptr1, ptr2, sizeof(lhs.pod)) == 0;
+    return memcmp(&lhs.pod, &rhs.pod, sizeof(T)) == 0;
   }
 };
 
