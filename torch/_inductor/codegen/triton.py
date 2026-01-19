@@ -2094,7 +2094,7 @@ class BlockParameters:
 
         def revert(self, attr):
             if not self.is_identity:
-                return [attr[i] for i in self.sort_idx]
+                return [attr[i] for i in self.revert_sort_idx]
             return attr
 
     @dataclasses.dataclass
@@ -3684,13 +3684,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # With broadcast:
             # tl.store(out_ptr0 + (tl.full([1, 1], 0, tl.int32).broadcast_to((XBLOCK,1)), tmp4, xmask)
             indexing_str = indexing.index_str
-            if (
-                is_sympy_integer_like(index)
-                and value.shape is not None
-                and not all(str(x) == "1" for x in value.shape)
-            ):
-                value_shape = ", ".join(map(str, value.shape))
-                indexing_str += f".broadcast_to({value_shape})"
+            if is_sympy_integer_like(index):
+                if self.is_combo_kernel:
+                    # In combo kernels, broadcast pointer to match mask shape
+                    indexing_str += f".broadcast_to({self.dense_size_str()})"
+                elif value.shape is not None and not all(
+                    str(x) == "1" for x in value.shape
+                ):
+                    value_shape = ", ".join(map(str, value.shape))
+                    indexing_str += f".broadcast_to({value_shape})"
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
             self.atomic_add_found = True
