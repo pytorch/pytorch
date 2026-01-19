@@ -42,10 +42,43 @@ def unwrap_fn_spec(fn_spec: pytree.TreeSpec) -> Callable:
     return pytree.tree_unflatten((), fn_spec)
 
 
-def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+# Callback for retrieving modules by index. Set by Dynamo to avoid layering violation.
+# The HOP layer defines the interface; Dynamo provides the implementation.
+_module_retriever: Callable[[int], Any] | None = None
 
-    mod = get_external_object_by_index(nn_module_index)
+
+def set_module_retriever(fn: Callable[[int], Any]) -> None:
+    """
+    Register the module retrieval function. Called by Dynamo to provide
+    its implementation of get_external_object_by_index.
+
+    This enables dependency inversion: the HOP layer defines the interface,
+    and Dynamo provides the implementation, avoiding a direct import from
+    torch._dynamo in the HOP layer.
+    """
+    global _module_retriever
+    _module_retriever = fn
+
+
+def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
+    """
+    Retrieve an nn.Module by its registered index.
+
+    This is the runtime counterpart to register_user_object(). During tracing,
+    modules are registered and assigned integer indices. At runtime, this
+    function retrieves the original module instance.
+
+    Raises TypeError if the object at the index is not an nn.Module.
+    Raises RuntimeError if the module retriever has not been registered.
+    """
+    if _module_retriever is None:
+        raise RuntimeError(
+            "Module retriever not registered. This typically means "
+            "invoke_leaf_function is being called outside of a Dynamo context. "
+            "Ensure torch._dynamo is imported before using leaf functions with nn.Module arguments."
+        )
+
+    mod = _module_retriever(nn_module_index)
     if not isinstance(mod, torch.nn.Module):
         raise TypeError(
             f"Expected nn.Module at index {nn_module_index} for leaf function invocation, "
@@ -428,34 +461,9 @@ def _check_no_input_mutation(
                 )
 
 
-@contextlib.contextmanager
-def _allow_non_fake_inputs() -> Generator[None, None, None]:
-    """
-    Context manager to temporarily allow non-fake inputs in fake tensor mode.
-
-    This is controlled by torch._dynamo.config.leaf_function_allow_non_fake_inputs.
-    When enabled, real tensors in closures are auto-converted to fake tensors.
-    When disabled (default), an error is raised if fake_impl uses non-fake tensors.
-    """
-    from torch._dynamo import config as dynamo_config
-    from torch._subclasses.fake_tensor import fake_tensor_tls
-
-    if not dynamo_config.leaf_function_allow_non_fake_inputs:
-        yield
-        return
-
-    old_override = fake_tensor_tls.allow_non_fake_inputs_override
-    try:
-        fake_tensor_tls.allow_non_fake_inputs_override = True
-        yield
-    finally:
-        fake_tensor_tls.allow_non_fake_inputs_override = old_override
-
-
 @register_fake(invoke_leaf_function)
 def invoke_leaf_function_fake(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
-    with _allow_non_fake_inputs():
-        return _invoke_leaf_function_impl(fake_fn_spec, input_spec, *flat_args)
+    return _invoke_leaf_function_impl(fake_fn_spec, input_spec, *flat_args)
 
 
 @invoke_leaf_function.py_impl(DispatchKey.CompositeExplicitAutograd)
