@@ -3581,14 +3581,15 @@ class GraphModule(torch.nn.Module):
 
         self._test_leaf_function_helper(WrapperModule, args_fn, loss_fn)
 
-    def test_leaf_function_no_fake_fn(self):
+    def test_leaf_function_missing_fake_impl_error(self):
+        """Test that leaf_function without fake_impl raises an error."""
         from torch._dynamo.decorators import leaf_function
 
         @leaf_function
-        def simple_forward(mod, x):
+        def no_fake_impl_forward(mod, x):
             return (mod.linear(x),)
 
-        # No fake_impl - uses forward itself as fake_impl
+        # No @no_fake_impl_forward.fake_impl provided
 
         class SimpleModule(torch.nn.Module):
             def __init__(self):
@@ -3596,24 +3597,33 @@ class GraphModule(torch.nn.Module):
                 self.linear = torch.nn.Linear(3, 3)
 
             def forward(self, x):
-                return simple_forward(self, x)
+                return no_fake_impl_forward(self, x)
 
-        def args_fn():
-            return (torch.randn(3, 3, requires_grad=True),)
+        mod = SimpleModule()
+        x = torch.randn(3, 3)
 
-        def loss_fn(out):
-            return out[0].sum()
+        # Eager works fine
+        result = mod(x)
+        self.assertEqual(result[0].shape, (3, 3))
 
-        self._test_leaf_function_helper(SimpleModule, args_fn, loss_fn)
+        # Compiled should raise an error about missing fake_impl
+        compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Exception, "requires a fake_impl"):
+            compiled_mod(x)
 
-    def test_leaf_function_no_fake_fn_data_dependent_shape(self):
+    def test_leaf_function_data_dependent_shape(self):
+        """Test leaf_function with data-dependent shape (nonzero)."""
         from torch._dynamo.decorators import leaf_function
 
         @leaf_function
         def nonzero_forward(x):
             return (x.nonzero(),)
 
-        # No fake_impl - uses forward itself as fake_impl
+        @nonzero_forward.fake_impl
+        def nonzero_forward_fake(x):
+            # For data-dependent shapes, fake_impl just needs to return
+            # a tensor with correct dtype - shape will be determined at runtime
+            return (x.nonzero(),)
 
         class NonzeroModule(torch.nn.Module):
             def __init__(self):
@@ -3632,8 +3642,8 @@ class GraphModule(torch.nn.Module):
         result_compiled = compiled_mod(x)
         self.assertEqual(result[0], result_compiled[0])
 
-    def test_leaf_function_no_fake_fn_with_constant_tensor_closure(self):
-        import torch._dynamo.config as config
+    def test_leaf_function_constant_tensor_closure_error(self):
+        """Test that captured tensors in closures cause compilation error."""
         from torch._dynamo.decorators import leaf_function
 
         constant_weight = torch.randn(3, 3)
@@ -3642,7 +3652,9 @@ class GraphModule(torch.nn.Module):
         def constant_closure_forward(x):
             return (x @ constant_weight,)
 
-        # No fake_impl - uses forward itself as fake_impl
+        @constant_closure_forward.fake_impl
+        def constant_closure_forward_fake(x):
+            return (x @ constant_weight,)
 
         class ConstantClosureModule(torch.nn.Module):
             def __init__(self):
@@ -3658,11 +3670,12 @@ class GraphModule(torch.nn.Module):
         expected = x @ constant_weight
         self.assertEqual(result[0], expected)
 
-        # Need to allow non-fake inputs since forward captures constant_weight
-        with config.patch(leaf_function_allow_non_fake_inputs=True):
-            compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
-            result_compiled = compiled_mod(x)
-            self.assertEqual(result[0], result_compiled[0])
+        # Captured tensors cause compilation error - must pass as explicit args
+        compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            Exception, "Please convert all Tensors to FakeTensors"
+        ):
+            compiled_mod(x)
 
     def test_leaf_function_validation_shape_mismatch(self):
         import torch._dynamo.config as config
@@ -3807,33 +3820,6 @@ class GraphModule(torch.nn.Module):
 
         self._test_leaf_function_helper(TestModule, args_fn, loss_fn)
 
-    def test_leaf_function_no_fake_impl(self):
-        """Test leaf_function without fake_impl setter - uses forward itself as fake."""
-        from torch._dynamo.decorators import leaf_function
-
-        @leaf_function
-        def test_forward_fn(linear, x):
-            # No data-dependent control flow, so forward itself can be fake_impl
-            return (linear(x),)
-
-        # No @test_forward_fn.fake_impl - uses forward itself
-
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x):
-                return test_forward_fn(self.linear, x)
-
-        def args_fn():
-            return (torch.randn(10, 10, requires_grad=True),)
-
-        def loss_fn(out):
-            return out[0].sum()
-
-        self._test_leaf_function_helper(TestModule, args_fn, loss_fn)
-
     def test_leaf_function_no_module_inputs(self):
         """Test leaf_function with only tensor inputs (no nn.Module)."""
         from torch._dynamo.decorators import leaf_function
@@ -3865,74 +3851,6 @@ class GraphModule(torch.nn.Module):
 
         # The results should be equal (both use real_impl at runtime)
         self.assertEqual(eager_result[0], compiled_result[0])
-
-    def test_leaf_function_allow_non_fake_inputs_tensor_no_grad(self):
-        """Test that with allow_non_fake_inputs=True, captured tensors compile but don't get gradients."""
-        import torch._dynamo.config as config
-        from torch._dynamo.decorators import leaf_function
-
-        captured_weight = torch.randn(3, 3, requires_grad=True)
-
-        @leaf_function
-        def leaf_fn_with_captured_tensor(x):
-            return (x @ captured_weight,)
-
-        def fn(x):
-            return leaf_fn_with_captured_tensor(x)
-
-        # Eager - gradients flow correctly
-        x = torch.randn(3, 3, requires_grad=True)
-        eager_result = fn(x)
-        eager_result[0].sum().backward()
-        self.assertIsNotNone(captured_weight.grad)
-
-        # Reset
-        captured_weight.grad = None
-        torch._dynamo.reset()
-
-        # With flag=True, compilation succeeds but gradients don't flow
-        with config.patch(leaf_function_allow_non_fake_inputs=True):
-            compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-            x2 = torch.randn(3, 3, requires_grad=True)
-            compiled_result = compiled_fn(x2)
-            compiled_result[0].sum().backward()
-            # x2 gets gradients (it's a proper input)
-            self.assertIsNotNone(x2.grad)
-            # captured_weight does NOT get gradients (not tracked)
-            self.assertIsNone(captured_weight.grad)
-
-    def test_leaf_function_allow_non_fake_inputs_module_no_grad(self):
-        """Test that with allow_non_fake_inputs=True, captured modules compile but don't get gradients."""
-        import torch._dynamo.config as config
-        from torch._dynamo.decorators import leaf_function
-
-        captured_linear = torch.nn.Linear(3, 3)
-
-        @leaf_function
-        def leaf_fn_with_captured_module(x):
-            return (captured_linear(x),)
-
-        def fn(x):
-            return leaf_fn_with_captured_module(x)
-
-        # Eager - gradients flow correctly
-        x = torch.randn(3, 3, requires_grad=True)
-        eager_result = fn(x)
-        eager_result[0].sum().backward()
-        self.assertIsNotNone(captured_linear.weight.grad)
-
-        # Reset
-        captured_linear.zero_grad()
-        torch._dynamo.reset()
-
-        # With flag=True, compilation succeeds but gradients don't flow
-        with config.patch(leaf_function_allow_non_fake_inputs=True):
-            compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-            x2 = torch.randn(3, 3, requires_grad=True)
-            compiled_result = compiled_fn(x2)
-            compiled_result[0].sum().backward()
-            # captured_linear.weight does NOT get gradients (not tracked)
-            self.assertIsNone(captured_linear.weight.grad)
 
     def test_leaf_function_and_nonstrict_trace_mutually_exclusive(self):
         """Test that a function cannot be decorated with both @leaf_function and @nonstrict_trace."""
