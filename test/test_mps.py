@@ -12544,7 +12544,7 @@ class TestNoRegression(TestCase):
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 
-def transform_opinfo_sample_to_cpu(sample):
+def transform_opinfo_sample_to_cpu(sample, dtype=None):
     """Transforms opinfo.core.SampleInput from MPS to CPU"""
     def transform_sample(x):
         if not isinstance(x, torch.Tensor):
@@ -12552,6 +12552,8 @@ def transform_opinfo_sample_to_cpu(sample):
         requires_grad = x.requires_grad
         conjugated = x.is_conj()
         rc = x.detach()
+        if dtype:
+            rc = rc.to(dtype=dtype)
         rc = rc.cpu() if not conjugated else x.conj().cpu().conj()
         return rc.requires_grad_(x.requires_grad)
 
@@ -12672,57 +12674,55 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
+    def _run_op(self, op, mps_sample):
+        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning)
+            mps_out = op(mps_sample.input, *mps_sample.args, **mps_sample.kwargs)
+            try:
+                cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+            except NotImplementedError:
+                # TODO: Handle list inputs later
+                if not isinstance(mps_out, torch.Tensor):
+                    raise
+
+                if mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
+                    # Often CPU ops are not implemented for low precision dtypes
+                    # In that case, upcast to higher precision and try again
+                    cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                    cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+                    cpu_out = cpu_out.to(dtype=mps_out.dtype)
+
+        return mps_out, cpu_out, cpu_sample
+
+
     @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "mps:0")
         include_conjugated_inputs = dtype.is_complex and op.test_conjugated_samples
 
-        def get_samples():
-            return op.sample_inputs(
+        for mps_sample in op.sample_inputs(
                 device,
                 dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
                 include_conjugated_inputs=include_conjugated_inputs,
-                set_seed=True,
-            )
+                set_seed=True):
 
-        for mps_sample in get_samples():
-            #
-            # Forward check
-            #
-            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
-
-            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-            cpu_kwargs = cpu_sample.kwargs
-            mps_args = [mps_sample.input] + list(mps_sample.args)
-            mps_kwargs = mps_sample.kwargs
-
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
-                mps_args[1] = cpu_args[1]
-
-            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
-            # not normalized
-            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
-                mps_args[3] = F.normalize(mps_args[3])
-                cpu_args[3] = F.normalize(cpu_args[3])
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                cpu_out = op(*cpu_args, **cpu_kwargs)
-                mps_out = op(*mps_args, **mps_kwargs)
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
-               cpu_kwargs.get("mode") == "bilinear" and
-               cpu_kwargs.get("recompute_scale_factor") is True and
-               cpu_kwargs.get("scale_factor") == 1.7):
+               mps_sample.kwargs.get("mode") == "bilinear" and
+               mps_sample.kwargs.get("recompute_scale_factor") is True and
+               mps_sample.kwargs.get("scale_factor") == 1.7):
                 # For 1/3, 2/3 scale factors results will not match CPU ones
                 # As MPS compute scales in floats, but CPU always used doubles, which results
                 # in slight numerical differences
                 atol, rtol = 1, 0
 
-            if op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"] and cpu_kwargs.get("scale_factors") == [1.7, 0.9]:
+            if (op.name in ["_upsample_bilinear2d_aa", "_upsample_bicubic2d_aa"]
+               and mps_sample.kwargs.get("scale_factors") == [1.7, 0.9]):
                 # Similar to the above, float vs double precision aresults in slight error
                 atol, rtol = 2e-5, 2e-6
 
@@ -12732,8 +12732,8 @@ class TestConsistency(TestCaseMPS):
             if op.name == "kthvalue":
                 self.assertEqual(cpu_out[0], mps_out[0], atol=atol, rtol=rtol)
                 # kthvalue is non-deterministic if input has repeated values
-                dim = cpu_args[2] if len(cpu_args) > 2 else -1
-                keep_dim = cpu_args[3] if len(cpu_args) > 3 else False
+                dim = mps_sample.args[1] if len(mps_sample.args) > 1 else -1
+                keep_dim = mps_sample.args[2] if len(mps_sample.args) > 2 else False
                 values = torch.gather(mps_sample.input, dim, mps_out[1] if keep_dim else mps_out[1].unsqueeze(dim))
                 self.assertEqual(values if keep_dim else values.squeeze(dim), mps_out[0])
                 continue
@@ -12744,42 +12744,17 @@ class TestConsistency(TestCaseMPS):
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "mps:0")
 
-        def get_samples():
-            return op.sample_inputs(
-                device,
-                dtype,
+        for mps_sample in op.sample_inputs(
+                device, dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
                 # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-                set_seed=False,
-            )
-
-        for mps_sample in get_samples():
+                set_seed=False):
             #
             # Forward check
             #
-            cpu_sample = transform_opinfo_sample_to_cpu(mps_sample)
+            mps_out, cpu_out, cpu_sample = self._run_op(op, mps_sample)
 
-            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-            cpu_kwargs = cpu_sample.kwargs
-            mps_args = [mps_sample.input] + list(mps_sample.args)
-            mps_kwargs = mps_sample.kwargs
-
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
-                mps_args[1] = cpu_args[1]
-
-            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
-            # not normalized
-            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
-                mps_args[3] = F.normalize(mps_args[3])
-                cpu_args[3] = F.normalize(cpu_args[3])
-
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                cpu_out = op(*cpu_args, **cpu_kwargs)
-                mps_out = op(*mps_args, **mps_kwargs)
-
-            if op.name == "unique" and cpu_kwargs["sorted"] is False:
+            if op.name == "unique" and cpu_sample.kwargs["sorted"] is False:
                 continue
 
             atol, rtol = self._compute_tolerances(op, dtype)
@@ -12792,6 +12767,8 @@ class TestConsistency(TestCaseMPS):
             #
             # Backward check
             #
+            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            mps_args = [mps_sample.input] + list(mps_sample.args)
             cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
             mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
 
@@ -12800,8 +12777,8 @@ class TestConsistency(TestCaseMPS):
 
             diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
             diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_kwargs)) if req_grad(t))
-            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_kwargs)) if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_leaves((cpu_args, cpu_sample.kwargs)) if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_leaves((mps_args, mps_sample.kwargs)) if req_grad(t))
             self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
             self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 
@@ -12839,7 +12816,13 @@ class TestConsistency(TestCaseMPS):
                 atol, rtol = 5e-3, 5e-3
             if op.name == "nn.functional.embedding_bag" and dtype == torch.float16:
                 atol, rtol = 5e-3, 5e-3
-            self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
+
+            if isinstance(cpu_sample.input, torch.Tensor):
+                equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
+            else:
+                # TODO: Handle list inputs later
+                equal_input_types = True
+            self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol, exact_dtype=equal_input_types)
 
     # The CPU impl of grid_sampler_3d gives a large amount of error for half
     # precision types. So instead of testing MPS-vs-CPU outputs, test
@@ -12897,7 +12880,6 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
 
 
-
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
 
@@ -12909,24 +12891,10 @@ class TestErrorInputs(TestCase):
     )
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
-
-        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        mps_samples = op.error_inputs(device, set_seed=False)
-
-        for mps_sample in mps_samples:
-            mps_sample_input = mps_sample.sample_input
-            error_type = mps_sample.error_type
-            error_regex = mps_sample.error_regex
-
-            mps_args = [mps_sample_input.input] + list(mps_sample_input.args)
-            mps_kwargs = mps_sample_input.kwargs
-
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                mps_args[1] = mps_args[1].cpu()
-
-            with self.assertRaisesRegex(error_type, error_regex):
-                op(*mps_args, **mps_kwargs)
+        for sample in op.error_inputs(device, set_seed=True):
+            sample_input = sample.sample_input
+            with self.assertRaisesRegex(sample.error_type, sample.error_regex):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs)
 
     def test_index_put_out_of_bounds(self, device):
         x = torch.rand(10, 1, 10, device=device)
