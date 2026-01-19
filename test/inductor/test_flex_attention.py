@@ -201,6 +201,7 @@ TEST_ON_CUDA = (
 TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
 device_configs = {}
+test_device = ("cpu",)
 if HAS_GPU:
     if TEST_ON_CUDA:
         test_device = (
@@ -210,9 +211,6 @@ if HAS_GPU:
     elif TEST_ON_XPU:
         torch._C._set_onednn_allow_tf32(True)
         test_device = ("xpu",)
-else:
-    test_device = ("cpu",)
-
 
 class SubstringSet:
     def __init__(self, items):
@@ -4420,7 +4418,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
-    @unittest.skipIf(config.triton.native_matmul, "different dynamo counters")
+    # @unittest.skipIf(config.triton.native_matmul, "different dynamo counters")
     def test_free_symbol_dynamic(self, device):
         def batch_flip_causal(b, h, q_idx, kv_idx):
             return (q_idx >= kv_idx) & (b % 2 == 0)
