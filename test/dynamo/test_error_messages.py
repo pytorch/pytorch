@@ -13,7 +13,7 @@ import torch._dynamo
 import torch._dynamo.config
 import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
-from torch._dynamo.exc import ResumePrologueTracingError, Unsupported
+from torch._dynamo.exc import ResumePrologueTracingError, TorchRuntimeError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
@@ -886,7 +886,7 @@ from user code:
             return x + y
 
         self.assertExpectedInlineMunged(
-            Unsupported,
+            TorchRuntimeError,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(
                 torch.randn(3), torch.randn(4)
             ),
@@ -1878,7 +1878,7 @@ from user code:
             return s
 
         self.assertExpectedInlineMunged(
-            Unsupported,
+            TorchRuntimeError,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(x, y),
             """\
 RuntimeError when making fake tensor call
