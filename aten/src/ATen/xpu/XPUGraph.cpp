@@ -113,8 +113,8 @@ void XPUGraph::capture_end() {
     instantiate();
     if (!_xpu_graphs_debug) {
       graph_.reset();
+      has_graph_ = false;
     }
-    has_graph_ = false;
   }
 }
 
