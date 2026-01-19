@@ -7,7 +7,7 @@ cd /
 git clone https://github.com/OpenMathLib/OpenBLAS.git
 
 OPENBLAS_CHECKOUT_DIR="OpenBLAS"
-git -C "${OPENBLAS_CHECKOUT_DIR}" checkout 68ff451eccea3e7d7d2afb2588b63552bde7ea89
+git -C "${OPENBLAS_CHECKOUT_DIR}" checkout v0.3.31 
 OPENBLAS_BUILD_FLAGS="
 NUM_THREADS=128
 USE_OPENMP=1
