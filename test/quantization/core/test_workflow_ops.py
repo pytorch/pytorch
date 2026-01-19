@@ -30,7 +30,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_WITH_ROCM
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 
 # Reference method for fake quantize
@@ -344,7 +344,7 @@ class TestFakeQuantizeOps(TestCase):
         maxi = 255
         mini = 0
 
-        for i in range(20):
+        for _ in range(20):
             X1 = torch.randn(5, 5).to(torch.float16)
             Y1 = torch.fake_quantize_per_tensor_affine(X1, scale, zero, mini, maxi)
             Y1r = _fake_quantize_per_tensor_affine_reference(X1, scale, zero, mini, maxi)
@@ -368,8 +368,8 @@ class TestFakeQuantizeOps(TestCase):
         float_types = (torch.float32, torch.float16, torch.float64, torch.bfloat16)
         torch_types = (torch.qint8, torch.quint8)
         Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
-        tensor_qparam = (True, False)
-        for float_type, torch_type, X, tensor_qparams in itertools.product(float_types, torch_types, Xs, tensor_qparam):
+        tensor_qparams = (True, False)
+        for float_type, torch_type, X, tensor_qparam in itertools.product(float_types, torch_types, Xs, tensor_qparams):
             # pick the scale + zp so that some values get clipped
             X = X.to(float_type)
             obs = torch.ao.quantization.MinMaxObserver(torch_type)
@@ -770,7 +770,7 @@ class TestFakeQuantizeOps(TestCase):
         mini = 0
         maxi = 255
 
-        for i in range(20):
+        for _ in range(20):
             X1 = torch.randn(4, 5).to(torch.float16)
             Y1 = torch.fake_quantize_per_channel_affine(X1, scale, zero, axis, mini, maxi)
             Y1r = _fake_quantize_per_channel_affine_reference(X1, scale, zero, axis, mini, maxi)
@@ -1028,7 +1028,7 @@ class TestFakeQuantizeOps(TestCase):
             zero_types = [torch.int]
         devices = [torch.device('cpu'), torch.device('cuda')] if torch.cuda.is_available() else [torch.device('cpu')]
         axis = 1
-        for i in range(20):
+        for _ in range(20):
             for torch_type, float_type, device, zero_type in itertools.product(torch_types, float_types, devices, zero_types):
                 X = torch.randn(3, 3, device=device).to(float_type)
                 scales = (10 * torch.randn(3, device=device)).abs()
@@ -1080,7 +1080,6 @@ class TestFakeQuantizeOps(TestCase):
                 )
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    @unittest.skipIf(TEST_WITH_ROCM, "Not a suitable test for ROCM")
     @given(dtype=st.sampled_from([torch.float, torch.float64, torch.half, torch.bfloat16]),
            device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_fake_quantize_per_tensor_affine_inf(self, dtype, device) -> None:

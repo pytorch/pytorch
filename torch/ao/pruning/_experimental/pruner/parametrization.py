@@ -28,8 +28,12 @@ class FakeStructuredSparsity(nn.Module):
         self.register_buffer("mask", mask)
 
     def forward(self, x):
-        assert isinstance(self.mask, torch.Tensor)
-        assert self.mask.shape[0] == x.shape[0]
+        if not isinstance(self.mask, torch.Tensor):
+            raise AssertionError("mask must be a torch.Tensor")
+        if self.mask.shape[0] != x.shape[0]:
+            raise AssertionError(
+                f"mask shape[0] ({self.mask.shape[0]}) must match x shape[0] ({x.shape[0]})"
+            )
         shape = [1] * len(x.shape)
         shape[0] = -1
         return self.mask.reshape(shape) * x

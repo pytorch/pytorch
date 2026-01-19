@@ -59,7 +59,7 @@ struct AllocationLifetime {
 };
 
 struct AllocationSpec {
-  AllocationLifetime lifetime{};
+  AllocationLifetime lifetime;
   size_t size{0};
 
   bool not_overlapping_with(const AllocationSpec& other) const {

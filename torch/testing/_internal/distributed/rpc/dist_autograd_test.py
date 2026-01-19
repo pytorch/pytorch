@@ -1283,13 +1283,14 @@ class DistAutogradTest(CommonDistAutogradTest):
 
     @dist_init
     def test_nested_context(self):
-        with dist_autograd.context():
-            # Nested contexts not supported.
-            with self.assertRaisesRegex(
+        with (
+            dist_autograd.context(),
+            self.assertRaisesRegex(
                 RuntimeError, "Already have an autograd context id for this thread"
-            ):
-                with dist_autograd.context():
-                    pass
+            ),
+            dist_autograd.context(),
+        ):
+            pass
 
     @dist_init
     def test_graph_for_builtin_call(self):
@@ -1988,7 +1989,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         self.assertEqual(self.world_size - 1, len(known_context_ids))
 
         t1 = torch.rand((3, 3), requires_grad=True)
-        for i in range(100):
+        for _ in range(100):
             dst = self._next_rank()
             t1 = rpc.rpc_sync(worker_name(dst), torch.add, args=(t1, t1))
 

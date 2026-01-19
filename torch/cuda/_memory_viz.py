@@ -109,18 +109,21 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
                 # Ok to skip, the file will be removed by tempfile
                 pass
     args = [flamegraph_script, "--countname", "bytes"]
-    p = subprocess.Popen(
+    with subprocess.Popen(
         args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf-8"
-    )
-    assert p.stdin is not None
-    assert p.stdout is not None
-    p.stdin.write(flamegraph_lines)
-    p.stdin.close()
-    result = p.stdout.read()
-    p.stdout.close()
-    p.wait()
-    assert p.wait() == 0
-    return result
+    ) as p:
+        if p.stdin is None:
+            raise AssertionError("p.stdin is None")
+        if p.stdout is None:
+            raise AssertionError("p.stdout is None")
+        p.stdin.write(flamegraph_lines)
+        p.stdin.close()
+        result = p.stdout.read()
+        p.stdout.close()
+        p.wait()
+        if p.wait() != 0:
+            raise AssertionError(f"flamegraph process exited with code {p.wait()}")
+        return result
 
 
 def _write_blocks(f, prefix, blocks):
@@ -303,9 +306,10 @@ def segsum(data):
                     occupied[j] = m
         stream = "" if seg["stream"] == 0 else f", stream_{seg['stream']}"
         body = "".join(occupied)
-        assert (
-            seg_free_external + seg_free_internal + seg_allocated == seg["total_size"]
-        )
+        if seg_free_external + seg_free_internal + seg_allocated != seg["total_size"]:
+            raise AssertionError(
+                f"Segment size mismatch: {seg_free_external} + {seg_free_internal} + {seg_allocated} != {seg['total_size']}"
+            )
         stream = f" stream_{seg['stream']}" if seg["stream"] != 0 else ""
         if seg["total_size"] >= PAGE_SIZE:
             out.write(
@@ -317,7 +321,10 @@ def segsum(data):
     out.write(f"total_allocated: {Bytes(total_allocated)}\n")
     out.write(f"total_free: {_report_free(free_external, free_internal)}\n")
     out.write(legend)
-    assert free_internal + free_external + total_allocated == total_reserved
+    if free_internal + free_external + total_allocated != total_reserved:
+        raise AssertionError(
+            f"Memory accounting error: {free_internal} + {free_external} + {total_allocated} != {total_reserved}"
+        )
     return out.getvalue()
 
 
@@ -446,7 +453,43 @@ def _format_viz(data, viz_kind, device):
     )
 
 
-def trace_plot(data, device=None, plot_segments=False):
+def filter_alloc_free_pairs(data):
+    for dev_id in range(len(data["device_traces"])):
+        # set of indexes of trace events for alloc-free pairs
+        filterSet = set()
+        # map from addr to index of alloc event
+        allocMap = {}
+        # set of addrs from free_requested events
+        freeRequested = set()
+        for idx, event in enumerate(data["device_traces"][dev_id]):
+            if event["action"] == "alloc":
+                allocMap[event["addr"]] = idx
+            elif event["action"] == "free_requested":
+                freeRequested.add(event["addr"])
+                if allocMap.get(event["addr"]) is not None:
+                    filterSet.add(idx)
+                    filterSet.add(allocMap[event["addr"]])
+                    allocMap.pop(event["addr"])
+            elif event["action"] == "free_completed":
+                if event["addr"] in freeRequested:
+                    freeRequested.remove(event["addr"])
+                    filterSet.add(idx)
+                else:
+                    print(f"free_completed without free_requested: {event}")
+
+        # Remove events whose index is in filterSet
+        if filterSet:
+            # Create a new list excluding events with indices in filterSet
+            data["device_traces"][dev_id] = [
+                event
+                for idx, event in enumerate(data["device_traces"][dev_id])
+                if idx not in filterSet
+            ]
+
+    return data
+
+
+def trace_plot(data, device=None, plot_segments=False, filter_freed=False):
     """Generate a visualization over time of the memory usage recorded by the trace as an html file.
 
     Args:
@@ -454,10 +497,15 @@ def trace_plot(data, device=None, plot_segments=False):
         device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
         plot_segments (bool, optional): Plots memory returned from cudaMalloc, rather than individual allocations.
                                         Defaults to False.
+        filter_freed (bool, optional): Filter out alloc-free paired events to only plot allocations that are not freed yet.
+                                        Defaults to False to plot all trace events.
 
     Returns:
         str: HTML of visualization
     """
+    if filter_freed:
+        data = filter_alloc_free_pairs(data)
+
     return _format_viz(
         data,
         "Active Memory Timeline"
@@ -698,14 +746,22 @@ if __name__ == "__main__":
                 "-s", "--segments", action="store_true", help=help
             )
 
+            help = (
+                "filter out allocation-free pairs to only visualize the allocations that are not freed yet;"
+                "useful to reduce the number of events for large traces for debugging OOM"
+            )
+            trace_plot_a.add_argument(
+                "-f", "--filter_freed", action="store_true", help=help
+            )
+
     args = parser.parse_args()
 
     def _read(name):
         if name == "-":
-            f = sys.stdin.buffer
+            data = pickle.load(sys.stdin.buffer)
         else:
-            f = open(name, "rb")
-        data = pickle.load(f)
+            with open(name, "rb") as f:
+                data = pickle.load(f)
         if isinstance(data, list):  # segments only...
             data = {"segments": data, "traces": []}
         return data
@@ -734,7 +790,12 @@ if __name__ == "__main__":
         data = _read(args.input)
         _write(
             args.output,
-            trace_plot(data, device=args.device, plot_segments=args.segments),
+            trace_plot(
+                data,
+                device=args.device,
+                plot_segments=args.segments,
+                filter_freed=args.filter_freed,
+            ),
         )
     elif args.action == "segment_plot":
         data = _read(args.input)

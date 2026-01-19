@@ -218,6 +218,7 @@ def check_model(
     dynamic_shapes=None,
     atol=None,
     rtol=None,
+    move_model_to_device=True,
 ):
     with (
         torch.no_grad(),
@@ -229,7 +230,7 @@ def check_model(
         ),
     ):
         torch.manual_seed(0)
-        if not isinstance(model, types.FunctionType):
+        if not isinstance(model, types.FunctionType) and move_model_to_device:
             model = model.to(self.device)
 
         # For non mixed device inputs with default "cpu",set the device manually.

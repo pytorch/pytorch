@@ -70,6 +70,13 @@ if(NOT MSVC)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
     target_compile_options_if_supported(test_api "-Wno-error=nonnull")
   endif()
+
+  # Add -Wno-error=array-bounds for GCC 13+
+  # See: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=113239
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+    target_compile_options_if_supported(test_api "-Wno-error=array-bounds")
+  endif()
+
 endif()
 
 if(INSTALL_TEST)

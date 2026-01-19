@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
+
 #include <fmt/format.h>
 #include <mutex>
 #include <shared_mutex>
@@ -8,6 +10,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <torch/csrc/distributed/c10d/control_plane/WaitCounterHandler.hpp>
 
 namespace c10d::control_plane {
 
@@ -62,6 +66,68 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
                               res.setContent("pong", "text/plain");
                               res.setStatus(200);
                             }};
+
+RegisterHandler frTracehandler(
+    "fr_trace_json",
+    [](const Request&, Response& res) {
+      auto trace = ::c10d::dump_fr_trace_json(true, true);
+      res.setContent(std::move(trace), "application/json");
+      res.setStatus(200);
+    });
+
+RegisterHandler waitCounterHandler{
+    "wait_counter_values",
+    [](const Request&, Response& res) {
+      // Get all wait counter values from our tracking backend
+      res.setContent(getWaitCounterValuesJson(), "application/json");
+      res.setStatus(200);
+    }};
+
+#if !defined(FBCODE_CAFFE2)
+// Initialize the wait counter backend
+[[maybe_unused]] static bool init_backend = []() {
+  ensureWaitCounterBackendRegistered();
+  return true;
+}();
+#endif
+
+#ifndef _WIN32
+RegisterHandler pyspyHandler{
+    "pyspy_dump",
+    [](const Request& req, Response& res) {
+      pid_t target = getpid();
+      std::string cmd = "py-spy dump";
+      cmd += " --pid " + std::to_string(target);
+      if (!req.getParam("native").empty()) {
+        cmd += " --native";
+      }
+      if (!req.getParam("subprocesses").empty()) {
+        cmd += " --subprocesses";
+      }
+      if (!req.getParam("nonblocking").empty()) {
+        cmd += " --nonblocking";
+      }
+      cmd += " 2>&1";
+      std::array<char, 4096> buf{};
+      std::string output;
+      FILE* pipe = popen(cmd.c_str(), "r");
+      if (!pipe) {
+        throw std::runtime_error("Failed to start py-spy, not installed?");
+      }
+      while (fgets(buf.data(), buf.size(), pipe)) {
+        output.append(buf.data());
+      }
+      int rc = pclose(pipe);
+
+      // Get all wait counter values from our tracking backend
+      res.setContent(std::move(output), "text/plain");
+      if (rc != 0) {
+        res.setStatus(500);
+      } else {
+        res.setStatus(200);
+      }
+    }};
+#endif
 
 } // namespace
 

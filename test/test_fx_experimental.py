@@ -262,7 +262,7 @@ class TestFXExperimental(JitTestCase):
                 self.embedding_layers = torch.nn.ModuleList()
                 el = torch.nn.EmbeddingBag(500000, 4, mode="sum", sparse=True)
                 self.embedding_layers.append(el)
-                for i in range(3):
+                for _ in range(3):
                     el = torch.nn.EmbeddingBag(1000000, 4, mode="sum", sparse=True)
                     self.embedding_layers.append(el)
                 el = torch.nn.EmbeddingBag(500000, 4, mode="sum", sparse=True)
@@ -272,7 +272,7 @@ class TestFXExperimental(JitTestCase):
                 x = self.bottom_layers(a)
                 y = []
                 c = []
-                for i in range(len(self.embedding_layers)):
+                for _ in range(len(self.embedding_layers)):
                     temp = torch.randint(10, (8,))
                     c.append(temp + b)
                 for i in range(len(self.embedding_layers)):
@@ -601,7 +601,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch._assert
+                node.op == "call_function" and node.target is torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -660,7 +660,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch._assert
+                node.op == "call_function" and node.target is torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -688,7 +688,7 @@ class TestFXExperimental(JitTestCase):
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch._assert
+                node.op == "call_function" and node.target is torch._assert
                 for node in traced.graph.nodes
             )
         )
@@ -720,7 +720,7 @@ terrible spacing
         # Check the IR to make sure there's a call_function node with target == "Assert"
         self.assertTrue(
             any(
-                node.op == "call_function" and node.target == torch._assert
+                node.op == "call_function" and node.target is torch._assert
                 for node in traced.graph.nodes
             )
         )

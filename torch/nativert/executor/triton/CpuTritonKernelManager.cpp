@@ -1,14 +1,28 @@
 #include <torch/nativert/executor/triton/TritonKernelManager.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/FbcodeMaps.h>
-#include <c10/util/Logging.h>
 
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif // _WIN32
 
 namespace torch::nativert {
+
+// CPU-specific launch parameters
+class CpuLaunchParams : public LaunchParams {
+ public:
+  int num_cpu_threads = 0; // 0 means use all available threads
+
+  void parseAttributes(const Node* node) {
+    parseCommonAttributes(node);
+    for (const auto& attr : node->attributes()) {
+      set_from_variant<int64_t>(
+          num_cpu_threads, "num_cpu_threads", attr, [](auto v) {
+            return v >= 0;
+          });
+    }
+  }
+};
 
 namespace {
 void* _dlopen(const char* filename) {
@@ -39,7 +53,7 @@ char* _dlerror() {
 
 typedef void* kernel_ptr_t;
 typedef void (
-    *launcher_ptr_t)(uint32_t, uint32_t, uint32_t, void**, kernel_ptr_t);
+    *launcher_ptr_t)(uint32_t, uint32_t, uint32_t, int, void**, kernel_ptr_t);
 
 struct DlcloseDeleter {
   void operator()(void* p) const {
@@ -60,6 +74,14 @@ class CpuTritonKernelManager final : public TritonKernelManager {
       std::string kernel_bin_path,
       std::string kernel_launcher_bin_path);
   ~CpuTritonKernelManager() final = default;
+
+  std::unique_ptr<LaunchParams> createLaunchParams(
+      const Node* node) const override {
+    auto params = std::make_unique<CpuLaunchParams>();
+    params->parseAttributes(node);
+    return params;
+  }
+
   void launch(const LaunchParams& launch_params, void** args) final;
 
  private:
@@ -110,19 +132,21 @@ void CpuTritonKernelManager::load() {
       ": ",
       _dlerror());
 
-  launcher_fn_ =
-      reinterpret_cast<launcher_ptr_t>(_dlsym(launcher_handle_.get(), "run"));
+  launcher_fn_ = reinterpret_cast<launcher_ptr_t>(
+      _dlsym(launcher_handle_.get(), "run_from_nativert"));
   TORCH_CHECK(launcher_fn_ != nullptr, "could not dlsym run: ", _dlerror());
 }
 
 void CpuTritonKernelManager::launch(
     const LaunchParams& launch_params,
     void** args /* { ...inputs, output }*/) {
+  const auto& cpu_params = static_cast<const CpuLaunchParams&>(launch_params);
   load();
   launcher_fn_(
-      launch_params.grid_dims.x,
-      launch_params.grid_dims.y,
-      launch_params.grid_dims.z,
+      cpu_params.grid_dims.x,
+      cpu_params.grid_dims.y,
+      cpu_params.grid_dims.z,
+      cpu_params.num_cpu_threads,
       args,
       kernel_fn_);
 }

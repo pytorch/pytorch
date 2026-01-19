@@ -16,7 +16,8 @@ from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Uni
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._subclasses import FakeTensor
+from torch._library.opaque_object import OpaqueType
+from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -196,7 +197,7 @@ class MemoryFormatMeta:
 
         if use_memory_format:
             return MemoryFormatMeta(
-                # pyrefly: ignore  # unbound-name
+                # pyrefly: ignore [unbound-name]
                 memory_format=torch._prims_common.suggest_memory_format(t),
             )
 
@@ -436,6 +437,15 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
+    # See Note [Activations with no version counter checks in eager]
+    # Number of tensors saved for backward that were stashed on ctx (e.g., ctx.x = x)
+    # rather than via save_for_backward in an autograd.Function.
+    # These tensors are placed at the end of the saved tensors and should skip
+    # version counter checks at runtime.
+    num_tensors_saved_with_no_vc_check: Optional[int] = None
+
+    # Number of opaque objects saved for backward
+    num_opaque_objects_saved_for_bw: Optional[int] = None
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
@@ -481,6 +491,13 @@ class ViewAndMutationMeta:
     num_graphsafe_rng_states: int = 0
 
     graphsafe_rng_state_index: Optional[int] = None
+
+    # Stream indices for mutated inputs in the epilogue
+    # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
+    # the storage of the tensor that will be copied back into the original input
+    # None means use the current/default stream
+    # This is populated during graph compilation when stream assignments are made
+    mutated_inp_stream_indices: Optional[list[Optional[int]]] = None
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -665,10 +682,68 @@ class ViewAndMutationMeta:
     @property
     def tensors_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
-        if self.num_symints_saved_for_bw > 0:
-            return slice(self.num_forward, -self.num_symints_saved_for_bw)
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        # Fast-path: if no tensors without VC check, just return the VC check slice
+        if self.num_tensors_saved_with_no_vc_check == 0:
+            return self.tensors_saved_for_backwards_with_vc_check_slice
+        # Invariant: total tensors activations = (acts_with_vc_check, acts_no_vc_check)
+        vc_slice = self.tensors_saved_for_backwards_with_vc_check_slice
+        no_vc_slice = self.tensors_saved_for_backwards_no_vc_check_slice
+        # Start should be the same (self.num_forward)
+        assert vc_slice.start == self.num_forward
+        # End is the end of the no_vc_check slice
+        return slice(vc_slice.start, no_vc_slice.stop)
+
+    @property
+    def tensors_saved_for_backwards_with_vc_check_slice(self):
+        """
+        Slice of forward outputs that are tensors saved for backward that
+        require version counter checks (i.e., were saved via save_for_backward).
+        """
+        # See Note [Activations with no version counter checks in eager]
+        assert self.num_symints_saved_for_bw is not None
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        # The tensors with VC check come first, followed by tensors without VC check
+        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw
+        num_trailing = num_no_vc_check + num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(self.num_forward, -num_trailing if num_trailing != 0 else None)
         else:
             return slice(self.num_forward, None)
+
+    @property
+    def tensors_saved_for_backwards_no_vc_check_slice(self):
+        """
+        Slice of forward outputs that are tensors saved for backward that
+        do NOT require version counter checks (i.e., were stashed on ctx
+        rather than via save_for_backward in an autograd.Function).
+        """
+        assert self.num_symints_saved_for_bw is not None
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw
+        if num_no_vc_check == 0:
+            return slice(0, 0)  # empty slice
+        num_trailing = num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(-num_no_vc_check - num_trailing, -num_trailing)
+        else:
+            return slice(-num_no_vc_check, None)
+
+    @property
+    def opaque_objects_saved_for_backwards_slice(self):
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw or 0
+        if num_opaque > 0:
+            if num_symints > 0:
+                return slice(-num_opaque - num_symints, -num_symints)
+            else:
+                return slice(-num_opaque, None)
+        else:
+            return slice(0, 0)  # empty slice
 
     @property
     def symints_saved_for_backwards_slice(self):
@@ -893,15 +968,15 @@ class GraphSignature:
         parameters_to_mutate = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 user_inputs_to_mutate[output_name] = mutation_name
             else:
                 assert mutation_name in buffers or mutation_name in parameters
                 if mutation_name in buffers:
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     buffers_to_mutate[output_name] = mutation_name
                 else:
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     parameters_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
@@ -974,6 +1049,10 @@ class AOTConfig:
     # mutating input with req_grad in export joint tracing.
     export_trace_joint: bool = False
     disable_functionalization: bool = False
+    # If True, disable TorchFunctionMetadataMode during make_fx tracing.
+    # This mode is used to track torch_fn metadata but can interfere with
+    # certain tracing scenarios.
+    _disable_torch_fn_metadata_mode: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
@@ -1050,8 +1129,13 @@ class AOTState:
     # can cancel it and reenable it later when you need it.
     stack: contextlib.ExitStack
 
+    # The fake tensor mode used during tracing.  This is useful for later
+    # operations that need to create new fake tensors consistent with the
+    # original trace.
+    fake_mode: FakeTensorMode
 
-FxValue = Union[Tensor, int, SymInt, BackwardState]
+
+FxValue = Tensor | int | SymInt | BackwardState | OpaqueType
 
 
 class CompilerWrapper:
@@ -1236,9 +1320,9 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         output_code_ty: type[TOutputCode],
         compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
     ):
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.output_code_ty = output_code_ty
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.compiler_fn = compiler_fn
 
     def __call__(
@@ -1246,7 +1330,8 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
     ) -> OutputCode:
-        return self.compiler_fn(gm, example_inputs)
+        output_code = self.compiler_fn(gm, example_inputs)
+        return output_code
 
 
 class FlatFn(Protocol):
@@ -1295,3 +1380,17 @@ class JointWithDescriptors:
     @graph_module.setter
     def graph_module(self, value):
         self._aot_graph_capture.graph_module = value
+
+    @property
+    def fake_mode(self):
+        return self._aot_state.fake_mode
+
+    def cache_hash(self) -> str:
+        """
+        Return a hash string suitable for use as a cache key. This method
+        exists to decouple cache key generation from __str__/__repr__, so
+        that display-oriented changes don't accidentally affect caching.
+        """
+        from hashlib import sha256
+
+        return sha256(str(self).encode("utf-8")).hexdigest()

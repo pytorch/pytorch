@@ -72,7 +72,7 @@ class CUDATemplate(KernelTemplate):
 
     @classmethod
     @functools.lru_cache(None)
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def _template_from_string(cls, source: str) -> Any:
         return KernelTemplate._template_from_string(source)
 
@@ -361,6 +361,7 @@ class CUTLASSTemplate(CUDATemplate):
         torch.bool: "bool",
         torch.bfloat16: "cutlass::bfloat16_t",
         torch.float8_e4m3fn: "cutlass::float_e4m3_t",
+        torch.float8_e5m2: "cutlass::float_e5m2_t",
     }
 
     _DTYPE_TO_CUTLASS_SPARSE_META = {

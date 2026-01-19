@@ -148,7 +148,7 @@ Tensor qcat_nhwc_kernel(
           // Vectorized loop
           if (c + VLEN <= curr_C) {
             auto curr_scale_vec = Vectorized<float>(curr_scale);
-            auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
+            auto curr_zero_pt_vec = Vectorized<float>(curr_zero_pt);
             auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
             for (; c + VLEN <= curr_C; c += VLEN) {
               auto inp_vec = Vec::loadu(iptr + c);
@@ -174,7 +174,7 @@ Tensor qcat_nhwc_kernel(
           int64_t elem_size = curr_C - c;
           if ((VLEN == 4 * kVLEN) && elem_size >= kVLEN) {
             auto curr_scale_vec = Vectorized<float>(curr_scale);
-            auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
+            auto curr_zero_pt_vec = Vectorized<float>(curr_zero_pt);
             auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
             int64_t vec_num = elem_size / kVLEN;
             std::array<typename scalar_t::underlying, VLEN> buf_in{};
@@ -611,12 +611,10 @@ void qrelu_kernel(const Tensor& qx, Tensor& qy) {
 void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
                                    const Scalar& negval_) {
   int64_t i_zp = qx.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float i_scale = qx.q_scale();
+  float i_scale = static_cast<float>(qx.q_scale());
 
   int64_t o_zp = out.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float o_scale = out.q_scale();
+  float o_scale = static_cast<float>(out.q_scale());
   float o_inv_scale = 1.0f / o_scale;
 
   float negval = negval_.to<float>();
@@ -627,8 +625,8 @@ void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
     Vec zero_vec = Vec(0.0f);
     Vec one_vec = Vec(1.0f);
 
-    Vec i_scale_vec = Vec((float)i_scale);
-    Vec i_zp_vec = Vec((float)i_zp);
+    Vec i_scale_vec = Vec(i_scale);
+    Vec i_zp_vec = Vec(i_zp);
     Vec i_scale_zp_neg_premul_vec = i_scale_vec * i_zp_vec.neg();
 
     Vec negval_vec = Vec(negval);
@@ -738,10 +736,9 @@ void qprelu_out_kernel(Tensor& out,
 
 void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
   int64_t zero_point = qx.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float scale = qx.q_scale();
+  float scale = static_cast<float>(qx.q_scale());
   auto scale_vec = Vectorized<float>(scale);
-  auto zero_point_vec = Vectorized<float>((float)zero_point);
+  auto zero_point_vec = Vectorized<float>(zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
   int64_t output_zero_point = zero_point;
   float output_scale = scale;
@@ -828,10 +825,9 @@ void qgelu_kernel(const Tensor& qx, Tensor& qy, GeluType approximate) {
 void qsigmoid_kernel(
     const Tensor& qx, Tensor& qy, double output_scale, int64_t output_zero_point ) {
   int64_t zero_point = qx.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float scale = qx.q_scale();
+  float scale = static_cast<float>(qx.q_scale());
   auto scale_vec = Vectorized<float>(scale);
-  auto zero_point_vec = Vectorized<float>((float)zero_point);
+  auto zero_point_vec = Vectorized<float>(zero_point);
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
     float inv_output_scale = 1.0 / output_scale;
@@ -870,10 +866,9 @@ void qsigmoid_kernel(
 
 void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float scale = qx.q_scale();
+  float scale = static_cast<float>(qx.q_scale());
   auto scale_vec = Vectorized<float>(scale);
-  auto zero_point_vec = Vectorized<float>((float)zero_point);
+  auto zero_point_vec = Vectorized<float>(zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qhardsigmoid", [&]() {
@@ -1029,13 +1024,10 @@ void qthreshold_kernel(
 
   // defines input and output scales and zero_points
   int64_t input_zero_point = qx.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float input_scale = qx.q_scale();
+  float input_scale = static_cast<float>(qx.q_scale());
   int64_t output_zero_point = qy.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float output_scale = qy.q_scale();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float inv_output_scale = 1.0 / output_scale;
+  float output_scale = static_cast<float>(qy.q_scale());
+  float inv_output_scale = static_cast<float>(1.0 / output_scale);
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qthreshold", [&]() {
     qy = at::_empty_affine_quantized(
@@ -1096,8 +1088,7 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
 
   const auto o_scale = qy.q_scale();
   const auto o_zero_point = qy.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  const float o_inv_scale = 1.0 / o_scale;
+  const float o_inv_scale = static_cast<float>(1.0 / o_scale);
 
   using fVec = Vectorized<float>;
   fVec i_scale_vec(i_scale);
@@ -1135,10 +1126,9 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
 
 void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float scale = qx.q_scale();
+  float scale = static_cast<float>(qx.q_scale());
   auto scale_vec = Vectorized<float>(scale);
-  auto zero_point_vec = Vectorized<float>((float)zero_point);
+  auto zero_point_vec = Vectorized<float>(zero_point);
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qtanh", [&]() {
@@ -1198,16 +1188,13 @@ void qelu_kernel(
   // they are NOT related to the quantization scale term
 
   int64_t i_zp = qx.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float i_scale = qx.q_scale();
+  float i_scale = static_cast<float>(qx.q_scale());
 
   // In a future PR, we can improve on output scale and zero_point
   // selection.
   int64_t o_zp = qy.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float o_scale = qy.q_scale();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float inv_o_scale = 1.0 / o_scale;
+  float o_scale = static_cast<float>(qy.q_scale());
+  float inv_o_scale = static_cast<float>(1.0 / o_scale);
 
   float alpha_float = alpha.to<float>();
   float scale_coef = scale.to<float>();
@@ -1227,7 +1214,7 @@ void qelu_kernel(
     Vec scale_coef_vec = Vec(scale_coef);
     Vec input_scale_coef_vec = Vec(input_scale_coef);
     Vec i_scale_vec = Vec(i_scale);
-    Vec i_zero_point_vec = Vec((float)i_zp);
+    Vec i_zero_point_vec = Vec(i_zp);
     Vec i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
 
     cpu_kernel_vec(
@@ -1326,23 +1313,20 @@ void qadd_scalar_kernel(Tensor& out, const Tensor& self, const Scalar& other) {
 template <bool ReLUFused = false>
 void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   int64_t zero_point = out.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float scale = out.q_scale();
+  float scale = static_cast<float>(out.q_scale());
   float inv_scale = 1.0f / scale;
   int64_t self_zero_point = self.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float self_scale = self.q_scale();
+  float self_scale = static_cast<float>(self.q_scale());
   int64_t other_zero_point = other.q_zero_point();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  float other_scale = other.q_scale();
+  float other_scale = static_cast<float>(other.q_scale());
 
   // Broadcast out the parameters here to amortize out that cost across
   // loop iterations.
   // TODO: we can optimize dequantization by doing a premultiplication
   // of the zero point by scale and doing FMA on scale*x_q - (scale*zero_point)
-  auto self_zero_point_vec = Vectorized<float>((float)self_zero_point);
+  auto self_zero_point_vec = Vectorized<float>(self_zero_point);
   auto self_scale_vec = Vectorized<float>(self_scale);
-  auto other_zero_point_vec = Vectorized<float>((float)other_zero_point);
+  auto other_zero_point_vec = Vectorized<float>(other_zero_point);
   auto other_scale_vec = Vectorized<float>(other_scale);
 
   auto self_scale_neg_zp_premul_vec = self_scale_vec * self_zero_point_vec.neg();
@@ -2965,7 +2949,7 @@ void quantized_normalize_kernel(
     const bool beta_null = beta_data == nullptr;
     int64_t x_zp = X.q_zero_point();
     float x_scale = X.q_scale();
-    fVec x_zp_vec((float)x_zp);
+    fVec x_zp_vec(x_zp);
     fVec one_vec(1.0f);
     fVec zero_vec(0.0f);
     float x_fake_scale = 1.0f;
@@ -3253,7 +3237,7 @@ void quantized_groupnorm_nhwc_kernel(
     const bool beta_null = beta_data == nullptr;
     int64_t x_zp = X.q_zero_point();
     float x_scale = X.q_scale();
-    fVec x_zp_vec((float)x_zp);
+    fVec x_zp_vec(x_zp);
     fVec one_vec(1.0f);
     fVec zero_vec(0.0f);
     float x_fake_scale = 1.0f;

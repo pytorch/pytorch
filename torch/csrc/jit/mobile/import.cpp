@@ -17,12 +17,10 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
-#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
-#include <torch/library.h>
 #include <optional>
 #include <string>
 #include <vector>
@@ -391,7 +389,7 @@ void BytecodeDeserializer::parseMethods(
         debug_handles_m_tuple,
         function.get());
 
-    // 3. If upgrader is needed, change change the OP instrunction to CALL
+    // 3. If upgrader is needed, change change the OP instruction to CALL
     // instruction (In next PR, use_upgrader will be parsed to parseInstruction
     // function and do the actual change)
     if (use_upgrader) {

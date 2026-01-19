@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Float4_e2m1fn_x2.h>
 #include <torch/headeronly/util/Float8_e4m3fn.h>
@@ -17,6 +18,8 @@
 #include <torch/headeronly/util/quint8.h>
 
 #include <cstdint>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
 
 namespace c10 {
 
@@ -263,6 +266,21 @@ enum class ScalarType : int8_t {
 constexpr uint16_t NumScalarTypes =
     static_cast<uint16_t>(ScalarType::NumOptions);
 
+// Map from C++ type to ScalarType enum
+template <typename T>
+struct CppTypeToScalarType;
+
+#define SPECIALIZE_CppTypeToScalarType(cpp_type, scalar_type)                  \
+  template <>                                                                  \
+  struct CppTypeToScalarType<cpp_type>                                         \
+      : std::                                                                  \
+            integral_constant<c10::ScalarType, c10::ScalarType::scalar_type> { \
+  };
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
+
+#undef SPECIALIZE_CppTypeToScalarType
+
 namespace impl {
 
 // These are used to map ScalarTypes to C++ types.
@@ -318,6 +336,13 @@ inline std::ostream& operator<<(
   return stream << toString(scalar_type);
 }
 
+inline bool isQIntType(ScalarType t) {
+  // Don't forget to extend this when adding new QInt types
+  return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
+      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
+      t == ScalarType::QUInt2x4;
+}
+
 inline ScalarType toUnderlying(ScalarType t) {
   switch (t) {
     case ScalarType::QUInt8:
@@ -336,15 +361,21 @@ inline ScalarType toUnderlying(ScalarType t) {
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+using c10::CppTypeToScalarType;
 using c10::dummy_int1_7_t;
 using c10::dummy_uint1_7_t;
 using c10::NumScalarTypes;
 using c10::ScalarType;
+using c10::toString;
+using c10::operator<<;
+using c10::isQIntType;
+using c10::toUnderlying;
+
 namespace impl {
 using c10::impl::ScalarTypeToCPPTypeT;
 } // namespace impl
-using c10::toString;
-using c10::operator<<;
-using c10::toUnderlying;
-} // namespace torch::headeronly
+
+HIDDEN_NAMESPACE_END(torch, headeronly)
+
+C10_DIAGNOSTIC_POP()

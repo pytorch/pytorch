@@ -240,7 +240,7 @@ class TORCH_API RpcAgent {
   // should be profiled or not.
   void enableGILProfiling(bool flag);
 
-  // Retrieve wheher we should profile GIL wait times or not.
+  // Retrieve whether we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
 
   // Set type resolver that will be passed to JIT pickler to resolver type Ptr

@@ -2,7 +2,7 @@
 import copy
 import operator
 from collections.abc import Sequence
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
@@ -203,7 +203,7 @@ def _mark_sharding(
                 )
             node.meta["sharding"] = placement_strategies[node]
         elif node.op == "call_function":
-            if node.target == operator.getitem:
+            if node.target is operator.getitem:
                 input_nodes = node.all_input_nodes
                 assert len(input_nodes) == 1, (
                     f"non-compute op only support one input now, found node: {node} with length of inputs: {len(node.args)}"
@@ -237,11 +237,11 @@ def _mark_sharding(
                         op_schema,
                     )
                 placement_strategies[node] = OpSpec(
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     output_specs=_get_output_spec_from_output_sharding(output_sharding),
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     input_specs=output_sharding.redistribute_schema.args_spec
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     if output_sharding.redistribute_schema is not None
                     else _get_input_node_specs(node, placement_strategies),
                 )
@@ -273,7 +273,7 @@ def _create_placement_strategy(
     node: Node,
     mesh: DeviceMesh,
     placements: tuple[Placement, ...],
-    input_specs: Optional[Sequence[DTensorSpec]] = None,
+    input_specs: Sequence[DTensorSpec] | None = None,
 ) -> OpSpec:
     """
     Util function to construct an OpSpec for a given node.
@@ -426,9 +426,14 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
                 my_coord = spec.mesh.get_coordinate()
                 assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]
-                local_shard = placement._split_tensor(
-                    local_shard, num_chunks, with_padding=False, contiguous=True
-                )[0][my_coord_on_mesh_dim]
+                local_shard = placement._select_split_tensor(
+                    local_shard,
+                    num_chunks,
+                    my_coord_on_mesh_dim,
+                    with_padding=False,
+                    contiguous=True,
+                    clone=False,
+                )
         return local_shard
     elif isinstance(val, (list, tuple)):
         return val.__class__(_partition_val(v, spec) for v in val)

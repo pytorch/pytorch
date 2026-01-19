@@ -22,7 +22,7 @@ from torch._inductor import config
 from torch._inductor.codecache import FxGraphCache
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
-from torch._inductor.cudagraph_utils import FunctionID
+from torch._inductor.cudagraph_utils import FunctionID, PlaceholderInfo
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._ops import OpOverload
@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA_GRAPH,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -70,6 +71,15 @@ def get_compile_fn(backend):
         return functools.partial(torch.compile, backend="cudagraphs")
     else:
         return functools.partial(torch.compile, mode="reduce-overhead")
+
+
+def get_num_partitions(code):
+    """Get the number of cudagraph partitions from generated code."""
+    code = "".join(code)
+    found = re.search(r"partitions=\[(.*)\]", code)
+    assert found is not None, "Could not find partitions in generated code"
+    partitions = found.group(1)
+    return len([p for p in partitions.split(",") if p])
 
 
 class capture_stderr(list):
@@ -262,12 +272,15 @@ if HAS_CUDA_AND_TRITON:
 
             model = Model().cuda()
             eag = model(x, y, z)
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
 
             FileCheck().check(
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from"
-            ).check("torch.logical_xor").run(captured_output[0])
+            ).check("torch.logical_xor").run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @requires_multigpu()
@@ -277,7 +290,10 @@ if HAS_CUDA_AND_TRITON:
                 return (x + 1, y + 2)
 
             foo = get_compile_fn(backend)(foo)
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
             if torch._inductor.config.graph_partition:
@@ -286,16 +302,19 @@ if HAS_CUDA_AND_TRITON:
             else:
                 FileCheck().check(
                     "skipping cudagraphs due to cpu device (arg1_1). Found from"
-                ).check("y + 2").run(captured_output[0])
+                ).check("y + 2").run(log_stream.getvalue())
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 foo(
                     torch.ones([10], device="cuda:0"), torch.ones([10], device="cuda:1")
                 )
 
             FileCheck().check("skipping cudagraphs due to multiple devices").run(
-                captured_output[0]
+                log_stream.getvalue()
             )
             self.assertEqual(
                 counters["inductor"]["cudagraph_skips"],
@@ -308,13 +327,23 @@ if HAS_CUDA_AND_TRITON:
             def foo(x, y):
                 return x + y
 
-            with capture_stderr() as captured_output:
+            scheduler_log_stream, scheduler_ctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            utils_log_stream, utils_ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with scheduler_ctx(), utils_ctx():
                 foo(torch.rand([10], device="cuda"), torch.rand([10], device="cuda"))
 
-            FileCheck().check(
-                "skipping cudagraphs due to graph with symbolic shapes inputs"
-            ).check("x + y").run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            if config.graph_partition:
+                FileCheck().check("reason=dynamic shape ops").check("x + y").run(
+                    scheduler_log_stream.getvalue()
+                )
+            else:
+                FileCheck().check(
+                    "skipping cudagraphs due to graph with symbolic shapes inputs"
+                ).run(utils_log_stream.getvalue())
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -330,12 +359,15 @@ if HAS_CUDA_AND_TRITON:
             def inp():
                 return torch.ones([10], device="cuda")
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 foo(inp())
 
             FileCheck().check(
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from"
-            ).check(".add_(2)").run(captured_output[0])
+            ).check(".add_(2)").run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
             # mutation on inp doesn't hit cudagraphs
@@ -382,8 +414,11 @@ if HAS_CUDA_AND_TRITON:
             mut = get_compile_fn(backend)(mut)
             foo = get_compile_fn(backend)(foo)
 
-            with capture_stderr() as captured_output:
-                for i in range(3):
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     inp = torch.rand([4], device="cuda")
 
@@ -394,7 +429,7 @@ if HAS_CUDA_AND_TRITON:
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from",
                 1,
                 exactly=True,
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -414,8 +449,11 @@ if HAS_CUDA_AND_TRITON:
             mut = get_compile_fn(backend)(mut)
             foo = get_compile_fn(backend)(foo)
 
-            with capture_stderr() as captured_output:
-                for i in range(3):
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     inp = torch.rand([4], device="cuda")
 
@@ -426,7 +464,7 @@ if HAS_CUDA_AND_TRITON:
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from",
                 0,
                 exactly=True,
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
             self.assertTrue("cudagraph_skips" not in counters["inductor"])
 
             torch.compiler.cudagraph_mark_step_begin()
@@ -435,11 +473,14 @@ if HAS_CUDA_AND_TRITON:
             mut_inp = tmp.clone()
             # in this case, what previously a mutated cudagraph managed tensor is no longer,
             # now its an input from eager we should fallback to inductor without cudagraphs
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 mut(mut_inp)
             FileCheck().check(
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from"
-            ).check("x.add_(2)").run(captured_output[0])
+            ).check("x.add_(2)").run(log_stream.getvalue())
             self.assertEqual(mut_inp, non_mut(foo(inp)))
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
@@ -460,7 +501,10 @@ if HAS_CUDA_AND_TRITON:
             foo = get_compile_fn(backend)(foo)
             fee = get_compile_fn(backend)(fee)
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     fee(inp(), foo(inp()))
@@ -468,7 +512,7 @@ if HAS_CUDA_AND_TRITON:
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from",
                 1,
                 exactly=True,
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @parametrize("backend", ("inductor", "cudagraphs"))
@@ -489,11 +533,14 @@ if HAS_CUDA_AND_TRITON:
             mut = get_compile_fn(backend)(mut)
             foo = get_compile_fn(backend)(foo)
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 # Should warn for current_node=None
                 mut(inp())
 
-                for i in range(3):
+                for _ in range(3):
                     torch.compiler.cudagraph_mark_step_begin()
                     tmp = foo(inp())
                     mut(tmp)  # should not warn
@@ -505,7 +552,7 @@ if HAS_CUDA_AND_TRITON:
                 "skipping cudagraphs due to mutated inputs (1 instances). Found from",
                 1,
                 exactly=True,
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         def test_index_put(self):
@@ -530,6 +577,155 @@ if HAS_CUDA_AND_TRITON:
                     out = fn_c(*args())
 
                 self.assertEqual(fn(*args()), out)
+
+        def test_index_put_boolean_fallback_partitions_cudagraphs(self):
+            """
+            Test that index_put_ with boolean indices (which uses fallback path)
+            properly partitions around the unsafe op. This tests the fix for
+            GitHub issue #169951.
+            """
+
+            def fn(x, mask, values):
+                result = x.clone() + 2
+                result.index_put_([mask], values)
+                return result
+
+            fn_c = torch.compile(mode="reduce-overhead")(fn)
+            x = torch.randn(4, 8, device="cuda")
+            mask = torch.tensor([True, False, True, False], device="cuda")
+            values = torch.randn(2, 8, device="cuda")
+
+            if config.graph_partition:
+                # Check that we partition (unsafe op runs inline, cudagraphable parts are partitioned)
+                _, code = run_and_get_code(fn_c, x, mask, values)
+                self.assertGreaterEqual(get_num_partitions(code), 1)
+
+                # Verify correctness
+                for _ in range(3):
+                    x = torch.randn(4, 8, device="cuda")
+                    mask = torch.tensor([True, False, True, False], device="cuda")
+                    values = torch.randn(2, 8, device="cuda")
+                    out = fn_c(x, mask, values)
+                    expected = fn(x, mask, values)
+                    self.assertEqual(out, expected)
+
+                # Should not skip cudagraphs entirely
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            else:
+                # Without partitioning, cudagraphs are skipped due to the unsafe op
+                log_stream, ctx = logs_to_string(
+                    "torch._inductor.cudagraph_utils", "cudagraphs"
+                )
+                with ctx():
+                    fn_c(x, mask, values)
+                FileCheck().check("skipping cudagraphs due to").run(
+                    log_stream.getvalue()
+                )
+                self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_index_put_boolean_mutation_across_partitions(self):
+            """
+            Test that index_put_ with boolean indices correctly passes the mutated
+            buffer to subsequent partitions. This tests the fix for mutation buffers
+            with NoneLayout (like IndexPutFallback) being correctly tracked across
+            partition boundaries.
+
+            The key scenario is:
+            1. A buffer is created in partition 0
+            2. index_put_ (with boolean mask) mutates it - this creates a partition split
+            3. The mutated buffer is used in partition 1
+            """
+
+            def fn(x, mask, values):
+                # Create a buffer in partition 0
+                result = x.clone() + 2
+                # index_put_ with boolean mask causes partition split
+                result.index_put_([mask], values)
+                # Use the mutated buffer in partition 1
+                return result * 2 + result.sum()
+
+            fn_c = torch.compile(mode="reduce-overhead")(fn)
+            x = torch.randn(4, 8, device="cuda")
+            mask = torch.tensor([True, False, True, False], device="cuda")
+            values = torch.randn(2, 8, device="cuda")
+
+            # Verify we get multiple partitions
+            _, code = run_and_get_code(fn_c, x, mask, values)
+            self.assertGreaterEqual(get_num_partitions(code), 2)
+
+            # Verify correctness across multiple runs (tests cudagraph replay)
+            for _ in range(3):
+                x = torch.randn(4, 8, device="cuda")
+                mask = torch.tensor([True, False, True, False], device="cuda")
+                values = torch.randn(2, 8, device="cuda")
+                out = fn_c(x, mask, values)
+                expected = fn(x, mask, values)
+                self.assertEqual(out, expected)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_custom_op_mutation_with_cudagraph_unsafe(self):
+            """
+            Test that custom ops with mutations work correctly with cudagraph-unsafe
+            ops that cause partition splits. This tests that mutated buffers from
+            custom ops are correctly passed across partition boundaries.
+            """
+
+            @torch.library.custom_op(
+                "mylib::mutating_op",
+                mutates_args=["x"],
+                schema="(Tensor(a!)? x) -> (Tensor, Tensor)",
+                device_types="cuda",
+            )
+            def mutating_op(x) -> tuple[torch.Tensor, torch.Tensor]:
+                x.add_(1)
+                return (x + 1, x + 2)
+
+            @mutating_op.register_fake
+            def _(x) -> tuple[torch.Tensor, torch.Tensor]:
+                return (torch.empty_like(x), torch.empty_like(x))
+
+            @torch.library.custom_op(
+                "mylib::cudagraph_unsafe_combine",
+                mutates_args=[],
+                schema="(Tensor x, Tensor y, Tensor x1, Tensor y1) -> Tensor",
+                device_types="cuda",
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def cudagraph_unsafe_combine(x0, x1, y0, y1) -> torch.Tensor:
+                return x0 + x1 + y0 + y1
+
+            @cudagraph_unsafe_combine.register_fake
+            def _(x0, x1, y0, y1) -> torch.Tensor:
+                return torch.empty_like(x0)
+
+            def f(x):
+                x = x + 1
+                x = mutating_op(x)
+                x0, x1 = x[0], x[1]
+                y0 = x0 + 1
+                y1 = x1 + 1
+                y = cudagraph_unsafe_combine(x0, x1, y0, y1)
+                z = y + x0 + x1
+                z += 1
+                return y + z
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+
+            x = torch.randn((2, 4, 8), device="cuda")
+
+            # Verify we get multiple partitions
+            _, code = run_and_get_code(f_compiled, x.clone())
+            self.assertGreaterEqual(get_num_partitions(code), 2)
+
+            # Verify correctness across multiple runs (tests cudagraph replay)
+            for _ in range(5):
+                x = torch.randn((2, 4, 8), device="cuda")
+                x_cloned = x.clone()
+                eager_out = f(x)
+                compiled_out = f_compiled(x_cloned)
+                self.assertEqual(eager_out, compiled_out)
 
         def test_function_compiled_multiple_times(self):
             def foo(x):
@@ -916,14 +1112,6 @@ if HAS_CUDA_AND_TRITON:
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_custom_rule(self):
-            def get_num_partitions(code):
-                code = "".join(code)
-                found = re.search(r"partitions=\[(.*)\]", code)
-                assert found is not None
-                partitions = found.group(1)
-                num_partitions = len([p for p in partitions.split(",") if p])
-                return num_partitions
-
             @torch.library.custom_op("mylib::bar", mutates_args=())
             def bar(x: torch.Tensor, flag: int) -> torch.Tensor:
                 return x.clone()
@@ -945,34 +1133,45 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(num_partitions, 1)
 
             @torch.library.custom_op("mylib::baz", mutates_args=())
-            def baz(x: torch.Tensor, flag: int) -> torch.Tensor:
+            def baz(x: torch.Tensor) -> torch.Tensor:
                 return x.clone()
 
             @baz.register_fake
-            def _(x, flag):
+            def _(x):
                 return x.clone()
 
-            def should_partition(x, flag):
-                return flag
+            # custom_should_partition_ops takes effect which lead to 2 partitions
+            torch._inductor.config.custom_should_partition_ops = ["mylib::baz"]
 
-            torch._inductor.scheduler.register_should_partition_rule(
-                torch.ops.mylib.baz.default, should_partition
-            )
-
-            def f(x, flag):
+            def f(x):
                 x = x + 1
-                x = baz(x, flag)
+                x = baz(x)
                 x = x + 1
                 return x
 
             f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
-            _, code = run_and_get_code(f_compiled, x, True)
+            _, code = run_and_get_code(f_compiled, x)
             num_partitions = get_num_partitions(code)
             self.assertEqual(num_partitions, 2)
 
-            _, code = run_and_get_code(f_compiled, x, False)
+            # update the config should NOT force recompile
+            torch._inductor.config.custom_should_partition_ops = []
+            with torch.compiler.set_stance("fail_on_recompile"):
+                f_compiled(x)
+
+            # run_and_get_code forces recompile. Now we should cache miss, recompile, and
+            # only have 1 partition.
+            _, code = run_and_get_code(f_compiled, x)
             num_partitions = get_num_partitions(code)
             self.assertEqual(num_partitions, 1)
+
+            # test that op_overload name takes effect which lead to 2 partitions
+            torch._inductor.config.custom_should_partition_ops = ["mylib::baz.default"]
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions = get_num_partitions(code)
+            self.assertEqual(num_partitions, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
@@ -1357,7 +1556,6 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(samples, samples_compiled)
             self.assertEqual(num_skipped, counters["inductor"]["cudagraph_skips"])
 
-        @skipIfRocm
         def test_checkpointing_resets_persistent_refs(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1659,7 +1857,6 @@ if HAS_CUDA_AND_TRITON:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
-        @skipIfRocm
         @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
@@ -1684,14 +1881,20 @@ if HAS_CUDA_AND_TRITON:
                 except Exception as e:
                     thrown = True
                     if not IS_ARM64:
+                        # CUDA uses gemm/gemm_internal_cublas, ROCm uses bgemm_internal_cublaslt
                         self.assertTrue(
                             "at::cuda::blas::gemm<float, float>" in str(e)
                             or "at::cuda::blas::gemm_internal_cublas<float, float>"
                             in str(e)
+                            or "at::cuda::blas::bgemm_internal_cublaslt<float, float>"
+                            in str(e)
                         )
+                        # CUDA uses getCurrentCUDABlasHandle/getNewWorkspace,
+                        # ROCm uses getNewCUDABlasLtWorkspace/getCUDABlasLtWorkspace
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
                             or "getNewWorkspace" in str(e)
+                            or "CUDABlasLtWorkspace" in str(e)
                         )
 
                 self.assertTrue(thrown)
@@ -1757,6 +1960,56 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(self.num_checkpoints(), 1)
             self.assertEqual(self.get_root_children(), [2])
+
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
+        def test_rerecording_logs_reason(self):
+            import logging
+
+            from torch.testing._internal.logging_utils import log_settings
+
+            def foo(args):
+                x = args[0]
+                args.clear()
+                return x + 1, x + 2
+
+            inp = torch.rand([4], device="cuda")
+            inp_list = [inp]
+            # Create placeholder info for the input
+            foo_placeholders = (PlaceholderInfo("arg0", None, [], None),)
+            foo_cg = self.cudagraphify_impl(
+                foo, inp_list, (), placeholders=foo_placeholders
+            )
+            x1, x2 = foo_cg(inp_list)
+
+            def foo2(args):
+                x = args[0]
+                args.clear()
+                return [x * x * x]
+
+            inp_list = [x1]
+            foo2_placeholders = (PlaceholderInfo("arg0", None, [], None),)
+            foo2_cg = self.cudagraphify_impl(
+                foo2, inp_list, (), placeholders=foo2_placeholders
+            )
+            foo2_cg(inp_list)
+
+            del x1, x2
+
+            x1, x2 = foo_cg([inp])
+
+            # With cudagraphs logging enabled, we should see the re-recording debug log
+            with log_settings("cudagraphs"):
+                with self.assertLogs(
+                    logger="torch._inductor.cudagraph_trees", level=logging.DEBUG
+                ) as log:
+                    foo2_cg([torch.zeros_like(x1)])
+
+            self.assertTrue(
+                any(
+                    "re-recording due to" in record.getMessage()
+                    for record in log.records
+                )
+            )
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_checkpoint_shared_output_storage_deallocation(self):
@@ -2150,16 +2403,24 @@ if HAS_CUDA_AND_TRITON:
             # is currently broken.  But testing the float case here is also
             # awkward, because we plan to Tensor-ify the float compute, and as
             # a result we'd actually expect this to work with cuda graphs!
-            with capture_stderr() as captured_output:
+            scheduler_log_stream, scheduler_ctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            utils_log_stream, utils_ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with scheduler_ctx(), utils_ctx():
                 self.assertEqual(foo(torch.tensor(3, device="cuda")), 3)
                 self.assertEqual(foo(torch.tensor(6, device="cuda")), 6)
 
-            # NOTE: this test is named after incompatible ops, but is not skipping due to incompatible ops.
-            # This should get fixed.
-            FileCheck().check(
-                " to incompatible op aten._local_scalar_dense.default"
-            ).run(captured_output[0])
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            if config.graph_partition:
+                FileCheck().check(
+                    "reason=cpu ops, ir=DynamicScalar",
+                ).run(scheduler_log_stream.getvalue())
+            else:
+                FileCheck().check(
+                    "skipping cudagraphs due to disabling cudagraphs due to incompatible op"
+                ).run(utils_log_stream.getvalue())
 
         @torch._dynamo.config.patch("compiled_autograd", True)
         def test_compiled_autograd_static_input_params(self):
@@ -2169,7 +2430,7 @@ if HAS_CUDA_AND_TRITON:
 
             model = torch.nn.Linear(10, 10, bias=False, device="cuda")
             x = torch.randn(10, 10, device="cuda")
-            for i in range(5):
+            for _ in range(5):
                 out = model(x)
                 bwd(out.sum())
                 model.weight.grad = None
@@ -2187,7 +2448,13 @@ if HAS_CUDA_AND_TRITON:
             def foo(x):
                 return x.nonzero()
 
-            with capture_stderr() as captured_output:
+            scheduler_log_stream, scheduler_ctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            utils_log_stream, utils_ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with scheduler_ctx(), utils_ctx():
                 self.assertEqual(
                     foo(torch.tensor([1, 0, 2], device="cuda")),
                     torch.tensor([[0], [2]]),
@@ -2196,10 +2463,14 @@ if HAS_CUDA_AND_TRITON:
                     foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
                 )
 
-            FileCheck().check("incompatible op aten.nonzero.default").check("foo").run(
-                captured_output[0]
-            )
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+            if config.graph_partition:
+                FileCheck().check("reason=unbacked binding ops").check("foo").run(
+                    scheduler_log_stream.getvalue()
+                )
+            else:
+                FileCheck().check(
+                    "skipping cudagraphs due to disabling cudagraphs due to incompatible op"
+                ).run(utils_log_stream.getvalue())
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero_graph_breaks(self):
@@ -2212,7 +2483,11 @@ if HAS_CUDA_AND_TRITON:
             foo(torch.tensor([1, 0, 2], device="cuda"))
             foo(torch.tensor([1, 0, 0], device="cuda"))
 
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
+            if config.graph_partition:
+                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
+            else:
+                # Without graph partitioning, cudagraphs are skipped entirely
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero_backend(self):
@@ -2220,7 +2495,10 @@ if HAS_CUDA_AND_TRITON:
             def foo(x):
                 return x.nonzero()
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 self.assertEqual(
                     foo(torch.tensor([1, 0, 2], device="cuda")),
                     torch.tensor([[0], [2]]),
@@ -2231,7 +2509,7 @@ if HAS_CUDA_AND_TRITON:
 
             FileCheck().check(
                 "skipping cudagraphs due to incompatible op (nonzero)"
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
@@ -2242,12 +2520,15 @@ if HAS_CUDA_AND_TRITON:
 
             foo_c = torch.compile(mode="reduce-overhead")(foo)
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 t = torch.rand([32], device="cuda")
                 self.assertEqual(foo(t), foo_c(t))
 
             FileCheck().check("skipping cudagraphs due to cpp wrapper enabled").run(
-                captured_output[0]
+                log_stream.getvalue()
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
@@ -2533,7 +2814,10 @@ if HAS_CUDA_AND_TRITON:
                 def forward(self, x):
                     return x * self.param
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 # We have 3 graphs here
                 #             None
                 #       /                           \
@@ -2554,7 +2838,7 @@ if HAS_CUDA_AND_TRITON:
             FileCheck().check(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) "
                 "on cudagraph node None due to static input data pointer changed."
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("error_on_recompile", True)
@@ -2570,7 +2854,10 @@ if HAS_CUDA_AND_TRITON:
                 def forward(self, x):
                     return x * self.param
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 with torch.device("cuda"):
                     # We have 3 graphs here
                     #             None
@@ -2600,7 +2887,7 @@ if HAS_CUDA_AND_TRITON:
                 "on cudagraph node None due to static input data pointer changed.",
                 1,
                 exactly=True,
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 2)
 
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
@@ -2625,7 +2912,10 @@ if HAS_CUDA_AND_TRITON:
                 y = foo(inp)
                 z = goo(y)
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 torch.compiler.cudagraph_mark_step_begin()
                 x = torch.rand(2, 3, device="cuda")
                 y = foo(x)
@@ -2645,7 +2935,7 @@ if HAS_CUDA_AND_TRITON:
                 "on cudagraph node 0 due to cudagraph managed tensor data pointer changed",
                 1,
                 exactly=True,
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
@@ -2783,7 +3073,10 @@ if HAS_CUDA_AND_TRITON:
 
             mod = torch.compile(Mod(), mode="reduce-overhead")
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 for batch_size in range(10, 40, 10):
                     iter(batch_size, mod)
 
@@ -2796,7 +3089,7 @@ if HAS_CUDA_AND_TRITON:
                 "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
                 "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
                 "to silence this warning."
-            ).run("\n".join(captured_output))
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
         def test_skip_if_dynamic_shape_limit_reached2(self):
@@ -2821,12 +3114,14 @@ if HAS_CUDA_AND_TRITON:
                 for _ in range(3):
                     mod(q, k, v)
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 for batch_size in range(10, 40, 10):
                     for length in range(10, 30, 10):
                         iter(batch_size, length)
 
-            print(captured_output)
             FileCheck().check(
                 "CUDAGraph supports dynamic shapes by recording a new graph for each "
                 "distinct input size. Recording too many CUDAGraphs may lead to "
@@ -2836,7 +3131,7 @@ if HAS_CUDA_AND_TRITON:
                 "torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True. "
                 "Set torch._inductor.config.triton.cudagraph_dynamic_shape_warn_limit=None "
                 "to silence this warning."
-            ).run(captured_output[0])
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("triton.cudagraph_dynamic_shape_warn_limit", 1)
         def test_warn_once_if_dynamic_shape_limit_reached(self):
@@ -2855,7 +3150,10 @@ if HAS_CUDA_AND_TRITON:
 
             mod = torch.compile(Mod(), mode="reduce-overhead")
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 for batch_size in range(10, 200, 10):
                     iter(batch_size, mod)
 
@@ -2870,7 +3168,7 @@ if HAS_CUDA_AND_TRITON:
                 "to silence this warning.",
                 1,
                 exactly=True,
-            ).run("\n".join(captured_output))
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("cpp_wrapper", 1)
         def test_cpp_wrapper(self):
@@ -2928,14 +3226,29 @@ if HAS_CUDA_AND_TRITON:
 
             foo = torch.compile(foo, mode="reduce-overhead")
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx():
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
             FileCheck().check_count(
-                "cudagraph partition due to non gpu ops. Found from", 1, exactly=True
-            ).check_count("return (x + 1, y + 2)", 1, exactly=True).check(
-                "cudagraph partition into 2 partitions"
-            ).run(captured_output[0])
+                "Created 2 graph partitions: 1 cudagraphable, 1 non-cudagraphable",
+                1,
+                exactly=True,
+            ).check_count("reason=cpu ops", 1, exactly=True).run(log_stream.getvalue())
+
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_trees", "cudagraphs"
+            )
+            with ctx():
+                # trigger recording
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check_count(
+                "Recording function 0 (partition_0) of graph recording id 0",
+                1,
+                exactly=True,
+            ).run(log_stream.getvalue())
 
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_scalar1(self):
@@ -3227,7 +3540,10 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 for _ in range(3):
                     foo(
                         torch.ones([10], device="cuda:0"),
@@ -3235,7 +3551,7 @@ if HAS_CUDA_AND_TRITON:
                     )
 
             FileCheck().check("skipping cudagraphs due to multiple devices").run(
-                captured_output[0]
+                log_stream.getvalue()
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
             new_id = self.get_manager().new_graph_id().id
@@ -3308,13 +3624,16 @@ if HAS_CUDA_AND_TRITON:
             expected = fn(x)
             compiled_f = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_utils", "cudagraphs"
+            )
+            with ctx():
                 for _ in range(3):
                     result = compiled_f(x)
                     self.assertEqual(result, expected)
 
             FileCheck().check("incompatible op mylib.mysin.default").run(
-                captured_output[0]
+                log_stream.getvalue()
             )
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
@@ -4090,6 +4409,82 @@ if HAS_CUDA_AND_TRITON:
             compiled_out = compiled_foo(x)
             self.assertEqual(eager_out, compiled_out)
 
+        # Use autotune_at_compile_time=True to test standalone_compile
+        @parametrize("autotune_at_compile_time", [True, False])
+        @config.patch("graph_partition", True)
+        def test_graph_partition_kernel_reuse(self, autotune_at_compile_time):
+            def foo(x):
+                # partition 1
+                x1 = x @ x
+                y1 = x1 + 1
+                z_cpu = y1.cpu() + 1
+                # partition 2
+                # partition 2 should reuse the fused triton kernel generated
+                # in partition 1
+                x2 = z_cpu.to("cuda") @ z_cpu.to("cuda")
+                y2 = x2 + 1
+                return y1, y2
+
+            with config.patch(
+                "triton.autotune_at_compile_time", autotune_at_compile_time
+            ):
+                compiled_foo = torch.compile(foo)
+                x = torch.randn((20, 20), device="cuda")
+                eager_out = foo(x)
+                compiled_out, code = run_and_get_code(compiled_foo, x)
+                self.assertEqual(eager_out, compiled_out)
+
+                if autotune_at_compile_time:
+                    # auto-tuning block should only appear once. We generate auto-tuning code
+                    # for all the kernels no matter if they are defined in the main graph or
+                    # subgraph, to avoid the overhead of executing multiple auto-tuning code blocks.
+                    FileCheck().check_count(
+                        "Compile-time auto-tuning block", 1, exactly=True
+                    ).run(code[0])
+                    # triton_poi_fused_add_ should appear twice, first in the auto-tuning block,
+                    # and then in the main code block
+                    FileCheck().check_count(
+                        "def triton_poi_fused_add_", 2, exactly=True
+                    ).run(code[0])
+                    # cpu kernel definition should only appence once, not in the auto-tuning block
+                    FileCheck().check_count(
+                        "cpp_fused__to_copy_add_1 = ", 1, exactly=True
+                    ).run(code[0])
+                else:
+                    # triton_poi_fused_add_ should appear once, because of kernel reuse
+                    FileCheck().check_count(
+                        "def triton_poi_fused_add_", 1, exactly=True
+                    ).run(code[0])
+
+        @unittest.skipUnless(
+            config.graph_partition, "Test requires graph_partition to be enabled"
+        )
+        @config.patch("graph_partition", True)
+        @skipIfRocm
+        def test_graph_partition_user_defined_triton_kernel_reuse(self):
+            from torch.testing._internal.triton_utils import add_kernel
+
+            def foo(x, y):
+                # partition 1
+                output1 = torch.empty_like(x)
+                add_kernel[(4,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
+                output1_cpu = output1.cpu() + 1
+                # partition 2 should reuse the user-defined kernel
+                x2 = output1_cpu.to("cuda")
+                output2 = torch.empty_like(x)
+                add_kernel[(4,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
+                return output1, output2
+
+            compiled_foo = torch.compile(foo)
+            x = torch.randn(128, device="cuda")
+            y = torch.randn(128, device="cuda")
+            eager_out = foo(x, y)
+            compiled_out, code = run_and_get_code(compiled_foo, x, y)
+            self.assertEqual(eager_out, compiled_out)
+            FileCheck().check_count(
+                "async_compile.triton('add_kernel',", 1, exactly=True
+            ).run(code[0])
+
         def test_meta_tensor(self):
             def foobar(x, y):
                 return x * 2, y * 3
@@ -4494,7 +4889,7 @@ if HAS_CUDA_AND_TRITON:
             ]
             for i, compile_fn in enumerate(compile_fns):
                 torch.manual_seed(0)
-                for index in range(3):
+                for _ in range(3):
                     x = torch.randn(4, 4, device=device, requires_grad=True)
                     y = torch.randn(4, 4, device=device, requires_grad=True)
 
@@ -4598,6 +4993,77 @@ if HAS_CUDA_AND_TRITON:
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
     instantiate_parametrized_tests(TestSAC)
+
+    # OpInfo-based test for index/scatter ops with cudagraphs
+    from torch.testing._internal.common_device_type import (
+        DeviceTypeTestBase,
+        instantiate_device_type_tests,
+        ops,
+    )
+    from torch.testing._internal.common_methods_invocations import op_db
+
+    # Ops that involve indexing/scattering that we want to test with cudagraphs
+    INDEXING_OPS = (
+        "index_put",
+        "index_add",
+        "index_copy",
+        "index_fill",
+        "scatter",
+    )
+
+    indexing_op_db = [
+        op for op in op_db if any(idx_op in op.name for idx_op in INDEXING_OPS)
+    ]
+
+    class TestCudagraphIndexingOps(DeviceTypeTestBase):
+        """
+        Test that index/scatter ops work correctly with cudagraphs.
+        These ops should either:
+        1. Work correctly with cudagraph capture, or
+        2. Properly skip cudagraphs (e.g., for boolean indices)
+        """
+
+        @ops(
+            indexing_op_db,
+            allowed_dtypes=(torch.float32,),
+        )
+        @torch._inductor.config.patch("triton.cudagraphs", True)
+        def test_cudagraph_indexing_ops(self, device, dtype, op):
+            for deterministic in [False, True]:
+                torch._dynamo.reset()
+
+                samples = op.sample_inputs(device, dtype, requires_grad=False)
+                sample = next(iter(samples))
+
+                def fn(input, *args, **kwargs):
+                    return op.op(input, *args, **kwargs)
+
+                old_deterministic = torch.are_deterministic_algorithms_enabled()
+                try:
+                    torch.use_deterministic_algorithms(deterministic)
+
+                    # Run eager first - skip if eager fails (pre-existing issue)
+                    try:
+                        input_clone = sample.input.clone()
+                        expected = fn(input_clone, *sample.args, **sample.kwargs)
+                    except Exception as e:
+                        continue  # Skip this deterministic setting if eager fails
+
+                    compiled_fn = torch.compile(fn, mode="reduce-overhead")
+
+                    # Run multiple times to trigger cudagraph recording
+                    for _ in range(3):
+                        input_clone = sample.input.clone()
+                        result = compiled_fn(input_clone, *sample.args, **sample.kwargs)
+
+                    self.assertEqual(result, expected)
+                finally:
+                    torch.use_deterministic_algorithms(old_deterministic)
+
+    if torch.cuda.is_available():
+        instantiate_device_type_tests(
+            TestCudagraphIndexingOps, globals(), only_for=("cuda",)
+        )
 
 
 if __name__ == "__main__":

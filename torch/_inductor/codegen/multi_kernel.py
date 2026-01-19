@@ -218,7 +218,7 @@ class MultiKernel:
             # the multi call kernel.
             multi_call_args = call_args
             multi_call_arg_types = arg_types
-            for i, kernel in enumerate(self.kernels):
+            for kernel in self.kernels:
                 additional_call_args, additional_arg_types = (
                     kernel.additional_call_args_and_types()
                 )
@@ -306,7 +306,7 @@ class MultiKernelCall:
             # manually force a subkernel to ease perf testing
             picked_by_config = config.triton.multi_kernel - 2
             assert picked_by_config < len(self._kernels)
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.picked_kernel = picked_by_config
         elif not self.disable_cache:
             self.load_cache()
@@ -330,9 +330,9 @@ class MultiKernelCall:
         path = self.cache_file_path()
         if path.exists():
             with path.open() as fd:
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self.picked_kernel = int(fd.read())
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 assert self.picked_kernel >= 0 and self.picked_kernel < len(
                     self._kernels
                 )
@@ -381,7 +381,12 @@ class MultiKernelCall:
             return inner
 
         return [
-            benchmarker.benchmark_gpu(wrap_fn(kernel, index), rep=40)
+            benchmarker.benchmark(
+                wrap_fn(kernel, index),
+                # Currently the kernel type must be a CachingAutotuner
+                device=kernel.device_props.type,
+                rep=40,
+            )
             for index, kernel in enumerate(self.kernels)
         ]
 
@@ -602,6 +607,6 @@ class SizeHintMultiKernelCall(MultiKernelCall):
             self._dist_heuristic(shape_key, key) if key is not None else 2**62
             for key in self._kernel_hints
         ]
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self.picked_kernel = dists.index(min(dists))
         self._cache_shape_choice(shape_key, self.picked_kernel)

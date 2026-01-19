@@ -1,8 +1,3 @@
-# --------------------------------------------------------------------------
-# Copyright (c) Microsoft Corporation. All rights reserved.
-# Licensed under the MIT License.
-# --------------------------------------------------------------------------
-
 """Typings for function definitions."""
 
 from __future__ import annotations

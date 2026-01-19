@@ -379,7 +379,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     function->append_type(getOrCreateTypeAnnotations(i));
   }
 
-  // 3. If upgrader is needed, change change the OP instrunction to CALL
+  // 3. If upgrader is needed, change change the OP instruction to CALL
   // instruction (In next PR, use_upgrader will be parsed to parseInstruction
   // function and do the actual change)
   if (use_upgrader) {
@@ -414,7 +414,7 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
           false /*is_varret*/);
 
       function->setSchema(std::move(schema));
-    } catch (const c10::Error& e) {
+    } catch (const c10::Error&) {
     }
   }
   return function;

@@ -1147,24 +1147,13 @@ static at::Tensor linear_int8_with_onednn_weight(
       dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
 
   auto src = at::native::itensor_from_tensor(input_contig);
-  auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
-  int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
+  int64_t K = input.size(dim - 1), M = input.numel() / K, N = onednn_weight.size(1);
 
   auto output_size = input.sizes().vec();
   output_size[dim - 1] = N;
 
-  std::optional<ideep::tensor> onednn_bias{std::nullopt};
   bool with_bias = bias.has_value();
-  at::Tensor bias_val_float;
-  if (with_bias) {
-    bias_val_float = bias.value().to(at::kFloat);
-    if (bias_val_float.dim() == 1) {
-      auto b_reshape = bias_val_float.reshape({1, bias_val_float.size(0)});
-      onednn_bias = at::native::itensor_view_from_dense(b_reshape);
-    } else {
-      onednn_bias = at::native::itensor_view_from_dense(bias_val_float);
-    }
-  }
+
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
   auto out_dtype = output_dtype.has_value() ? output_dtype.value() : input.scalar_type();
@@ -1185,6 +1174,39 @@ static at::Tensor linear_int8_with_onednn_weight(
       at::native::itensor_view_from_dense(other.value().reshape({-1, other.value().size(dim - 1)})) :
       empty_tensor;
 
+  // Fast path with cache of params
+  static const char* env_var = std::getenv(CACHE_ONEDNN_CONTEXT_FLAG);
+  static const std::string cache_flag_str = env_var ? std::string(env_var) : "";
+  static const bool context_cache_enabled = !cache_flag_str.empty() && cache_flag_str == "1";
+  static std::unordered_map<int64_t, QlinearForwardParams> qlinear_forward_params_map;
+  int64_t weight_addr = at::native::data_ptr_from_mkldnn(onednn_weight);
+  if (context_cache_enabled) {
+    auto it = qlinear_forward_params_map.find(weight_addr);
+    if (it != qlinear_forward_params_map.end()) {
+      auto& params = it->second;
+      auto& args = params.args;
+      args[DNNL_ARG_SRC] = std::move(src);
+      args[DNNL_ARG_DST] = std::move(dst);
+      if (binary_post_op == "add") {
+        args[DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1] = std::move(src1);
+      }
+      params.primitive.execute(ideep::stream::default_stream(), args);
+      return dim == 2 ? output : output.resize_(output_size);
+    }
+  }
+
+  // Regular path
+  auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
+  tensor onednn_bias;
+  if (with_bias) {
+    at::Tensor bias_val_float = bias.value();
+    if (bias_val_float.dim() == 1) {
+      auto b_reshape = bias_val_float.reshape({1, bias_val_float.size(0)});
+      onednn_bias = at::native::itensor_view_from_dense(b_reshape);
+    } else {
+      onednn_bias = at::native::itensor_view_from_dense(bias_val_float);
+    }
+  }
   // Create onednn primitive
   auto src_dtype = at::native::get_mkldnn_dtype(input.scalar_type());
   auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
@@ -1192,7 +1214,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   auto dst_dtype = dst.get_data_type();
   auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
   auto bias_desc = with_bias ?
-      tensor::desc(onednn_bias.value().get_dims(), ideep::data_type::f32, ideep::format_tag::any) :
+      tensor::desc(onednn_bias.get_dims(), onednn_bias.get_data_type(), ideep::format_tag::any) :
       empty_tensor_desc;
   // Get op attr for primitive
   // Note: output_scale & output_zero_point are for re-quantization of the final output.
@@ -1249,7 +1271,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   args.insert({DNNL_ARG_DST, dst});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
   if (with_bias) {
-    args.insert({DNNL_ARG_BIAS, onednn_bias.value()});
+    args.insert({DNNL_ARG_BIAS, onednn_bias});
   }
   tensor src_scales_t = tensor(ideep::scale_t(1, input_scale));
   tensor wei_scales_t = at::native::itensor_from_tensor(weight_scales);
@@ -1273,7 +1295,22 @@ static at::Tensor linear_int8_with_onednn_weight(
     args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1});
   }
   primitive.execute(ideep::stream::default_stream(), args);
-  return dim == 2 ? output : output.reshape(output_size);
+  // Update cache if needed
+  if (context_cache_enabled) {
+    QlinearForwardParams params;
+    params.primitive = primitive;
+    params.packed_weight = expected_weight;
+    params.weight_scales = wei_scales_t;
+    params.src_scale = input_scale != 1.0f ? std::make_optional<tensor>(src_scales_t) : std::nullopt;
+    params.dst_scale = output_scale != 1.0f ? std::make_optional<tensor>(dst_scales_t) : std::nullopt;
+    params.src_zero_point = input_zero_point != 0 ? std::make_optional<tensor>(src_zp_t) : std::nullopt;
+    params.dst_zero_point = output_zero_point != 0 ? std::make_optional<tensor>(dst_zp_t) : std::nullopt;
+    params.bias = with_bias ? std::make_optional<tensor>(onednn_bias) : std::nullopt;
+    params.scratchpad = scratchpad;
+    params.init_args();
+    qlinear_forward_params_map[weight_addr] = params;
+  }
+  return dim == 2 ? output : output.resize_(output_size);
 }
 
 #if AT_MKLDNN_ACL_ENABLED()

@@ -3,12 +3,13 @@ import functools
 import itertools
 import logging
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, cast, Optional, Union
 
 import sympy
 from sympy import Expr
 
+from torch import SymInt
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     has_free_unbacked_symbols,
@@ -181,7 +182,7 @@ class SizeVarAllocator:
         def statically_known(expr):
             evaluated = self.shape_env._maybe_evaluate_static(
                 expr,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 axioms=axioms,
                 var_to_range=var_to_range_tuple,
             )
@@ -387,10 +388,6 @@ class SizeVarAllocator:
         """
         # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
         # see https://github.com/sympy/sympy/issues/28200
-        if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
-            denominator
-        ):
-            return False
 
         if len(free_symbols(numerator)) > 20:
             return False
@@ -602,6 +599,11 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
     ) -> int:
+        if isinstance(expr, SymInt):
+            raise TypeError(
+                "wrong API usage!, use size_hint from torch.fx.experimental.symbolic_shapes or pass sympy expressions instead"
+            )
+
         out = self.symbolic_hint(
             expr,
             hint_override=hint_override,
@@ -882,7 +884,7 @@ class SizeVarAllocator:
         # Start building the unbacked replacements mapping using CanonicalExprFinder
         # The mapping is from Expr to its "canonical" Expr.
         self.unbacked_replacements = {}
-        for expr in self.equality_graph.keys():
+        for expr in self.equality_graph:
             canonical_expr = uf.find_expr(expr)
             if expr != canonical_expr:
                 self.unbacked_replacements[expr] = canonical_expr

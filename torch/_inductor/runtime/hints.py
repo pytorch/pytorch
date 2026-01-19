@@ -89,13 +89,13 @@ if has_triton_package():
             divisible_by_16=None,
             equal_to_1=None,
         ):
-            # pyrefly: ignore  # not-iterable
+            # pyrefly: ignore [not-iterable]
             return {(x,): [["tt.divisibility", 16]] for x in divisible_by_16}
 
 else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
     AttrsDescriptorWrapper = collections.namedtuple(  # type: ignore[no-redef, name-match]
-        # pyrefly: ignore  # invalid-argument
+        # pyrefly: ignore [invalid-argument]
         "AttrsDescriptor",
         ["divisible_by_16", "equal_to_1"],
         defaults=[(), ()],
@@ -135,6 +135,7 @@ class DeviceProperties(typing.NamedTuple):
     major: int | None = None
     regs_per_multiprocessor: int | None = None
     max_threads_per_multi_processor: int | None = None
+    max_threads_per_block: int | None = None
     warp_size: int | None = None
 
     @classmethod
@@ -169,6 +170,7 @@ class DeviceProperties(typing.NamedTuple):
             max_threads_per_multi_processor=getattr(
                 props, "max_threads_per_multi_processor", None
             ),
+            max_threads_per_block=getattr(props, "max_threads_per_block", 1024),
             warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
         )
 

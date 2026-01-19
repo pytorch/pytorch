@@ -257,7 +257,10 @@ class RecordWorkerEventsTest(unittest.TestCase):
         self.assertEqual(failed_event.metadata["state"], "FAILED")
         self.assertEqual(failed_event.metadata["global_rank"], 0)
         md = json.loads(failed_event.metadata["metadata"])
-        self.assertEqual(failed_event.metadata["raw_error"], '{"message": "<NONE>"}')
+        self.assertEqual(
+            failed_event.metadata["raw_error"],
+            '{"message": "<NONE>", "errorTraits": {"category": "system_terminated_error", "retryability": "False"}}',
+        )
         self.assertEqual(md["exit_code"], [1])
         self.assertEqual(md["worker_pid"], [1000])
 

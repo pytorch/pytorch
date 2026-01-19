@@ -42,7 +42,7 @@ def check_onnx_opset_operator(
             attributes = ops[i]["attributes"]
             assert len(attributes) == len(graph.node[i].attribute)
             for j in range(len(attributes)):
-                for attribute_field in attributes[j].keys():
+                for attribute_field in attributes[j]:
                     assert attributes[j][attribute_field] == getattr(
                         graph.node[i].attribute[j], attribute_field
                     )

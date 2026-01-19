@@ -18,8 +18,9 @@ of compilation.
 
 import logging
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from unittest import mock
 
 import torch
@@ -166,7 +167,7 @@ def propagate_dynamo_source(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -
         if "." not in name and len(name):
             for node in module.graph.find_nodes(op="placeholder"):
                 # non-placeholder in original_gm may become placeholder in submodules
-                node._dynamo_source = name_to_dynamo_source.get(node.name, None)
+                node._dynamo_source = name_to_dynamo_source.get(node.name)
 
 
 class DDPOptimizerContext:
@@ -488,7 +489,7 @@ class DDPOptimizer:
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
-        to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
+        to compile each subgraph. Finally, stitches compiled graphs into one graphmodule
         and returns its callable.
         """
         # 1: compute the partition map according to DDP bucket logic

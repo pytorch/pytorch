@@ -889,20 +889,26 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         assert z == 1
 
     def test_user_defined_exception_variable(self):
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             z = 0
             try:
                 raise CustomException
             except ValueError:
                 z = 1
-            except CustomException:
+            except CustomException as e:
+                # trying to call python_type on the
+                # UserDefinedExceptionClassVariable
+                cls = type(e)
+                if type(cls) is type:
+                    t = t + 1
                 z = 2
             assert z == 2
             return t.sin()
 
         t = torch.randn(2)
         fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(t), opt_fn(t))
 
     def test_user_defined_exception_with_args(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -956,7 +962,51 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = (torch.randn(4, 16, requires_grad=True),)
 
         with self.assertRaisesRegex(Exception, "weight = self.linear.w"):
-            torch._dynamo.functional_export._dynamo_graph_capture_for_export(Model())(x)
+            torch._dynamo.functional_export.dynamo_graph_capture_for_export(Model())(x)
+
+    def test_context_manager_preserves_exception_stack(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167900
+        # When an exception is raised inside a context manager and the context manager
+        # doesn't suppress it, the error message should point to the original raise
+        # location, not the context manager cleanup code.
+        def g():
+            assert False  # noqa: B011
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            with torch.no_grad():
+                g()
+            return x
+
+        with self.assertRaises(Unsupported) as ctx:
+            f(torch.randn(1))
+
+        # The error should point to "assert False" in g(), not "return x"
+        self.assertIn("in g", str(ctx.exception))
+        self.assertIn("assert False", str(ctx.exception))
+        self.assertNotIn("return x", str(ctx.exception))
+
+    def test_reraise_preserves_exception_stack(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167900
+        # When an exception is caught and re-raised, the error message should
+        # point to the original raise location, not the reraise location.
+        def g():
+            raise Exception("Invalid")  # noqa: TRY002
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            try:
+                g()
+            except Exception:  # noqa: TRY203
+                raise
+            return x
+
+        with self.assertRaises(Unsupported) as ctx:
+            f(torch.randn(1))
+
+        # The error should point to 'raise Exception("Invalid")' in g()
+        self.assertIn("in g", str(ctx.exception))
+        self.assertIn('raise Exception("Invalid")', str(ctx.exception))
 
 
 instantiate_parametrized_tests(ExceptionTests)

@@ -1,12 +1,13 @@
 {
   "tools/test/docstring_linter_testdata/more_python_code.py.txt": {
-    " 1": "def a_very_very_long(): lines=8, docs=0: FAIL",
-    "10": "class LintInit: lines=6, docs=0: FAIL"
+    " 1": "def a_very_very_long(): lines=6, docs=0: FAIL",
+    "10": "class LintInit: lines=5, docs=0: FAIL"
   },
   "tools/test/docstring_linter_testdata/python_code.py.txt": {
-    "17": "class LongWithoutDocstring: lines=6, docs=0: FAIL",
-    "24": "class LongWithShortDocstring: lines=6, docs=10: FAIL",
-    "54": "def long_without_docstring(): lines=7, docs=0: FAIL",
-    "71": "def ImpossibleCombo.needs_docs(): lines=12, docs=0: FAIL"
+    "17": "class LongWithoutDocstring: lines=5, docs=0: FAIL",
+    "24": "class LongWithShortDocstring: lines=5, docs=10: FAIL",
+    "54": "def long_without_docstring(): lines=6, docs=0: FAIL",
+    "71": "def ImpossibleCombo.needs_docs(): lines=11, docs=0: FAIL",
+    "85": "class NotDocstring: lines=19, docs=0: FAIL"
   }
 }

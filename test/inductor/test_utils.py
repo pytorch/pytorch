@@ -74,7 +74,7 @@ class TestUtils(TestCase):
         self.assertEqual(expr.is_integer, None)
         self.assertEqual(expr.is_nonnegative, None)
         # replace abs(x) with y
-        # propagte abs(x) sympy properties.
+        # propagate abs(x) sympy properties.
         result = sympy_subs(expr, {expr: Symbol("y")})
         self.assertEqual(result.name, "y")
         self.assertEqual(result.is_integer, None)
@@ -91,7 +91,7 @@ class TestUtils(TestCase):
 
     def test_flops_fx(self):
         def create_fx_node(
-            aten: torch._ops.OpOverloadPacket, args, kwargs
+            aten, op_overload: torch._ops.OpOverload, args, kwargs
         ) -> tuple[torch.fx.Node, torch.fx.Node]:
             node1 = torch.fx.Node(
                 graph=torch.fx.Graph(),
@@ -101,8 +101,13 @@ class TestUtils(TestCase):
                 args=args,
                 kwargs=kwargs,
             )
-            name: str = aten.overloads()[0]
-            op_overload: torch._ops.OpOverload = getattr(aten, name)
+            # name: str = aten.overloads()[0]
+            # if aten == torch.ops.aten.addmm:
+            #     name = "default"
+            # print(aten)
+            # print(aten.overloads())
+            # print(name)
+            # op_overload: torch._ops.OpOverload = getattr(aten, name)
             node2 = torch.fx.Node(
                 graph=torch.fx.Graph(),
                 name="",
@@ -119,17 +124,25 @@ class TestUtils(TestCase):
             trues = [
                 (
                     torch.ops.aten.addmm,
+                    torch.ops.aten.addmm.default,
                     (torch.Tensor(4, 4), torch.Tensor(4, 5), torch.Tensor(5, 4)),
                     {},
                 ),
                 (
                     torch.ops.aten.bmm,
+                    torch.ops.aten.bmm.default,
                     (torch.Tensor(10, 4, 5), torch.Tensor(10, 5, 4)),
                     {},
                 ),
-                (torch.ops.aten.mm, (torch.Tensor(2, 3), torch.Tensor(3, 2)), {}),
+                (
+                    torch.ops.aten.mm,
+                    torch.ops.aten.mm.default,
+                    (torch.Tensor(2, 3), torch.Tensor(3, 2)),
+                    {},
+                ),
                 (
                     torch.ops.aten.convolution,
+                    torch.ops.aten.convolution.default,
                     (
                         torch.Tensor(2, 2, 3),
                         torch.Tensor(2, 2, 2),
@@ -145,6 +158,7 @@ class TestUtils(TestCase):
                 ),
                 (
                     torch.ops.aten._convolution,
+                    torch.ops.aten._convolution.deprecated,
                     (
                         torch.Tensor(2, 2, 2),
                         torch.Tensor(2, 2, 2),
@@ -166,17 +180,19 @@ class TestUtils(TestCase):
             falses = [
                 (
                     torch.ops.aten.add,
+                    torch.ops.aten.add.Tensor,
                     (torch.Tensor(1, 2, 3), torch.Tensor(1, 2, 3)),
                     {},
                 ),
                 (
                     torch.ops.aten.mul,
+                    torch.ops.aten.mul.Tensor,
                     (torch.Tensor(1, 2, 3), torch.Tensor(1, 2, 3)),
                     {},
                 ),
             ]
-            for t, args, kwargs in trues:
-                fx_node_1, fx_node_2 = create_fx_node(t, args, kwargs)
+            for t, t2, args, kwargs in trues:
+                fx_node_1, fx_node_2 = create_fx_node(t, t2, args, kwargs)
                 self.assertTrue(
                     countable_fx(fx_node_1), f"Expected true {t}: {fx_node_1}"
                 )
@@ -185,8 +201,8 @@ class TestUtils(TestCase):
                 )
                 self.assertNotEqual(count_flops_fx(fx_node_1), None)
                 self.assertNotEqual(count_flops_fx(fx_node_2), None)
-            for f, args, kwargs in falses:
-                fx_node_1, fx_node_2 = create_fx_node(f, args, kwargs)
+            for f, f2, args, kwargs in falses:
+                fx_node_1, fx_node_2 = create_fx_node(f, f2, args, kwargs)
                 self.assertFalse(
                     countable_fx(fx_node_1), f"Expected false {f}: {fx_node_1}"
                 )
@@ -201,7 +217,7 @@ class TestUtils(TestCase):
         self.assertTrue(type(ret) is float)
 
 
-instantiate_device_type_tests(TestUtils, globals())
+instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

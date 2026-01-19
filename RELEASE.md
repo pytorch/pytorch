@@ -51,6 +51,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
+| 2.10 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.13.0.50) | ROCm 7.1 |
 | 2.9 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.13.0.50) | ROCm 6.4 |
 | 2.8 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 12.9 (CUDNN 9.10.2.21) | ROCm 6.4 |
 | 2.7 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 11.8 (CUDNN 9.1.0.70), CUDA 12.6 (CUDNN 9.5.1.17) | CUDA 12.8 (CUDNN 9.7.1.26) | ROCm 6.3 |
@@ -66,7 +67,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 ### PyTorch CUDA Support Matrix
 
-For Release 2.9 PyTorch Supports following CUDA Architectures:
+For Release 2.9 and 2.10 PyTorch Supports following CUDA Architectures:
 
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |
@@ -96,7 +97,12 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
 | 2.9 | Sept 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
 | 2.10 | Dec 2025 | Jan 2026 | (Feb 2026) | (Mar 2026) |
-| 2.11 | Mar 2026 | Apr 2026 | (Jun 2026) | (Jul 2026) |
+| 2.11 | 16 Feb 2026 | 18 Mar 2026 | (Apr 2026) | (May 2026) |
+| 2.12 | 13 Apr 2026 | 13 May 2026 | (Jun 2026) | (Jul 2026) |
+| 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | (Sept 2026) |
+| 2.14 | 3 Aug 2026 | 2 Sept 2026 | (Oct 2026) | (Nov 2026) |
+| 2.15 | 28 Sept 2026 | 28 Oct 2026 | (Nov 2026) | (Dec 2026) |
+| 2.16 | 2 Nov 2026 | 22 Dec 2026 | (Jan 2027) | (Feb 2027) |
 
 ## General Overview
 
@@ -120,11 +126,12 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 Following requirements need to be met prior to cutting a release branch:
 
-* Resolve all outstanding issues in the milestones (for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28)) before first RC cut is completed. After RC cut is completed, the following script should be executed from test-infra repo in order to validate the presence of the fixes in the release branch:
-``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream --branch release/1.11 --milestone-id 26 --missing-in-branch ```
+* Triton release branch must be created (e.g., [release/3.6.x](https://github.com/triton-lang/triton/tree/release/3.6.x)) and the Triton pin update PR must be landed (e.g., [#168096](https://github.com/pytorch/pytorch/pull/168096)) at least 1 week before the branch cut
+* Resolve all outstanding issues in the milestones that are feature work and release blocking (for example [release 2.10 milestone](https://github.com/pytorch/pytorch/milestone/57)). A report of outstanding cherry-picks can be produced by running the [github-analytics-daily workflow](https://github.com/pytorch/test-infra/blob/main/.github/workflows/github-analytics-daily.yml)
 * Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems (Linux, MacOS, Windows), Python versions as well as CPU architectures (x86 and arm) and accelerator versions (CUDA, ROCm, XPU).
+* All [viable/strict](.github/workflows/update-viablestrict.yml) jobs are green, which requires the following jobs to pass: `pull`, `trunk`, `lint`, `linux-aarch64`
 * All the nightly jobs for pytorch and domain libraries should be green. Validate this using the following HUD links:
-  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
+  * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
 
@@ -151,7 +158,7 @@ This script should create 2 branches:
 ### PyTorch ecosystem libraries
 
 *Note*:  Release branches for individual ecosystem libraries should be created after first release candidate build of PyTorch is available in staging channels (which happens about a week after PyTorch release branch has been created). This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Ecosystem Library POC.
-Test-Infra branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used for domains.
+Test-Infra branch cut should be performed at the same time as PyTorch core branch cut. Convenience script can also be used for domains.
 
 > NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
 
@@ -182,7 +189,7 @@ These are examples of changes that should be made to the *default* branch after 
 ### Making release branch specific changes for ecosystem libraries
 
 Ecosystem libraries branch cut is done a few days after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Ecosystem Library POC.
-After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
+After the branch cut is performed, the PyTorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
 * torchvision : [Update version.txt](https://github.com/pytorch/vision/pull/8968) and [change workflow branch references](https://github.com/pytorch/vision/pull/8969)
@@ -247,7 +254,7 @@ Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://
 ### Release Candidate health validation
 
 Validate that the release jobs for pytorch and domain libraries are green. Validate this using the following HUD links:
-  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
+  * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
 
@@ -497,13 +504,13 @@ An example of this process can be found here:
 In nightly builds for conda and wheels pytorch depend on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
 
 In Nightly builds we have following configuration:
-* Conda builds, depend on: https://anaconda.org/pytorch-nightly/torchtriton
-* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton/
-* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton-rocm/
+* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton/
+* ROCm wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton-rocm/
+* XPU wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton-xpu/
 
 However for release we have following :
-* Conda builds, depend on: https://anaconda.org/pytorch-test/torchtriton for test and https://anaconda.org/pytorch/torchtriton for release
 * Wheel builds, depend only triton pypi package: https://pypi.org/project/triton/ for both test and release
-* Rocm wheel builds, depend on : https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release
+* ROCm wheel builds, depend on : https://download.pytorch.org/whl/test/triton-rocm/ for test and https://download.pytorch.org/whl/triton-rocm/ for release
+* XPU wheel builds, depend on : https://download.pytorch.org/whl/test/triton-xpu/ for test and https://download.pytorch.org/whl/triton-xpu/ for release
 
 Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .
