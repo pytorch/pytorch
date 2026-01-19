@@ -355,6 +355,29 @@ op_db: list[OpInfo] = [
                     torch.float64: 1e-05,
                 },
             ),
+            # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-2, rtol=1e-4),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1e-4),
+                    }
+                ),
+                "TestConsistency",
+                "test_output_match",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-2, rtol=1e-4),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1e-4),
+                    }
+                ),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+            ),
         ),
         dtypes=all_types_and(torch.bool),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
@@ -369,6 +392,18 @@ op_db: list[OpInfo] = [
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
                 },
+            ),
+            # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-2, rtol=1e-4),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1e-4),
+                    }
+                ),
+                "TestConsistency",
+                "test_output_match",
+                device_type="mps",
             ),
         ),
         dtypes=all_types_and(torch.bool),
@@ -385,6 +420,18 @@ op_db: list[OpInfo] = [
                     torch.float64: 1e-05,
                 },
             ),
+            # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-2, rtol=1e-4),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1e-4),
+                    }
+                ),
+                "TestConsistency",
+                "test_output_match",
+                device_type="mps",
+            ),
         ),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         dtypes=all_types_and(torch.bool),
@@ -399,6 +446,18 @@ op_db: list[OpInfo] = [
                     torch.float32: 1e-04,
                     torch.float64: 1e-05,
                 },
+            ),
+            # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-2, rtol=1e-4),
+                        torch.bfloat16: tol(atol=1e-2, rtol=1e-4),
+                    }
+                ),
+                "TestConsistency",
+                "test_output_match",
+                device_type="mps",
             ),
         ),
         dtypes=all_types_and(torch.bool),
