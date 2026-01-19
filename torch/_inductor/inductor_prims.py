@@ -118,13 +118,10 @@ def _reserve_rng_state(device: torch.device, used_offset):
         dev_index = torch.cuda.current_device()
 
     gen = torch.cuda.default_generators[dev_index]
-    try:
-        seed_t, off_t, intra_t = torch.ops.inductor_prims.inductor_reserve_rng_state(
-            gen, used_offset
-        )
-    except Exception as e:
-        # f"[warn] inductor_reserve_rng_state unavailable"
-        return 0, 0
+    seed_t, off_t, intra_t = torch.ops.inductor_prims.inductor_reserve_rng_state(
+        gen, used_offset
+    )
+
     # NOTE: for correctness in eager, intra_t should be 0.
     # Keep everything as tensor math to avoid host sync.
     if intra_t.device.type != "cuda":
@@ -150,10 +147,11 @@ def _rand_eager_offsets_impl(offsets, device: torch.device) -> Tensor:
     containing the packed (seed, base) values for each reservation.
     """
     states = [_reserve_rng_state(device, int(off)) for off in offsets]
-    seeds = [s for s, b in states]
-    bases = [b for s, b in states]
-    seeds_tensor = torch.stack(seeds).view(-1)
-    bases_tensor = torch.stack(bases).view(-1)
+    seeds = [s for s, _ in states]
+    bases = [b for _, b in states]
+    _to_i64 = lambda x: x if isinstance(x, torch.Tensor) else torch.as_tensor(x, device=device, dtype=torch.int64)
+    seeds_tensor = torch.stack([_to_i64(x) for x in seeds]).view(-1)
+    bases_tensor = torch.stack([_to_i64(x) for x in bases]).view(-1)
     i64 = torch.int64
     packed = (seeds_tensor.to(dtype=i64) << 32) | (
         bases_tensor.to(dtype=i64) & 0xFFFFFFFF
