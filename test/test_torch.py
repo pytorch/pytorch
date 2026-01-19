@@ -5960,6 +5960,7 @@ class TestTorchDeviceType(TestCase):
     @onlyNativeDeviceTypes
     def test_grad_scaler_step_stage(self, device):
         device = torch.device(device)
+
         class _PlaceHolderOptimizer(torch.optim.Optimizer):
             def __init__(self, *args, **kwargs):
                 kwargs.setdefault("defaults", {})
