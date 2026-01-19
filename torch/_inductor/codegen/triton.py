@@ -187,6 +187,47 @@ def gen_attr_descriptor_import() -> str:
         return ""
 
 
+@lru_cache(None)
+def gen_common_triton_imports() -> str:
+    imports = IndentedBuffer()
+    imports.splice(
+        """
+        import triton
+        import triton.language as tl
+        """
+    )
+    try:
+        import triton.language.extra.tlx  # noqa: F401
+
+        imports.splice(
+            """
+           import triton.language.extra.tlx as tlx  # noqa: F401
+           """
+        )
+    except ImportError:
+        pass
+    if attr_desc := gen_attr_descriptor_import():
+        imports.writeline(attr_desc)
+
+    imports.splice(
+        """
+        from torch._inductor.runtime import triton_helpers, triton_heuristics
+        from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+        from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+        """
+    )
+    if config.triton.proton_profiling:
+        imports.splice(
+            """
+            import triton.profiler as proton
+            import triton.profiler.language as pl
+            pl.enable_semantic('triton')
+            """
+        )
+
+    return imports.getvalue()
+
+
 class TritonSymbols:
     """
     Stores sympy.Symbol instances and constants associated with triton codegen.
@@ -1171,7 +1212,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.eager_numerics.division_rounding
+            and config.emulate_divison_rounding
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -3306,8 +3347,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     GDC_WAIT = "tl.extra.cuda.gdc_wait()"
     GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
 
-    @staticmethod
-    def _enable_pdl_codegen():
+    def _enable_pdl_codegen(self):
         if not torch._inductor.config.triton.enable_pdl:
             return False
         if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
@@ -3634,13 +3674,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # With broadcast:
             # tl.store(out_ptr0 + (tl.full([1, 1], 0, tl.int32).broadcast_to((XBLOCK,1)), tmp4, xmask)
             indexing_str = indexing.index_str
-            if (
-                is_sympy_integer_like(index)
-                and value.shape is not None
-                and not all(str(x) == "1" for x in value.shape)
-            ):
-                value_shape = ", ".join(map(str, value.shape))
-                indexing_str += f".broadcast_to({value_shape})"
+            if is_sympy_integer_like(index):
+                if self.is_combo_kernel:
+                    # In combo kernels, broadcast pointer to match mask shape
+                    indexing_str += f".broadcast_to({self.dense_size_str()})"
+                elif value.shape is not None and not all(
+                    str(x) == "1" for x in value.shape
+                ):
+                    value_shape = ", ".join(map(str, value.shape))
+                    indexing_str += f".broadcast_to({value_shape})"
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
             self.atomic_add_found = True
@@ -4997,15 +5039,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(arg, int):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
-                    hint = V.graph.sizevars.optimization_hint_with_override(
+                    hint = V.graph.sizevars.size_hint(
                         arg.inner_expr,
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     args.append(str(hint))
                 elif isinstance(arg, sympy.Expr):
-                    hint = V.graph.sizevars.optimization_hint_with_override(
+                    hint = V.graph.sizevars.size_hint(
                         arg,
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     args.append(str(hint))
                 else:
@@ -5034,13 +5078,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.try_get_buffer(arg_name)
                 if buf:
-                    size = V.graph.sizevars.optimization_hints_with_override(
+                    size = V.graph.sizevars.size_hints(
                         buf.get_size(),
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
-                    stride = V.graph.sizevars.optimization_hints_with_override(
+                    stride = V.graph.sizevars.size_hints(
                         buf.get_stride(),
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
@@ -5048,21 +5094,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
-                    size = V.graph.sizevars.optimization_hints_with_override(
+                    size = V.graph.sizevars.size_hints(
                         const_tensor.size(),
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
-                    stride = V.graph.sizevars.optimization_hints_with_override(
+                    stride = V.graph.sizevars.size_hints(
                         const_tensor.stride(),
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.optimization_hint_with_override(
+                    symval_hint = V.graph.sizevars.size_hint(
                         arg_sig.expr,
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
 
                     # Force the seed_offset to be 0 so calls to the same kernel
@@ -5073,7 +5122,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.optimization_hint_with_override(
+                    count = V.graph.sizevars.size_hint(
                         arg_sig.count, hint_override=self.hint_override
                     )
                     result.writeline(
@@ -5154,57 +5203,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return "reduction"
         return "pointwise"
 
-    @classmethod
-    @lru_cache(None)
-    def gen_common_triton_imports(cls) -> str:
-        imports = IndentedBuffer()
-        imports.splice(
-            """
-            import triton
-            import triton.language as tl
-            """
-        )
-        try:
-            import triton.language.extra.tlx  # noqa: F401
-
-            imports.splice(
-                """
-               import triton.language.extra.tlx as tlx  # noqa: F401
-               """
-            )
-        except ImportError:
-            pass
-        if attr_desc := gen_attr_descriptor_import():
-            imports.writeline(attr_desc)
-
-        imports.splice(
-            """
-            from torch._inductor.runtime import triton_helpers, triton_heuristics
-            from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
-            from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
-            """
-        )
-        if config.triton.proton_profiling:
-            imports.splice(
-                """
-                import triton.profiler as proton
-                import triton.profiler.language as pl
-                pl.enable_semantic('triton')
-                """
-            )
-
-        return imports.getvalue()
-
-    @classmethod
-    def triton_meta_common(cls):
-        return {
-            "enable_fp_fusion": not config.emulate_precision_casts,
-            "disable_ftz": config.eager_numerics.disable_ftz,
-            "launch_pdl": cls._enable_pdl_codegen(),
-        }
-
-    @classmethod
-    def inductor_meta_common(cls):
+    @staticmethod
+    def inductor_meta_common():
         inductor_meta = {
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
             "assert_indirect_indexing": config.assert_indirect_indexing,
@@ -5282,7 +5282,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             size_hints[prefix] = size_hint
 
         if name is None:
-            code.splice(self.gen_common_triton_imports())
+            code.splice(gen_common_triton_imports())
             device_type = V.graph.get_current_device_or_throw().type
             if device_type == "cpu":
                 code.splice("triton_helpers.set_driver_to_cpu()")
@@ -5386,7 +5386,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 torch._inductor.config.triton.native_matmul
                 and ("tl.dot" in str(self.body) or "tl.dot" in str(self.compute))
             ),
-            **self.triton_meta_common(),
         }
 
         # Skip memory optimization for forward of the training loop where we expect
@@ -5492,6 +5491,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
+        triton_meta["launch_pdl"] = self._enable_pdl_codegen()
+
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
         # during launching the Inductor-compiled Triton kernel.
@@ -5499,6 +5500,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # https://github.com/triton-lang/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
+        triton_meta["enable_fp_fusion"] = not config.emulate_precision_casts
 
         self.triton_meta = triton_meta
 
