@@ -584,8 +584,6 @@ def _package_exported_programs(
             model_name, ep, archive_writer, pickle_protocol
         )
         weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
-        print(f"weights_config_file: {weights_config_file}")
-        print(f"weights_config: {_dataclass_to_dict(weights_config)}")
         _package_payload_config(archive_writer, weights_config, weights_config_file)
 
         constants_config = _package_constants(
@@ -855,9 +853,6 @@ def _load_state_dict(
         assert weights_config_file in archive_reader.get_file_names(), (
             f"{weights_config_file} not found in PT2 archive"
         )
-        print(
-            f"weights_config_file: {weights_config_file}, {archive_reader.read_string(weights_config_file)}"
-        )
         weights_config = _load_payload_config(archive_reader, weights_config_file)
         # construct the mapping from file name (e.g. weight_0) to flat weight payload
         state_dict_file_map = _build_file_map(
@@ -876,13 +871,19 @@ def _load_state_dict(
                 )
             else:
                 tensor_meta = payload_meta.tensor_meta
-                print(f"tensor_meta: {tensor_meta}")
-                print(f"weight_fqn: {weight_fqn}, {deserialize_storage_offset(tensor_meta.storage_offset)}")
                 assert tensor_meta is not None
-                temp = state_dict_file_map[payload_meta.path_name]
                 print(f"payload_meta.path_name: {payload_meta.path_name}")
-                print(f"temp: {temp}, shape: {temp.shape}, stride: {temp.stride()}, storage_offset: {temp.storage_offset()}")
-                print(f"size: {deserialize_size(tensor_meta.sizes)}, stride: {deserialize_stride(tensor_meta.strides)}, storage_offset: {deserialize_storage_offset(tensor_meta.storage_offset)}")
+                print(f"tensor_meta: {tensor_meta}")
+                print(
+                    f"tensor_meta.sizes: {tensor_meta.sizes}, tensor_meta.strides: {tensor_meta.strides}, tensor_meta.storage_offset: {tensor_meta.storage_offset}"
+                )
+                print(
+                    f"deserialize_size: {deserialize_size(tensor_meta.sizes)}, deserialize_stride: {deserialize_stride(tensor_meta.strides)}, deserialize_storage_offset: {deserialize_storage_offset(tensor_meta.storage_offset)}"
+                )
+                print(f"input: {state_dict_file_map[payload_meta.path_name]}")
+                print(
+                    f"input.size(): {state_dict_file_map[payload_meta.path_name].size()}, input.stride(): {state_dict_file_map[payload_meta.path_name].stride()}, input.storage_offset(): {state_dict_file_map[payload_meta.path_name].storage_offset()}"
+                )
                 weight_tensor = torch.as_strided(
                     input=state_dict_file_map[payload_meta.path_name],
                     size=deserialize_size(tensor_meta.sizes),
