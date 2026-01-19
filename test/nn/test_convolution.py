@@ -44,7 +44,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocmHipBlasltVersionLessThan,
     skipMeta,
     skipMPS,
-    skipXPUIf,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -2360,7 +2360,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.shape, output_size)
 
     @skipMeta
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2594")
+    @skipXPU("https://github.com/intel/torch-xpu-ops/issues/2594")
     @parametrize_test(
         "input_shape,transposed,dilated,groups,layout,backend_expected",
         [
