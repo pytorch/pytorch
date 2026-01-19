@@ -177,19 +177,36 @@ class TestDTensorDebugMode(TestCase):
         debug_string = debug_mode.debug_string(show_stack_trace=False)
 
         # Check for key forward operations
+        self.assertIn("<method 'add' of 'torch._C.TensorBase' objects>", debug_string)
         self.assertIn("aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))", debug_string)
         self.assertIn("redistribute_input(1, S(1) -> S(0))", debug_string)
+        self.assertIn("redistribute_input(t: f32[8, 1], trace: S(1)->S(0))", debug_string)
         self.assertIn("_dtensor::shard_dim_alltoall", debug_string)
+        self.assertIn("aten::add.Tensor(t: f32[1, 8], t: f32[1, 8])", debug_string)
+
+        # Check for sum operations
+        self.assertIn("<method 'sum' of 'torch._C.TensorBase' objects>", debug_string)
         self.assertIn("aten::sum(dt: f32[8, 8]| S(0))", debug_string)
+        self.assertIn("aten::sum(t: f32[1, 8])", debug_string)
 
         # Check for backward operations
         self.assertIn("torch._tensor.backward", debug_string)
         self.assertIn("aten::ones_like(dt: f32[]| P(sum)", debug_string)
+        self.assertIn("aten::ones_like(t: f32[]", debug_string)
         self.assertIn("aten::expand(dt: f32[]| R, [8, 8])", debug_string)
+        self.assertIn("aten::expand(t: f32[], [8, 8])", debug_string)
 
-        # Check for redistribute operations in backward pass (order may vary)
+        # Check for redistribute operations in backward pass
         self.assertIn("redistribute_input(t: f32[8, 8], trace: R->S(1))", debug_string)
         self.assertIn("redistribute_input(t: f32[8, 8], trace: R->S(0))", debug_string)
+
+        # Check for split operations in backward pass
+        self.assertIn("aten::split.Tensor(t: f32[8, 8], 1, 1)", debug_string)
+        self.assertIn("aten::split.Tensor(t: f32[8, 8], 1)", debug_string)
+
+        # Check for _to_copy operations
+        self.assertIn("aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)", debug_string)
+        self.assertIn("aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)", debug_string)
 
         # Check that both clone and detach operations appear (order-independent)
         self.assertIn("aten::clone(t: f32[8, 1])", debug_string)
