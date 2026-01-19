@@ -407,7 +407,7 @@ class Optimizer:
         for param_group in param_groups:
             self.add_param_group(cast(dict, param_group))
 
-        # Allows _cuda_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
+        # Allows _accelerator_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
         # which I don't think exists
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
@@ -448,29 +448,34 @@ class Optimizer:
         return format_string
 
     # Currently needed by Adam and AdamW
-    def _cuda_graph_capture_health_check(self) -> None:
+    def _accelerator_graph_capture_health_check(self) -> None:
         # Note [torch.compile x capturable]
         # If we are compiling, we try to take the capturable path automatically by
         # setting the flag to True during tracing. Due to this, we skip all the checks
-        # normally required for determining whether we can use CUDA graphs and
+        # normally required for determining whether we can use CUDA/XPU graphs and
         # shunt the responsibility to torch.inductor. This saves time during tracing
         # since the checks are slow without sacrificing UX since inductor will warn
-        # later if CUDA graphs cannot be enabled, e.g.,
+        # later if CUDA/XPU graphs cannot be enabled, e.g.,
         # https://github.com/pytorch/pytorch/blob/d3ba8901d8640eb16f88b2bfef9df7fa383d4b47/torch/_inductor/compile_fx.py#L390.
         # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
-        if (
-            not torch.compiler.is_compiling()
-            and torch.backends.cuda.is_built()
-            and torch.cuda.is_available()
-        ):
-            capturing = torch.cuda.is_current_stream_capturing()
+
+        # Determine available accelerator device
+        accelerator = None
+        if torch.backends.cuda.is_built() and torch.cuda.is_available():
+            accelerator = (torch.cuda, "CUDA")
+        elif hasattr(torch, "xpu") and torch.xpu.is_available():
+            accelerator = (torch.xpu, "XPU")
+
+        if not torch.compiler.is_compiling() and accelerator:
+            device_module, device_name = accelerator
+            capturing = device_module.is_current_stream_capturing()
 
             if capturing and not all(
                 group["capturable"] for group in self.param_groups
             ):
                 raise RuntimeError(
-                    "Attempting CUDA graph capture of step() for an instance of "
+                    f"Attempting {device_name} graph capture of step() for an instance of "
                     + self.__class__.__name__
                     + " but param_groups' capturable is False."
                 )
@@ -482,7 +487,7 @@ class Optimizer:
             ):
                 warnings.warn(
                     "This instance was constructed with capturable=True or some of all the param_groups came with capturable=True, "
-                    "but step() is running without CUDA graph capture. If you never intend to graph-capture this "
+                    f"but step() is running without {device_name} graph capture. If you never intend to graph-capture this "
                     "instance, capturable=True can impair performance, and you should set capturable=False.",
                     stacklevel=2,
                 )
