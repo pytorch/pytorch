@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfRocm,
     skipIfRocmArch,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
@@ -7771,7 +7772,7 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
-    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
+    @skipIfRocm
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
