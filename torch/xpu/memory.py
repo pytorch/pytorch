@@ -626,10 +626,12 @@ class MemPool(_XPUMemPool):
         r"""Return a snapshot of the XPU memory allocator pool state across all
         devices.
 
-        .. note::
-            This method is not currently supported for XPU.
+        Interpreting the output of this function requires familiarity with the
+        memory allocator internals.
+
         """
-        raise NotImplementedError("XPU: MemPool.snapshot is not supported yet.")
+        snapshot = torch.xpu.memory_snapshot(self.id)
+        return snapshot
 
 
 @contextlib.contextmanager
