@@ -176,7 +176,7 @@ static Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... ext
   return (randomness == RandomnessType::Same) ? res : makeBatched(res, 0, cur_level);
 }
 
-static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, double p, std::optional<bool> train) {
+static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, double p, std::optional<bool> train, std::optional<Generator> generator) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
@@ -200,7 +200,7 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
       shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
       tensor_value = tensor_value.expand_symint(shapeVec);
     }
-    auto [output, mask] = at::native_dropout(tensor_value, p, train);
+    auto [output, mask] = at::native_dropout(tensor_value, p, train, generator);
     return std::make_tuple(
         makeBatched(output, 0, cur_level),
         makeBatched(mask, 0, cur_level));
@@ -211,7 +211,7 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   // Check for probability of zero to avoid divide by zero and NaN results
   double scale = p1m == 0 ? 0. : 1. / p1m;
   Tensor mask = at::empty_like(tensor, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  mask.bernoulli_(p1m);
+  mask.bernoulli_(p1m, generator);
   const auto output = tensor.mul(mask).mul_(scale);
   return std::make_tuple(output, mask);
 }

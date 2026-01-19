@@ -101,15 +101,15 @@ def _dropout_returns_masked_input_and_mask(
 
 
 @_onnx_symbolic("aten::dropout")
-@symbolic_helper.parse_args("v", "f", "b")
-def dropout(g: jit_utils.GraphContext, input, p, train):
+@symbolic_helper.parse_args("v", "f", "b", "none")
+def dropout(g: jit_utils.GraphContext, input, p, train, generator=None):
     masked, _ = _dropout_returns_masked_input_and_mask(g, input, p, train)
     return masked
 
 
 @_onnx_symbolic("aten::native_dropout")
-@symbolic_helper.parse_args("v", "f", "b")
-def native_dropout(g: jit_utils.GraphContext, input, p, train):
+@symbolic_helper.parse_args("v", "f", "b", "none")
+def native_dropout(g: jit_utils.GraphContext, input, p, train, generator=None):
     return _dropout_returns_masked_input_and_mask(g, input, p, train)
 
 

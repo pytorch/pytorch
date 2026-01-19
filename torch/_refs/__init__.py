@@ -5945,6 +5945,7 @@ def _uniform_helper(
     *,
     dtype: torch.dtype,
     device: DeviceLikeType,
+    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     utils.validate_shape(shape)
 
@@ -5959,7 +5960,14 @@ def _uniform_helper(
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
     device = utils.canonicalize_device(device)
 
-    return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
+    return prims._uniform_helper(
+        shape,
+        low=low,
+        high=high,
+        dtype=dtype,
+        device=device,
+        generator=generator,
+    )
 
 
 @register_decomposition(aten.masked_fill)

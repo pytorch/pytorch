@@ -159,7 +159,7 @@ graph(%x : Tensor,
 TEST(IRTest, OperatorMap) {
   OperatorMap<int> op_map;
   const char* literal1 =
-      "aten::dropout(Tensor input, float p, bool train) -> Tensor";
+      "aten::dropout(Tensor input, float p, bool train, Generator? generator=None) -> Tensor";
   const char* literal2 =
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor";
   const char* literal3 =

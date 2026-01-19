@@ -1,3 +1,6 @@
+from typing import Optional
+
+import torch
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -66,11 +69,15 @@ class Dropout(_DropoutNd):
         detectors: https://arxiv.org/abs/1207.0580
     """
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(
+        self, input: Tensor, generator: Optional[torch.Generator] = None
+    ) -> Tensor:
         """
         Runs the forward pass.
         """
-        return F.dropout(input, self.p, self.training, self.inplace)
+        return F.dropout(
+            input, self.p, self.training, self.inplace, generator=generator
+        )
 
 
 class Dropout1d(_DropoutNd):
@@ -114,11 +121,15 @@ class Dropout1d(_DropoutNd):
        https://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(
+        self, input: Tensor, generator: Optional[torch.Generator] = None
+    ) -> Tensor:
         """
         Runs the forward pass.
         """
-        return F.dropout1d(input, self.p, self.training, self.inplace)
+        return F.dropout1d(
+            input, self.p, self.training, self.inplace, generator=generator
+        )
 
 
 class Dropout2d(_DropoutNd):
@@ -169,11 +180,15 @@ class Dropout2d(_DropoutNd):
        https://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(
+        self, input: Tensor, generator: Optional[torch.Generator] = None
+    ) -> Tensor:
         """
         Runs the forward pass.
         """
-        return F.dropout2d(input, self.p, self.training, self.inplace)
+        return F.dropout2d(
+            input, self.p, self.training, self.inplace, generator=generator
+        )
 
 
 class Dropout3d(_DropoutNd):
@@ -217,11 +232,15 @@ class Dropout3d(_DropoutNd):
        https://arxiv.org/abs/1411.4280
     """
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(
+        self, input: Tensor, generator: Optional[torch.Generator] = None
+    ) -> Tensor:
         """
         Runs the forward pass.
         """
-        return F.dropout3d(input, self.p, self.training, self.inplace)
+        return F.dropout3d(
+            input, self.p, self.training, self.inplace, generator=generator
+        )
 
 
 class AlphaDropout(_DropoutNd):
