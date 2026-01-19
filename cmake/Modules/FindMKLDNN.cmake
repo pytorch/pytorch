@@ -20,17 +20,40 @@ IF(NOT MKLDNN_FOUND)
   SET(MKLDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
 
   if(USE_XPU) # Build oneDNN GPU library
+    if(DEFINED ENV{XPU_MKLDNN_LIBRARY_TYPE})
+      set(XPU_MKLDNN_LIBRARY_TYPE "$ENV{XPU_MKLDNN_LIBRARY_TYPE}")
+    else()
+      set(XPU_MKLDNN_LIBRARY_TYPE "STATIC")
+    endif()
+
+    if(XPU_MKLDNN_LIBRARY_TYPE STREQUAL "STATIC")
+      set(XPU_MKLDNN_SHARED_LIBRARY 0)
+    elseif(XPU_MKLDNN_LIBRARY_TYPE STREQUAL "SHARED")
+      set(XPU_MKLDNN_SHARED_LIBRARY 1)
+    else()
+      message(FATAL_ERROR
+        "XPU_MKLDNN_LIBRARY_TYPE must be either STATIC or SHARED (got '${XPU_MKLDNN_LIBRARY_TYPE}')")
+    endif()
+
     if(WIN32)
       # Windows
       set(DNNL_HOST_COMPILER "DEFAULT")
       set(SYCL_CXX_DRIVER "icx")
       set(DNNL_LIB_NAME "dnnl.lib")
+      if(XPU_MKLDNN_SHARED_LIBRARY)
+        set(DNNL_LIB_NAME "dnnl.dll")
+        set(DNNL_FILE_NAMES "dnnl.dll")
+      endif()
     elseif(LINUX)
       # Linux
       # g++ is soft linked to /usr/bin/cxx, oneDNN would not treat it as an absolute path
       set(DNNL_HOST_COMPILER "g++")
       set(SYCL_CXX_DRIVER "icpx")
       set(DNNL_LIB_NAME "libdnnl.a")
+      if(XPU_MKLDNN_SHARED_LIBRARY)
+        set(DNNL_LIB_NAME "libdnnl.so")
+        set(DNNL_FILE_NAMES "libdnnl.so" "libdnnl.so.3" "libdnnl.so.3.10")
+      endif()
     else()
       MESSAGE(FATAL_ERROR "OneDNN for Intel GPU in PyTorch currently supports only Windows and Linux.
                            Detected system '${CMAKE_SYSTEM_NAME}' is not supported.")
@@ -57,7 +80,7 @@ IF(NOT MKLDNN_FOUND)
       -DDNNL_BUILD_TESTS=OFF
       -DDNNL_BUILD_EXAMPLES=OFF
       -DONEDNN_BUILD_GRAPH=ON
-      -DDNNL_LIBRARY_TYPE=STATIC
+      -DDNNL_LIBRARY_TYPE=${XPU_MKLDNN_LIBRARY_TYPE}
       -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER} # Use global cxx compiler as host compiler
       -G ${CMAKE_GENERATOR} # Align Generator to Torch
       BUILD_COMMAND ${DNNL_MAKE_COMMAND}
@@ -71,10 +94,25 @@ IF(NOT MKLDNN_FOUND)
     # This target would be further linked to libtorch_xpu.so.
     # The libtorch_xpu.so would contain Conv&GEMM operators that depend on
     # oneDNN primitive implementations inside libdnnl.a.
-    add_library(xpu_mkldnn INTERFACE)
+    if(NOT XPU_MKLDNN_SHARED_LIBRARY)
+      add_library(xpu_mkldnn INTERFACE)
+      target_link_libraries(xpu_mkldnn INTERFACE ${XPU_MKLDNN_LIBRARIES})
+      target_include_directories(xpu_mkldnn INTERFACE ${XPU_MKLDNN_INCLUDE})
+    else()
+      add_library(xpu_mkldnn SHARED IMPORTED)
+      foreach(xpu_mkldnn_include_dir IN LISTS XPU_MKLDNN_INCLUDE)
+        file(MAKE_DIRECTORY ${xpu_mkldnn_include_dir})
+      endforeach()
+      set_target_properties(xpu_mkldnn PROPERTIES
+        IMPORTED_LOCATION "${XPU_MKLDNN_LIBRARIES}"
+        INTERFACE_INCLUDE_DIRECTORIES "${XPU_MKLDNN_INCLUDE}"
+      )
+      set(XPU_MKLDNN_INSTALLED_FILES "")
+      foreach(file IN LISTS DNNL_FILE_NAMES)
+        list(APPEND XPU_MKLDNN_INSTALLED_FILES "${BINARY_DIR}/src/${file}")
+      endforeach()
+    endif()
     add_dependencies(xpu_mkldnn xpu_mkldnn_proj)
-    target_link_libraries(xpu_mkldnn INTERFACE ${XPU_MKLDNN_LIBRARIES})
-    target_include_directories(xpu_mkldnn INTERFACE ${XPU_MKLDNN_INCLUDE})
   endif()
 
   IF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)

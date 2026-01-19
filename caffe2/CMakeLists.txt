@@ -1669,6 +1669,16 @@ endif()
 
 # ---[ XPU library.
 if(USE_XPU)
+  if(XPU_MKLDNN_SHARED_LIBRARY)
+    set_target_properties(torch_xpu PROPERTIES
+      INSTALL_RPATH "$ORIGIN" )
+    target_link_options(torch_xpu PRIVATE
+      "-Wl,--disable-new-dtags"
+    )
+    install(FILES ${XPU_MKLDNN_INSTALLED_FILES}
+      DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
+
   target_link_libraries(torch_xpu INTERFACE torch::xpurt)
 
   target_link_libraries(torch_xpu PUBLIC c10_xpu)
@@ -1677,8 +1687,14 @@ if(USE_XPU)
       torch_xpu INTERFACE $<INSTALL_INTERFACE:include>)
   target_include_directories(
       torch_xpu PRIVATE ${Caffe2_XPU_INCLUDE})
-  target_link_libraries(
+  
+  if(XPU_MKLDNN_SHARED_LIBRARY)
+    target_link_libraries(
+      torch_xpu PUBLIC ${Caffe2_XPU_DEPENDENCY_LIBS})
+  else()
+    target_link_libraries(
       torch_xpu PRIVATE ${Caffe2_XPU_DEPENDENCY_LIBS})
+  endif()
 
   # Ensure that torch_cpu is ready before being linked by torch_xpu.
   add_dependencies(torch_xpu torch_cpu)
