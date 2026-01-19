@@ -665,13 +665,6 @@ def round_to_power_of_2(scale: torch.Tensor, eps: torch.Tensor) -> torch.Tensor:
     # Round to nearest integer exponent
     rounded_exponent = torch.round(log2_scale)
 
-    # Clamp exponent to reasonable range for float32
-    # Minimum: -126 (near float32 minimum normal)
-    # Maximum: 127 (near float32 maximum)
-    min_exponent = -126.0
-    max_exponent = 127.0
-    rounded_exponent = torch.clamp(rounded_exponent, min_exponent, max_exponent)
-
     # Calculate 2^rounded_exponent
     rounded_scale = torch.pow(2.0, rounded_exponent)
 
