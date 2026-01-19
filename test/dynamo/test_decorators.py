@@ -3375,6 +3375,33 @@ class GraphModule(torch.nn.Module):
         ):
             compiled_mod(x)
 
+    def test_leaf_function_input_mutation_error(self):
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def mutate_input(x):
+            x.add_(1)
+            return (x,)
+
+        @mutate_input.fake_impl
+        def mutate_input_fake(x):
+            return (x + 1,)
+
+        def fn(x):
+            return mutate_input(x)
+
+        x = torch.randn(3, 3)
+
+        # Eager works (but is dangerous)
+        x_eager = x.clone()
+        result_eager = fn(x_eager)
+        self.assertEqual(result_eager[0], x + 1)
+
+        # Compiled detects mutation and raises error
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
+            compiled_fn(x.clone())
+
     def test_leaf_function_validation_shape_mismatch(self):
         import torch._dynamo.config as config
         from torch._dynamo.decorators import leaf_function
