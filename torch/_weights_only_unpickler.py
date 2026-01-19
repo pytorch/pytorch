@@ -375,11 +375,15 @@ class Unpickler:
                             if len(full_path) > 0 and full_path[0] == "."
                             else builtins_name + full_path
                         )
+                    # Extract just the class/function name for a cleaner suggestion
+                    global_name = full_path.rsplit(".", 1)[-1]
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                        f"Please use `torch.serialization.add_safe_globals([{full_path}])` or the "
-                        f"`torch.serialization.safe_globals([{full_path}])` context manager to allowlist this global "
-                        "if you trust this class/function."
+                        f"Please use `torch.serialization.add_safe_globals([{global_name}])` to allowlist "
+                        f"this global if you trust this class/function.\n"
+                        f"You may also need to add `{global_name}` to a tuple along with its module path "
+                        f'if class/function definition does not match the path in the checkpoint:\n'
+                        f'`torch.serialization.add_safe_globals([({global_name}, "{full_path}")])`'
                     )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
