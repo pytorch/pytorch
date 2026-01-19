@@ -3,6 +3,7 @@
 import itertools
 import os
 import random
+import re
 from contextlib import nullcontext
 from unittest import skip, skipIf, skipUnless
 
@@ -11,14 +12,17 @@ import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
-from torch._inductor.utils import fresh_cache, run_and_get_triton_code
+from torch._inductor.utils import (
+    fresh_cache,
+    fresh_inductor_cache,
+    run_and_get_triton_code,
+)
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _test_mode,
-    enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
@@ -764,7 +768,6 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     def test_empty_strided_p2p(self, set_device: bool) -> None:
         self._init_process(set_device)
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         alloc_args = self._get_test_alloc_args()
 
@@ -786,7 +789,6 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
         self._init_process(set_device)
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         alloc_args = self._get_test_alloc_args()
 
@@ -1219,7 +1221,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 class LoweringTest(MultiProcContinuousTest):
     def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
         torch.manual_seed(42 + self.rank)
         torch._inductor.config._collective.auto_select = True
 
@@ -1280,6 +1281,128 @@ class LoweringTest(MultiProcContinuousTest):
 
         self.assertIn("one_shot_all_reduce", code_3)
         self.assertNotIn("return (buf0", code_3)
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_comm_buffer_reuse(self):
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w1 = torch.rand(N, N, device=self.device)
+        w2 = torch.rand(N, N, device=self.device)
+        w3 = torch.rand(N, N, device=self.device)
+
+        def func_no_reuse(x, w1, w2):
+            a = torch.mm(x, w1)
+            b = torch.mm(a, w2)
+            # Both `a` and `b` need comm buffers that are live simultaneously
+            a = torch.ops.symm_mem.one_shot_all_reduce(a, "sum", "0")
+            b = torch.ops.symm_mem.one_shot_all_reduce(b, "sum", "0")
+            return a + b
+
+        def func_no_reuse_eager(x, w1, w2):
+            # we need to allocate the output tensors here
+            # because eager path would not allocate the output tensors as symm_mem tensors automatically
+            mm1_out = symm_mem.empty(N, N, device=self.device)
+            mm2_out = symm_mem.empty(N, N, device=self.device)
+
+            mm1_out = torch.mm(x, w1, out=mm1_out)
+            mm2_out = torch.mm(mm1_out, w2, out=mm2_out)
+            # Both `a` and `b` need comm buffers that are live simultaneously
+            mm1_out = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            mm2_out = torch.ops.symm_mem.one_shot_all_reduce(mm2_out, "sum", "0")
+            return mm1_out + mm2_out
+
+        compiled_no_reuse = torch.compile(func_no_reuse, fullgraph=True)
+        code_no_reuse = run_and_get_triton_code(compiled_no_reuse, x, w1, w2)
+
+        p2p_matches = re.findall(r"buf\d+ = empty_strided_p2p", code_no_reuse)
+        self.assertEqual(
+            len(p2p_matches), 2, f"Expected 2 p2p allocations, got {len(p2p_matches)}"
+        )
+
+        # Check numerical result for no_reuse path
+        eager_no_reuse = func_no_reuse_eager(x, w1, w2)
+        compiled_output_no_reuse = compiled_no_reuse(x, w1, w2)
+        torch.testing.assert_close(
+            eager_no_reuse,
+            compiled_output_no_reuse,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled and eager (no reuse) outputs do not match",
+        )
+
+        def func_reuse(x, w1, w2, w3):
+            a = torch.mm(x, w1)
+            # First all_reduce uses a comm buffer
+            a = torch.ops.symm_mem.one_shot_all_reduce(a, "sum", "0")
+            b = torch.mm(a, w2)  # `b` is a regular cuda allocation
+            # `a` can be freed here, `c` can reuse the freed `a`
+            c = torch.mm(b, w3)
+            c = torch.ops.symm_mem.one_shot_all_reduce(c, "sum", "0")
+            return c
+
+        def func_reuse_eager(x, w1, w2, w3):
+            # we need to allocate the output tensors here
+            # because eager path would not allocate the output tensors as symm_mem tensors automatically
+            mm1_out = symm_mem.empty(N, N, device=self.device)
+
+            torch.mm(x, w1, out=mm1_out)
+            a = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            b = torch.mm(a, w2)
+            torch.mm(b, w3, out=mm1_out)
+            mm1_out = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            return mm1_out
+
+        compiled_reuse = torch.compile(func_reuse, fullgraph=True)
+        code_reuse = run_and_get_triton_code(compiled_reuse, x, w1, w2, w3)
+
+        p2p_matches_reuse = re.findall(r"buf\d+ = empty_strided_p2p", code_reuse)
+        self.assertEqual(
+            len(p2p_matches_reuse),
+            1,
+            f"Expected 1 p2p allocation (reuse), got {len(p2p_matches_reuse)}",
+        )
+
+        cuda_matches = re.findall(r"buf\d+ = empty_strided_cuda", code_reuse)
+        self.assertGreaterEqual(
+            len(cuda_matches), 1, "Expected at least 1 regular cuda allocation"
+        )
+
+        # Check numerical result for reuse path
+        eager_reuse = func_reuse_eager(x, w1, w2, w3)
+        compiled_output_reuse = compiled_reuse(x, w1, w2, w3)
+        torch.testing.assert_close(
+            eager_reuse,
+            compiled_output_reuse,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled and eager (reuse) outputs do not match",
+        )
+
+    @skip_if_rocm_multiprocess  # test requires support for registered buffers
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_external_allocation_fallback(self):
+        self._init_process()
+
+        N = 8
+
+        def func_input_direct(x):
+            return torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+
+        x_input = torch.rand(N, N, device=self.device)
+
+        # Compilation should succeed here even though we do not control allocation
+        # of the input; user is responsible for passing a symmetric memory buffer.
+        compiled_input_direct = torch.compile(func_input_direct, fullgraph=True)
+
+        # At runtime, this should raise an error because the input is not
+        # a symmetric memory buffer as required by the op.
+        with self.assertRaises(RuntimeError):
+            run_and_get_triton_code(compiled_input_direct, x_input)
 
 
 class SymmMemSingleProcTest(TestCase):
@@ -1377,7 +1500,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     def test_mempool_tensor_factory(self):
         self._init_process()
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -1402,7 +1524,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     def test_mempool_compute_ops(self):
         self._init_process()
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         dim = 1024

@@ -76,7 +76,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             False,
             padding_mode,
         )
-        assert qconfig, "qconfig must be provided for QAT module"
+        if not qconfig:
+            raise AssertionError("qconfig must be provided for QAT module")
         self.qconfig = qconfig
         self.freeze_bn = freeze_bn if self.training else True
         self.bn = _BN_CLASS_MAP[dim](out_channels, eps, momentum, True, True)
@@ -131,7 +132,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         """Approximated method to fuse conv and bn. It requires only one forward pass.
         conv_orig = conv / scale_factor where scale_factor = bn.weight / running_std
         """
-        assert self.bn.running_var is not None
+        if self.bn.running_var is None:
+            raise AssertionError("self.bn.running_var must not be None")
         running_std = torch.sqrt(self.bn.running_var + self.bn.eps)
         scale_factor = self.bn.weight / running_std
         weight_shape = [1] * len(self.weight.shape)
@@ -186,8 +188,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
           Z_inference = conv(X, fake_quant(r * W / running_std)) - r * (running_mean - B_c) / running_std + beta
         """
 
-        assert self.bn.running_var is not None
-        assert self.bn.running_mean is not None
+        if self.bn.running_var is None:
+            raise AssertionError("self.bn.running_var must not be None")
+        if self.bn.running_mean is None:
+            raise AssertionError("self.bn.running_mean must not be None")
 
         # using zero bias here since the bias for original conv
         # will be added later
@@ -354,14 +358,17 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         """
         # The ignore is because _FLOAT_MODULE is a TypeVar here where the bound
         # has no __name__ (code is fine though)
-        assert type(mod) is cls._FLOAT_MODULE, (
-            "qat."
-            + cls.__name__
-            + ".from_float only works for "
-            + cls._FLOAT_MODULE.__name__
-        )
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
-        assert mod.qconfig, "Input float module must have a valid qconfig"
+        if type(mod) is not cls._FLOAT_MODULE:
+            raise AssertionError(
+                "qat."
+                + cls.__name__
+                + ".from_float only works for "
+                + cls._FLOAT_MODULE.__name__
+            )
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
+        if not mod.qconfig:
+            raise AssertionError("Input float module must have a valid qconfig")
         qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]  # type: ignore[index]
         qat_convbn = cls(
@@ -408,7 +415,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
         if cls._FLOAT_BN_MODULE:  # type: ignore[attr-defined]
             # fuse bn into conv
-            assert self.bn.running_var is not None and self.bn.running_mean is not None
+            if self.bn.running_var is None or self.bn.running_mean is None:
+                raise AssertionError(
+                    "self.bn.running_var and self.bn.running_mean must not be None"
+                )
             conv.weight, conv.bias = fuse_conv_bn_weights(
                 conv.weight,
                 conv.bias,
@@ -581,7 +591,8 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
             padding_mode=padding_mode,
             qconfig=qconfig,
         )
-        assert qconfig, "qconfig must be provided for QAT module"
+        if not qconfig:
+            raise AssertionError("qconfig must be provided for QAT module")
         self.qconfig = qconfig
         self.weight_fake_quant = self.qconfig.weight()
 
@@ -748,7 +759,8 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
             padding_mode=padding_mode,
             qconfig=qconfig,
         )
-        assert qconfig, "qconfig must be provided for QAT module"
+        if not qconfig:
+            raise AssertionError("qconfig must be provided for QAT module")
         self.qconfig = qconfig
         self.weight_fake_quant = self.qconfig.weight()
 
@@ -916,7 +928,8 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
             padding_mode=padding_mode,
             qconfig=qconfig,
         )
-        assert qconfig, "qconfig must be provided for QAT module"
+        if not qconfig:
+            raise AssertionError("qconfig must be provided for QAT module")
         self.qconfig = qconfig
         self.weight_fake_quant = self.qconfig.weight()
 

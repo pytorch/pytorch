@@ -114,6 +114,7 @@ def _broadcast_object(
         )
         # pyrefly: ignore [bad-argument-type]
         dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
+        # pyrefly: ignore [bad-argument-type]
         buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
         obj = torch.load(buffer, map_location=device, weights_only=False)
     return obj
