@@ -10,13 +10,13 @@ import pandas as pd
 
 flaky_models = {
     "yolov3",
-    "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
-    "timm_efficientnet",  # see https://github.com/pytorch/pytorch/issues/148699
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
     "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
     # discovered in https://github.com/pytorch/pytorch/issues/161419. Its not flaky but really hard to repro, so skipping it
     "mobilenetv3_large_100",
+    # https://github.com/pytorch/pytorch/issues/163670
+    "vision_maskrcnn",
 }
 
 
@@ -35,57 +35,20 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
         flaky_models.update(
             {
                 "Background_Matting",
-                "alexnet",
-                "cait_m36_384",
-                "dla102",
-                "demucs",
-                "densenet121",
-                "detectron2_fcos_r_50_fpn",
-                "doctr_det_predictor",
-                "doctr_reco_predictor",
-                "dpn107",
-                "fbnetv3_b",
-                "hf_BigBird",
-                "hf_Longformer",
-                "hf_Reformer",
-                "hf_Roberta_base",
-                "hf_T5",
-                "hf_T5_base",
-                "hf_T5_generate",
-                "levit_128",
-                "llava",
-                "microbench_unbacked_tolist_sum",
                 "mnasnet1_0",
-                "mobilenet_v2",
-                "pytorch_CycleGAN_and_pix2pix",
-                "pytorch_stargan",
+                "llava",
+                "repvgg_a2",
                 "resnet152",
                 "resnet18",
                 "resnet50",
-                "resnext50_32x4d",
-                "sam",
-                "sam_fast",
-                "shufflenet_v2_x1_0",
-                "squeezenet1_1",
-                "stable_diffusion_text_encoder",
                 "stable_diffusion_unet",
-                "swsl_resnext101_32x16d",
-                "timm_efficientdet",
-                "timm_efficientnet",
-                "timm_nfnet",
-                "timm_regnet",
-                "timm_resnest",
-                "timm_vovnet",
                 "torchrec_dlrm",
+                "shufflenet_v2_x1_0",
                 "vgg16",
+                "BERT_pytorch",
                 # LLM
-                "meta-llama/Llama-3.2-1B",
                 "google/gemma-2-2b",
-                "google/gemma-3-4b-it",
-                "openai/whisper-tiny",
-                "Qwen/Qwen3-0.6B",
-                "mistralai/Mistral-7B-Instruct-v0.3",
-                "openai/gpt-oss-20b",
+                "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
             }
         )
 
@@ -93,7 +56,13 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
 
-        if accuracy == expected_accuracy:
+        if accuracy is None:
+            status = "MISSING_ACCURACY:"
+            failed.append(model)
+        elif expected_accuracy is None:
+            status = "MISSING_EXPECTED:"
+            failed.append(model)
+        elif accuracy == expected_accuracy:
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue

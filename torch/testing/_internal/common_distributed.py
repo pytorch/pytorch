@@ -211,6 +211,14 @@ def at_least_x_gpu(x):
     return False
 
 
+def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
+    _handle_test_skip = getattr(args[0], "_handle_test_skip", None)
+    if len(args) == 0 or _handle_test_skip is None:
+        return False
+    _handle_test_skip(msg)
+    return True
+
+
 def skip_if_lt_x_gpu(x):
     def decorator(func):
         @wraps(func)
@@ -221,11 +229,54 @@ def skip_if_lt_x_gpu(x):
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
                 return func(*args, **kwargs)
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+                sys.exit(test_skip.exit_code)
 
         return wrapper
 
     return decorator
+
+
+def requires_world_size(n: int):
+    """
+    Decorator to request a specific world size for a test. The test harness can
+    read this attribute to set the number of ranks to spawn. If there are fewer
+    than `n` CUDA devices available, the test should be skipped by the harness.
+
+    Usage:
+        @require_world_size(3)
+        def test_something(self):
+            ...
+    """
+
+    def decorator(func):
+        func._required_world_size = n
+        available = torch.cuda.device_count()
+        return unittest.skipUnless(
+            available >= n, f"requires {n} GPUs, found {available}"
+        )(func)
+
+    return decorator
+
+
+def get_required_world_size(obj: Any, default: int) -> int:
+    """
+    Returns the requested world size for the currently running unittest method on `obj`
+    if annotated via `@require_world_size(n)`, else returns `default`.
+    """
+    try:
+        # Try MultiProcessTestCase helper first, then unittest fallback
+        test_name = (
+            obj._current_test_name()  # type: ignore[attr-defined]
+            if hasattr(obj, "_current_test_name") and callable(obj._current_test_name)
+            else obj._testMethodName
+        )
+        fn = getattr(obj, test_name)
+        value = fn._required_world_size
+        return int(value)
+    except Exception:
+        return default
 
 
 # This decorator helps avoiding initializing cuda while testing other backends
@@ -237,7 +288,9 @@ def nccl_skip_if_lt_x_gpu(backend, x):
                 return func(*args, **kwargs)
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
-            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
+            test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
+            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
+                sys.exit(test_skip.exit_code)
 
         return wrapper
 
@@ -353,6 +406,13 @@ def requires_nccl_version(version, msg):
             torch.cuda.nccl.version() < version,
             f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
+
+
+def requires_nccl_shrink():
+    """
+    Require NCCL shrink support (NCCL available and version >= 2.27).
+    """
+    return requires_nccl_version((2, 27), "Need NCCL 2.27+ for shrink_group")
 
 
 def requires_nccl():
@@ -749,7 +809,8 @@ class MultiProcessTestCase(TestCase):
 
         self.processes = []  # type: ignore[var-annotated]
         self.rank = self.MAIN_PROCESS_RANK
-        self.file_name = tempfile.NamedTemporaryFile(delete=False).name
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file_name = f.name
         # pid to pipe consisting of error message from process.
         self.pid_to_pipe = {}  # type: ignore[var-annotated]
 
@@ -863,7 +924,7 @@ class MultiProcessTestCase(TestCase):
         try:
             getattr(self, test_name)()
         except unittest.SkipTest as se:
-            logger.info(
+            logger.info(  # noqa: G200
                 "Process %s skipping test %s for following reason: %s",
                 self.rank,
                 test_name,
@@ -905,11 +966,10 @@ class MultiProcessTestCase(TestCase):
                 try:
                     pipe.send(MultiProcessTestCase.Event.GET_TRACEBACK)
                     pipes.append((i, pipe))
-                except ConnectionError as e:
-                    logger.error(
-                        "Encountered error while trying to get traceback for process %s: %s",
+                except ConnectionError:
+                    logger.exception(
+                        "Encountered error while trying to get traceback for process %s",
                         i,
-                        e,
                     )
 
         # Wait for results.
@@ -932,11 +992,10 @@ class MultiProcessTestCase(TestCase):
                     logger.error(
                         "Could not retrieve traceback for timed out process: %s", rank
                     )
-            except ConnectionError as e:
-                logger.error(
-                    "Encountered error while trying to get traceback for process %s: %s",
+            except ConnectionError:
+                logger.exception(
+                    "Encountered error while trying to get traceback for process %s",
                     rank,
-                    e,
                 )
 
     def _join_processes(self, fn) -> None:
@@ -1141,7 +1200,7 @@ def run_subtests(
     subtest_config_values: list[list[Any]] = [item[1] for item in subtest_config_items]
     for values in itertools.product(*subtest_config_values):
         # Map keyword to chosen value
-        subtest_kwargs = dict(zip(subtest_config_keys, values))
+        subtest_kwargs = dict(zip(subtest_config_keys, values, strict=True))
         with cls_inst.subTest(**subtest_kwargs):
             torch._dynamo.reset()
             test_fn(*test_args, **test_kwargs, **subtest_kwargs)
@@ -1432,7 +1491,7 @@ class MultiThreadedTestCase(TestCase):
                 logger.error("Caught exception: \n%s exiting thread %s", msg, rank)
                 error_msg += f"Thread {rank} exited with exception:\n{msg}\n"
             elif isinstance(exc, SystemExit):
-                if type(exc.code) == int and skip_code < 0:
+                if type(exc.code) is int and skip_code < 0:
                     skip_code = exc.code
 
         # check exceptions
@@ -1653,7 +1712,7 @@ class MultiProcContinuousTest(TestCase):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         assert rdvz_file is not None
-        # rank should be local_rank for tests running on <= 8gpus which is how all these tests are designed
+        # rank should be local_rank for tests running on <= 8 gpus which is how all these tests are designed
         # and we expect LOCAL_RANK set by torchrun. Setting it lets init_device_mesh set the device without
         # issuing a warning
         os.environ["LOCAL_RANK"] = str(rank)
@@ -1713,6 +1772,22 @@ class MultiProcContinuousTest(TestCase):
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
             except BaseException as ex:  # noqa: B036
+                if isinstance(ex, SystemExit):
+                    # Get exit code from the process
+                    exit_code = getattr(ex, "code", None)
+
+                    # Look up exit code in TEST_SKIPS to see if it is a valid skip
+                    skip_entry = next(
+                        (v for v in TEST_SKIPS.values() if v.exit_code == exit_code),
+                        None,
+                    )
+
+                    # If we found an entry, we want to skip the test and the object back to the main process
+                    if skip_entry:
+                        completion_queue.put(unittest.SkipTest(skip_entry.message))
+                        # Skip exception handling below, move to main thread for processing the skip
+                        continue
+
                 raised_exception = True
                 # Send the exception and stack trace back to the dispatcher
                 exc_info = sys.exc_info()
@@ -1737,7 +1812,8 @@ class MultiProcContinuousTest(TestCase):
         cls.task_queues = []
         cls.completion_queues = []
         # Need a rendezvous file for `init_process_group` purpose.
-        cls.rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            cls.rdvz_file = f.name
 
         # CUDA multiprocessing requires spawn instead of fork, to make sure
         # child processes have their own memory space.
@@ -1834,6 +1910,8 @@ class MultiProcContinuousTest(TestCase):
                 # Wait for the workers to finish the test
                 for i, completion_queue in enumerate(self.completion_queues):
                     rv = completion_queue.get()
+                    if isinstance(rv, unittest.SkipTest):
+                        raise rv
                     if isinstance(rv, BaseException):
                         # Hit an exception, re-raise it in the main process.
                         logger.warning(

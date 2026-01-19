@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any
 
 from torch.ao.quantization.backend_config import (
     BackendConfig,
@@ -32,8 +33,8 @@ __all__ = [
 def fuse(
     model: GraphModule,
     is_qat: bool,
-    fuse_custom_config: Union[FuseCustomConfig, dict[str, Any], None] = None,
-    backend_config: Union[BackendConfig, dict[str, Any], None] = None,
+    fuse_custom_config: FuseCustomConfig | dict[str, Any] | None = None,
+    backend_config: BackendConfig | dict[str, Any] | None = None,
 ) -> GraphModule:
     if fuse_custom_config is None:
         fuse_custom_config = FuseCustomConfig()
@@ -101,7 +102,10 @@ def fuse(
         else:
             node_subpattern = None
         if maybe_last_node is node:
-            assert obj is not None
+            if obj is None:
+                raise AssertionError(
+                    "fuse handler object must not be None for matched root node"
+                )
             root_node_getter = fusion_pattern_to_root_node_getter.get(
                 pattern, default_root_node_getter
             )

@@ -2,16 +2,12 @@
 // We disable this file from being hipified because there are CUDA drivers hip
 // has not implemented yet. Also, we're passing in a cubin file directly, so it
 // would take more work to support ROCM anyway.
-#include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <ATen/Context.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
 #include <cstdint>
-#include <stdexcept>
 
 #include <torch/csrc/utils/python_numbers.h>
 #include <filesystem>
@@ -267,6 +263,15 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
     return nullptr;
   }
   CUdevice device = static_cast<CUdevice>(device_ptr); // NOLINT
+
+  // Ensure CUDA context is initialized before loading kernel
+  CUcontext pctx = nullptr;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxRetain(&pctx, device));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxSetCurrent(pctx));
+  }
+
   CUfunction func = nullptr;
   func = loadKernel(filePath, funcName, sharedMemBytes, device);
   // Taken from triton/nvidia/backend/driver.c

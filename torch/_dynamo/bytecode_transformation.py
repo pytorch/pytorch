@@ -21,8 +21,8 @@ import itertools
 import sys
 import types
 import uuid
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 from . import config
 from .bytecode_analysis import (
@@ -77,6 +77,7 @@ class Instruction:
     offset: Optional[int] = None
     starts_line: Optional[int] = None
     is_jump_target: bool = False
+
     positions: Optional["dis.Positions"] = None
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
@@ -157,7 +158,7 @@ elif sys.version_info >= (3, 11):
 
 else:
 
-    def inst_has_op_bits(name: str):
+    def inst_has_op_bits(name: str) -> bool:
         return False
 
 
@@ -397,19 +398,38 @@ def create_call_function(nargs: int, push_null: bool) -> list[Instruction]:
     return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
-def create_call_function_ex(has_kwargs: bool) -> list[Instruction]:
+def create_call_function_ex(
+    has_kwargs: bool, push_null: bool, ignore_314_kwargs_push: bool = False
+) -> list[Instruction]:
     """
     Assumes that in 3.14+, if has_kwargs=False, there is NOT a NULL
     on the TOS for the kwargs. This utility function will add a PUSH_NULL.
 
-    If the caller has already pushed a NULL, then do not call this function -
-    just use create_instruction("CALL_FUNCTION_EX", arg=...).
+    If the caller has already pushed a NULL for the kwargs, then set ignore_314_kwargs_push=True
+    so we don't push another NULL for the kwargs.
     """
-    insts = []
-    if sys.version_info >= (3, 14) and not has_kwargs:
-        insts.append(create_instruction("PUSH_NULL"))
-    insts.append(create_instruction("CALL_FUNCTION_EX", arg=int(has_kwargs)))
-    return insts
+    if sys.version_info >= (3, 11):
+        output = []
+        if (
+            sys.version_info >= (3, 14)
+            and not has_kwargs
+            and not ignore_314_kwargs_push
+        ):
+            output.append(create_instruction("PUSH_NULL"))
+            has_kwargs = True
+        if push_null:
+            output.append(create_instruction("PUSH_NULL"))
+            # 3.13 swapped NULL and callable
+            # if flags == 1, 2 values popped - otherwise if flags == 0, 1 value
+            rots = (
+                int(has_kwargs) + 2
+                if sys.version_info >= (3, 13)
+                else int(has_kwargs) + 3
+            )
+            output.extend(create_rot_n(rots))
+        output.append(create_instruction("CALL_FUNCTION_EX", arg=int(has_kwargs)))
+        return output
+    return [create_instruction("CALL_FUNCTION_EX", arg=int(has_kwargs))]
 
 
 def create_call_method(nargs: int) -> list[Instruction]:
@@ -515,6 +535,8 @@ def create_binary_slice(
 def create_copy(i: int) -> list[Instruction]:
     if sys.version_info >= (3, 11):
         return [create_instruction("COPY", arg=i)]
+    if i == 1:
+        return [create_instruction("DUP_TOP")]
     # COPY 4
     # 0 1 2 3
     # 3 1 2 0
@@ -614,65 +636,67 @@ def encode_varint(n: int) -> list[int]:
     return b
 
 
-def linetable_311_writer(
-    first_lineno: int,
-) -> tuple[list[int], Callable[[Optional["dis.Positions"], int], None]]:
-    """
-    Used to create typing.CodeType.co_linetable
-    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
-    This is the internal format of the line number table for Python 3.11
-    """
-    assert sys.version_info >= (3, 11)
-    linetable = []
-    lineno = first_lineno
+if sys.version_info >= (3, 11):
 
-    def update(positions: Optional["dis.Positions"], inst_size: int) -> None:
-        nonlocal lineno
-        lineno_new = positions.lineno if positions else None
+    def linetable_311_writer(
+        first_lineno: int,
+    ) -> tuple[list[int], Callable[[dis.Positions | None, int], None]]:
+        """
+        Used to create typing.CodeType.co_linetable
+        See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+        This is the internal format of the line number table for Python 3.11
+        """
+        assert sys.version_info >= (3, 11)
+        linetable = []
+        lineno = first_lineno
 
-        def _update(delta: int, size: int) -> None:
-            assert 0 < size <= 8
-            # first byte - use 13 (no column info) is positions is
-            # malformed, otherwise use 14 (long form)
-            other_varints: tuple[int, ...] = ()
-            if (
-                positions
-                and positions.lineno is not None
-                and positions.end_lineno is not None
-                and positions.col_offset is not None
-                and positions.end_col_offset is not None
-            ):
-                linetable.append(0b1_1110_000 + size - 1)
-                # for whatever reason, column offset needs `+ 1`
-                # https://github.com/python/cpython/blob/1931c2a438c50e6250725c84dff94fc760b9b951/Python/compile.c#L7603
-                other_varints = (
-                    positions.end_lineno - positions.lineno,
-                    positions.col_offset + 1,
-                    positions.end_col_offset + 1,
-                )
+        def update(positions: dis.Positions | None, inst_size: int) -> None:
+            nonlocal lineno
+            lineno_new = positions.lineno if positions else None
+
+            def _update(delta: int, size: int) -> None:
+                assert 0 < size <= 8
+                # first byte - use 13 (no column info) is positions is
+                # malformed, otherwise use 14 (long form)
+                other_varints: tuple[int, ...] = ()
+                if (
+                    positions
+                    and positions.lineno is not None
+                    and positions.end_lineno is not None
+                    and positions.col_offset is not None
+                    and positions.end_col_offset is not None
+                ):
+                    linetable.append(0b1_1110_000 + size - 1)
+                    # for whatever reason, column offset needs `+ 1`
+                    # https://github.com/python/cpython/blob/1931c2a438c50e6250725c84dff94fc760b9b951/Python/compile.c#L7603
+                    other_varints = (
+                        positions.end_lineno - positions.lineno,
+                        positions.col_offset + 1,
+                        positions.end_col_offset + 1,
+                    )
+                else:
+                    linetable.append(0b1_1101_000 + size - 1)
+                # encode signed int
+                if delta < 0:
+                    delta = ((-delta) << 1) | 1
+                else:
+                    delta <<= 1
+                # encode unsigned int
+                linetable.extend(encode_varint(delta))
+                for n in other_varints:
+                    linetable.extend(encode_varint(n))
+
+            if lineno_new is None:
+                lineno_delta = 0
             else:
-                linetable.append(0b1_1101_000 + size - 1)
-            # encode signed int
-            if delta < 0:
-                delta = ((-delta) << 1) | 1
-            else:
-                delta <<= 1
-            # encode unsigned int
-            linetable.extend(encode_varint(delta))
-            for n in other_varints:
-                linetable.extend(encode_varint(n))
+                lineno_delta = lineno_new - lineno
+                lineno = lineno_new
+            while inst_size > 8:
+                _update(lineno_delta, 8)
+                inst_size -= 8
+            _update(lineno_delta, inst_size)
 
-        if lineno_new is None:
-            lineno_delta = 0
-        else:
-            lineno_delta = lineno_new - lineno
-            lineno = lineno_new
-        while inst_size > 8:
-            _update(lineno_delta, 8)
-            inst_size -= 8
-        _update(lineno_delta, inst_size)
-
-    return linetable, update
+        return linetable, update
 
 
 @dataclasses.dataclass(slots=True)
@@ -894,6 +918,7 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                 if sys.version_info < (3, 11):
                     # `arg` is expected to be bytecode offset, whereas `offset` is byte offset.
                     # Divide since bytecode is 2 bytes large.
+                    assert target.offset is not None
                     inst.arg = int(target.offset / 2)
                 else:
                     raise RuntimeError("Python 3.11+ should not have absolute jumps")
@@ -903,6 +928,7 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                 inst.arg = abs(
                     int(target.offset - inst.offset - instruction_size(inst))
                 )
+                # pyrefly: ignore [unsupported-operation]
                 inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
@@ -1239,7 +1265,7 @@ def add_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> Non
 
 def remove_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> None:
     new_insts = []
-    for inst, next_inst in zip(instructions, instructions[1:]):
+    for inst, next_inst in itertools.pairwise(instructions):
         if (
             inst.opname == "NOP"
             and inst.argval == "GRAPH_BREAK_IF_LEAF"
@@ -1354,6 +1380,7 @@ def update_offsets(instructions: Sequence[Instruction]) -> None:
     offset = 0
     for inst in instructions:
         inst.offset = offset
+
         offset += instruction_size(inst)
 
 
@@ -1373,7 +1400,11 @@ def debug_checks(code: types.CodeType) -> None:
     """Make sure our assembler produces same bytes as we start with"""
     dode, _ = transform_code_object(code, lambda x, y: None, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
-    assert code.co_lnotab == dode.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
+    # TODO: reenable after better understanding how to handle sourceless
+    # (None) codes
+    # assert list(code.co_lines()) == list(dode.co_lines()), (
+    #     "line table mismatch via co_lines()"
+    # )
 
 
 HAS_LOCAL = set(dis.haslocal)

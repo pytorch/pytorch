@@ -8,10 +8,11 @@ import re
 import subprocess
 import sys
 import warnings
+from collections.abc import Callable
 from enum import Enum
 from functools import cache
 from logging import info
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from urllib.request import Request, urlopen
 
 import yaml
@@ -512,6 +513,8 @@ def perform_misc_tasks(
         "keep-going",
         branch == MAIN_BRANCH
         or bool(tag and re.match(r"^trunk/[a-f0-9]{40}$", tag))
+        # Pattern for tags created via manual run on HUD
+        or bool(tag and re.match(r"^ciflow/[^/]+/[a-f0-9]{40}$", tag))
         or check_for_setting(labels, pr_body, "keep-going"),
     )
     set_output(

@@ -12,14 +12,15 @@ import os.path
 import pickle
 import pstats
 import shutil
+import tempfile
 import traceback
-from collections.abc import Iterator, Sequence
-from typing import Any, Callable, IO, Optional, Union
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any, IO, Optional, Union
 from unittest.mock import patch
 
 import torch
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
-from torch import fx as fx
+from torch import fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch._inductor import utils
@@ -97,6 +98,7 @@ def draw_buffers(
             dtype = node.data.dtype
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
+
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -228,6 +230,7 @@ def update_orig_fx_node_name_to_buf_name(
             )
             continue
         else:
+            # pyrefly: ignore [bad-argument-type, unsupported-operation]
             assert len(children_nodes) == 1 and children_nodes[0] == node
 
         ir_node = node.node
@@ -251,6 +254,7 @@ def get_node_name_to_buf_meta(
         if buf_name not in buf_name_to_n_node:
             buf_name_to_n_node[buf_name] = OrderedSet([node_name])
         else:
+            # pyrefly: ignore [missing-attribute]
             buf_name_to_n_node[buf_name].add(node_name)
 
     node_name_to_buf_meta = {}
@@ -343,6 +347,7 @@ def reset_provenance_globals() -> Iterator[None]:
     global _inductor_triton_kernel_to_post_grad_node_info
     global _inductor_pre_grad_node_stack_trace
     global _inductor_kernel_stack_trace
+    global _inductor_kernel_provenance_debug_handle
 
     # Store original values
     original_pre_grad_graph_id = _pre_grad_graph_id
@@ -354,6 +359,9 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_pre_grad_node_stack_trace.copy()
     )
     original_inductor_kernel_stack_trace = _inductor_kernel_stack_trace.copy()
+    original_inductor_kernel_provenance_debug_handle = (
+        _inductor_kernel_provenance_debug_handle
+    )
 
     # Reset to default values
     _pre_grad_graph_id = -1
@@ -361,6 +369,7 @@ def reset_provenance_globals() -> Iterator[None]:
     _inductor_triton_kernel_to_post_grad_node_info = {}
     _inductor_pre_grad_node_stack_trace = {}
     _inductor_kernel_stack_trace = {}
+    _inductor_kernel_provenance_debug_handle = 0
 
     try:
         yield
@@ -374,6 +383,9 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_kernel_stack_trace = original_inductor_kernel_stack_trace
         _inductor_pre_grad_node_stack_trace = (
             original_inductor_pre_grad_node_stack_trace
+        )
+        _inductor_kernel_provenance_debug_handle = (
+            original_inductor_kernel_provenance_debug_handle
         )
 
 
@@ -1146,9 +1158,11 @@ def set_kernel_post_grad_provenance_tracing(
                                 kernel_name, []
                             )
                         )
+                        # pyrefly: ignore [missing-attribute]
                         stack_traces_set.update(snode.node.get_stack_traces())
                         curr_node_info.extend(
                             origin.name
+                            # pyrefly: ignore [missing-attribute]
                             for origin in snode.node.origins
                             if origin.name not in curr_node_info
                         )
@@ -1177,7 +1191,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    folder = "/tmp/inductor_saved_args"
+    folder = os.path.join(tempfile.gettempdir(), "inductor_saved_args")
     if not os.path.exists(folder):
         os.mkdir(folder)
 

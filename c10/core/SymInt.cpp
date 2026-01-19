@@ -4,7 +4,6 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/safe_numerics.h>
-#include <functional>
 
 namespace c10 {
 
@@ -84,7 +83,7 @@ DEFINE_BINARY(max_slow_path, sym_max, SymInt)
 
 SymInt::operator SymFloat() const {
   if (auto ma = maybe_as_int()) {
-    return SymFloat(double(*ma));
+    return SymFloat(static_cast<double>(*ma));
   } else {
     return SymFloat(toSymNodeImplUnowned()->sym_float());
   }
@@ -127,14 +126,6 @@ int64_t SymInt::guard_int(const char* file, int64_t line) const {
     return *ma;
   } else {
     return toSymNodeImplUnowned()->guard_int(file, line);
-  }
-}
-
-bool SymInt::expect_size(const char* file, int64_t line) const {
-  if (auto ma = maybe_as_int()) {
-    return *ma >= 0;
-  } else {
-    return toSymNodeImplUnowned()->expect_size(file, line);
   }
 }
 

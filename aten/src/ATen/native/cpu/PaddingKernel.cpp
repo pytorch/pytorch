@@ -96,7 +96,7 @@ struct ReplicationPad {
 };
 
 template <typename scalar_t>
-static inline void copy_stub(scalar_t* out, const scalar_t* in, int64_t size) {
+inline void copy_stub(scalar_t* out, const scalar_t* in, int64_t size) {
   using Vec = Vectorized<scalar_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {
@@ -112,7 +112,7 @@ static inline void copy_stub(scalar_t* out, const scalar_t* in, int64_t size) {
 }
 
 template <typename scalar_t>
-static inline void add_stub(scalar_t* grad_in, const scalar_t* grad_out, int64_t size) {
+inline void add_stub(scalar_t* grad_in, const scalar_t* grad_out, int64_t size) {
   using Vec = Vectorized<scalar_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size()); d += Vec::size()) {

@@ -1,0 +1,216 @@
+name: vllm-benchmark
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+        description: The runner to use.
+      docker_image:
+        required: true
+        type: string
+        description: The name of the base docker image to use.
+      build_environment:
+        required: true
+        type: string
+        description: The build environment name, e.g. linux-jammy-cuda12.9-py3.12-gcc11
+      pytorch_branch:
+        required: false
+        type: string
+        description: The PyTorch branch to checkout. Default to the current checkout.
+      pytorch_commit:
+        required: false
+        type: string
+        description: The PyTorch commit to checkout. Default to the current checkout.
+      models:
+        required: false
+        type: string
+        description: The list of models to benchmark. Default to all models.
+        default: ''
+
+jobs:
+  benchmark:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      id-token: write
+      contents: read
+    container:
+      image: ${{ inputs.docker_image }}
+      options: --gpus all --ipc=host --tty
+    steps:
+      - name: Install system dependencies
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y git unzip
+
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
+          submodules: recursive
+          show-progress: false
+
+      - name: Get vLLM pinned commit
+        id: vllm-pinned-commit
+        run: |
+          VLLM_PINNED_COMMIT=$(cat .github/ci_commit_pins/vllm.txt)
+          echo "commit=${VLLM_PINNED_COMMIT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout vLLM
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: vllm-project/vllm
+          path: vllm-project/vllm
+          ref: ${{ steps.vllm-pinned-commit.outputs.commit }}
+          submodules: recursive
+          show-progress: false
+
+      - name: Authenticate with AWS
+        if: ${{ always() && contains(inputs.runner, 'b200') }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
+          aws-region: us-east-1
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build_environment }}
+          s3-bucket: gha-artifacts
+
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          python-version: 3.12
+          activate-environment: true
+
+      - name: Install build artifacts
+        shell: bash
+        run: |
+          set -eux
+          ls -laR dist
+
+          # Need to install pip because there might be parts that are not using
+          # uv yet
+          uv pip install pip==25.3
+
+          uv pip install \
+            dist/torch-*.whl \
+            dist/vision/torchvision-*.whl \
+            dist/audio/torchaudio-*.whl \
+            dist/vllm/vllm-*.whl \
+            --extra-index-url https://download.pytorch.org/whl/cu129 \
+            --index-strategy unsafe-best-match
+
+          # We can build and install torchao from its pinned commit in PyTorch
+          # too, but that pin is too old and nothing seems to use it. Let's
+          # install torchao from pypi then
+          uv pip install torchao==0.15.0 --torch-backend=cu129
+
+      - name: Print some debug information
+        env:
+          VLLM_PINNED_COMMIT: ${{ steps.vllm-pinned-commit.outputs.commit }}
+        run: |
+          uv pip list
+
+          PYTORCH_WHL=$(uv pip list | grep torch)
+          VLLM_WHL=$(uv pip list | grep vllm)
+
+          {
+            echo "### Run vLLM benchmark with the following packages:"
+            echo "PyTorch:"
+            echo "${PYTORCH_WHL}"
+            echo "vLLM: ${VLLM_WHL}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Checkout pytorch-integration-testing repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: pytorch/pytorch-integration-testing
+          path: pytorch/pytorch-integration-testing
+          ref: main
+
+      - name: Check if the device is supported
+        run: |
+          set -eux
+
+          if command -v nvidia-smi; then
+            DEVICE_NAME=cuda
+            nvidia-smi
+          elif command -v rocm-smi; then
+            DEVICE_NAME=rocm
+            rocm-smi
+          elif command -v hl-smi; then
+            DEVICE_NAME=hpu
+            hl-smi
+          else
+            lscpu
+            arch=$(uname -m)
+
+            case "$arch" in
+              aarch64|arm64)
+                DEVICE_NAME=arm64-cpu
+                ;;
+              *)
+                DEVICE_NAME=cpu
+                ;;
+            esac
+          fi
+          echo "DEVICE_NAME=$DEVICE_NAME" >> "${GITHUB_ENV}"
+
+      - name: Setup benchmark tests
+        env:
+          MODELS: ${{ inputs.models }}
+        shell: bash
+        run: |
+          set -eux
+
+          pushd vllm-project/vllm
+          rm .buildkite/performance-benchmarks/tests/*.json || true
+          popd
+
+          pushd pytorch/pytorch-integration-testing
+          # Set the list of benchmarks we want to cover in this runner
+          python .github/scripts/setup_vllm_benchmark.py \
+            --from-benchmark-configs-dir vllm-benchmarks/benchmarks \
+            --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
+            --models "${MODELS}" \
+            --device "${DEVICE_NAME}"
+          popd
+
+          pushd vllm-project/vllm
+          ls -lah .buildkite/performance-benchmarks/tests
+          find .buildkite/performance-benchmarks/tests -type f -exec cat {} \;
+          popd
+
+      - name: Run vLLM benchmark
+        working-directory: vllm-project/vllm
+        env:
+          HF_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          # vLLM-related environment variables
+          ENGINE_VERSION: v1
+          SAVE_TO_PYTORCH_BENCHMARK_FORMAT: 1
+        shell: bash
+        run: |
+          set -eux
+          bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
+          aws-region: us-east-1
+
+      - name: Upload the benchmark results to OSS benchmark database for the dashboard
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: vllm-project/vllm/benchmarks/results
+          benchmark-name: 'PyTorch x vLLM benchmark'
+          dry-run: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error

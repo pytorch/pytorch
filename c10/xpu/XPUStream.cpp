@@ -5,14 +5,12 @@
 
 #include <atomic>
 #include <deque>
-#include <mutex>
 #include <vector>
 
 namespace c10::xpu {
 namespace {
 
 // Global stream state and constants
-c10::once_flag init_flag;
 DeviceIndex num_gpus = -1;
 constexpr int kStreamsPerPoolBits = 5;
 constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
@@ -31,6 +29,7 @@ std::deque<
     std::array<std::atomic<uint32_t>, max_compile_time_stream_priorities>>
     priority_counters;
 
+// NOLINTNEXTLINE(*c-arrays)
 thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 
 /*
@@ -163,7 +162,10 @@ void initDeviceStreamState(DeviceIndex device) {
 }
 
 void initXPUStreamsOnce() {
-  c10::call_once(init_flag, initGlobalStreamState);
+  auto static init_flag [[maybe_unused]] = [] {
+    initGlobalStreamState();
+    return true;
+  }();
 
   if (current_streams) {
     return;
@@ -172,6 +174,7 @@ void initXPUStreamsOnce() {
   // Inits current streams (thread local) to the last queue in the "normal
   // priority" queue pool. Note: the queue pool have not been initialized yet.
   // It will be initialized in initDeviceStreamState for the specified device.
+  // NOLINTNEXTLINE(*c-arrays)
   current_streams = std::make_unique<StreamId[]>(num_gpus);
   for (const auto i : c10::irange(num_gpus)) {
     // Assigning the current stream to the last one in the pool can be
@@ -236,9 +239,11 @@ sycl::queue& XPUStream::queue() const {
   switch (st) {
     case StreamIdType::NORMAL:
     case StreamIdType::HIGH:
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       return *streams[device_index][static_cast<uint8_t>(st)][si];
     // See Note [External XPU Stream]
     case StreamIdType::EXT:
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       return *(reinterpret_cast<sycl::queue*>(stream_id));
     default:
       TORCH_CHECK(

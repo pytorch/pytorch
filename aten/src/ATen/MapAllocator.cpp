@@ -7,7 +7,6 @@
 #define AT_ATOMIC_IPC_REFCOUNT 1
 #endif
 
-#include <c10/core/CPUAllocator.h>
 
 #include <c10/util/error.h>
 #ifdef _WIN32
@@ -62,7 +61,7 @@ constexpr const char* unknown_eventname = "eventname not specified";
 #endif
 }  // namespace (anonymous)
 
-MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags, size_t size)
+MapAllocator::MapAllocator(WithFd /*unused*/, std::string_view filename, int fd, int flags, size_t size)
   : filename_(filename.empty() ? unknown_filename : filename)
   , size_(0) // to be filled later
 #ifdef _WIN32
@@ -252,13 +251,13 @@ MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags,
     if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
       if (flags_ & ALLOCATOR_MAPPED_SHARED) {
         // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
-        if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
+        if ((fd = open(filename_.c_str(), flags, static_cast<mode_t>(0600))) == -1) {
           TORCH_CHECK(false, "unable to open file <", filename_, "> in read-write mode: ", c10::utils::str_error(errno), " (", errno, ")");
         }
       } else if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_OPEN
         // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
-        if((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
+        if((fd = shm_open(filename_.c_str(), flags, static_cast<mode_t>(0600))) == -1) {
           TORCH_CHECK(false, "unable to open shared memory object <", filename_, "> in read-write mode: ", c10::utils::str_error(errno), " (", errno, ")");
         }
 #else
@@ -494,7 +493,7 @@ RefcountedMapAllocator::RefcountedMapAllocator(const char *filename, int flags, 
 
     initializeAlloc();
 }
-RefcountedMapAllocator::RefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
+RefcountedMapAllocator::RefcountedMapAllocator(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size)
   : RefcountedMapAllocatorArgCheck(flags)
   , MapAllocator(WITH_FD, filename, flags, fd, size + map_alloc_alignment) {
 
@@ -503,7 +502,7 @@ RefcountedMapAllocator::RefcountedMapAllocator(WithFd, const char *filename, int
 
 void RefcountedMapAllocator::initializeAlloc() {
   TORCH_CHECK(base_ptr_, "base_ptr_ is null");
-  MapInfo *map_info = (MapInfo*)base_ptr_;
+  MapInfo *map_info = static_cast<MapInfo*>(base_ptr_);
 
 #ifdef _WIN32
   ReleaseContext* r_ctx = new ReleaseContext;
@@ -539,7 +538,7 @@ void RefcountedMapAllocator::close() {
   }
 #else /* _WIN32 */
 
-  MapInfo *info = (MapInfo*)(data);
+  MapInfo *info = static_cast<MapInfo*>(data);
   if (--info->refcount == 0) {
 #ifdef HAVE_SHM_UNLINK
     if (shm_unlink(filename_.c_str()) == -1) {
@@ -614,7 +613,7 @@ at::DataPtr MapAllocator::makeDataPtr(std::string_view filename, int flags, size
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
 }
 
-at::DataPtr MapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+at::DataPtr MapAllocator::makeDataPtr(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new MapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
@@ -626,7 +625,7 @@ at::DataPtr RefcountedMapAllocator::makeDataPtr(const char *filename, int flags,
   return {context->data(), context, &deleteRefcountedMapAllocator, at::DeviceType::CPU};
 }
 
-at::DataPtr RefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+at::DataPtr RefcountedMapAllocator::makeDataPtr(WithFd /*unused*/, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new RefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size() - map_alloc_alignment;
   return {context->data(), context, &deleteRefcountedMapAllocator, at::DeviceType::CPU};

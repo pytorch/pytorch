@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <stdexcept>
 #include <string>
 
@@ -98,6 +99,14 @@ inline void THPUtils_internStringInPlace(PyObject** obj) {
  */
 
 inline py::object PyObject_FastGetAttrString(PyObject* obj, const char* name) {
+#if IS_PYTHON_3_13_PLUS
+  PyObject* res = (PyObject*)nullptr;
+  int result_code = PyObject_GetOptionalAttrString(obj, name, &res);
+  if (result_code == -1) {
+    PyErr_Clear();
+  }
+  return py::reinterpret_steal<py::object>(res);
+#else
   PyTypeObject* tp = Py_TYPE(obj);
   PyObject* res = (PyObject*)nullptr;
 
@@ -122,4 +131,5 @@ inline py::object PyObject_FastGetAttrString(PyObject* obj, const char* name) {
     }
   }
   return py::reinterpret_steal<py::object>(res);
+#endif
 }

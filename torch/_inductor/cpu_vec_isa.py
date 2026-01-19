@@ -7,7 +7,8 @@ import re
 import subprocess
 import sys
 import warnings
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 from torch._inductor import config
@@ -156,7 +157,7 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecNEON(VecISA):
     _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
-    _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VECSVE_WITH_SLEEF"]
+    _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
     _arch_flags = ""  # Unused
     _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
@@ -168,29 +169,9 @@ class VecNEON(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-class VecSVE128(VecISA):
-    # SVE with 128-bit width
-    _bit_width = 128
-    _macro = [
-        "CPU_CAPABILITY_SVE",
-        "CPU_CAPABILITY_SVE128",
-        "AT_BUILD_ARM_VECSVE_WITH_SLEEF",
-        "__ARM_FEATURE_BF16",
-    ]
-    _arch_flags = "-march=armv9-a+sve2+fp16+fp16fml+bf16 -msve-vector-bits=128"
-    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
-
-    def __str__(self) -> str:
-        if config.is_fbcode():
-            return "sve128"
-        return "asimd"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
-
-
 @dataclasses.dataclass
 class VecSVE256(VecISA):
-    # SVE with 256-bit width
+    # this function can be repurposed for SVE with variable vec length
     _bit_width = 256
     _macro = [
         "CPU_CAPABILITY_SVE",
@@ -237,6 +218,7 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
 """
 
     @functools.cache  # noqa: B019
+    # pyrefly: ignore [bad-override]
     def __bool__(self) -> bool:
         if super().__bool__():
             if config.is_fbcode():
@@ -247,7 +229,7 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
                 base_flags = self._arch_flags
                 # temporarily change _arch_flags for avx512_bf16 check_build
                 self._arch_flags += " -mavx512bf16"
-                if self.check_build(VecAMX._avx512_bf16_code):
+                if self.check_build(self._avx512_bf16_code):
                     self._is_avx512_bf16_supported = True
                 # restore _arch_flags
                 self._arch_flags = base_flags
@@ -267,8 +249,55 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
 
 
 @dataclasses.dataclass
-class VecAMX(VecAVX512):
-    _arch_flags = VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
+class VecAVX512VNNI(VecAVX512):
+    _bit_width = 512
+    _arch_flags = VecAVX512._arch_flags + " -mavx512vnni -mavx512vl"
+    _dtype_nelements = {
+        torch.float: 16,
+        torch.bfloat16: 32,
+        torch.float16: 32,
+        torch.int8: 64,
+        torch.uint8: 64,
+    }
+
+    def __str__(self) -> str:
+        return super().__str__() + " avx512_vnni"
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
+
+    _avx512_vnni_code = """
+#include <cstdint>
+#include <immintrin.h>
+
+extern "C" __m256i __avx512_vnni_chk_kernel_1(__m256i src, __m256i a, __m256i b) {
+    return _mm256_dpbusd_epi32(src, a, b);
+}
+
+extern "C" __m512i __avx512_vnni_chk_kernel_2(__m512i src, __m512i a, __m512i b) {
+    return _mm512_dpbusd_epi32(src, a, b);
+}
+"""
+
+    @functools.cache  # noqa: B019
+    def __bool__(self) -> bool:
+        if super().__bool__():
+            if config.is_fbcode():
+                return False
+            if (
+                torch.cpu._is_vnni_supported()
+                and not _IS_WINDOWS
+                and self.check_build(self._avx512_vnni_code)
+            ):
+                return True
+        return False
+
+    def build_arch_flags(self) -> str:
+        return self._arch_flags
+
+
+@dataclasses.dataclass
+class VecAMX(VecAVX512VNNI):
+    _arch_flags = VecAVX512VNNI._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
     # check amx_fp16 separately since it is not always supported when amx is supported
     # amx_fp16 intrinsic compilation need gcc >=13 on platforms which support amx_fp16
     _is_amx_fp16_supported = False
@@ -414,10 +443,12 @@ def x86_isa_checker() -> list[str]:
 
     avx2 = torch.cpu._is_avx2_supported()
     avx512 = torch.cpu._is_avx512_supported()
+    avx512_vnni = avx512 and torch.cpu._is_vnni_supported()
     amx_tile = torch.cpu._is_amx_tile_supported()
 
     _check_and_append_supported_isa(supported_isa, avx2, "avx2")
     _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+    _check_and_append_supported_isa(supported_isa, avx512_vnni, "avx512_vnni")
     _check_and_append_supported_isa(supported_isa, amx_tile, "amx_tile")
 
     return supported_isa
@@ -426,10 +457,10 @@ def x86_isa_checker() -> list[str]:
 invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [
     VecAMX(),
+    VecAVX512VNNI(),
     VecAVX512(),
     VecAVX2(),
     VecNEON(),
-    VecSVE128(),
     VecSVE256(),
 ]
 
@@ -449,7 +480,8 @@ def get_isa_from_cpu_capability(
         "avx2": "avx2",
         "avx512": "avx512",
     }
-    if capability in capability_to_isa_str.keys():
+    if capability in capability_to_isa_str:
+        # pyrefly: ignore [bad-index, index-error]
         isa_str = capability_to_isa_str[capability]
         if isa_str == "INVALID_VEC_ISA":
             return invalid_vec_isa
@@ -494,8 +526,6 @@ def valid_vec_isa_list() -> list[VecISA]:
     elif arch == "aarch64":
         if torch.backends.cpu.get_cpu_capability() == "SVE256":
             isa_list.append(VecSVE256())
-        elif torch.backends.cpu.get_cpu_capability() == "SVE128":
-            isa_list.append(VecSVE128())
         else:
             isa_list.append(VecNEON())
 

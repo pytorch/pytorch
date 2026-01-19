@@ -271,7 +271,7 @@ def aoti_load_package(
 
 def aot_compile(
     gm: torch.fx.GraphModule,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
@@ -314,6 +314,25 @@ def aot_compile(
         )
 
 
+lite_mode_options = {
+    # Fallback by default unless users explicitly annotated with
+    # regional inductor compile.
+    "fallback_by_default": True,
+    "selective_decompose": True,
+    # Disable reorder optimizations
+    "reorder_for_peak_memory": False,
+    "reorder_for_compute_comm_overlap": False,
+    "triton.reorder_for_reducing_graph_partitions": False,
+    # Disable pre-, joint-, post-grad passes
+    "use_pre_grad_passes": False,
+    "use_joint_graph_passes": False,
+    "use_post_grad_passes": False,
+    # Disable dead code elimination (dce) and buffer reuse
+    "use_dce": False,
+    "allow_buffer_reuse": False,
+}
+
+
 def list_mode_options(
     mode: Optional[str] = None, dynamic: Optional[bool] = None
 ) -> dict[str, Any]:
@@ -331,6 +350,8 @@ def list_mode_options(
 
     mode_options: dict[str, dict[str, bool]] = {
         "default": {},
+        # lite backend for opt-in optimizations
+        "lite": lite_mode_options,
         # enable cudagraphs
         "reduce-overhead": {
             "triton.cudagraphs": True,
@@ -389,6 +410,7 @@ def standalone_compile(
         "from_example_inputs", "from_tracing_context", "from_graph"
     ] = "from_graph",
     options: Optional[dict[str, Any]] = None,
+    aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
 ) -> CompiledArtifact:
     """
     Precompilation API for inductor.
@@ -420,5 +442,5 @@ def standalone_compile(
 
     options = options if options else {}
     return standalone_compile(
-        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options
+        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options, aot=aot
     )

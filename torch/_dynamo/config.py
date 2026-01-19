@@ -3,6 +3,7 @@ Configuration module for TorchDynamo compiler and optimization settings.
 
 This module contains various configuration flags and settings that control TorchDynamo's
 behavior, including:
+
 - Runtime behavior flags (e.g., guard settings, specialization options)
 - Debugging and development options
 - Performance tuning parameters
@@ -12,9 +13,11 @@ behavior, including:
 import getpass
 import os
 import sys
+import sysconfig
 import tempfile
+from collections.abc import Callable
 from os.path import abspath, dirname
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
@@ -36,11 +39,38 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
+# Override backend for specific graphs (for debugging/bisecting).
+# Format: "filter1:backend1;filter2:backend2;..." where filter can be:
+#   - Individual IDs: "0,5,10"
+#   - Ranges: "10-20" (inclusive)
+#   - Comparisons: ">10", ">=10", "<5", "<=5"
+# Backends can be: "eager", "aot_eager", "inductor", "inductor:reduce-overhead", etc.
+# Examples:
+#   ">10:eager"                    - Run graphs with frame_id > 10 in dynamo eager backend
+#   "<=5:aot_eager;>5:inductor"    - First 6 graphs use aot_eager, rest use inductor
+# [@compile_ignored: debug]
+debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
 dead_code_elimination = True
+
+# Enable or disable side effect replay after graph execution.
+# When False, mutations to Python objects (lists, dicts, attributes) won't be
+# replayed after the compiled graph runs. This can cause correctness issues
+# if your code depends on these mutations being visible. This should probably
+# never be False by default. At the moment, only export will need it.
+replay_side_effects = True
+
+# Configure side effect warning level
+# If `info` (default): allow side effects and log to TORCH_LOGS="side_effects" and tlparse
+# If `silent`, we allow side effects, no logs are made.
+# If `warn`, we allow side effects but issue warnings
+# If `error`, we error on side effects
+# NOTE: it is NOT safe to change this config during compilation!
+side_effect_replay_policy = "info"
 
 # disable (for a function) when cache reaches this size
 
@@ -105,7 +135,9 @@ assume_static_by_default = True
 # with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = True
+automatic_dynamic_shapes = (
+    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_SHAPES", "1") == "1"
+)
 
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
@@ -187,8 +219,22 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
-# legacy config, does nothing now!
+# Legacy config, does nothing now!
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
+"""Allowlist of inline modules to skip during compilation.
+
+Legacy configuration that previously controlled which modules could be
+inlined during tracing. This configuration is deprecated and no longer used.
+
+:type: dict[Any, Any]
+:default: {}
+
+.. deprecated::
+   This configuration is deprecated and does nothing now.
+
+.. note::
+   DEPRECATED: This setting has no effect on current behavior.
+"""
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -308,7 +354,7 @@ optimize_ddp: Union[
     ],
 ] = True
 
-# By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
+# By default, Dynamo emits runtime asserts (e.g. torch._check) in the graph.
 # In some cases those asserts could be performance costly
 # E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.
 # Setting this to True keeps them hinting to symbolic shapes engine,
@@ -394,6 +440,11 @@ error_on_nested_jit_trace = True
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
 
+# If true, force dynamo compilation even when inside FX symbolic tracing.
+# This allows nested compilation where the outer tracer (e.g., make_fx) can
+# trace over dynamo-compiled functions. Use with error_on_nested_fx_trace=False.
+force_compile_during_fx_trace = False
+
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
@@ -417,6 +468,9 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 # Trace through NumPy or graphbreak
 trace_numpy = True
 
+# Trace through torch.autograd.grad or graphbreak
+trace_autograd_ops = False
+
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
 numpy_default_float = "float64"
@@ -430,7 +484,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = True
 
 # Use C++ guard manager for symbolic shapes
-enable_cpp_symbolic_shape_guards = not is_fbcode()
+enable_cpp_symbolic_shape_guards = False
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
@@ -456,6 +510,10 @@ nested_graph_breaks = False
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.
 install_free_tensors = False
+
+# Temporary flag to control the turning of install_free_tensors to True for
+# export. We will remove this flag in a few weeks when stable.
+install_free_tensors_for_export = True
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
@@ -544,6 +602,12 @@ capture_autograd_function = True
 # This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
+# Enable capturing torch.profiler.record_function ops in the graph
+# When True, profiler ops are emitted to the graph and preserved through
+# compilation (make_fx, functionalization). When False, profiler ops
+# are treated as nullcontext.
+capture_profiler_record_function: bool = False
+
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
@@ -553,11 +617,22 @@ log_compilation_metrics = True
 # mutated after the print statement.
 reorderable_logging_functions: set[Callable[[Any], None]] = set()
 
-# A set of methods that will be ignored while tracing,
-# to prevent graph breaks.
-# Add logging.Logger.<method> to ignore all calls for method,
-# or logger.<method> to ignore calls for method from this logger instance only.
-ignore_logger_methods: set[Callable[..., Any]] = set()
+# A set of functions that will be ignored during Dynamo tracing.
+# These functions will NOT run, will NOT be reordered, and will NOT
+# cause graph breaks. They act as full no-ops.
+# Ignored functions can take any arguments, but MUST return None.
+# Functions should either be module-level functions,
+# `logging.Logger.<method>` (ignores all method for all logging.Logger instances)
+# or `logger_obj.<method>` (ignores method only for logger_obj logging.Logger instance).
+# Other functions may or may not be ignored due to implementation details. If you want to ignore a function
+# that `ignore_logging_functions` is failing to ignore, please submit an issue.
+ignore_logging_functions: set[Callable[..., Any]] = set()
+
+# Backwards compat: `ignore_logger_methods` now aliases `ignore_logging_functions`.
+# Existing code that used `ignore_logger_methods` will continue to work.
+ignore_logger_methods: set[Callable[..., Any]] = Config(
+    alias="torch._dynamo.config.ignore_logging_functions"
+)
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
@@ -607,6 +682,12 @@ strict_precompile = os.environ.get("TORCH_STRICT_PRECOMPILE", "0") == "1"
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
 
+# We have small decompositions for some optimizer ops such as
+# addcmul and foreach_addcmul which avoid item() graph breaks by decomposing
+# into their constituent ops. This flag controls whether we use these decompositions
+# This can affect numerics for non-inductor backends.
+enable_dynamo_decompositions = True
+
 
 # Checks if we should graph break when seeing nn parameter constructors
 # in dynamo; this is so that we clearly fail and ask users to move outside
@@ -614,8 +695,45 @@ compiled_autograd = False
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
 
+# If True, enable calling torch.compile inside __torch_dispatch__ handlers.
+# When enabled:
+# 1. __torch_dispatch__ methods are automatically wrapped with torch._dynamo.disable
+# 2. torch.compile is skipped when active TorchDispatchModes are on the stack
+#    (unless they have ignore_compile_internals=True)
+# This allows torch.compile to work inside dispatch mode handlers once all
+# ambient modes have been "consumed".
+# See https://github.com/pytorch/pytorch/issues/155331 for more context.
+inline_torch_dispatch_torch_compile = True
+
+# Eager AC/SAC reapplies the mutations (like global dict mutations) in the
+# backward during the recomputation of forward. torch.compile has no easy way to
+# reapply python mutations in the backward. But many users might be ok to skip
+# reapplication of side effects in the backward. They can set this config flag
+# to accept this eager and compile divergence.
+skip_fwd_side_effects_in_bwd_under_checkpoint = False
+
+
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
+"""Overrides torch.compile() kwargs for Compiled Autograd.
+
+This dictionary allows overriding specific torch.compile() keyword arguments
+when using Compiled Autograd. Only certain overrides are currently supported.
+
+:type: dict[str, Any]
+:default: {}
+
+Example::
+
+    torch._dynamo.config.compiled_autograd_kwargs_override = {
+        "fullgraph": True
+    }
+
+.. note::
+   Currently only the "fullgraph" kwarg override is supported. Other kwargs
+   may be added in future versions.
+"""
+
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
@@ -670,7 +788,8 @@ pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", N
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
-    default=True,
+    # Disable by default on free-threaded builds since they always do a full collection, which can be slow
+    default=sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
@@ -692,6 +811,10 @@ enable_aot_compile = False
 
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
+
+# Experimental flag to enable regional compile on invoke_subgraph HOP.
+# For testing only!
+enable_invoke_subgraph_regional_compile: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

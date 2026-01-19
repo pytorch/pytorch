@@ -117,7 +117,7 @@ class FwdKernel:
     def get_all(cls) -> list["FwdKernel"]:
         kernels: list[FwdKernel] = []
         for aligned, dtype, (sm, sm_max) in itertools.product(
-            [True, False], DTYPES.keys(), zip(SM, SM[1:])
+            [True, False], DTYPES.keys(), itertools.pairwise(SM)
         ):
             # Remove some kernels we don't use
             if dtype == "bf16" and sm < 80:
@@ -228,7 +228,7 @@ class BwdKernel:
         for aligned, dtype, (sm, sm_max), apply_dropout, max_k in itertools.product(
             [True, False],
             DTYPES.keys(),
-            zip(SM, SM[1:]),
+            itertools.pairwise(SM),
             [True, False],
             [32, 64, 128, 2**16],
         ):

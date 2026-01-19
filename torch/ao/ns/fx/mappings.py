@@ -1,5 +1,5 @@
 import operator
-from typing import Callable, Optional
+from typing import TYPE_CHECKING
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -17,6 +17,10 @@ import torch.nn.functional as F
 from torch.ao.quantization.backend_config import get_native_backend_config
 
 from .ns_types import NSNodeTargetType
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 toq = torch.ops.quantized
@@ -372,16 +376,19 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
         if config.fused_module is not None:
             # case 1: pattern fuses a pattern of ops into an op
             # example: nn.Conv1d, nn.ReLU fused into nni.ConvReLU1d
+            # pyrefly: ignore [bad-argument-type]
             new_connections.append((first_element, config.fused_module))
 
         if config.qat_module is not None:
             # case 2: pattern swaps a module into a QAT module
             # example: nni.ConvReLU1d swapped into nniqat.ConvReLU1d
+            # pyrefly: ignore [bad-argument-type]
             new_connections.append((first_element, config.qat_module))
 
         if config.reference_quantized_module is not None:
             # case 3: reference version of floating point module, such as
             # nn.Conv2d and nnqr.Conv2d
+            # pyrefly: ignore [bad-argument-type]
             new_connections.append((first_element, config.reference_quantized_module))
 
     #
@@ -415,6 +422,7 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
         target2,
     ) in _lower_to_native_backend.STATIC_LOWER_FUNCTIONAL_MAP.items():
         new_connections.append((source, target1))
+        # pyrefly: ignore [bad-argument-type]
         new_connections.append((source, target2))
 
     for source_to_target in (
@@ -423,6 +431,7 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
         quantization_mappings.DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS,
     ):
         for source, target in source_to_target.items():  # type:ignore[assignment]
+            # pyrefly: ignore [bad-argument-type]
             new_connections.append((source, target))
 
     #
@@ -455,7 +464,7 @@ def get_base_name_to_sets_of_related_ops() -> dict[str, set[NSNodeTargetType]]:
 def get_base_name_for_op(
     base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]],
     op: NSNodeTargetType,
-) -> Optional[str]:
+) -> str | None:
     for base_name, set_of_related_ops in base_name_to_sets_of_related_ops.items():
         if op in set_of_related_ops:
             return base_name
@@ -465,7 +474,7 @@ def get_base_name_for_op(
 def add_op_to_sets_of_related_ops(
     base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]],
     op: NSNodeTargetType,
-    related_op: Optional[NSNodeTargetType],
+    related_op: NSNodeTargetType | None,
 ) -> None:
     if related_op is not None:
         for set_of_related_ops in base_name_to_sets_of_related_ops.values():

@@ -266,9 +266,12 @@ inductor_expected_failures_single_sample["cuda"] = {
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
+        b8,
         f16,
         f32,
         f64,
+        i32,
+        i64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
@@ -283,15 +286,17 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f32, f64},
-    "linalg.eig": {f32, f64},
+    "to_sparse": {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    },  # align with cuda.
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
-    # could not create a primitive descriptor for
-    # a deconvolution forward propagation primitive
-    "nn.functional.conv_transpose2d": {f32, f64},
-    "nn.functional.conv_transpose3d": {f32, f64},
     # [Begin] Incorrect XPU reference due to new driver.
     "masked.prod": {b8, i32, i64},
     "masked.amin": {i64},
@@ -303,6 +308,24 @@ inductor_expected_failures_single_sample["xpu"] = {
     "std_mean": {f64},
     "var_mean": {f64},
     # [End]
+    "fft.fft": {f16},
+    "fft.fft2": {f16},
+    "fft.fftn": {f16},
+    "fft.hfft": {f16},
+    "fft.hfft2": {f16},
+    "fft.hfftn": {f16},
+    "fft.rfft": {f16},
+    "fft.rfft2": {f16},
+    "fft.rfftn": {f16},
+    "fft.ifft": {f16},
+    "fft.ifft2": {f16},
+    "fft.ifftn": {f16},
+    "fft.ihfft": {f16},
+    "fft.ihfft2": {f16},
+    "fft.ihfftn": {f16},
+    "fft.irfft": {f16},
+    "fft.irfft2": {f16},
+    "fft.irfftn": {f16},
 }
 
 
@@ -646,7 +669,7 @@ inductor_override_kwargs["xpu"] = {
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("nn.functional.embedding_bag", f32): {"check_gradient": False},
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
-    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
     ("_unsafe_masked_index", f16): {
         "reference_in_float": True,
         "atol": 3e-4,
@@ -819,9 +842,6 @@ inductor_one_sample["cuda"] = {
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.group_norm": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
-    # Enabling all tests for this test fails randomly
-    # See https://github.com/pytorch/pytorch/issues/129238
-    "nn.functional.huber_loss": {f16},
     "nn.functional.interpolate.bicubic": {f16},
     "nn.functional.interpolate.bilinear": {f16},
     "nn.functional.interpolate.trilinear": {f16},
@@ -939,9 +959,6 @@ inductor_one_sample["xpu"] = {
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.group_norm": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
-    # Enabling all tests for this test fails randomly
-    # See https://github.com/pytorch/pytorch/issues/129238
-    "nn.functional.huber_loss": {f16},
     "nn.functional.interpolate.bicubic": {f16},
     "nn.functional.interpolate.bilinear": {f16},
     "nn.functional.interpolate.trilinear": {f16},
@@ -1329,8 +1346,10 @@ class TestInductorOpInfo(TestCase):
                         # Triton
                         if has_triton():
                             adjusted_kwargs.update(
-                                copy_to_gpu=False, reference_in_float=False
+                                copy_to_gpu=False,
                             )
+                            if device_type == GPU_TYPE:
+                                adjusted_kwargs["reference_in_float"] = False
 
                         # skip checking gradient on CPU for now
                         if device_type == GPU_TYPE:

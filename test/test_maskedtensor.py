@@ -424,7 +424,7 @@ class TestUnary(TestCase):
         fn_name = _fix_fn_name(fn_name)
         if fn_name in ["log", "log10", "log1p", "log2", "sqrt"]:
             data = data.mul(0.5).abs()
-        if fn_name in ["rsqrt"]:
+        if fn_name == "rsqrt":
             data = data.abs() + 1  # Void division by zero
         if fn_name in ["acos", "arccos", "asin", "arcsin", "logit"]:
             data = data.abs().mul(0.5).clamp(0, 1)
@@ -432,7 +432,7 @@ class TestUnary(TestCase):
             data = data.mul(0.5).clamp(-1, 1)
         if fn_name in ["acosh", "arccosh"]:
             data = data.abs() + 1
-        if fn_name in ["bitwise_not"]:
+        if fn_name == "bitwise_not":
             data = data.mul(128).to(torch.int8)
         return data, mask
 
@@ -449,7 +449,7 @@ class TestUnary(TestCase):
         mt = masked_tensor(data, mask)
         t_args = [data]
         mt_args = [mt]
-        if fn_name in ["pow"]:
+        if fn_name == "pow":
             t_args += [2.0]
             mt_args += [2.0]
         return t_args, mt_args

@@ -567,6 +567,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
     quantized = False
 
     last_quantized_node = None
+    # pyrefly: ignore [bad-assignment]
     for node in gm.graph.nodes:
         if isinstance(node.target, OpOverload):
             with gm.graph.inserting_before(node):
@@ -629,6 +630,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
                     attr_names_to_clean.add(k)
                 if k == "_buffers":
                     buffer_name_to_clean = set()
+
                     for b_name, b_value in v.items():
                         if isinstance(b_value, torch.Tensor) and b_value.dtype in [
                             torch.qint8,

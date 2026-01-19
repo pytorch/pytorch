@@ -36,22 +36,22 @@ device_type = torch.device(get_devtype())
 class TestApply(FSDPTest):
     @property
     def world_size(self):
-        if torch.cuda.is_available():
-            gpu_cnt = torch.cuda.device_count()
+        if torch.accelerator.is_available():
+            gpu_cnt = torch.accelerator.device_count()
             if gpu_cnt < 2:
                 return gpu_cnt
         return 2
 
     @torch.no_grad()
     def _init_linear_weights(self, m):
-        if type(m) == nn.Linear:
+        if type(m) is nn.Linear:
             m.weight.fill_(1.0)
             m.bias.fill_(1.0)
 
     def check_weights(self, fsdp, expected_tensor_fn, check):
         with FSDP.summon_full_params(fsdp, recurse=True):
             linear_modules = [
-                module for module in fsdp.modules() if type(module) == nn.Linear
+                module for module in fsdp.modules() if type(module) is nn.Linear
             ]
             for module in linear_modules:
                 for param in module.parameters():

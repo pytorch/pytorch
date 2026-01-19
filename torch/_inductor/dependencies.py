@@ -3,8 +3,8 @@ import dataclasses
 import itertools
 import logging
 import re
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, Optional, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -57,6 +57,10 @@ class Dep(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def numel_hint(self) -> int:
+        pass
+
+    @abc.abstractmethod
     def has_unbacked_symbols(self) -> bool:
         pass
 
@@ -70,7 +74,9 @@ class Dep(abc.ABC):
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
+    # pyrefly: ignore [bad-override]
     name: str
+    # pyrefly: ignore [bad-override]
     index: sympy.Expr
     var_names: tuple[sympy.Symbol, ...]
     size: tuple[sympy.Expr, ...]
@@ -149,7 +155,7 @@ class MemoryDep(Dep):
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert OrderedSet(order) == OrderedSet(range(0, self.num_vars))
+        assert OrderedSet(order) == OrderedSet(range(self.num_vars))
         return order
 
     def get_offset(self) -> sympy.Expr:
@@ -258,6 +264,12 @@ class MemoryDep(Dep):
         except NotImplementedError:  # NoneLayout
             return 0
 
+    def numel_hint(self) -> int:
+        try:
+            return V.graph.sizevars.size_hint(self.get_numel(), fallback=0)
+        except NotImplementedError:  # NoneLayout
+            return 0
+
     def has_unbacked_symbols(self) -> bool:
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
@@ -306,11 +318,13 @@ class MemoryDep(Dep):
 
 @dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
+    # pyrefly: ignore [bad-override]
     name: str
     mode: Optional[str] = None
 
     # depends on the entire buffer
     @property
+    # pyrefly: ignore [bad-override]
     def index(self) -> sympy.Expr:
         raise NotImplementedError("StarDep does not have an index")
 
@@ -332,6 +346,12 @@ class StarDep(Dep):
             return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
                 V.graph.get_dtype(self.name)
             )
+        except NotImplementedError:
+            return 0  # NoneLayout, MultiOutputLayout, etc
+
+    def numel_hint(self) -> int:
+        try:
+            return V.graph.sizevars.size_hint(self.get_numel(), fallback=0)
         except NotImplementedError:
             return 0  # NoneLayout, MultiOutputLayout, etc
 
@@ -359,6 +379,7 @@ class StarDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
     # Fake dependency on unused buffer
+    # pyrefly: ignore [bad-override]
     name: str
     # Buffer that is doing the mutation
     mutating_buf: str
@@ -375,6 +396,7 @@ class WeakDep(Dep):
         return OrderedSet()
 
     @property
+    # pyrefly: ignore [bad-override]
     def index(self) -> sympy.Expr:
         raise NotImplementedError("WeakDep does not have an index")
 
@@ -387,6 +409,9 @@ class WeakDep(Dep):
         return self
 
     def numbytes_hint(self) -> int:
+        return 1  # Purely inserted for ordering, not an actual dep
+
+    def numel_hint(self) -> int:
         return 1  # Purely inserted for ordering, not an actual dep
 
     def has_unbacked_symbols(self) -> bool:
@@ -662,8 +687,11 @@ def extract_read_writes(
         range_vars = [*itertools.chain.from_iterable(args)]
 
     return ReadWrites(
+        # pyrefly: ignore [missing-attribute]
         OrderedSet(inner._reads),
+        # pyrefly: ignore [missing-attribute]
         OrderedSet(inner._writes),
+        # pyrefly: ignore [missing-attribute]
         inner._index_exprs,
         range_vars,
         var_ranges,

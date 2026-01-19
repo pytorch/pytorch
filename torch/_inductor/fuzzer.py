@@ -6,20 +6,12 @@ import random
 import signal
 import string
 import traceback
-from collections.abc import KeysView, Sequence
+import types
+from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
-from typing import (
-    Any,
-    Callable,
-    get_args,
-    get_origin,
-    Literal,
-    Optional,
-    TypeVar,
-    Union,
-)
+from typing import Any, get_args, get_origin, Literal, Optional, TypeVar, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -108,6 +100,7 @@ class TypeExemplars:
         """
         Return an example of a class.
         """
+
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
@@ -218,15 +211,15 @@ class SamplingMethod(Enum):
         if field_name in TYPE_OVERRIDES:
             return random.choice(TYPE_OVERRIDES[field_name])
 
-        if type_hint == bool:
+        if type_hint is bool:
             return random.choice([True, False]) if random_sample else not default
-        elif type_hint == int:
+        elif type_hint is int:
             # NOTE initially tried to use negation of the value, but it doesn't work because most types are ints
             # when they should be natural numbers + zero. Python types to cover these values aren't super convenient.
             return random.randint(0, 1000)
-        elif type_hint == float:
+        elif type_hint is float:
             return random.uniform(0, 1000)
-        elif type_hint == str:
+        elif type_hint is str:
             characters = string.ascii_letters + string.digits + string.punctuation
             return "".join(
                 random.choice(characters) for _ in range(random.randint(1, 20))
@@ -294,7 +287,7 @@ class SamplingMethod(Enum):
                 )
                 for _ in range(random.randint(0, 3))
             }
-        elif is_type(type_hint, Union):
+        elif is_type(type_hint, Union) or is_type(type_hint, types.UnionType):
             # do whatever is not the type of default
             try:
                 assert len(type_hint.__args__) > 1
@@ -304,11 +297,11 @@ class SamplingMethod(Enum):
                 new_type = random.choice(type_hint.__args__)
             else:
                 new_type = random.choice(
-                    [t for t in type_hint.__args__ if t != type(default)]
+                    [t for t in type_hint.__args__ if t is not type(default)]
                 )
             try:
                 new_default = new_type()
-            except Exception:  # noqa: E722
+            except Exception:
                 # if default constructor doesn't work, try None
                 new_default = None
 
@@ -515,6 +508,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "joint_custom_pre_pass": DEFAULT,  # Typing
         "pre_grad_custom_pass": DEFAULT,  # Typing
         "custom_partitioner_fn": DEFAULT,  # Typing
+        "inductor_choices_class": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
@@ -777,7 +771,7 @@ class ConfigFuzzer:
         test_model_fn = self.test_model_fn_factory()
         try:
             test_model_fn()
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Eager exception", Status.FAILED_RUN_EAGER_EXCEPTION, True, exc
             )
@@ -786,7 +780,7 @@ class ConfigFuzzer:
         try:
             test_model_fn2 = self.test_model_fn_factory()
             comp = torch.compile(test_model_fn2, backend="inductor")
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Exception compiling", Status.FAILED_COMPILE, True, exc
             )
@@ -794,7 +788,7 @@ class ConfigFuzzer:
         # try running compiled
         try:
             compile_result = comp()
-        except Exception as exc:  # noqa: E722
+        except Exception as exc:
             return handle_return(
                 "Exception running compiled",
                 Status.FAILED_RUN_COMPILE_EXCEPTION,
@@ -918,7 +912,7 @@ def visualize_results(
     assert len(results) > 0
 
     input_set: OrderedSet[str] = OrderedSet({})
-    for key in results.keys():
+    for key in results.keys():  # noqa: SIM118
         input_set.add(key[0])
         input_set.add(key[1])
     input_list = sorted(input_set)

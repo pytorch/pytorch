@@ -100,12 +100,12 @@ std::ostream& operator<<(
   stream << "device_: " << tensor_metadata.device_ << '\n';
   stream << "sizes_: ";
   for (const auto& size : tensor_metadata.sizes_) {
-    stream << size << " ";
+    stream << size << ' ';
   }
   stream << '\n';
   stream << "strides_: ";
   for (const auto& stride : tensor_metadata.strides_) {
-    stream << stride << " ";
+    stream << stride << ' ';
   }
 
   stream << "requires_grad_: " << tensor_metadata.requires_grad_ << '\n';

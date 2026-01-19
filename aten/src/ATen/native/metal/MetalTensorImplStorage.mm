@@ -115,7 +115,7 @@ std::ostream& operator<<(
   std::copy(
       strides.begin(), strides.end() - 1, std::ostream_iterator<int>(oss, ","));
   oss << sizes.back();
-  output << oss.str() << "}";
+  output << oss.str() << '}';
   return output;
 }
 

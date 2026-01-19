@@ -100,13 +100,6 @@ void block_sparse_triangular_solve_vec(
     bool upper,
     bool transpose,
     bool unitriangular) {
-#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
-  TORCH_CHECK(
-      false,
-      "Calling triangular solver with block sparse GPU tensors requires compiling ",
-      "PyTorch with ROCm 4.5.0+. ",
-      "Please use PyTorch built with newer ROCm version.");
-#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
@@ -217,7 +210,6 @@ void block_sparse_triangular_solve_vec(
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void block_sparse_triangular_solve_mat(
@@ -227,13 +219,6 @@ void block_sparse_triangular_solve_mat(
     bool upper,
     bool transpose,
     bool unitriangular) {
-#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
-  TORCH_CHECK(
-      false,
-      "Calling triangular solver with block sparse GPU tensors requires compiling ",
-      "PyTorch with ROCm 4.5.0+. ",
-      "Please use PyTorch built with newer ROCm version.");
-#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
@@ -357,7 +342,6 @@ void block_sparse_triangular_solve_mat(
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void block_sparse_mv(
@@ -575,24 +559,9 @@ void spmm(
   cusparseOperation_t opB = transpose_B ? CUSPARSE_OPERATION_TRANSPOSE
                                         : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  // CUDA < 11.0 doesn't support 64-bit indices and doesn't raise an error about this
-  // silently returning incorrect results
-#if defined(USE_ROCM) && (ROCM_VERSION < 60300)
-  auto mat1_32 = at::native::_sparse_csr_tensor_unsafe(
-      mat1.crow_indices().to(kInt),
-      mat1.col_indices().to(kInt),
-      mat1.values(),
-      mat1.sizes(),
-      mat1.scalar_type(),
-      mat1.layout(),
-      mat1.device());
-  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1_32);
-  auto algorithm = CUSPARSE_MM_ALG_DEFAULT;
-#else // defined(USE_ROCM) && (ROCM_VERSION < 60300)
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
   auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
-#endif // defined(USE_ROCM) && (ROCM_VERSION < 60300)
 
   auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(
       transpose_B ? mat2_->mT() : *mat2_);
@@ -810,7 +779,8 @@ void addmm_out_sparse_csr(
   if (mat1.layout() == kSparseBsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided)
-        return block_sparse_mm(input, mat1, mat2, beta, alpha, result);
+         { block_sparse_mm(input, mat1, mat2, beta, alpha, result); return;
+}
     }
   }
 
@@ -819,13 +789,13 @@ void addmm_out_sparse_csr(
       if (result.layout() == kStrided) {
         auto result_t = result.transpose(-2, -1);
         auto input_t = (result.is_same(input) ? result_t : input.transpose(-2, -1));
-        return block_sparse_mm(
+        block_sparse_mm(
             input_t,
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result_t);
+            result_t); return;
       }
     }
   }
@@ -840,41 +810,41 @@ void addmm_out_sparse_csr(
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kStrided) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spmm(
+        spmm(
             mat2.transpose(0, 1).to_sparse_csr(),
             mat1.transpose(0, 1),
             beta,
             alpha,
-            result.transpose(0, 1));
+            result.transpose(0, 1)); return;
       }
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kStrided) {
-        return spmm(
+        spmm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1));
+            result.transpose(-2, -1)); return;
       }
     }
   }
   if (mat1.layout() == kSparseCsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
-        return spmm(mat1, mat2, beta, alpha, result);
+        spmm(mat1, mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr) {
-        return spgemm(mat1, mat2, beta, alpha, result);
+        spgemm(mat1, mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO: Add native CSC support via cuSPARSE if supported.
         // CSR @ CSC kernel would be very fast due to format alignment
-        return spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result);
+        spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result); return;
       }
     }
   }
@@ -882,27 +852,28 @@ void addmm_out_sparse_csr(
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+        spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr)
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+         { spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result); return;
+}
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spgemm(
-            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+        spgemm(
+            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result); return;
       }
       if (result.layout() == kSparseCsc) {
-        return spgemm(
+        spgemm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1));
+            result.transpose(-2, -1)); return;
       }
     }
   }
@@ -933,7 +904,7 @@ void addmv_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
   if (mat.layout() == kSparseBsr) {
-    return block_sparse_mv(mat, vec, beta, alpha, result);
+    block_sparse_mv(mat, vec, beta, alpha, result); return;
   }
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
@@ -1213,14 +1184,12 @@ void triangular_solve_out_sparse_csr(
   }
   if (A.layout() == kSparseBsr) {
     if (B.size(-1) == 1) {
-      return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
+      block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular); return;
     } else {
-      return block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular);
+      block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular); return;
     }
   }
-#ifdef USE_ROCM
-  TORCH_CHECK(false, "ROCm is not supported");
-#else
+
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format
   // but there is a bug in CUDA 11.3.1 version:
@@ -1286,6 +1255,12 @@ void triangular_solve_out_sparse_csr(
               desc_spsv.descriptor()));
         });
   } else {
+    // this macro must exist outside the DISPATCH macro for windows builds
+#ifdef USE_ROCM
+#define ROCM_EXTRA_ARG ,nullptr
+#else
+#define ROCM_EXTRA_ARG
+#endif
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
         X.scalar_type(), "triangular_solve_out_sparse_csr_cuda_impl", [&] {
           scalar_t alpha = 1;
@@ -1337,13 +1312,14 @@ void triangular_solve_out_sparse_csr(
               descX.descriptor(),
               compute_type,
               CUSPARSE_SPSM_ALG_DEFAULT,
-              desc_spsm.descriptor()));
+              desc_spsm.descriptor()
+              ROCM_EXTRA_ARG
+            ));
         });
   }
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void sampled_addmm_out_sparse_csr(

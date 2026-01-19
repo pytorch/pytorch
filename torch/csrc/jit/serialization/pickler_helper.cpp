@@ -106,7 +106,7 @@ std::array<
 GetBackendMetaSerialization() {
   // The array to save function pointer for BackendMeta serialization.
   // key is the DeviceType, value is std::pair obj.
-  // value.first represent get function and value.seconde represent set function
+  // value.first represent get function and value.second represent set function
   static std::array<
       std::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
       at::COMPILE_TIME_MAX_DEVICE_TYPES>

@@ -5,9 +5,10 @@ This module provides decorators and utilities for controlling TorchDynamo's beha
 import functools
 import inspect
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -95,6 +96,8 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
+            # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
 
         if fn is None:
@@ -154,9 +157,9 @@ class set_stance(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
         _set_stance(self.prev)
 
@@ -295,6 +298,14 @@ def skip_frame(msg: str = "") -> None:
     """Force a skipped frame"""
 
 
+@_disallow_in_graph_helper(throw_if_not_allowed=False)
+def step_unsupported(msg: str = "") -> None:
+    """Force a step unsupported graph break, which results in compiling
+    the traced FX graph so far, then skipping the rest of the frame.
+    In order to get expected behavior, there should be at least 2 ops
+    and a part of the code not contained in any try/with blocks."""
+
+
 def forbid_in_graph(fn: Any) -> Any:
     """
     Customize which functions TorchDynamo will assert are not present while tracing.
@@ -306,6 +317,7 @@ def forbid_in_graph(fn: Any) -> Any:
     if isinstance(fn, (list, tuple)):
         return [forbid_in_graph(x) for x in fn]
     assert callable(fn), "forbid_in_graph applies only to callables"
+    # pyrefly: ignore [missing-attribute]
     fn._dynamo_forbidden = True
     return fn
 
@@ -482,10 +494,18 @@ def substitute_in_graph(
         def dispatch_fn(
             self: VariableBuilder, value: Callable[_P, _R]
         ) -> PolyfilledFunctionVariable:
+            if inspect.isclass(value):
+                guard_type = GuardBuilder.CLASS_MATCH
+            elif inspect.ismodule(value):
+                guard_type = GuardBuilder.MODULE_MATCH
+            else:
+                guard_type = GuardBuilder.ID_MATCH
+            guards = self.install_guards(guard_type)
+            assert guards is not None
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
-                **self.install_guards(GuardBuilder.FUNCTION_MATCH),
+                **guards,
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
@@ -519,7 +539,7 @@ def _apply_func_to_inner_tensors_of_same_dim(
             func(inner, *args, **kwargs)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DimRange:
     """
     This represents an dimension of a tensor and the corresponding
@@ -557,14 +577,21 @@ def mark_unbacked(
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
             If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
     """
-    # You could have copied the mark_dynamic behavior but I'm not convinced
-    # it's what you want
-    assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+    if torch.distributed.is_available() and isinstance(
+        t, torch.distributed.tensor.DTensor
+    ):
+        # apply on inner tensor sizes/strides
+        mark_unbacked(t._local_tensor, index)
+    else:
+        # You could have copied the mark_dynamic behavior but I'm not convinced
+        # it's what you want
+        assert not is_traceable_wrapper_subclass(t), "not implemented yet"
 
     if isinstance(index, int):
         if strict:
             if not hasattr(t, "_dynamo_strict_unbacked_indices"):
                 t._dynamo_strict_unbacked_indices = set()
+
             t._dynamo_strict_unbacked_indices.add(index)
             return
 
@@ -582,6 +609,7 @@ def mark_unbacked(
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
+
         if isinstance(t._specialize_on, dict):
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
@@ -654,7 +682,9 @@ def mark_dynamic(
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
+
             t._dynamo_dynamic_range = set()
+
             t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
@@ -663,11 +693,13 @@ def mark_dynamic(
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
+
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
+
         if isinstance(t._specialize_on, dict):
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
@@ -694,6 +726,7 @@ def maybe_mark_dynamic(t: Any, index: Union[int, list[Any], tuple[Any]]) -> None
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
             t._dynamo_weak_dynamic_indices = set()
         # TODO(voz): Should we bounds check?
+
         t._dynamo_weak_dynamic_indices.add(index)
         return
 
@@ -747,6 +780,7 @@ def mark_static(
 
     if not isinstance(t, torch.Tensor) and issubclass(t, torch.nn.Module):
         t._dynamo_marked_static = True
+        # pyrefly: ignore [bad-return]
         return t
 
     if not isinstance(t, torch.Tensor):
@@ -861,6 +895,7 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
+    "nested_graph_breaks",
 )
 
 from . import config
@@ -936,6 +971,26 @@ def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
     return ctx
 
 
+@overload
+def disable_nested_graph_breaks(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def disable_nested_graph_breaks(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
+def disable_nested_graph_breaks(fn: Optional[Any] = None) -> Any:
+    """
+    Context manager/decorator to disable nested graph breaks when tracing
+    this function and any nested functions. Used when nested graph breaks
+    is causing problems.
+    """
+    ctx = patch_dynamo_config(nested_graph_breaks=False)
+    if fn:
+        return ctx(fn)
+    return ctx
+
+
 class ErrorOnGraphBreakDecoratorContextManager:
     def __init__(self, error_on_graph_break: bool) -> None:
         self.error_on_graph_break = error_on_graph_break
@@ -973,3 +1028,13 @@ def error_on_graph_break(
     The default value of torch.compile's `error_on_graph_break` setting is False.
     """
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
+
+
+def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
+    """
+    Check if a method is marked as `dynamo_disable` recursively. It returns:
+    - True if disable(recursive=True)
+    - False if disable(recursive=False)
+    - None if method is not a disable decorator
+    """
+    return getattr(method, "_torchdynamo_disable_recursive", None)

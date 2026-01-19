@@ -78,7 +78,7 @@ struct C10_API Storage {
             resizable)) {}
 
  protected:
-  explicit Storage(unsafe_borrow_t, const Storage& rhs)
+  explicit Storage(unsafe_borrow_t /*unused*/, const Storage& rhs)
       : storage_impl_(c10::intrusive_ptr<c10::StorageImpl>::reclaim(
             rhs.storage_impl_.get())) {}
 
@@ -149,7 +149,7 @@ struct C10_API Storage {
   }
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) const {
-    return storage_impl_->set_data_ptr_noswap(std::move(data_ptr));
+    storage_impl_->set_data_ptr_noswap(std::move(data_ptr));
   }
 
   DeviceType device_type() const {

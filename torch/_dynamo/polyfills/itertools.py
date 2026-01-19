@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import itertools
 import operator
-from typing import Callable, Optional, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Optional, overload, TYPE_CHECKING, TypeAlias, TypeVar
 
 from ..decorators import substitute_in_graph
 
@@ -196,6 +196,7 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T1],
     /,
@@ -205,6 +206,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
@@ -213,6 +215,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
@@ -223,6 +226,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],
@@ -233,6 +237,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],

@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     serialTest,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -59,6 +58,9 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    # PDL tests are CUDA SM90+ only, skip on CPU
+    "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # calling div on only symint args
     "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu", "mps")
@@ -66,7 +68,6 @@ test_failures = {
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
     "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
     "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
-    "test_convolution4_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
@@ -75,34 +76,17 @@ test_failures = {
     "test_reduction2_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction3_dynamic_shapes": TestFailure(("mps",)),
     "test_reduction5_dynamic_shapes": TestFailure(("mps",)),
-    "test_reflection_pad2d_dynamic_shapes": TestFailure(("mps",)),
     "test_roll_dynamic_shapes": TestFailure(("mps",)),
+    "test_select_scatter_dtype_consistency_dynamic_shapes": TestFailure(("mps",)),
     "test_std_dynamic_shapes": TestFailure(("mps",)),
     "test_var_correction_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
-    "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
 }
-
-if not torch._inductor.config.cpp_wrapper:
-    test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
-        ("cuda",)
-    )
-
-if TEST_WITH_ROCM:
-    # Tensor-likes are not close
-    test_failures["test_dynamic_stride_nobreak"] = TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    )
-    test_failures["test_item_to_inputs_kernel_nobreak"] = TestFailure(
-        ("cpu", "cuda"), is_skip=True
-    )
-    test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
-
 
 if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
@@ -159,7 +143,7 @@ class TestInductorDynamic(TestCase):
         if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
-        TestCase.setUp(self)
+        super().setUp()
         # this should be in setUpClass, but device-generic tests
         # don't work with setUpClass well (non-deterministically the wrong setUpClass is resolved),
         # so put it in test setUp, it's cheap
@@ -285,7 +269,6 @@ class TestInductorDynamic(TestCase):
         def f():
             full = torch.full((), 11)
             i0 = full.item()
-            torch._check_is_size(i0)
             return torch.full((i0,), 0)
 
         opt_f = torch.compile(f, fullgraph=True)
@@ -450,8 +433,6 @@ class TestInductorDynamic(TestCase):
     def test_return_unbacked_view_split(self, device):
         def f(values, length_per_key):
             u0, u1 = length_per_key.tolist()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
             v1, v2 = torch.functional.split(values, [u0, u1])
             return v1, v2
 
@@ -483,7 +464,6 @@ class TestInductorDynamic(TestCase):
 
         @torch.library.register_fake("_test::_cat")
         def _cat_fake(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
-            [torch._check_is_size(d) for d in ds]
             return t.new_empty([sum(ds)])
 
         def _cat_setup_context(ctx, inputs, output):
@@ -983,7 +963,6 @@ class TestInductorDynamic(TestCase):
         @torch.compile(fullgraph=True, dynamic=True)
         def f(x):
             a = x.item()
-            torch._check_is_size(a)
             torch._check(a >= 1)
             torch._check(a <= 10)
             return torch.ones(a, a)
@@ -995,8 +974,6 @@ class TestInductorDynamic(TestCase):
         @torch.compile()
         def f(xt):
             xs = xt.tolist()
-            for x in xs:
-                torch._check_is_size(x)
             y = sum(xs)
             return torch.zeros(y, device=device)
 
@@ -1222,6 +1199,36 @@ class TestInductorDynamic(TestCase):
         actual = opt_fn(inp, True)
         self.assertEqual(actual, expect)
         check_count(2)  # Reused existing kernel
+
+    def test_coalescing_analysis_sympy_is_constant(self, device):
+        # Regression test for issue where sympy's is_constant() would trigger
+        # numerical evaluation that caused assertion errors in our custom Mod function
+        def fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6):
+            t3 = torch.nn.functional.scaled_dot_product_attention(arg0, arg1, arg2)
+            t4 = t3.min(dim=3).values
+            t6 = arg3.var(dim=0)
+            t7 = t6.reshape((29, 50, 32))
+            t10 = arg5.clone()
+            t10.zero_()
+            t11 = t10.transpose(0, 2)
+            t12 = torch.pow(torch.pow(t4, arg4), t11)
+            t15 = torch.nn.functional.layer_norm(arg6, (32,))
+            t16 = t12 / t15
+            t17 = ((((t4) - t7) - t16) - t11) - t16
+            return t17
+
+        arg0 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg1 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg2 = torch.rand([29, 50, 32, 5], dtype=torch.float16, device=device)
+        arg3 = torch.rand([3, 10, 4640], dtype=torch.float16, device=device)
+        arg4 = torch.rand([29, 50, 32], dtype=torch.float16, device=device)
+        arg5 = torch.rand([32, 50, 29], dtype=torch.float16, device=device)
+        arg6 = torch.rand([29, 50, 32], dtype=torch.float16, device=device)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        expected = fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
+        actual = compiled_fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
+        self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)

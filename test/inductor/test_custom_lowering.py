@@ -4,8 +4,9 @@ from functools import partial
 from unittest import skipIf
 
 import torch
+from torch._inductor import config
 from torch._inductor.ir import Pointwise
-from torch._inductor.lowering import make_pointwise, register_lowering
+from torch._inductor.lowering import make_fallback, make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import ops
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
@@ -208,7 +209,7 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_tanh_approx(self):
         def fn(inp):
@@ -223,7 +224,7 @@ class TestCustomLowering(InductorTestCase):
 
     @requires_gpu()
     @skipIfRocm
-    @skipIfXpu
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_multi_inp_asm(self):
         def fn(a, b):
@@ -236,6 +237,17 @@ class TestCustomLowering(InductorTestCase):
         out1 = a + b
         out2 = fn_opt(a, b)
         self.assertEqual(out1, out2)
+
+    @config.patch(joint_graph_constant_folding=False)
+    def test_constant_creation(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.tensor(1)
+
+        make_fallback(torch.ops.aten.lift_fresh_copy.default)
+        self.assertTrue(
+            torch.allclose(torch.compile(M())(torch.ones(3)), torch.ones(3) + 1)
+        )
 
 
 if __name__ == "__main__":

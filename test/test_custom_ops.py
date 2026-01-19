@@ -14,15 +14,16 @@ import unittest
 from functools import partial
 from pathlib import Path
 from typing import *  # noqa: F403
+from unittest.mock import patch
 
 import numpy as np
 import yaml
 
 import torch._custom_ops as custom_ops
+import torch.distributed
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
-from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
 from torch._library.fake_profile import (
@@ -36,6 +37,7 @@ from torch._library.fake_profile import (
 )
 from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2  # @manual
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -56,6 +58,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 # Shadowed by `torch.testing._internal.common_utils.custom_op`
@@ -891,6 +894,11 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [True]
         if typ is str:
             return ["foo"]
+        if torch.distributed.is_available():
+            from torch.distributed.distributed_c10d import GroupName
+
+            if typ is GroupName:
+                return ["group"]
         if typ is torch.dtype:
             return [torch.float32]
         if typ is torch.device:
@@ -1065,6 +1073,16 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             del foo
 
+        # Define a named tuple for a Point with x and y coordinates
+        Point = collections.namedtuple("Point", ["x", "y"])
+        with self.assertRaisesRegex(ValueError, "unsupported type"):
+
+            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
+            def foo(x: Tensor, y: Point) -> Tensor:
+                raise NotImplementedError
+
+            del foo
+
     def test_supported_schemas(self):
         # All of these should already be tested by PyTorch codegen
         # (we share the same mechanism), but here's a sanity check.
@@ -1213,7 +1231,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         from torch._custom_op.impl import SUPPORTED_DEVICE_TYPE_TO_KEY
 
-        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY.keys():
+        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY:
             # Smoke test: should not raise error
             custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)(
                 foo_impl
@@ -2551,6 +2569,111 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(x, expected)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_subclass_accessor_view_error(self):
+        @torch.library.custom_op(
+            "_torch_testing::_failing_two_tensor_accessor",
+            mutates_args=(),
+            schema="(Tensor(a) tx, SymInt idx) -> Tensor(a)",
+        )
+        def _failing_two_tensor_accessor(tx, idx):
+            return tx.view_as(tx)
+
+        def noop(*args):
+            pass
+
+        _failing_two_tensor_accessor.register_autograd(noop, setup_context=noop)
+
+        t = torch.rand(2)
+        with self.assertRaisesRegex(
+            RuntimeError, "Custom ops that are views do not support SymInt."
+        ):
+            torch.ops._torch_testing._failing_two_tensor_accessor(t, 2)
+
+        @torch.library.custom_op(
+            "_torch_testing::_failing_two_tensor_accessor_list",
+            mutates_args=(),
+            schema="(Tensor(a) tx, SymInt[] idx) -> Tensor(a)",
+        )
+        def _failing_two_tensor_accessor_list(tx, idx):
+            return tx.view_as(tx)
+
+        def noop(*args):
+            pass
+
+        _failing_two_tensor_accessor_list.register_autograd(noop, setup_context=noop)
+
+        t = torch.rand(2)
+        with self.assertRaisesRegex(
+            RuntimeError, "Custom ops that are views do not support SymInt."
+        ):
+            torch.ops._torch_testing._failing_two_tensor_accessor_list(t, (2,))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_subclass_accessor_view(self):
+        class MyTwoTensor(TwoTensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func is torch.ops._torch_testing._two_tensor_accessor.default:
+                    self.assertIsInstance(args[0], MyTwoTensor)
+                    self.assertIn(args[1], (0, 1))
+                    if args[1] == 0:
+                        res = args[0].a
+                    else:
+                        res = args[0].b
+                    # Always return a fresh Tensor!
+                    return res.view_as(res)
+                return super().__torch_dispatch__(func, types, args, kwargs)
+
+        @torch.library.custom_op(
+            "_torch_testing::_two_tensor_accessor",
+            mutates_args=(),
+            schema="(Tensor(a) tx, int idx) -> Tensor(a)",
+        )
+        def _two_tensor_accessor(tx, idx):
+            raise RuntimeError("Should never be called")
+
+        def backward(ctx, gO):
+            gI = gO.clone()
+            if ctx.idx == 0:
+                return MyTwoTensor(gI, torch.zeros_like(gO)), None
+            else:
+                return MyTwoTensor(torch.zeros_like(gO), gI), None
+
+        def setup_ctx(ctx, inputs, output):
+            ctx._is_pure_view = True
+            ctx.idx = inputs[1]
+
+        _two_tensor_accessor.register_autograd(backward, setup_context=setup_ctx)
+
+        x = torch.rand(3)
+        y = torch.rand(3)
+        z = MyTwoTensor(x, y, requires_grad=True)
+        res = torch.ops._torch_testing._two_tensor_accessor(z, 0)
+        res.sum().backward()
+        self.assertEqual(res, x)
+        self.assertTrue(res._is_view())
+        self.assertTrue(res._base is z)
+        self.assertEqual(z.grad, torch.ones_like(z.grad))
+
+        res = torch.ops._torch_testing._two_tensor_accessor(z, 1)
+        res.sum().backward()
+        self.assertEqual(res, y)
+        self.assertTrue(res._is_view())
+        self.assertTrue(res._base is z)
+        self.assertEqual(z.grad, TwoTensor(torch.ones(3), torch.ones(3)))
+
+        leaf = MyTwoTensor(torch.rand(3), torch.rand(3), requires_grad=True)
+        non_leaf = leaf.clone()
+        view_a = torch.ops._torch_testing._two_tensor_accessor(non_leaf, 0)
+        self.assertTrue(view_a._is_view())
+        self.assertTrue(view_a._base is non_leaf)
+        view_a *= 2
+        self.assertEqual(non_leaf.a, view_a)
+        self.assertNotEqual(leaf.a, view_a)
+        non_leaf.sum().backward()
+        self.assertEqual(leaf.grad, MyTwoTensor(2 * torch.ones(3), torch.ones(3)))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_kwarg_only_tensors(self):
         with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
 
@@ -2856,6 +2979,33 @@ class TestCustomOpAPI(TestCase):
             if prev is None and after is None:
                 continue
             self.assertGreater(after, prev)
+
+    def test_mutated_no_warning(self):
+        # Run in subprocess since the warning is emitted only once
+        script = """\
+import warnings
+import torch
+from torch import Tensor
+
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    torch.set_warn_always(True)
+
+    @torch.library.custom_op("mylib::func", mutates_args=("x",))
+    def func(x: Tensor) -> None:
+        x.add_(1)
+
+    if len(w) > 0:
+        raise AssertionError(f"Unexpected warning: {w[0].message}")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(e.output.decode("utf-8"))
 
     def test_mutated_unknown(self):
         @torch.library.custom_op(
@@ -4521,6 +4671,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         ):
             self.assertTrue(optests.is_inside_opcheck_mode())
 
+    @patch("torch._functorch.config.check_custom_op_aliasing", False)
     def test_opcheck_bad_op(self):
         op = op_with_incorrect_schema(self, "foo")
         x = torch.randn(3)

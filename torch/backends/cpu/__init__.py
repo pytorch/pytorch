@@ -16,7 +16,6 @@ def get_cpu_capability() -> str:
     - "NO AVX"
     - "AVX2"
     - "AVX512"
-    - "SVE128"
     - "SVE256"
     """
     return torch._C._get_cpu_capability()

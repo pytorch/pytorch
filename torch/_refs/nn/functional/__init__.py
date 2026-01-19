@@ -145,6 +145,7 @@ def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         a = args[0]
         if "inplace" not in kwargs:
             kwargs["inplace"] = False
+
         if kwargs["inplace"]:
             torch._check(
                 "out" not in kwargs,
@@ -517,8 +518,8 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
     torch._check(
-        lambd >= 0,
-        lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
+        0 <= lambd <= torch.finfo(a.dtype).max,
+        lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
     )
     # We implement this in one torch.where to generate better code in the backward
     # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
@@ -625,6 +626,7 @@ def smooth_l1_loss(
         )
     else:
         loss = torch.abs(input - target)
+
         loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
         return _apply_loss_reduction(loss, reduction)
 

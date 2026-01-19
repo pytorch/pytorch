@@ -1,7 +1,5 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -301,7 +299,7 @@ void ConstantValueMap::PrintMaps() {
         }
       }
     }
-    ss << " (rank = " << x.second << ")";
+    ss << " (rank = " << x.second << ')';
     std::cout << "node " << x.first << ": " << ss.str() << '\n';
   }
   std::cout << '\n';
@@ -346,9 +344,9 @@ void ConstantValueMap::PrintMaps() {
     std::cout << "(node " << x.first << ": ";
     for (const auto& dim : x.second.dim()) {
       if (dim.has_dim_param()) {
-        std::cout << dim.dim_param() << " ";
+        std::cout << dim.dim_param() << ' ';
       } else {
-        std::cout << dim.dim_value() << " ";
+        std::cout << dim.dim_value() << ' ';
       }
     }
     std::cout << "), ";
@@ -361,7 +359,7 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "SymbolDim Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().symbolDimMap) {
-    std::cout << "(" << x.first << ": " << x.second << "), ";
+    std::cout << '(' << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
       std::cout << '\n';
@@ -370,7 +368,7 @@ void ConstantValueMap::PrintMaps() {
   std::cout << "DimSymbol Map:" << '\n';
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().dimSymbolMap) {
-    std::cout << "(" << x.first << ": " << x.second << "), ";
+    std::cout << '(' << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
       std::cout << '\n';

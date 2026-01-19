@@ -11,8 +11,6 @@ class ViewTests(torch._dynamo.test_case.TestCase):
         def f(t, _u0):
             u0 = t[0].item()
             u1 = t[1].item()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
             n = u0 * u1
             a = torch.randn(n)
             return a.view(-1, _u0)
@@ -25,8 +23,6 @@ class ViewTests(torch._dynamo.test_case.TestCase):
         def f(t, _n):
             u0 = t[0].item()
             u1 = t[1].item()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
             a = torch.randn(u0, u1)
             return a.view(_n)
 

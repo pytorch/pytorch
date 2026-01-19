@@ -36,6 +36,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+  # Disable FBGEMM for CUDA 13 builds
+  export USE_FBGEMM=0
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
@@ -168,14 +173,16 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # shellcheck disable=SC1091
+  source /opt/intel/oneapi/umf/latest/env/vars.sh
+  # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Enable XCCL build
   export USE_XCCL=1
   export USE_MPI=0
-  # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
-  export USE_KINETO=0
   export TORCH_XPU_ARCH_LIST=pvc
 fi
 
@@ -233,7 +240,9 @@ if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-full-debug* ]]; then
+  export CMAKE_BUILD_TYPE=Debug
+elif [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
@@ -299,6 +308,11 @@ else
       python -m build --wheel --no-isolation
     fi
     pip_install_whl "$(echo dist/*.whl)"
+    if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
+      # Regression test for https://github.com/pytorch/pytorch/issues/164297
+      # Torch should be importable and that's about it
+      pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
+    fi
 
     if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
       install_torchvision
@@ -344,13 +358,18 @@ else
       sudo rm -f /opt/cache/bin/c++
       sudo rm -f /opt/cache/bin/gcc
       sudo rm -f /opt/cache/bin/g++
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
+      # Restore original clang compilers that were backed up during sccache wrapping.
+      # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
+      # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
+      if [[ -d /opt/rocm/llvm/bin ]]; then
+        pushd /opt/rocm/llvm/bin
+        if [[ -d original ]]; then
+          sudo mv original/clang .
+          sudo mv original/clang++ .
+        fi
+        sudo rm -rf original
+        popd
       fi
-      sudo rm -rf original
-      popd
     fi
 
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
@@ -419,7 +438,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   # export test times so that potential sharded tests that'll branch off this build will use consistent data
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
-  python tools/stats/export_test_times.py
+  PYTHONPATH=. python tools/stats/export_test_times.py
 fi
 # don't do this for bazel or s390x or riscv64 as they don't use sccache
 if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then

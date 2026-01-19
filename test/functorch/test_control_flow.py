@@ -742,7 +742,7 @@ def forward(self, pred_1, x_1):
 
     def test_cond_in_forloop(self):
         def for_loop_fake(x):
-            for i in range(3):
+            for _ in range(3):
                 x = x * x + 1
             return x
 
@@ -942,12 +942,10 @@ def forward(self, pred_1):
         b = torch.randn(4, requires_grad=True)
         c = torch.randn(4, requires_grad=True)
 
-        for pred, fn in zip(
-            [torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]
-        ):
+        for pred in [torch.tensor(False), torch.tensor(True)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
+                r"Higher Order Operator: torch\.cond",
             ):
                 cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
 
@@ -1236,7 +1234,7 @@ def forward(self, pred_1, x_1):
         from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
         # This is a helper function that extracts the metadata from the tensor and
-        # sets the requries_grad flag to false. This is needed as we compare the
+        # sets the requires_grad flag to false. This is needed as we compare the
         # metadata of the operands and the gradients
         def _extract_tensor_metadata_except_requires_grad(arg):
             metadata = _extract_tensor_metadata(arg)
@@ -1413,7 +1411,8 @@ def forward(self, pred_1, x_1):
         x = torch.ones([3])
         y = torch.ones([1, 2, 3])
         with self.assertRaisesRegex(
-            RuntimeError, "map doesn't work unless it is captured completely"
+            RuntimeError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             control_flow.map(f, x, y)
 
@@ -1422,7 +1421,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.UncapturedHigherOrderOpError,
             # "Expected all leaves to be of torch.Tensor type.*",
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             control_flow.map(f1, x, y)
 
@@ -1961,7 +1960,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.Unsupported,
             # "HigherOrderOperator body's output must consist of tensors or ints only"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_float_output, init, x, dim=0)
 
@@ -2418,7 +2417,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan_fct(wrong_carry_shape, init, x, dim=dim)
 
@@ -2441,7 +2440,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.Unsupported,
             # combine_fn needs to produce two pytrees, one for the carries and one for the outputs.
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan_fct(no_carry, init, x, dim=dim)
 
@@ -2758,13 +2757,11 @@ class GraphModule(torch.nn.Module):
         l_xs_ = L_xs_
 
         flip: "f32[3, 10, 2]" = torch.flip(l_xs_, [0]);  l_xs_ = None
-
         scan_combine_fn_0 = self.scan_combine_fn_0
         scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_0_, l_init_1_], [flip], []);  scan_combine_fn_0 = l_init_0_ = l_init_1_ = flip = None
         getitem: "f32[1, 10, 2]" = scan[0]
         getitem_1: "f32[1, 10, 2]" = scan[1]
         out: "f32[3, 1, 10, 2]" = scan[2];  scan = None
-
         out_1: "f32[3, 1, 10, 2]" = out.flip([0]);  out = None
         return (getitem, getitem_1, out_1)
 
@@ -3066,13 +3063,9 @@ class GraphModule(torch.nn.Module):
         ).to(DEVICE)
 
         # Test 3 models: RNNScanList, RNNScanTensor, RNNLoop
-        models = [
-            ("ScanList", RNNScanList),
-            ("ScanTensor", RNNScanTensor),
-            ("Loop", RNNLoop),
-        ]
+        models = [RNNScanList, RNNScanTensor, RNNLoop]
 
-        for model_name, model_class in models:
+        for model_class in models:
             # Create uncompiled model
             model_uc = model_class().to(DEVICE)
             uncompiled_grads, uncompiled_loss = run_test_and_get_grads_loss(
@@ -3088,9 +3081,7 @@ class GraphModule(torch.nn.Module):
             )
 
             # Compare gradients for each layer
-            for i, (uncompiled_grad, compiled_grad) in enumerate(
-                zip(uncompiled_grads, compiled_grads)
-            ):
+            for uncompiled_grad, compiled_grad in zip(uncompiled_grads, compiled_grads):
                 self.assertEqual(
                     uncompiled_grad,
                     compiled_grad,
@@ -3502,7 +3493,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_input_mutation, init, x, dim=0)
 
@@ -3523,7 +3514,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
@@ -3544,7 +3535,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
@@ -3567,7 +3558,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_carry_carry_alias, init, inp, dim=0)
 
@@ -3590,7 +3581,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
@@ -3669,7 +3660,7 @@ class AssociativeScanModels:
                     # Check if val is a list and if it has the same length as combine_fn
                     # If so, then use the individual elements.
                     # If not, duplicate the first element.
-                    if type(val) == list and len(val) == chain_len:
+                    if type(val) is list and len(val) == chain_len:
                         kwargs_el[key] = val[ind]
                     else:
                         kwargs_el[key] = val
@@ -4102,15 +4093,12 @@ class GraphModule(torch.nn.Module):
         elem: "f32[3, 10, 2]" = torch.movedim(l_xs_0_0_, 0, 0);  l_xs_0_0_ = None
         elem_1: "f32[3, 10, 2]" = torch.movedim(l_xs_0_1_0_, 0, 0);  l_xs_0_1_0_ = None
         elem_2: "f32[3, 10, 2]" = torch.movedim(l_xs_1_, 0, 0);  l_xs_1_ = None
-
         elem_3: "f32[3, 10, 2]" = torch.flip(elem, [0]);  elem = None
         elem_4: "f32[3, 10, 2]" = torch.flip(elem_1, [0]);  elem_1 = None
         elem_5: "f32[3, 10, 2]" = torch.flip(elem_2, [0]);  elem_2 = None
-
         child: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 0, -1, 2)
         child_1: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 0, -1, 2)
         child_2: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 0, -1, 2)
-
         child_3: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_3, 0, 1, None, 2)
         child_4: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_4, 0, 1, None, 2)
         child_5: "f32[1, 10, 2]" = torch.ops.aten.slice(elem_5, 0, 1, None, 2)
@@ -4173,34 +4161,26 @@ class GraphModule(torch.nn.Module):
         b_2: "f32[2, 10, 2]" = torch._C._nn.pad(child_7, [0, 0, 0, 0, 0, 1], 'constant', None);  child_7 = None
 
         stacked: "f32[2, 2, 10, 2]" = torch.stack([cat, b_2], dim = 1);  cat = b_2 = None
-
         interleaved: "f32[4, 10, 2]" = torch.flatten(stacked, start_dim = 0, end_dim = 1);  stacked = None
-
         interleaved_1: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved, 0, 0, 3);  interleaved = None
 
         b_3: "f32[2, 10, 2]" = torch._C._nn.pad(child_8, [0, 0, 0, 0, 0, 1], 'constant', None);  child_8 = None
 
         stacked_1: "f32[2, 2, 10, 2]" = torch.stack([cat_1, b_3], dim = 1);  cat_1 = b_3 = None
-
         interleaved_2: "f32[4, 10, 2]" = torch.flatten(stacked_1, start_dim = 0, end_dim = 1);  stacked_1 = None
-
         interleaved_3: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_2, 0, 0, 3);  interleaved_2 = None
 
         b_4: "f32[2, 10, 2]" = torch._C._nn.pad(child_9, [0, 0, 0, 0, 0, 1], 'constant', None);  child_9 = None
 
         stacked_2: "f32[2, 2, 10, 2]" = torch.stack([cat_2, b_4], dim = 1);  cat_2 = b_4 = None
-
         interleaved_4: "f32[4, 10, 2]" = torch.flatten(stacked_2, start_dim = 0, end_dim = 1);  stacked_2 = None
-
         interleaved_5: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_4, 0, 0, 3);  interleaved_4 = None
-
-        child_17: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
-        child_18: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
-        child_19: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
-
-        movedim_3: "f32[3, 10, 2]" = torch.movedim(child_17, 0, 0);  child_17 = None
-        movedim_4: "f32[3, 10, 2]" = torch.movedim(child_18, 0, 0);  child_18 = None
-        movedim_5: "f32[3, 10, 2]" = torch.movedim(child_19, 0, 0);  child_19 = None
+        flip_3: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
+        flip_4: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
+        flip_5: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
+        movedim_3: "f32[3, 10, 2]" = torch.movedim(flip_3, 0, 0);  flip_3 = None
+        movedim_4: "f32[3, 10, 2]" = torch.movedim(flip_4, 0, 0);  flip_4 = None
+        movedim_5: "f32[3, 10, 2]" = torch.movedim(flip_5, 0, 0);  flip_5 = None
         return (movedim_3, movedim_4, movedim_5)
 """,  # noqa: B950
         )
@@ -5329,7 +5309,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "associative_scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.associative_scan",
         ):
             associative_scan(fct_input_mutation, x, 0)
 
@@ -5349,7 +5329,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "associative_scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.associative_scan",
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 
@@ -5371,7 +5351,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "associative_scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.associative_scan",
         ):
             associative_scan(fct_output_output_alias, inp, 0)
 
@@ -5432,6 +5412,7 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_simple_with_linear_compile_check_graph(self):
@@ -5450,7 +5431,9 @@ class TestControlFlowTraced(TestCase):
 
         backend = EagerAndRecordGraphs()
         torch.compile(f, backend=backend)(torch.tensor(False), x)
-        self.assertEqual(len(backend.graphs), 2)
+        # With autograd.grad tracing support, the entire function is traced
+        # into a single graph instead of breaking into forward + backward graphs
+        self.assertEqual(len(backend.graphs), 1)
         gm = backend.graphs[0]
 
         self.assertExpectedInline(
@@ -5461,52 +5444,12 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
     l_x_ = L_x_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (l_x_,));  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (l_x_,));  l_pred_ = cond_true_0 = cond_false_0 = None
     result = cond[0];  cond = None
     grad_out = torch.ones_like(result)
-    return (result, grad_out)""",  # noqa: B950
-        )
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[1].print_readable(print_output=False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_ctx_saved_tensors_0_: "f32[4]", L_ctx_pred: "b8[]", L_args_1_: "f32[4]"):
-        l_ctx_saved_tensors_0_ = L_ctx_saved_tensors_0_
-        l_ctx_pred = L_ctx_pred
-        l_args_1_ = L_args_1_
-
-        cond_true_0 = self.cond_true_0
-        cond_false_0 = self.cond_false_0
-        cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, (l_args_1_, l_ctx_saved_tensors_0_));  l_ctx_pred = cond_true_0 = cond_false_0 = l_args_1_ = l_ctx_saved_tensors_0_ = None
-        getitem: "f32[4]" = cond[0];  cond = None
-        return (getitem,)
-
-    class cond_true_0(torch.nn.Module):
-        def forward(self, l_args_1_: "f32[4]", l_ctx_saved_tensors_0_: "f32[4]"):
-            l_args_1__1 = l_args_1_
-            l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
-
-            sin: "f32[4]" = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1);  sin = None
-
-            cos: "f32[4]" = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
-
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(l_args_1__1, cos);  l_args_1__1 = cos = None
-            return (mul,)
-
-    class cond_false_0(torch.nn.Module):
-        def forward(self, l_args_1_: "f32[4]", l_ctx_saved_tensors_0_: "f32[4]"):
-            l_args_1__1 = l_args_1_
-            l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
-
-            cos: "f32[4]" = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1);  cos = None
-
-            sin: "f32[4]" = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
-
-            neg: "f32[4]" = torch.ops.aten.neg.default(sin);  sin = None
-
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(l_args_1__1, neg);  l_args_1__1 = neg = None
-            return (mul,)
-""",  # noqa: B950
+    grad = torch.autograd.grad(result, (l_x_,), grad_out);  result = l_x_ = grad_out = None
+    getitem_1 = grad[0];  grad = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_while_loop_op_mismatch_in_meta(self):
@@ -6249,7 +6192,7 @@ def forward(self, x_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -6313,7 +6256,7 @@ def forward(self, x_1):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -6335,7 +6278,7 @@ def forward(self, x_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
@@ -6360,7 +6303,7 @@ def forward(self, x_1):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 f(example_input_func)
         finally:
@@ -6394,7 +6337,7 @@ def forward(self, x_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
 
@@ -6533,7 +6476,7 @@ def forward(self, arg0_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -6709,7 +6652,7 @@ def forward(self, arg0_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -7150,7 +7093,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             functional_f(*example_inputs)
 
@@ -7602,7 +7545,7 @@ def forward(self, arg0_1, arg1_1):
 
         inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
         for inp in inps:
-            gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 4))
+            gm = make_fx(foo, tracing_mode="symbolic")(inp)
             self.assertExpectedInline(
                 gm.code.strip(),
                 """\
@@ -7879,7 +7822,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # due to set_
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             torch.cond(inp.sum() > 0, f, f, (inp, tmp))
 
@@ -8090,7 +8033,7 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
             # "Encountered aliasing during higher order op tracing for HOP.*"
             # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
             # torch._dynamo.exc.UncapturedHigherOrderOpError,
-            # "scan must be captured completely with torch.compile.*",
+            # r"Higher Order Operator: torch\.ops\.higher_order\.scan",
             Exception,
             ".*",
         ):
@@ -8149,6 +8092,260 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_simple(self):
+        x = torch.randn(3, 4, 4)
+        y = torch.randn(4, 2)
+        zeros = torch.zeros(2, 3)
+
+        def combine_fn(init, xs):
+            return init.clone(), xs @ y
+
+        def fn(scan_op, x, y):
+            def inner_fn(zeros, x, y):
+                x = x.view(2, 2, 4)
+
+                return scan_op(
+                    combine_fn,
+                    zeros,
+                    x,
+                )
+
+            return torch.vmap(inner_fn, in_dims=(1, 0, None))(zeros, x, y)
+
+        out = fn(scan, x, y)
+        compile_out = torch.compile(fn)(scan, x, y)
+        exp = fn(_fake_scan, x, y)
+        self.assertEqual(out, exp)
+        self.assertEqual(out, compile_out)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_complex_ops(self):
+        # Test with various operations requiring shape reasoning
+        x = torch.randn(4, 5, 3, 2)
+        init = torch.randn(4, 3, 2)
+        weight = torch.randn(3, 3)
+
+        def combine_fn(carry, xs):
+            # carry: (3, 2), xs: (3, 2)
+            intermediate = torch.nn.functional.relu(carry)
+            xs_t = xs.transpose(0, 1)  # (2, 3)
+            result = xs_t @ weight  # (2, 3)
+            new_carry = intermediate + result.transpose(0, 1)  # Back to (3, 2)
+            output = torch.sin(carry).sum() + torch.cos(xs).mean()
+            return new_carry, output
+
+        def fn(scan_op, x, init):
+            def inner_fn(x, init):
+                return scan_op(combine_fn, init, x)
+
+            return torch.vmap(inner_fn, in_dims=(0, 0))(x, init)
+
+        out = fn(scan, x, init)
+        compile_out = torch.compile(fn)(scan, x, init)
+        exp = fn(_fake_scan, x, init)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_unbatched_x(self):
+        # Test with various operations requiring shape reasoning
+        x = torch.randn(5, 3, 2)
+        init = torch.randn(4, 3, 2)
+        weight = torch.randn(3, 3)
+
+        def combine_fn(carry, xs):
+            # carry: (3, 2), xs: (3, 2)
+            intermediate = torch.nn.functional.relu(carry)
+            xs_t = xs.transpose(0, 1)  # (2, 3)
+            result = xs_t @ weight  # (2, 3)
+            new_carry = intermediate + result.transpose(0, 1)  # Back to (3, 2)
+            output = torch.sin(carry).sum() + torch.cos(xs).mean()
+            return new_carry, output
+
+        def fn(scan_op, x, init):
+            def inner_fn(x, init):
+                return scan_op(combine_fn, init, x)
+
+            return torch.vmap(inner_fn, in_dims=(None, 0))(x, init)
+
+        out = fn(scan, x, init)
+        compile_out = torch.compile(fn)(scan, x, init)
+        exp = fn(_fake_scan, x, init)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    @skipIfTorchDynamo("not a dynamo test")
+    def test_scan_in_vmap_unbatched_init_error(self):
+        # Test with various operations requiring shape reasoning
+        x = torch.randn(4, 5, 3, 2)
+        init = torch.randn(4, 3, 2)
+        weight = torch.randn(3, 3)
+
+        def combine_fn(carry, xs):
+            # carry: (3, 2), xs: (3, 2)
+            intermediate = torch.nn.functional.relu(carry)
+            xs_t = xs.transpose(0, 1)  # (2, 3)
+            result = xs_t @ weight  # (2, 3)
+            new_carry = intermediate + result.transpose(0, 1)  # Back to (3, 2)
+            output = torch.sin(carry).sum() + torch.cos(xs).mean()
+            return new_carry, output
+
+        def vmap_fn(x, init):
+            def fn(x, init):
+                return scan(combine_fn, init, x)
+
+            return torch.vmap(fn, in_dims=(0, None))(x, init)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            """The size of tensor a \\(4\\) must match the size of tensor b \\(2\\) at non-singleton dimension 4""",
+        ):
+            vmap_fn(x, init)
+
+    @skipIfTorchDynamo("a vmap test, not a dynamo test")
+    def test_vmap_closure_weight_error(self):
+        init_batched = torch.randn(7, 2, 3)
+        xs_batched = torch.randn(7, 5, 4)
+        weight = torch.randn(7, 4, 3)
+
+        def combine_fn(carry, xs):
+            # carry: (2, 3), xs: (4,), weight: (4, 3)
+            new_carry = carry + xs @ weight
+            output = carry.sum()
+            return new_carry, output
+
+        def expected_fn(init, xs, weight):
+            def fn(init, xs, weight):
+                return _fake_scan(combine_fn, init, xs)
+
+            return torch.vmap(fn, in_dims=(0, 0, 0))(init, xs, weight)
+
+        # Note that even though weight is vampped but combine_fn is accessing
+        # the closure weight instead of the wrapped out weight thus causing
+        # a shape mismatch.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            """The size of tensor a \\(2\\) must match the size of tensor b \\(7\\) at non-singleton dimension 1""",
+        ):
+            expected_fn(init_batched, xs_batched, weight)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_in_vmap_mixed_batch_dims(self):
+        init = torch.randn(8, 5, 6)
+        xs_batched = torch.randn(3, 6, 5, 8)
+        scale = torch.randn([])
+
+        def combine_fn(carry, xs):
+            # carry: 8, 5
+            # xs: 5, 8
+            # new_carry: 8, 5
+            new_carry = carry + (xs * scale).sum()
+            output = xs @ carry
+            return new_carry, output
+
+        def fn(scan_op, init, xs):
+            def inner_fn(init, xs):
+                return scan_op(combine_fn, init, xs)
+
+            return torch.vmap(inner_fn, in_dims=(2, 1))(init, xs)
+
+        out = fn(scan, init, xs_batched)
+        compile_out = torch.compile(fn)(scan, init, xs_batched)
+        exp = fn(_fake_scan, init, xs_batched)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_vmap_scan_vmap_scan_nested(self):
+        # Outer batch: 3, inner batch: 4, outer scan: 5, inner scan: 6
+        init = torch.randn(3, 4, 2, 8)
+        xs_outer = torch.randn(3, 5, 4, 6, 2)
+
+        def fn(scan_op, init, xs):
+            def inner_combine(carry, xs):
+                # carry: (2, 8), xs: (2,)
+                new_carry = carry + xs.unsqueeze(-1)
+                output = carry.sum(dim=0)  # (8,)
+                return new_carry, output
+
+            def outer_combine(init, xs):
+                # carry: (4, 2, 8,), xs: (4, 6, 2)
+                # xs has batch dimension 4 from outer vmap
+
+                def inner_fn(init, xs):
+                    # init: (2, 8)
+                    # xs: (6, 2)
+                    # final_carry: (2, 8)
+                    # outputs: (6, 8)
+                    final_carry, outputs = scan_op(inner_combine, init, xs)
+                    return (final_carry.sum(0, keepdim=True) + outputs).sum(
+                        dim=0
+                    )  # (8,)
+
+                inner_results = torch.vmap(inner_fn)(init, xs)  # (4, 8)
+                new_carry = init + inner_results.mean(dim=0)  # (8,)
+                output = inner_results.sum(dim=0)  # (8,)
+                return new_carry.expand(*init.size()), output
+
+            def vmap_inner_fn(init, xs):
+                # init: (4, 2, 8)
+                # xs: (5, 4, 6, 2)
+                return scan_op(outer_combine, init, xs)
+
+            return torch.vmap(vmap_inner_fn)(init, xs)
+
+        out = fn(scan, init, xs_outer)
+        compile_out = torch.compile(fn)(scan, init, xs_outer)
+        exp = fn(_fake_scan, init, xs_outer)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_scan_vmap_scan_nested(self):
+        xs_outer = torch.randn(5, 3, 4, 2)
+        init_outer = torch.randn(3, 8)
+
+        def fn(scan_op, init, xs):
+            def inner_combine_fake(carry, xs):
+                # carry: 8
+                # xs: 2
+                new_carry = carry + xs.sum()
+                output = carry * 2
+                return new_carry, output
+
+            def outer_combine_fake(carry, xs):
+                # carry: 3, 8
+                # xs: 3, 4, 2
+                def inner_fn(carry_elem, xs_elem):
+                    # carry_elem: 8
+                    # xs: 4, 2
+                    # final_carry: 8
+                    # outputs.sum(0): 8
+                    final_carry, outputs = _fake_scan(
+                        inner_combine_fake, carry_elem, xs_elem
+                    )
+                    return outputs.sum(0), final_carry
+
+                # result: (8,)
+                # next_carry, (3, 8))
+                result, next_carry = torch.vmap(inner_fn, in_dims=(0, 0))(carry, xs)
+                output = result.sum(dim=0)
+                return next_carry, output
+
+            return scan_op(outer_combine_fake, init, xs)
+
+        out = fn(scan, init_outer, xs_outer)
+        compile_out = torch.compile(fn)(scan, init_outer, xs_outer)
+        exp = fn(_fake_scan, init_outer, xs_outer)
+
+        self.assertEqual(out, exp)
+        self.assertEqual(compile_out, exp)
+
     @skipIfTorchDynamo("Skip because we're testing export")
     @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
@@ -8166,7 +8363,6 @@ class GraphModule(torch.nn.Module):
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
-
         sym_size_int_1: "Sym(s77)" = torch.ops.aten.sym_size.int(x, 0)
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -8265,10 +8461,10 @@ class GraphModule(torch.nn.Module):
             s27_1 = s27
             s77_1 = s77
 
-            size = child.size();  child = None
-            getitem: "Sym(s77)" = size[0]
-            getitem_1: "Sym(s27)" = size[1];  size = getitem_1 = None
-            lt: "Sym(u0 < s77)" = unbacked_symint < getitem;  unbacked_symint = getitem = None
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(child, 0)
+
+            size = child.size();  child = size = None
+            lt: "Sym(u0 < s77)" = unbacked_symint < sym_size_int;  unbacked_symint = sym_size_int = None
             return lt
 
     class body_fn_0(torch.nn.Module):
@@ -8276,15 +8472,15 @@ class GraphModule(torch.nn.Module):
             s27_1 = s27
             s77_1 = s77
 
+            sym_size_int: "Sym(s77)" = torch.ops.aten.sym_size.int(child_1, 0)
+
             x_clone: "f32[s77, s27]" = child_1.clone()
 
             ge: "Sym(u1 >= 0)" = unbacked_symint_0 >= 0
             _check = torch._check(ge);  ge = _check = None
 
-            size = child_1.size();  child_1 = None
-            getitem: "Sym(s77)" = size[0]
-            getitem_1: "Sym(s27)" = size[1];  size = getitem_1 = None
-            lt: "Sym(u1 < s77)" = unbacked_symint_0 < getitem;  getitem = None
+            size = child_1.size();  child_1 = size = None
+            lt: "Sym(u1 < s77)" = unbacked_symint_0 < sym_size_int;  sym_size_int = None
             _check_1 = torch._check(lt);  lt = _check_1 = None
 
             select: "f32[s27]" = x_clone.select(0, unbacked_symint_0)
@@ -8412,7 +8608,7 @@ class GraphModule(torch.nn.Module):
         getitem_13: "Sym(u20)" = while_loop[5]
         getitem_14: "Sym(u21)" = while_loop[6]
 
-        child: "f32[2, 3]" = while_loop[7];  while_loop = None
+        getitem_7: "f32[2, 3]" = while_loop[7];  while_loop = None
 
         add: "Sym(u15 + 1)" = getitem_8 + 1
         add_1: "Sym(u16 + 1)" = getitem_9 + 1
@@ -8421,7 +8617,7 @@ class GraphModule(torch.nn.Module):
         add_4: "Sym(u19 + 1)" = getitem_12 + 1
         add_5: "Sym(u20 + 1)" = getitem_13 + 1
         add_6: "Sym(u21 + 1)" = getitem_14 + 1
-        add_7: "f32[2, 3]" = child + 1
+        add_7: "f32[2, 3]" = getitem_7 + 1
 
         add_8: "f32[2, 3]" = getitem_8 + l_t_;  getitem_8 = None
         add_9: "f32[2, 3]" = getitem_9 + l_t_;  getitem_9 = None
@@ -8430,7 +8626,7 @@ class GraphModule(torch.nn.Module):
         add_12: "f32[2, 3]" = getitem_12 + l_t_;  getitem_12 = None
         add_13: "f32[2, 3]" = getitem_13 + l_t_;  getitem_13 = None
         add_14: "f32[2, 3]" = getitem_14 + l_t_;  getitem_14 = None
-        add_15: "f32[2, 3]" = child + l_t_;  child = l_t_ = None
+        add_15: "f32[2, 3]" = getitem_7 + l_t_;  getitem_7 = l_t_ = None
         return (add, add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15)
 
     class cond_fn_0(torch.nn.Module):
@@ -8466,7 +8662,6 @@ class GraphModule(torch.nn.Module):
 
         x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
         _guards_fn = self._guards_fn(x);  _guards_fn = None
-
         sym_size_int_1: "Sym(s6)" = torch.ops.aten.sym_size.int(x, 0)
 
         sin: "f32[s6, 3]" = torch.ops.aten.sin.default(x);  x = None
@@ -8753,10 +8948,8 @@ class GraphModule(torch.nn.Module):
             t_4: "f32[3, 3]" = torch.ops.aten.t.default(t_3);  t_3 = None
             mul_4: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select)
             mul_5: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg1_1, select);  arg1_1 = select = None
-
             add_7: "f32[3, 3]" = torch.ops.aten.add.Tensor(mm, mul_5);  mm = mul_5 = None
             add_8: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_7, mul_4);  add_7 = mul_4 = None
-
             add_9: "i64[]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
             add_10: "f32[3]" = torch.ops.aten.add.Tensor(view, arg2_1);  view = arg2_1 = None
             add_11: "f32[3, 3]" = torch.ops.aten.add.Tensor(t_4, arg3_1);  t_4 = arg3_1 = None
@@ -8775,7 +8968,7 @@ class GraphModule(torch.nn.Module):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn)(f, x)
 
@@ -8795,7 +8988,7 @@ class GraphModule(torch.nn.Module):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn)(view_f, x)
 
@@ -8816,7 +9009,7 @@ class GraphModule(torch.nn.Module):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn)(f, x)
 
@@ -8825,7 +9018,7 @@ class GraphModule(torch.nn.Module):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 with torch.inference_mode(inference_mode):
                     torch.compile(fn)(f, x)
@@ -8971,7 +9164,6 @@ class GraphModule(torch.nn.Module):
 
         x, y, z, = fx_pytree.tree_flatten_spec(([x, y, z], {}), self._in_spec)
         _guards_fn = self._guards_fn(x, y, z);  _guards_fn = None
-
         sym_size_int_4: "Sym(s17)" = torch.ops.aten.sym_size.int(y, 0);  y = None
         sym_size_int_5: "Sym(s68)" = torch.ops.aten.sym_size.int(z, 0)
 
@@ -9160,14 +9352,12 @@ class GraphModule(torch.nn.Module):
 
         sum_1: "f32[]" = l_x_.sum()
         gt: "b8[]" = sum_1 > 0;  sum_1 = None
-
         cond_true_0 = self.cond_true_0
         cond_false_0 = self.cond_false_0
         cond = torch.ops.higher_order.cond(gt, cond_true_0, cond_false_0, (l_x_, s94, s17, s17, l_z_));  gt = cond_true_0 = cond_false_0 = l_x_ = s94 = s17 = l_z_ = None
 
         getitem_5: "f32[u0, s94]" = cond[0]
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(getitem_5, 0);  getitem_5 = None
-        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0;  sym_size_int = None
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None

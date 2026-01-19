@@ -10,6 +10,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial
 from typing import Any, Literal
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -21,7 +22,11 @@ from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 _group_name_to_store: dict[str, c10d.Store] = {}
 
 
-def enable_symm_mem_for_group(group_name: str) -> None:
+@deprecated(
+    "`enable_symm_mem_for_group` is deprecated. There is no need to call this function anymore.",
+    category=FutureWarning,
+)
+def enable_symm_mem_for_group(group_name: c10d.GroupName) -> None:
     """
     Enables symmetric memory for a process group.
 
@@ -73,7 +78,7 @@ def _test_mode(group_names: set[str] | None = None) -> Generator[None, None, Non
         _mocked_group_names = prev_group_names
 
 
-def is_symm_mem_enabled_for_group(group_name: str) -> bool:
+def is_symm_mem_enabled_for_group(group_name: c10d.GroupName) -> bool:
     """
     Check if symmetric memory is enabled for a process group.
 
@@ -88,7 +93,9 @@ def is_symm_mem_enabled_for_group(group_name: str) -> bool:
 _group_name_to_workspace_tensor: dict[str, torch.Tensor | None] = {}
 
 
-def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
+def get_symm_mem_workspace(
+    group_name: c10d.GroupName, min_size: int
+) -> _SymmetricMemory:
     """
     Get the symmetric memory workspace associated with the process group. If
     ``min_size`` is greater than the workspace associated with ``group_name``,
@@ -102,8 +109,6 @@ def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
         _SymmetricMemory: the symmetric memory workspace associated with the
         group.
     """
-    enable_symm_mem_for_group(group_name)
-
     tensor = _group_name_to_workspace_tensor.get(group_name)
     size = tensor.numel() * tensor.element_size() if tensor is not None else 0
     if tensor is None or size < min_size:
@@ -142,7 +147,7 @@ def _pipelined_multi_all_gather_and_consume(
     shard: list[torch.Tensor],
     shard_consumer: Callable[[list[torch.Tensor], int], None],
     ag_out: list[torch.Tensor],
-    group_name: str,
+    group_name: c10d.GroupName,
     ag_out_needed: bool = True,
 ) -> None:
     """
@@ -288,7 +293,7 @@ def _pipelined_all_gather_and_consume(
     shard: torch.Tensor,
     shard_consumer: Callable[[torch.Tensor, int], None],
     ag_out: torch.Tensor,
-    group_name: str,
+    group_name: c10d.GroupName,
     ag_out_needed: bool = True,
 ) -> None:
     """
@@ -316,7 +321,7 @@ def _pipelined_all_gather_and_consume(
 def _pipelined_produce_and_all2all(
     chunk_producer: Callable[[int, torch.Tensor], None],
     output: torch.Tensor,
-    group_name: str,
+    group_name: c10d.GroupName,
     out_chunk_dim: int = 0,
 ) -> None:
     """
@@ -453,7 +458,7 @@ lib.define(
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
     "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
-    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, int[]? output_shape, "
+    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, SymInt[]? output_shape, "
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
@@ -464,6 +469,39 @@ lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor"
 lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
 )
+
+lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
+"""
+Given a local tensor and a group name, return a tuple of tensors that are
+symmetric on other devices. The returned tensors are ordered by rank IDs. The
+length of the tuple equals to the size of the group.
+
+Note: this API works only when `world_within_direct_access()` returns True, i.e.
+only when the group is within NVLink domain or similar. It does not work across
+network interfaces.
+"""
+
+
+@torch.library.impl(lib, "get_remote_tensors", "CUDA")
+def _get_remote_tensors_default(
+    local: torch.Tensor, group_name: c10d.GroupName
+) -> tuple[torch.Tensor, ...]:
+    hdl = rendezvous(local, group_name)
+    if hdl is None:
+        raise ValueError("Tensor is not allocated from Symmetric Memory")
+
+    return tuple(
+        hdl.get_remote_tensor(peer, local.size(), local.dtype)
+        for peer in range(hdl.world_size)
+    )
+
+
+@torch.library.impl(lib, "get_remote_tensors", "Meta")
+def _get_remote_tensors_meta(
+    local: torch.Tensor, group_name: c10d.GroupName
+) -> tuple[torch.Tensor, ...]:
+    group = c10d._resolve_process_group(group_name)
+    return tuple(torch.empty_like(local) for _ in range(group.size()))
 
 
 class _ScaleMode(Enum):
@@ -507,7 +545,7 @@ def _fused_all_gather_matmul_impl(
     kwargs_list: list[dict[str, Any]],
     out_dtypes: list[torch.dtype | None],
     gather_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     return_A: bool,
 ) -> tuple[torch.Tensor | None, list[torch.Tensor]]:
     if A_shard.dim() < 2:
@@ -523,6 +561,19 @@ def _fused_all_gather_matmul_impl(
         raise ValueError("Invalid gather_dim")
 
     group = c10d._resolve_process_group(group_name)
+
+    if gather_dim == A_shard.ndim - 1 or gather_dim == -1:
+        return _fused_all_gather_matmul_last_gather_dim_impl(
+            mm_out_op,
+            A_shard,
+            Bs,
+            A_scale,
+            kwargs_list,
+            out_dtypes,
+            gather_dim,
+            group_name,
+            return_A,
+        )
 
     # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
     # The flattened tensor doesn't need to be contiguous (for computation
@@ -624,12 +675,146 @@ def _fused_all_gather_matmul_impl(
     return A, [unflatten(output) for output in outputs]
 
 
+def _pipelined_all_gather_and_consume_last_dim(
+    shard: torch.Tensor,
+    shard_consumer: Callable[[torch.Tensor, int], None],
+    ag_out: torch.Tensor,
+    group_name: c10d.GroupName,
+    ag_out_needed: bool = True,
+) -> None:
+    p2p_workspace_size_req = 0
+    p2p_workspace_size_req = shard.numel() * shard.element_size()
+    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
+    group_size = symm_mem.world_size
+    rank = symm_mem.rank
+
+    symm_mem.barrier(channel=0)
+    backend_stream = _get_backend_stream()
+    backend_stream.wait_stream(torch.cuda.current_stream())
+
+    def copy_shard(dst: torch.Tensor, src: torch.Tensor) -> None:
+        dst.copy_(src)
+
+    def get_p2p_buf(remote_rank: int) -> torch.Tensor:
+        buf = symm_mem.get_buffer(
+            remote_rank,
+            shard.shape,
+            shard.dtype,
+        )
+        return buf
+
+    local_p2p_buf = get_p2p_buf(rank)
+
+    shards = ag_out.chunk(group_size)
+
+    copy_shard(dst=local_p2p_buf, src=shard)
+    symm_mem.barrier(channel=1)
+    backend_stream.wait_stream(torch.cuda.current_stream())
+
+    # At this point, all ranks have copied their local shard to
+    # their local p2p buffer. Each rank can now copy and consume
+    # remote shards.
+    shard_consumer(shard, rank)
+
+    for step in range(1, group_size):
+        if step % 2 == 0:
+            stream = torch.cuda.current_stream()
+        else:
+            stream = backend_stream
+        remote_rank = (step + rank) % group_size
+        remote_p2p_buf = get_p2p_buf(remote_rank)
+        with stream:
+            copy_shard(dst=shards[remote_rank], src=remote_p2p_buf)
+            shard_consumer(shards[remote_rank], remote_rank)
+
+    if ag_out_needed:
+        # Copy from input to the all-gather output. Opportunistically overlap
+        # it with the last shard_consumer.
+        if group_size % 2 == 0:
+            stream = torch.cuda.current_stream()
+        else:
+            stream = backend_stream
+        with stream:
+            copy_shard(dst=shards[rank], src=shard)
+
+    torch.cuda.current_stream().wait_stream(backend_stream)
+    symm_mem.barrier(channel=0)
+
+
+def _fused_all_gather_matmul_last_gather_dim_impl(
+    mm_out_op: torch._ops.OpOverload,
+    A_shard: torch.Tensor,
+    Bs: list[torch.Tensor],
+    A_scale: torch.Tensor | None,
+    kwargs_list: list[dict[str, Any]],
+    out_dtypes: list[torch.dtype | None],
+    gather_dim: int,
+    group_name: c10d.GroupName,
+    return_A: bool,
+) -> tuple[torch.Tensor | None, list[torch.Tensor]]:
+    group = c10d._resolve_process_group(group_name)
+    group_size = group.size()
+
+    B_shards = [B.chunk(group.size()) for B in Bs]
+
+    leading_dims = list(A_shard.shape[:-1])
+    A_shard_flat = A_shard.flatten(0, -2)
+
+    def unflatten(t: torch.Tensor) -> torch.Tensor:
+        return t.view(*leading_dims, -1)
+
+    A_flat_out = A_shard_flat.new_empty(
+        A_shard_flat.shape[0] * group.size(),
+        A_shard_flat.shape[1],
+    )
+
+    outputs = [
+        torch.empty(
+            (A_shard_flat.shape[0], B.shape[1]),
+            dtype=out_dtype or B.dtype,
+            device=A_shard.device,
+        )
+        for B, out_dtype in zip(Bs, out_dtypes)
+    ]
+
+    first = True
+    events = [torch.cuda.Event() for _ in outputs]
+
+    def default_consumer(shard: torch.Tensor, rank: int) -> None:
+        nonlocal first
+        for out, event, B_shard, kwargs in zip(outputs, events, B_shards, kwargs_list):
+            event.wait()
+            if first:
+                torch.ops.aten.mm.out(shard, B_shard[rank], **kwargs, out=out)
+            else:
+                out.addmm_(shard, B_shard[rank])
+            event.record()
+
+        first = False
+
+    _pipelined_all_gather_and_consume_last_dim(
+        A_shard_flat,
+        default_consumer,
+        A_flat_out,
+        group_name,
+        return_A,
+    )
+    ret_A = None
+    if return_A:
+        # This path is inefficient and will be filtered out at passes stage
+        # Added only for completeness.
+        A_split_cat_out_flat = torch.cat(A_flat_out.chunk(group_size), dim=-1)
+        ret_A = unflatten(A_split_cat_out_flat)
+
+    return ret_A, [unflatten(output) for output in outputs]
+
+
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")
 def _fused_all_gather_matmul_fallback(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     gather_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     *,
     return_A: bool = True,
 ) -> tuple[torch.Tensor | None, list[torch.Tensor]]:
@@ -638,6 +823,15 @@ def _fused_all_gather_matmul_fallback(
         A_shard.contiguous(), group_size, group_name
     )
     A = torch.ops._c10d_functional.wait_tensor(A)
+    if gather_dim == A.ndim - 1 or gather_dim == -1:
+        A_splits = A.chunk(group_size)
+        A_mm = torch.cat(A_splits, dim=-1)
+        res = [torch.matmul(A_mm, B) for B in Bs]
+        if return_A:
+            return A_mm, res
+        else:
+            return None, res
+
     A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
     res = [torch.matmul(A, B).movedim(0, gather_dim) for B in Bs]
     if return_A:
@@ -651,7 +845,7 @@ def _fused_all_gather_matmul(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     gather_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     *,
     return_A: bool = True,
 ) -> tuple[torch.Tensor | None, list[torch.Tensor]]:
@@ -702,7 +896,7 @@ def _should_use_fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
     gather_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> bool:
     group = c10d._resolve_process_group(group_name)
     local_M = math.prod(A_shard.shape[:-1])
@@ -724,7 +918,7 @@ def _should_use_fused_all_gather_matmul_native(
 def _fused_all_gather_matmul_native(
     A_shard: torch.Tensor,
     B: torch.Tensor,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
@@ -778,7 +972,7 @@ def _fused_all_gather_matmul_native(
 def _should_use_multimem_all_gather_matmul(
     A_shard: torch.Tensor,
     gather_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     return_A: bool,
 ) -> bool:
     group = c10d._resolve_process_group(group_name)
@@ -804,7 +998,7 @@ def _should_use_multimem_all_gather_matmul(
 def _multimem_all_gather_matmul(
     A_shard: torch.Tensor,
     Bs: list[torch.Tensor],
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> list[torch.Tensor]:
     group = c10d._resolve_process_group(group_name)
     A_shape = torch.Size((A_shard.shape[0] * group.size(), *A_shard.shape[1:]))
@@ -823,7 +1017,7 @@ def _fused_all_gather_scaled_matmul_fallback(
     A_scale: torch.Tensor,
     B_scales: list[torch.Tensor],
     gather_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
     result_scales: list[torch.Tensor | None],
     out_dtypes: list[torch.dtype | None],
@@ -897,7 +1091,7 @@ def _fused_all_gather_scaled_matmul(
     A_scale: torch.Tensor,
     B_scales: list[torch.Tensor],
     gather_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     biases: list[torch.Tensor | None],
     result_scales: list[torch.Tensor | None],
     out_dtypes: list[torch.dtype | None],
@@ -1003,7 +1197,7 @@ def _fused_matmul_reduce_scatter(
     B: torch.Tensor,
     reduce_op: str,
     scatter_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> torch.Tensor:
     """
     Perform the following logic with micro-pipelined computation and
@@ -1039,7 +1233,7 @@ def _fused_matmul_reduce_scatter_fallback(
     B: torch.Tensor,
     reduce_op: str,
     scatter_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> torch.Tensor:
     res = funcol.reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
     res = funcol.wait_tensor(res)
@@ -1054,7 +1248,7 @@ def _fused_matmul_reduce_scatter_impl(
     out_dtype: torch.dtype | None,
     reduce_op: str,
     scatter_dim: int,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> torch.Tensor:
     if A.dim() < 2:
         raise ValueError("A_shard must be a matrix")
@@ -1140,7 +1334,7 @@ def _fused_scaled_matmul_reduce_scatter(
     reduce_op: str,
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     output_shape: list[int],
     bias: torch.Tensor | None = None,
     result_scale: torch.Tensor | None = None,
@@ -1194,7 +1388,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     reduce_op: str,
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     output_shape: list[int],
     bias: torch.Tensor | None = None,
     result_scale: torch.Tensor | None = None,
@@ -1246,7 +1440,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     reduce_op: str,
     orig_scatter_dim: int,
     scatter_dim_after_maybe_reshape: int,
-    group_name: str,
+    group_name: c10d.GroupName,
     output_shape: list[int],
 ) -> torch.Tensor:
     if A.dim() < 2:
@@ -1470,7 +1664,7 @@ of additional launching overhead.
 @torch.library.impl(lib, "_low_contention_all_gather", "Meta")
 def _low_contention_all_gather_meta(
     tensor: torch.Tensor,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> torch.Tensor:
     group_size = c10d._get_group_size_by_name(group_name)
     return tensor.new_empty(tensor.shape[0] * group_size, *tensor.shape[1:])
@@ -1479,7 +1673,7 @@ def _low_contention_all_gather_meta(
 @torch.library.impl(lib, "_low_contention_all_gather", "CUDA")
 def _low_contention_all_gather(
     tensor: torch.Tensor,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> torch.Tensor:
     """
     Performs all-gather with symmetric memory in a low-contention fashion.
@@ -1515,7 +1709,7 @@ def _low_contention_all_gather(
             local_buf.copy_(tensor)
         # pull
         symm_mem.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
             chunks[remote_rank].copy_(src_buf)
@@ -1528,7 +1722,7 @@ def _low_contention_all_gather(
 def _low_contention_reduce_scatter_meta(
     tensor: torch.Tensor,
     reduce_op: str,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> torch.Tensor:
     group_size = c10d._get_group_size_by_name(group_name)
     return tensor.unflatten(0, (group_size, -1)).mean(dim=0)
@@ -1550,7 +1744,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
     with _get_backend_stream():
         # pull + offline reduction
         symm_mem.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             src_buf = symm_mem.get_buffer(
                 remote_rank,
@@ -1587,7 +1781,7 @@ def _low_contention_reduce_scatter_with_workspace(
     with _get_backend_stream():
         # push + offline reduction
         workspace.barrier()
-        for step in range(0, world_size):
+        for step in range(world_size):
             remote_rank = (rank - step) % world_size
             dst_buf = workspace.get_buffer(
                 remote_rank, chunks[0].shape, chunks[0].dtype, chunks[0].numel() * rank
@@ -1611,7 +1805,7 @@ def _low_contention_reduce_scatter_with_workspace(
 def _low_contention_reduce_scatter(
     tensor: torch.Tensor,
     reduce_op: str,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> torch.Tensor:
     """
     Performs reduce-scatter with symmetric memory in a low-contention fashion.
@@ -1654,7 +1848,7 @@ def _all_to_all_vdev_2d_meta(
     out: torch.Tensor,
     in_splits: torch.Tensor,
     out_splits_offsets: torch.Tensor,
-    group_name: str,
+    group_name: c10d.GroupName,
     major_align: int | None = None,
 ) -> None:
     return None
@@ -1666,7 +1860,7 @@ def _all_to_all_vdev_2d_offset_meta(
     out: torch.Tensor,
     in_splits_offsets: torch.Tensor,
     out_splits_offsets: torch.Tensor,
-    group_name: str,
+    group_name: c10d.GroupName,
 ) -> None:
     return None
 
@@ -1685,6 +1879,26 @@ if TYPE_CHECKING:
     from torch.types import _device, _dtype, _int
 
 
+_use_implicit_mempool: bool | None = None  # type: ignore[assignment]
+
+
+def _should_use_implicit_mempool() -> bool:
+    r"""
+    Check if the implicit memory pool should be used for symmetric memory allocations.
+
+    Returns:
+        bool: True if the implicit memory pool should be used, False otherwise.
+
+    By default, use implicit memory pool for `symm_mem.empty`.  Users can
+    disable this by setting the environment variable `TORCH_SYMMMEM_IMPLICIT_POOL` to `0`.
+    """
+    global _use_implicit_mempool
+    if _use_implicit_mempool is None:
+        _use_implicit_mempool = os.getenv("TORCH_SYMMMEM_IMPLICIT_POOL", "1") == "1"
+
+    return _use_implicit_mempool
+
+
 @overload
 def empty(
     *size: _int, dtype: _dtype | None = None, device: _device | None = None
@@ -1692,6 +1906,7 @@ def empty(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def empty(
     size: Sequence[_int],
     *,
@@ -1706,8 +1921,6 @@ def empty(  # type: ignore[misc]
     device: _device | None = None,
 ) -> torch.Tensor:
     r"""
-    empty(*size, *, dtype=None, device=None) -> Tensor
-
     Similar to :func:`torch.empty()`. The returned tensor can be used by
     :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
     symmetric memory tensor among participating processes.
@@ -1734,17 +1947,24 @@ def empty(  # type: ignore[misc]
 
     if device is None:
         device = torch.get_default_device()
+    else:
+        device = torch.device(device)
 
-    return _SymmetricMemory.empty_strided_p2p(
-        size=size,
-        stride=torch._prims_common.make_contiguous_strides_for(size),
-        dtype=dtype,
-        device=torch.device(device),
-    )
+    stride = torch._prims_common.make_contiguous_strides_for(size)
+
+    if _should_use_implicit_mempool() and device.type == "cuda":
+        # Allocate tensor from an implicit memory pool
+        mempool = get_mem_pool(device)
+        # TODO: this path can be made device-agnostic if `use_mem_pool` is
+        # elevated from torch.cuda to torch accelerator.
+        with torch.cuda.use_mem_pool(mempool):
+            return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
+    else:
+        return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
 
 def rendezvous(
-    tensor: torch.Tensor, group: Union[str, ProcessGroup]
+    tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
 ) -> _SymmetricMemory:
     r"""
     rendezvous(tensor, group) -> _SymmetricMemory
@@ -1762,13 +1982,12 @@ def rendezvous(
     from torch._C._distributed_c10d import ProcessGroup
 
     if isinstance(group, str):
-        group_name = group
+        group_name = c10d.GroupName(group)
     elif isinstance(group, ProcessGroup):
         group_name = group.group_name
     else:
         raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
 
-    enable_symm_mem_for_group(group_name)
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -1797,7 +2016,7 @@ def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
 
     Args:
         backend (str): the backend for symmetric memory allocation. Currently,
-        only "NVSHMEM", "CUDA", "NCCL" are supported.
+            only `"NVSHMEM"`, `"CUDA"`, `"NCCL"` are supported.
     """
     _SymmetricMemory.set_backend(name)
 
@@ -1808,8 +2027,7 @@ def get_backend(device: _device) -> str | None:
     found, return None.
 
     Args:
-        device (class:`torch.device` or str): the device for which to get the
-        backend.
+        device (`torch.device` or str): the device for which to get the backend.
     """
     return _SymmetricMemory.get_backend(torch.device(device))
 
@@ -1817,11 +2035,116 @@ def get_backend(device: _device) -> str | None:
 def get_mempool_allocator(device: _device):  # type: ignore[no-untyped-def]
     r"""
     Get the MemPool allocator for symmetric memory for a given device.
+
     Args:
-        device (class:`torch.device` or str): the device for which to get the
-        MemPool allocator.
+        device (`torch.device` or str): the device for which to get the MemPool
+            allocator.
     """
     return _SymmetricMemory.get_mempool_allocator(torch.device(device))
 
 
-__all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]
+def set_signal_pad_size(size: int) -> None:
+    r"""
+    Set the signal pad size for future symmetric memory allocations.
+
+    Signal pads are P2P-accessible memory regions used for synchronization in
+    symmetric memory. This function allows users to configure
+    the signal pad size to be proportional to their workload requirements.
+
+    .. warning::
+        This must be called before any symmetric memory allocations are made.
+        The size cannot be changed after allocations have been performed.
+
+    Args:
+        size (int): the signal pad size in bytes. The size should be
+            proportional to the number of blocks launched and the world size.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Set a larger signal pad size before any allocations
+        >>> torch.distributed._symmetric_memory.set_signal_pad_size(1024 * 1024)  # 1MB
+    """
+    _SymmetricMemory.signal_pad_size = size
+
+
+def get_signal_pad_size() -> int:
+    r"""
+    Get the current signal pad size for symmetric memory allocations.
+
+    Returns the user-configured size if set via :func:`set_signal_pad_size`,
+    otherwise returns the default size.
+
+    Returns:
+        int: the signal pad size in bytes.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> size = torch.distributed._symmetric_memory.get_signal_pad_size()
+        >>> print(f"Signal pad size: {size} bytes")
+    """
+    return _SymmetricMemory.signal_pad_size
+
+
+# An internal map from device to the symmetric memory pool for that device.
+_symm_mem_pools: dict[_device, torch.cuda.MemPool] = {}
+
+
+def get_mem_pool(device: _device) -> torch.cuda.MemPool:
+    """
+    Get the symmetric memory pool for a given device. If not found, create a new
+    pool.
+
+    The tensor allocations with this pool must be symmetric across ranks.  The
+    allocated tensors can be used with symmetric operations, for example,
+    operations defined under `torch.ops.symm_mem`.
+
+    Args:
+        device (`torch.device` or str): the device for which to get the symmetric memory pool.
+
+    Returns:
+        `torch.cuda.MemPool`: the symmetric memory pool for the given device.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> pool = torch.distributed._symmetric_memory.get_mem_pool("cuda:0")
+        >>> with torch.cuda.use_mem_pool(pool):
+        >>>     tensor = torch.randn(1000, device="cuda:0")
+        >>> tensor = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
+
+    """
+    # This function is a wrapper around the `torch.cuda.MemPool` constructor.
+    # Due to special requirements of SymmetricMemory, we preset certain options for the pool.
+    # - use_on_oom=False: we don't want to lend the space of the pool for
+    # non-symmetric allocations because this could desync the allocation state
+    # across ranks.
+    # - no_split=True: we don't want to split segments, because today a segment
+    # is associated with a signal pad, if two allocated tensors share a segment
+    # and their kernels concurrently use (the same) signal pad, this could cause
+    # undefined behaviors. We could consider relaxing this in the future if we
+    # establish stream tracking and implicit synchronization around an
+    # allocation.
+    if device not in _symm_mem_pools:
+        allocator = get_mempool_allocator(device)
+        # Create a new pool with the given allocator and the preset options.
+        _symm_mem_pools[device] = torch.cuda.MemPool(
+            allocator,
+            use_on_oom=False,
+            no_split=True,
+        )
+
+    return _symm_mem_pools[device]
+
+
+__all__ = [
+    "empty",
+    "rendezvous",
+    "is_nvshmem_available",
+    "set_backend",
+    "get_backend",
+    "set_signal_pad_size",
+    "get_signal_pad_size",
+    "get_mem_pool",
+]

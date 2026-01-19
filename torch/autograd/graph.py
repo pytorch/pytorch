@@ -44,6 +44,7 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "set_warn_on_accumulate_grad_stream_mismatch",
 ]
 
 
@@ -187,7 +188,8 @@ def _get_grad_fn_or_grad_acc(t: Union[torch.Tensor, "GradientEdge"]) -> Node:
             node = t.view_as(t).grad_fn.next_functions[0][0]  # type: ignore[union-attr]
     else:
         node = t.grad_fn
-    assert node is not None
+    if node is None:
+        raise AssertionError("Expected gradient function to be set")
     return node
 
 
@@ -229,7 +231,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
 
     # Note that output_nr default to 0 which is the right value
     # for the AccumulateGrad node.
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 
@@ -437,6 +439,13 @@ def disable_saved_tensors_hooks(error_message: str) -> Generator[None, None, Non
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
 
 
+def set_warn_on_accumulate_grad_stream_mismatch(enabled: bool) -> None:
+    """Whether to warn when the AccumulateGrad node's stream does not match the stream
+    of the node that produced the incoming gradient.
+    """
+    return torch._C._set_warn_on_accumulate_grad_stream_mismatch(enabled)
+
+
 class _MultiHandle(RemovableHandle):
     handles: tuple[RemovableHandle, ...]
 
@@ -528,11 +537,12 @@ def register_multi_grad_hook(
             def inner_hook(grad: torch.Tensor) -> None:
                 nonlocal count, nb_calls, buffer, fn
                 id = torch._C._current_graph_task_id()
-                assert id != -1, (
-                    "expected this hook to be called inside a backward call"
-                )
+                if id == -1:
+                    raise AssertionError(
+                        "expected this hook to be called inside a backward call"
+                    )
                 count[id] = count.get(id, 0)
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
                 with lock:
@@ -546,7 +556,8 @@ def register_multi_grad_hook(
 
                 buffer[id][idx] = grad
 
-                assert nb_calls is not None
+                if nb_calls is None:
+                    raise AssertionError("Expected nb_calls to be set")
                 if curr_count == nb_calls - 1:
                     fn = cast(Callable[[Sequence[Optional[torch.Tensor]]], None], fn)
                     fn(buffer[id])
@@ -566,7 +577,10 @@ def register_multi_grad_hook(
         def wrapped_fn(grad: torch.Tensor) -> None:
             nonlocal ran_hook
             id = torch._C._current_graph_task_id()
-            assert id != -1, "expected this hook to be called inside a backward call"
+            if id == -1:
+                raise AssertionError(
+                    "expected this hook to be called inside a backward call"
+                )
             with lock:
                 prev, ran_hook[id] = ran_hook[id], True
             if prev:
@@ -662,11 +676,13 @@ class _swap_with_cloned(saved_tensors_hooks):
                 "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
                 "in which the graph was originally recorded."
             )
-            assert _allow_mutation_on_saved_tensors_enabled, error_msg
+            if not _allow_mutation_on_saved_tensors_enabled:
+                raise AssertionError(error_msg)
             if handle in ctx.cloned:
                 res = ctx.cloned[handle]
             else:
-                assert handle in ctx.original, error_msg
+                if handle not in ctx.original:
+                    raise AssertionError(error_msg)
                 res = ctx.original[handle]
             return res
 
