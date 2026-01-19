@@ -115,6 +115,7 @@ test_failures = {
     #
     # Failed to find dynamic for loop variable:
     #
+    "test_complex_conv2d_conj_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_conv1d_with_permute_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
         ("cpu",), is_skip=True
