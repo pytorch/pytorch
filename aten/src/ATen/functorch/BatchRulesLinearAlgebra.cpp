@@ -6,6 +6,8 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 
+#include <algorithm>
+
 namespace at::functorch {
 
 typedef std::tuple<Tensor, std::optional<int64_t>> oneOutput;
@@ -315,7 +317,7 @@ oneOutput linalg_lu_solve_batch_rule(
   const auto LU_num_batch_dims = rankWithoutBatchDim(LU_, LU_bdim) - LU_min_rank;
   const auto pivots_num_batch_dims = rankWithoutBatchDim(pivots_, pivots_bdim) - pivots_min_rank;
   const auto B_num_batch_dims = rankWithoutBatchDim(B_, B_bdim) - B_min_rank;
-  const auto max_num_batch_dims = std::max(std::max(LU_num_batch_dims, pivots_num_batch_dims), B_num_batch_dims);
+  const auto max_num_batch_dims = std::max({LU_num_batch_dims, pivots_num_batch_dims, B_num_batch_dims});
 
   LU_ = maybePadToLogicalRank(LU_, LU_bdim, max_num_batch_dims + LU_min_rank);
   pivots_ = maybePadToLogicalRank(pivots_, pivots_bdim, max_num_batch_dims + pivots_min_rank);
@@ -382,14 +384,6 @@ fourOutputs solve_ex_batch_rule(
   A_ = ensure_has_bdim(A_, A_bdim.has_value(), batch_size);
   B_ = ensure_has_bdim(B_, B_bdim.has_value(), batch_size);
 
-  // NOTE [ solve_ex Batch Rule Contiguity ]
-  // A determines whether or not linalg_solve takes an optimized path. We need the check on A_ to match the one run on
-  // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behavior
-  // differs based on whether or not the optimized path was taken
-  const auto batched_A_was_contiguous = A_bdim.has_value() ? at::select(A, *A_bdim, 0).is_contiguous() : A.is_contiguous();
-  if (batched_A_was_contiguous && !A.is_complex()) {
-    A_ = A_.contiguous();
-  }
   auto res = _linalg_solve_ex(A_, B_, left, check_errors);
   return std::make_tuple(std::move(std::get<0>(res)), 0, std::move(std::get<1>(res)), 0, std::move(std::get<2>(res)), 0, std::move(std::get<3>(res)), 0);
 }

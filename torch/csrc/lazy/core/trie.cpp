@@ -1,8 +1,5 @@
 #include <torch/csrc/lazy/core/trie.h>
 
-#include <torch/csrc/lazy/core/hash.h>
-#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
-#include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <fstream>
 #include <sstream>

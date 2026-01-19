@@ -12,6 +12,7 @@ from torch.distributed.pipelining.microbatch import (
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    skipCPUIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -60,6 +61,7 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
+    @skipCPUIf(True, "Flex attention backward is not supported on CPU")
     def test_split_block_mask(self, device):
         B = 6
         H = 1

@@ -15,7 +15,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from typing import Optional, TextIO, Union
+from typing import TextIO
 
 
 try:
@@ -64,7 +64,7 @@ def find_free_port():
     raise RuntimeError("Failed to create a socket")
 
 
-def stop_etcd(subprocess, data_dir: Optional[str] = None):
+def stop_etcd(subprocess, data_dir: str | None = None):
     if subprocess and subprocess.poll() is None:
         logger.info("stopping etcd server")
         subprocess.terminate()
@@ -107,7 +107,7 @@ class EtcdServer:
         etcd_binary_path: path of etcd server binary (see above for fallback path)
     """
 
-    def __init__(self, data_dir: Optional[str] = None):
+    def __init__(self, data_dir: str | None = None):
         self._port = -1
         self._host = "localhost"
 
@@ -123,7 +123,7 @@ class EtcdServer:
             data_dir if data_dir else tempfile.mkdtemp(prefix="torchelastic_etcd_data")
         )
         self._etcd_cmd = None
-        self._etcd_proc: Optional[subprocess.Popen] = None
+        self._etcd_proc: subprocess.Popen | None = None
 
     def _get_etcd_server_process(self) -> subprocess.Popen:
         if not self._etcd_proc:
@@ -149,7 +149,7 @@ class EtcdServer:
         self,
         timeout: int = 60,
         num_retries: int = 3,
-        stderr: Union[int, TextIO, None] = None,
+        stderr: int | TextIO | None = None,
     ) -> None:
         """
         Start the server, and waits for it to be ready. When this function returns the sever is ready to take requests.
@@ -185,7 +185,7 @@ class EtcdServer:
         atexit.register(stop_etcd, self._etcd_proc, self._base_data_dir)
 
     def _start(
-        self, data_dir: str, timeout: int = 60, stderr: Union[int, TextIO, None] = None
+        self, data_dir: str, timeout: int = 60, stderr: int | TextIO | None = None
     ) -> None:
         sock = find_free_port()
         sock_peer = find_free_port()

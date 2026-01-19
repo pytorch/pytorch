@@ -712,7 +712,7 @@ def fake_quantize_per_tensor_affine(
             "Non-constant scale not supported",
             inputs,
         )
-    # pyrefly: ignore [missing-attribute]
+
     scale = scale.float().data  # Avoid exporter generating double type
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)

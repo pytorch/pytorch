@@ -52,7 +52,7 @@ class TestComplement(TestCase):
 
         _LOGGER.debug(f"{layout}  =>  {layoutR}")
 
-        # Post-condition: test disjointness of the codomains
+        # Post-condition: test disjointedness of the codomains
         for a in range(size(layout)):
             for b in range(size(layoutR)):
                 assert (layout(a) != layoutR(b)) or (layout(a) == 0 and layoutR(b) == 0)

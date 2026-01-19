@@ -18,6 +18,7 @@ from functorch.compile import (
     nop,
 )
 from torch._functorch.aot_autograd import aot_export_module
+from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.effects import (
     _EffectType,
     _get_effect,
@@ -26,6 +27,7 @@ from torch._higher_order_ops.effects import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.node import has_side_effect
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
@@ -34,7 +36,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TEST_CUDA,
-    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
@@ -136,7 +137,7 @@ def forward(self, arg1_1):
     with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
-    return [add]""",  # noqa: B950
+    return (add,)""",  # noqa: B950
             )
 
     def test_torchbind_custom_op(self):
@@ -299,7 +300,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res.sum().backward()
 
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(TEST_WITH_ROCM, "triton")
     @unittest.skipIf(not SM80OrLater, "triton")
     @unittest.skipIf(not TEST_CUDA, "triton")
     @skipIfNoDynamoSupport
@@ -558,6 +558,43 @@ def forward(self, tangents_1, tangents_2, tangents_token):
     clone_1 = torch.ops.aten.clone.default(tangents_2)
     return (clone, clone_1, tangents_1, tangents_2, getitem_6)""",
             )
+
+    def test_dce(self):
+        # If an operator is marked as side effectful, it should not get DCEd by
+        # FX's eliminate_dead_code
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            log3 = []
+
+            @torch.library.custom_op(
+                "mylib::my_logger3",
+                mutates_args=(),
+            )
+            def my_logger3(s: str, t: torch.Tensor) -> torch.Tensor:
+                log3.append(s)
+                return torch.zeros(1)
+
+            @my_logger3.register_fake
+            def my_logger3(s, t) -> torch.Tensor:
+                return torch.zeros(1)
+
+            # Registering an op as being effectful should also prevent FX DCE
+            from torch._library.effects import EffectType
+
+            torch.library._register_effectful_op(
+                "mylib::my_logger3", EffectType.ORDERED
+            )
+
+            def foo(x):
+                b = torch.scalar_tensor(x.shape[0])
+                torch.ops.mylib.my_logger3("moo", b)
+                return x + x
+
+            gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 3))
+            gm.graph.eliminate_dead_code()
+            gm.recompile()
+            gm(torch.ones(3, 3))
+            self.assertTrue(len(log3), 1)
 
     def test_effects_and_input_mutation_return(self):
         def fn(a, b):
@@ -869,6 +906,151 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
             )
         finally:
             handle.destroy()
+
+    @unittest.skipIf(not TEST_CUDA, "triton")
+    def test_export_invoke_subgraph(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            recorded_list = []
+
+            @torch.library.custom_op("mylib::record_memory", mutates_args=())
+            def record_memory(prefix: str, module_name: str) -> None:
+                torch.cuda.synchronize()
+                mem_alloc = torch.cuda.memory_allocated() / 1024**2
+                mem_reserved = torch.cuda.memory_reserved() / 1024**2
+                memory_str = f"[{prefix}] {module_name}: allocated={mem_alloc:.2f} MB, reserved={mem_reserved:.2f} MB"
+                recorded_list.append(memory_str)
+
+            @record_memory.register_fake
+            def record_memory_fake(prefix, module_name):
+                return
+
+            record_memory.register_effect(_EffectType.ORDERED)
+            has_side_effect(torch.ops.mylib.record_memory.default)
+
+            class N(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear1 = torch.nn.Linear(1024, 1024)
+                    self.relu = torch.nn.ReLU()
+                    self.linear2 = torch.nn.Linear(1024, 1024)
+
+                @torch.compiler.nested_compile_region
+                def forward(self, x):
+                    torch.ops.mylib.record_memory("forward", "N")
+                    x = self.linear1(x)
+                    x = self.relu(x)
+                    x = self.linear2(x)
+                    return x
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mod_list = torch.nn.ModuleList(N() for _ in range(3))
+
+                def forward(self, x):
+                    for m in self.mod_list:
+                        x = m(x)
+                    torch.ops.mylib.record_memory("forward", "N")
+                    return (x,)
+
+            model = M().to("cuda")
+            torch.cuda.reset_peak_memory_stats()
+
+            x = torch.randn(32, 1024, requires_grad=True, device="cuda")
+
+            # Test torch.export
+            ep = torch.export.export(model, (x,))
+            decomp = ep.run_decompositions()
+            self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
+
+            self.assertExpectedInline(
+                decomp.graph_module.code.strip(),
+                """\
+def forward(self, token, p_mod_list_0_linear1_weight, p_mod_list_0_linear1_bias, p_mod_list_0_linear2_weight, p_mod_list_0_linear2_bias, p_mod_list_1_linear1_weight, p_mod_list_1_linear1_bias, p_mod_list_1_linear2_weight, p_mod_list_1_linear2_bias, p_mod_list_2_linear1_weight, p_mod_list_2_linear1_bias, p_mod_list_2_linear2_weight, p_mod_list_2_linear2_bias, x):
+    repeated_subgraph0 = self.repeated_subgraph0
+    invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', token, x, p_mod_list_0_linear1_weight, p_mod_list_0_linear1_bias, p_mod_list_0_linear2_weight, p_mod_list_0_linear2_bias);  repeated_subgraph0 = token = x = p_mod_list_0_linear1_weight = p_mod_list_0_linear1_bias = p_mod_list_0_linear2_weight = p_mod_list_0_linear2_bias = None
+    getitem = invoke_subgraph[0]
+    getitem_1 = invoke_subgraph[1];  invoke_subgraph = None
+    repeated_subgraph0_1 = self.repeated_subgraph0
+    invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', getitem, getitem_1, p_mod_list_1_linear1_weight, p_mod_list_1_linear1_bias, p_mod_list_1_linear2_weight, p_mod_list_1_linear2_bias);  repeated_subgraph0_1 = getitem = getitem_1 = p_mod_list_1_linear1_weight = p_mod_list_1_linear1_bias = p_mod_list_1_linear2_weight = p_mod_list_1_linear2_bias = None
+    getitem_2 = invoke_subgraph_1[0]
+    getitem_3 = invoke_subgraph_1[1];  invoke_subgraph_1 = None
+    repeated_subgraph0_2 = self.repeated_subgraph0
+    invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_2, 'subgraph_0', getitem_2, getitem_3, p_mod_list_2_linear1_weight, p_mod_list_2_linear1_bias, p_mod_list_2_linear2_weight, p_mod_list_2_linear2_bias);  repeated_subgraph0_2 = getitem_2 = getitem_3 = p_mod_list_2_linear1_weight = p_mod_list_2_linear1_bias = p_mod_list_2_linear2_weight = p_mod_list_2_linear2_bias = None
+    getitem_4 = invoke_subgraph_2[0]
+    getitem_5 = invoke_subgraph_2[1];  invoke_subgraph_2 = None
+    with_effects = torch.ops.higher_order.with_effects(getitem_4, torch.ops.mylib.record_memory.default, 'forward', 'N');  getitem_4 = None
+    getitem_6 = with_effects[0];  with_effects = None
+    return (getitem_6, getitem_5)""",
+            )
+
+            self.assertExpectedInline(
+                decomp.graph_module.repeated_subgraph0.code.strip(),
+                """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops.mylib.record_memory.default, 'forward', 'N');  arg0_1 = None
+    getitem = with_effects[0];  with_effects = None
+    permute = torch.ops.aten.permute.default(arg2_1, [1, 0]);  arg2_1 = None
+    addmm = torch.ops.aten.addmm.default(arg3_1, arg1_1, permute);  arg3_1 = arg1_1 = permute = None
+    relu = torch.ops.aten.relu.default(addmm);  addmm = None
+    permute_1 = torch.ops.aten.permute.default(arg4_1, [1, 0]);  arg4_1 = None
+    addmm_1 = torch.ops.aten.addmm.default(arg5_1, relu, permute_1);  arg5_1 = relu = permute_1 = None
+    return (getitem, addmm_1)""",
+            )
+
+            recorded_list.clear()
+            out2 = ep.module()(x)
+            self.assertEqual(len(recorded_list), 4)
+            self.assertTrue(torch.allclose(model(x)[0], out2[0]))
+
+            # Test when we unlift the tokens from the graph. This is used in the inductor path.
+            with (
+                tracing(TracingContext(None)),
+                torch._functorch.config.patch(unlift_effect_tokens=True),
+            ):
+                gm, gs = aot_export_module(ep.module(), (x,), trace_joint=False)
+                self.assertExpectedInline(
+                    str(gm.code).strip(),
+                    """\
+def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1, arg8_1, arg9_1, arg10_1, arg11_1, arg12_1, arg13_1):
+    _make_token_default = torch.ops.prims._make_token.default()
+    repeated_subgraph0 = self.repeated_subgraph0
+    with_effects_1 = torch.ops.higher_order.with_effects(_make_token_default, torch.ops.higher_order.invoke_subgraph, repeated_subgraph0, 'subgraph_0', arg13_1, arg1_1, arg2_1, arg3_1, arg4_1);  _make_token_default = repeated_subgraph0 = arg13_1 = arg1_1 = arg2_1 = arg3_1 = arg4_1 = None
+    getitem = with_effects_1[0]
+    getitem_1 = with_effects_1[1];  with_effects_1 = None
+    repeated_subgraph0_1 = self.repeated_subgraph0
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.invoke_subgraph, repeated_subgraph0_1, 'subgraph_0', getitem_1, arg5_1, arg6_1, arg7_1, arg8_1);  getitem = repeated_subgraph0_1 = getitem_1 = arg5_1 = arg6_1 = arg7_1 = arg8_1 = None
+    getitem_2 = with_effects_2[0]
+    getitem_3 = with_effects_2[1];  with_effects_2 = None
+    repeated_subgraph0_2 = self.repeated_subgraph0
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_2, torch.ops.higher_order.invoke_subgraph, repeated_subgraph0_2, 'subgraph_0', getitem_3, arg9_1, arg10_1, arg11_1, arg12_1);  getitem_2 = repeated_subgraph0_2 = getitem_3 = arg9_1 = arg10_1 = arg11_1 = arg12_1 = None
+    getitem_4 = with_effects_3[0]
+    getitem_5 = with_effects_3[1];  with_effects_3 = None
+    with_effects = torch.ops.higher_order.with_effects(getitem_4, torch.ops.mylib.record_memory.default, 'forward', 'N');  getitem_4 = None
+    getitem_6 = with_effects[0];  with_effects = None
+    _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_6]);  getitem_6 = _sink_tokens_default = None
+    return (getitem_5,)""",  # noqa: B950
+                )
+                self.assertExpectedInline(
+                    str(gm.repeated_subgraph0.code).strip(),
+                    """\
+def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
+    _make_token_default = torch.ops.prims._make_token.default()
+    with_effects = torch.ops.higher_order.with_effects(_make_token_default, torch.ops.mylib.record_memory.default, 'forward', 'N');  _make_token_default = None
+    getitem = with_effects[0];  with_effects = None
+    t = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
+    addmm = torch.ops.aten.addmm.default(arg3_1, arg1_1, t);  arg3_1 = arg1_1 = t = None
+    relu = torch.ops.aten.relu.default(addmm);  addmm = None
+    t_1 = torch.ops.aten.t.default(arg4_1);  arg4_1 = None
+    addmm_1 = torch.ops.aten.addmm.default(arg5_1, relu, t_1);  arg5_1 = relu = t_1 = None
+    _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem]);  getitem = _sink_tokens_default = None
+    return (addmm_1,)""",  # noqa: B950
+                )
+
+        recorded_list.clear()
+        out2 = torch.compile(model)(x)
+        self.assertEqual(len(recorded_list), 4)
+        self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
 
 if __name__ == "__main__":

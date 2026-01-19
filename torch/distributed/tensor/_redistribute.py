@@ -8,12 +8,13 @@ import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast, NamedTuple, Optional
+from typing import cast, NamedTuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.tensor._collective_utils import one_step_redistribute_cost
 from torch.distributed.tensor._dtensor_spec import (
     DTensorSpec,
     ShardOrder,
@@ -22,6 +23,7 @@ from torch.distributed.tensor._dtensor_spec import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -36,7 +38,7 @@ logger = logging.getLogger(__name__)
 # When True, forces the graph-based algorithm using Dijkstra's shortest path.
 # When False, prefers the greedy algorithm for faster planning. Uses the graph-based algorithm
 # only when necessary to support strided-shard redistribution
-_FORCE_MIN_COST_REDISTRIBUTION_PLAN: Optional[bool] = None
+_FORCE_MIN_COST_REDISTRIBUTION_PLAN: bool | None = None
 
 
 @contextlib.contextmanager
@@ -91,6 +93,7 @@ def use_min_cost_redistribution_plan(enabled: bool = True):
                        Default: True
     """
     global _FORCE_MIN_COST_REDISTRIBUTION_PLAN
+
     old_value = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
     _FORCE_MIN_COST_REDISTRIBUTION_PLAN = enabled
     try:
@@ -108,28 +111,32 @@ class _TransformInfo(NamedTuple):
 
 # Global cache for DTensorRedistributePlanner instances
 _planner_cache: dict[
-    tuple[weakref.ReferenceType, int], "DTensorRedistributePlanner"
+    tuple[weakref.ReferenceType[DeviceMesh], TensorMeta],
+    "DTensorRedistributePlanner",
 ] = {}
 
 
 def get_redistribute_planner(
-    device_mesh: DeviceMesh, tensor_dimension: int
+    device_mesh: DeviceMesh,
+    dtensor_meta: TensorMeta,
 ) -> "DTensorRedistributePlanner":
     """
     Factory function to get or create a DTensorRedistributePlanner instance.
     This function provides transparent caching of planner instances based on
-    device_mesh and tensor_dimension. Multiple calls with the same parameters
+    device mesh and dtensor meta. Multiple calls with the same parameters
     will return the same cached instance for better performance.
     Args:
         device_mesh: The device mesh for the planner
-        tensor_dimension: Number of tensor dimensions
+        dtensor_meta: TensorMeta of the DTensor to redistribute
     Returns:
         A DTensorRedistributePlanner instance (potentially cached)
     """
-    cache_key = (weakref.ref(device_mesh), tensor_dimension)
+    if _are_we_tracing():
+        return DTensorRedistributePlanner(device_mesh, dtensor_meta)
 
+    cache_key = (weakref.ref(device_mesh), dtensor_meta)
     if cache_key not in _planner_cache:
-        planner = DTensorRedistributePlanner(device_mesh, tensor_dimension)
+        planner = DTensorRedistributePlanner(device_mesh, dtensor_meta)
         _planner_cache[cache_key] = planner
 
     return _planner_cache[cache_key]
@@ -154,7 +161,7 @@ class DTensorRedistributePlanner:
     class DistState:
         placements: tuple[Placement, ...]
         tensor_dim_to_mesh_dim: ShardOrder
-        _hash: Optional[int] = dataclasses.field(
+        _hash: int | None = dataclasses.field(
             default=None, init=False, repr=False, compare=False
         )
 
@@ -227,7 +234,7 @@ class DTensorRedistributePlanner:
         mesh: DeviceMesh,
         transform_infos: Sequence[_TransformInfo],
         src_placement: tuple[Placement, ...],
-        src_shard_order: Optional[ShardOrder] = None,
+        src_shard_order: ShardOrder | None = None,
     ) -> str:
         """
         Generate a string representation of the sequence of state transitions
@@ -282,44 +289,53 @@ class DTensorRedistributePlanner:
     def __init__(
         self,
         device_mesh: DeviceMesh,
-        tensor_dimension: int,
+        dtensor_meta: TensorMeta,
     ) -> None:
         """
         Initialize DTensorRedistributePlanner.
 
         Args:
             device_mesh: The device mesh for this planner
-            tensor_dimension: Number of tensor dimensions
+            dtensor_meta: TensorMeta of the DTensor to redistribute
         """
         self.device_mesh = device_mesh
-        self.coordinate = device_mesh.get_coordinate()
-        assert self.coordinate is not None
-        self.tensor_dimension = tensor_dimension
-        self.setup_collective_cost()
+        assert device_mesh._is_current_rank_part_of_mesh()
+        assert dtensor_meta is not None
+        self.dtensor_meta = dtensor_meta
+        self.tensor_dimension = len(dtensor_meta.shape)
+        self.setup_cost_callbacks()
 
-    def setup_collective_cost(
+    def setup_cost_callbacks(
         self,
-        all_reduce_cost: int = 4,
-        all_to_all_cost: int = 1,
-        all_gather_cost: int = 2,
-        reduce_scatter_cost: int = 2,
-        chunk_cost: int = 0,
     ) -> None:
         """
-        Set up the cost weights for different collective operations.
+        Set up the cost function for different collective operations.
+        Uses communication time estimation based on actual tensor sizes and
+        mesh topology for accurate cost modeling.
         """
-        # those can be turned in a handler considering the tensor dim size
-        self.all_reduce_cost = all_reduce_cost
-        self.all_to_all_cost = all_to_all_cost
-        self.all_gather_cost = all_gather_cost
-        self.reduce_scatter = reduce_scatter_cost
-        self.chunk_cost = chunk_cost
+
+        def state_to_spec(
+            state: DTensorRedistributePlanner.DistState,
+        ) -> DTensorSpec:
+            return DTensorSpec(
+                mesh=self.device_mesh,
+                placements=state.placements,
+                tensor_meta=self.dtensor_meta,
+                shard_order=state.tensor_dim_to_mesh_dim,
+            )
+
+        def cost_function(src_state, dst_state):
+            return one_step_redistribute_cost(
+                state_to_spec(src_state), state_to_spec(dst_state)
+            )
+
+        self.cost_function = cost_function
 
     def get_next_state(
         self,
         placements: tuple[Placement, ...],
         tensor_mesh_dim_tuple: ShardOrder,
-    ) -> dict["DTensorRedistributePlanner.DistState", int]:
+    ) -> dict["DTensorRedistributePlanner.DistState", float]:
         # We map tensor dimensions to device mesh axes, similar to JAX-style
         # sharding representation. Notation:
         # S(<tensor_dim>)[<list_of_device_dims>] means tensor dimension
@@ -363,10 +379,14 @@ class DTensorRedistributePlanner:
         # to operate on any Partial mesh dim.
 
         # list of [DistState, cost]
-        all_next_state: dict[DTensorRedistributePlanner.DistState, int] = {}
+        all_next_state: dict[DTensorRedistributePlanner.DistState, float] = {}
 
         tensor_mesh_dim_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
             tensor_mesh_dim_tuple
+        )
+        cur_dist_state = self.DistState(
+            self._to_tuple(placements),
+            tensor_mesh_dim_tuple,
         )
         ######################################################################
         # handle case 1: Shard(a) -> Shard(b)
@@ -391,7 +411,10 @@ class DTensorRedistributePlanner:
                         tensor_mesh_dim_dict
                     ),
                 )
-                all_next_state[dist_state] = self.all_to_all_cost
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
                 # reset content for next iteration
                 tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
@@ -410,7 +433,10 @@ class DTensorRedistributePlanner:
                 DTensorRedistributePlanner._dict_to_ShardOrder(tensor_mesh_dim_dict),
             )
             tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
-            all_next_state[dist_state] = self.all_gather_cost
+            all_next_state[dist_state] = self.cost_function(
+                cur_dist_state,
+                dist_state,
+            )
 
         ######################################################################
         # handle case 3: Partial() -> Replicate()
@@ -422,7 +448,10 @@ class DTensorRedistributePlanner:
             dist_state = self.DistState(
                 self._to_tuple(new_placements), tensor_mesh_dim_tuple
             )
-            all_next_state[dist_state] = self.all_reduce_cost
+            all_next_state[dist_state] = self.cost_function(
+                cur_dist_state,
+                dist_state,
+            )
 
         ######################################################################
         # handle case 4: Replicate() -> Shard()
@@ -440,7 +469,10 @@ class DTensorRedistributePlanner:
                         tensor_mesh_dim_dict
                     ),
                 )
-                all_next_state[dist_state] = self.chunk_cost
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
@@ -459,7 +491,10 @@ class DTensorRedistributePlanner:
                         tensor_mesh_dim_dict
                     ),
                 )
-                all_next_state[dist_state] = self.reduce_scatter
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
@@ -472,7 +507,10 @@ class DTensorRedistributePlanner:
             dist_state = self.DistState(
                 self._to_tuple(new_placements), tensor_mesh_dim_tuple
             )
-            all_next_state[dist_state] = self.chunk_cost
+            all_next_state[dist_state] = self.cost_function(
+                cur_dist_state,
+                dist_state,
+            )
 
         return all_next_state
 
@@ -500,7 +538,7 @@ class DTensorRedistributePlanner:
         counter = 0
         pq: list[
             tuple[
-                int,
+                float,
                 int,
                 DTensorRedistributePlanner.DistState,
                 list[DTensorRedistributePlanner.DistState],
@@ -535,7 +573,6 @@ class DTensorRedistributePlanner:
         full_tensor_shape: tuple[int, ...],
     ) -> list[int]:
         new_logical_shape = list(full_tensor_shape)
-        assert self.coordinate is not None
         for entry in src_state.tensor_dim_to_mesh_dim:
             tensor_dim = entry.tensor_dim
             mesh_dims = entry.mesh_dims
@@ -546,7 +583,7 @@ class DTensorRedistributePlanner:
                 new_size = Shard.local_shard_size_and_offset(
                     new_logical_shape[tensor_dim],
                     self.device_mesh.size(mesh_dim=mdim),
-                    self.coordinate[mdim],
+                    self.device_mesh._sym_get_coordinate(mdim),
                 )[0]
                 new_logical_shape[tensor_dim] = new_size
         return new_logical_shape
@@ -557,9 +594,38 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        assert src_spec.shard_order is not None and dst_spec.shard_order is not None
-        src_state = self.DistState(src_spec.placements, src_spec.shard_order)
-        dst_state = self.DistState(dst_spec.placements, dst_spec.shard_order)
+        # In case _StridedShard exists in placements, we let _StridedShard have
+        # higher priority to express shard_order.
+        if any(
+            isinstance(placement, _StridedShard) for placement in src_spec.placements
+        ):
+            src_placements, src_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    src_spec.placements, src_spec.mesh
+                )
+            )
+        else:
+            src_placements = src_spec.placements
+            src_shard_order = src_spec.shard_order
+        if any(
+            isinstance(placement, _StridedShard) for placement in dst_spec.placements
+        ):
+            dst_placements, dst_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    dst_spec.placements, dst_spec.mesh
+                )
+            )
+        else:
+            dst_placements = dst_spec.placements
+            dst_shard_order = dst_spec.shard_order
+        if src_shard_order is None or dst_shard_order is None:
+            raise NotImplementedError(
+                "Redistribution of _StridedShard placement is only supported for "
+                "_StridedShard that can be converted to ordered Shard placements. "
+                "Full _StridedShard redistribution support is not yet implemented."
+            )
+        src_state = self.DistState(src_placements, src_shard_order)
+        dst_state = self.DistState(dst_placements, dst_shard_order)
         transform_infos: list[_TransformInfo] = []
         state_path = self.find_min_cost_path(src_state, dst_state)
         for cur_state, nxt_state in itertools.pairwise(state_path):
@@ -606,7 +672,6 @@ class DTensorRedistributePlanner:
         """
         # logical shape records the logic tensor shape on the mesh dimension
         # this is useful to ensure uneven sharding gets correct output shape
-        assert self.coordinate is not None
         initial_logical_shape = list(src_spec.shape)
         mesh_dims_to_logical_shape = [initial_logical_shape]
         transform_infos: list[_TransformInfo] = []
@@ -634,7 +699,7 @@ class DTensorRedistributePlanner:
                     local_shard_size, _ = src._local_shard_size_and_offset(
                         current_logical_shape[src.dim],
                         mesh_dim_size,
-                        self.coordinate[i],
+                        self.device_mesh._sym_get_coordinate(i),
                     )
                     new_logical_shape = list(current_logical_shape)
                     new_logical_shape[src.dim] = local_shard_size
@@ -712,7 +777,7 @@ class DTensorRedistributePlanner:
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
     device_mesh = src_spec.device_mesh
     src_shard_order = src_spec.shard_order
@@ -720,7 +785,6 @@ def _gen_transform_infos_non_cached(
     # DTensorSpec should automatically generate shard_order, and it can be () if
     # no shard.
     assert src_shard_order is not None and dst_shard_order is not None
-
     # Determine which transform strategy to use:
     # 1. Non-standard device order → always use graph-based
     # 2. Global flag or explicit parameter True → use graph-based
@@ -736,8 +800,11 @@ def _gen_transform_infos_non_cached(
         use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
     elif use_graph_based_transform is None:
         use_graph_based_transform = False
-
-    drp = get_redistribute_planner(device_mesh, len(src_spec.shape))
+    assert src_spec.tensor_meta is not None
+    drp = get_redistribute_planner(
+        device_mesh,
+        src_spec.tensor_meta,
+    )
     if use_graph_based_transform:
         transform_infos = drp.generate_graph_based_transform_infos(
             src_spec, dst_spec, src_spec.shape
@@ -751,7 +818,7 @@ def _gen_transform_infos_non_cached(
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(
         src_spec, dst_spec, use_graph_based_transform
@@ -764,8 +831,7 @@ def redistribute_local_tensor(
     target_spec: DTensorSpec,
     *,
     async_op: bool = False,
-    is_backward: bool = False,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -780,9 +846,7 @@ def redistribute_local_tensor(
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
 
-    my_coordinate = device_mesh.get_coordinate()
-
-    if my_coordinate is None:
+    if not device_mesh._is_current_rank_part_of_mesh():
         # if rank is not part of mesh, we skip redistribute and simply return local_tensor,
         # which should be an empty tensor
         return local_tensor
@@ -858,7 +922,7 @@ def redistribute_local_tensor(
                 elif current.is_replicate():
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
-                        local_tensor, device_mesh, i, my_coordinate[i]
+                        local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 else:
                     assert current.is_shard(), (
@@ -876,29 +940,18 @@ def redistribute_local_tensor(
             elif target.is_partial():
                 if current.is_replicate():
                     partial_spec = cast(Partial, target)
-                    # skip the replicate to partial transformation when we are in backward pass
-                    # In this case we keep the grad as replicate, this is because we don't
-                    # want to convert the replicated gradients back to partial, although
-                    # that's logically conform with the same layout, converting the gradients
-                    # back to partial is actually useless as you would have to do reduce later
-                    # which would be more expensive than keeping it replicate! For this reason,
-                    # we keep the replicate grad here.
-                    new_local_tensor = (
-                        partial_spec._partition_value(local_tensor, device_mesh, i)
-                        if not is_backward
-                        else local_tensor
+                    new_local_tensor = partial_spec._partition_value(
+                        local_tensor, device_mesh, i
                     )
                 elif current.is_shard():
-                    if not is_backward:
-                        raise RuntimeError(
-                            f"redistribute from {current} to {target} not supported yet"
-                        )
-                    # for backward shard -> partial, we just need to convert the shard to replicate
-                    current_placement = cast(Shard, current)
-                    new_local_tensor = current_placement._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    raise RuntimeError(
+                        f"redistribute from {current} to {target} not supported yet"
                     )
                 else:
+                    if current != target:
+                        raise AssertionError(
+                            f"Redistribution from one partial type ({current}) to another ({target}) is unsupported."
+                        )
                     # partial -> partial no op, should never hit
                     new_local_tensor = local_tensor
 
@@ -919,8 +972,8 @@ class Redistribute(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
         async_op: bool = False,
-        forward_dtype: Optional[torch.dtype] = None,
-        backward_dtype: Optional[torch.dtype] = None,
+        forward_dtype: torch.dtype | None = None,
+        backward_dtype: torch.dtype | None = None,
     ):
         ctx.async_op = async_op
         ctx.backward_dtype = backward_dtype
@@ -990,26 +1043,37 @@ class Redistribute(torch.autograd.Function):
         else:
             local_tensor = grad_output._local_tensor
             current_spec = grad_output._spec
+        # skip the replicate to partial transformation when we are in backward pass
+        # In this case we keep the grad as replicate, this is because we don't
+        # want to convert the replicated gradients back to partial, although
+        # that's logically conform with the same layout, converting the gradients
+        # back to partial is actually useless as you would have to do reduce later
+        # which would be more expensive than keeping it replicate!
+
+        # for backward shard -> partial, we just do shard -> replicate
+        # for backward replicate -> partial, we skip the transformation
+        normalized_placements: list[Placement] = []
+        for current, target in zip(current_spec.placements, previous_spec.placements):
+            if (current.is_shard() or current.is_replicate()) and target.is_partial():
+                normalized_placements.append(Replicate())
+            else:
+                normalized_placements.append(target)
+
+        previous_spec = DTensorSpec(
+            previous_spec.device_mesh,
+            placements=tuple(normalized_placements),
+            tensor_meta=previous_spec.tensor_meta,
+        )
 
         output = redistribute_local_tensor(
             local_tensor,
             current_spec,
             previous_spec,
             async_op=async_op,
-            is_backward=True,
         )
 
         if output.dtype != ctx.original_dtype:
             output = output.to(ctx.original_dtype)
-
-        # normalize the target placement to replicate if it is partial
-        normalized_placements: list[Placement] = []
-        for previous_placement in previous_spec.placements:
-            if previous_placement.is_partial():
-                # keep target placement to replicate instead of partial in this case
-                normalized_placements.append(Replicate())
-            else:
-                normalized_placements.append(previous_placement)
 
         spec = DTensorSpec(
             previous_spec.device_mesh,
