@@ -6,3 +6,6 @@ from __future__ import annotations
 __all__: list[str] = []
 
 from torch.onnx._internal.torchscript_exporter.symbolic_opset18 import *  # noqa: F401,F403
+
+from torch.onnx import symbolic_helper
+from torch.onnx.symbolic_helper import parse_args

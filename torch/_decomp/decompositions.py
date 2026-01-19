@@ -5447,8 +5447,6 @@ def resize_as(self, other, memory_format=None):
     if memory_format == torch.preserve_format:
         memory_format = suggest_memory_format(other)
     return aten.resize(self, other.shape, memory_format=memory_format)
-
-
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)

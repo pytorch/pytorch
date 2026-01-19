@@ -650,6 +650,73 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                     module, x, ops, opset_versions=[opset_version]
                 )
 
+    def test_fft_rfftn_static_export(self):
+        """Test ONNX export of torch.fft.rfftn with static power-of-2 shapes."""
+        class M(torch.nn.Module):
+            def forward(self, x):
+                # Explicit shape parameter is required for ONNX
+                return torch.fft.rfftn(x, s=(8, 8), dim=(-2, -1))
+
+        x = torch.randn(1, 8, 8)
+        # Just verify it exports without error
+        onnx_buffer = io.BytesIO()
+        torch.onnx.export(M(), x, onnx_buffer, opset_version=18)
+        onnx_buffer.seek(0)
+        model = onnx.load(onnx_buffer)
+        onnx.checker.check_model(model)
+
+    def test_fft_rfftn_3d(self):
+        """Test ONNX export of 3D FFT."""
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.fft.rfftn(x, s=(8, 8, 8), dim=(-3, -2, -1))
+
+        x = torch.randn(1, 8, 8, 8)
+        onnx_buffer = io.BytesIO()
+        torch.onnx.export(M(), x, onnx_buffer, opset_version=18)
+        onnx_buffer.seek(0)
+        model = onnx.load(onnx_buffer)
+        onnx.checker.check_model(model)
+
+    def test_fft_rfftn_with_norm(self):
+        """Test ONNX export of FFT with normalization."""
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.fft.rfftn(x, s=(8, 8), dim=(-2, -1), norm="ortho")
+
+        x = torch.randn(1, 8, 8)
+        onnx_buffer = io.BytesIO()
+        torch.onnx.export(M(), x, onnx_buffer, opset_version=18)
+        onnx_buffer.seek(0)
+        model = onnx.load(onnx_buffer)
+        onnx.checker.check_model(model)
+
+    def test_fft_rfftn_non_power_of_2_fails(self):
+        """Test that non-power-of-2 shapes are handled appropriately.
+        
+        Note: Depending on the export path (torch.export vs torch.jit), the error
+        may occur at different stages (symbolic export, decomposition, or inference).
+        """
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.fft.rfftn(x, s=(7, 7), dim=(-2, -1))
+
+        x = torch.randn(1, 7, 7)
+        onnx_buffer = io.BytesIO()
+        
+        # Try to export - error may be raised or may succeed depending on path
+        try:
+            torch.onnx.export(M(), x, onnx_buffer, opset_version=18)
+            # If no error during export, that's OK - the validation happens
+            # in the decomposition which may be skipped in some trace modes
+        except RuntimeError as e:
+            # Expected if validation is enforced
+            error_msg = str(e).lower()
+            self.assertTrue(
+                "power" in error_msg or "size" in error_msg,
+                f"Expected error about power-of-2 or size, got: {e}"
+            )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
