@@ -1555,7 +1555,7 @@ except RuntimeError as e:
                         )
                     self.assertRegex(
                         error_message,
-                        r"Exception raised from trigger_torch_check_eq_failure at .*/main.cpp:8",
+                        r"Exception raised from trigger_torch_check_eq_failure at .*[/\\]main.cpp:8",
                     )
                 else:
                     self.assertNotIn(
