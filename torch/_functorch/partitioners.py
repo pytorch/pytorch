@@ -2343,7 +2343,9 @@ def solve_min_cut(
                     )
 
             # Format the constraints nicely
-            constraint_lines = []
+            # NOTE: keep this as `list[str]` (not `list[LiteralString]`) so
+            # pyrefly doesn't reject appending f-strings here.
+            constraint_lines: list[str] = []
             for node_name, constraints in node_constraints.items():
                 constraint_lines.append(f"  {node_name}:")
                 for c in constraints:
