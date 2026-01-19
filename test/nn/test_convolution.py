@@ -1761,6 +1761,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
         output_mask = [False, True, True]
         test_conv_backward_output_mask(output_mask)
 
+        # ConvB propagation must return just weight gradient
+        output_mask = [False, True, False]
+        test_conv_backward_output_mask(output_mask)
+
         # ConvB propagation must return just bias gradient
         output_mask = [False, False, True]
         test_conv_backward_output_mask(output_mask)
@@ -2360,7 +2364,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.shape, output_size)
 
     @skipMeta
-    @skipXPU("https://github.com/intel/torch-xpu-ops/issues/2594")
+    @skipXPU #Refer https://github.com/intel/torch-xpu-ops/issues/2594
     @parametrize_test(
         "input_shape,transposed,dilated,groups,layout,backend_expected",
         [
