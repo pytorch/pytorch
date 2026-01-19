@@ -1800,6 +1800,19 @@ class NativeCachingAllocator : public XPUAllocator {
     allocated_blocks[block->ptr] = block;
   }
 
+  Block* get_allocated_block(void* ptr, bool remove = false) {
+    std::scoped_lock<std::mutex> lock(mutex);
+    auto it = allocated_blocks.find(ptr);
+    if (it == allocated_blocks.end()) {
+      return nullptr;
+    }
+    Block* block = it->second;
+    if (remove) {
+      allocated_blocks.erase(it);
+    }
+    return block;
+  }
+
   void assertValidDevice(DeviceIndex device) {
     const auto device_num = device_allocators.size();
     TORCH_CHECK(
@@ -1812,7 +1825,7 @@ class NativeCachingAllocator : public XPUAllocator {
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
 
-  void init(DeviceIndex device_count) {
+  void init(DeviceIndex device_count) override {
     const auto size = static_cast<DeviceIndex>(device_allocators.size());
     if (size < device_count) {
       device_allocators.resize(device_count);
@@ -1846,9 +1859,17 @@ class NativeCachingAllocator : public XPUAllocator {
     }
   }
 
-  void emptyCache(MempoolId_t mempool_id) override {
-    for (auto& da : device_allocators) {
-      da->emptyCache(mempool_id);
+  void free(void* ptr) {
+    if (!ptr) {
+      return;
+    }
+    Block* block = get_allocated_block(ptr, /* remove */ true);
+    TORCH_CHECK(block, "invalid device pointer: ", ptr);
+    device_allocators[block->device]->free(block);
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_memory_deallocation(
+          c10::kXPU, reinterpret_cast<uintptr_t>(block->ptr));
     }
   }
 
@@ -1872,6 +1893,19 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[block->device]->recordStream(block, xpu_stream);
   }
 
+  DataPtr allocate(size_t size) override {
+    auto device = c10::xpu::current_device();
+    void* r = nullptr;
+    if (size != 0) {
+      this->malloc(&r, device, size, xpu::getCurrentXPUStream(device));
+    }
+    return {r, r, &local_raw_delete, Device(DeviceType::XPU, device)};
+  }
+
+  DeleterFnPtr raw_deleter() const override {
+    return &local_raw_delete;
+  }
+
   void* raw_alloc(size_t size) override {
     if (size == 0) {
       return nullptr;
@@ -1882,8 +1916,14 @@ class NativeCachingAllocator : public XPUAllocator {
     return r;
   }
 
-  DeleterFnPtr raw_deleter() const override {
-    return &local_raw_delete;
+  void* raw_alloc_with_stream(size_t size, XPUStream stream) {
+    if (size == 0) {
+      return nullptr;
+    }
+    auto device = c10::xpu::current_device();
+    void* r = nullptr;
+    malloc(&r, device, size, stream);
+    return r;
   }
 
   void raw_delete(void* ptr) override {
