@@ -19,10 +19,10 @@ TEST(CachingHostAllocatorTest, check_stats) {
   // Clear the stats and ensure they are zero.
   size_t round_size = c10::llvm::PowerOf2Ceil(N);
   auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
-  ASSERT_EQ(stats.allocation.current, 0);
-  ASSERT_EQ(stats.allocation.peak, 0);
-  ASSERT_EQ(stats.allocation.allocated, 0);
-  ASSERT_EQ(stats.allocation.freed, 0);
+  ASSERT_EQ(stats.allocations.current, 0);
+  ASSERT_EQ(stats.allocations.peak, 0);
+  ASSERT_EQ(stats.allocations.allocated, 0);
+  ASSERT_EQ(stats.allocations.freed, 0);
 
   void* ptr{nullptr};
   void* ctx{nullptr};
@@ -32,14 +32,10 @@ TEST(CachingHostAllocatorTest, check_stats) {
     ptr = pinned_tensor.data_ptr();
     ctx = pinned_tensor.storage().data_ptr().get_context();
     auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
-    ASSERT_EQ(stats.allocation.current, 1);
-    ASSERT_EQ(stats.allocation.peak, 1);
-    ASSERT_EQ(stats.allocation.allocated, 1);
-    ASSERT_EQ(stats.allocation.freed, 0);
-    ASSERT_EQ(stats.segment.allocated, 1);
-    ASSERT_EQ(stats.segment.freed, 0);
-    ASSERT_EQ(stats.reserved_bytes.current, round_size);
-    ASSERT_EQ(stats.allocated_bytes.current, round_size);
+    ASSERT_EQ(stats.allocations.current, 1);
+    ASSERT_EQ(stats.allocations.peak, 1);
+    ASSERT_EQ(stats.allocations.allocated, 1);
+    // We dont track active bytes as free blocks are added in process_events
     ASSERT_EQ(stats.host_alloc_time.max, stats.host_alloc_time.min);
     ASSERT_EQ(stats.host_free_time.total, 0);
   }
@@ -50,13 +46,9 @@ TEST(CachingHostAllocatorTest, check_stats) {
     auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
     ASSERT_EQ(ptr, pinned_tensor.data_ptr());
     ASSERT_EQ(ctx, pinned_tensor.storage().data_ptr().get_context());
-    ASSERT_EQ(stats.allocation.current, 1);
-    ASSERT_EQ(stats.allocation.peak, 1);
-    ASSERT_EQ(stats.allocation.allocated, 2);
-    ASSERT_EQ(stats.allocation.freed, 1);
-    ASSERT_EQ(stats.segment.allocated, 1);
-    ASSERT_EQ(stats.segment.freed, 0);
-    ASSERT_EQ(stats.reserved_bytes.current, round_size);
+    ASSERT_EQ(stats.allocations.current, 1);
+    ASSERT_EQ(stats.allocations.peak, 1);
+    ASSERT_EQ(stats.allocations.allocated, 1);
     ASSERT_EQ(stats.allocated_bytes.current, round_size);
   }
   // Ensure we don't reuse the allocation, due to size mismatch.
@@ -68,14 +60,10 @@ TEST(CachingHostAllocatorTest, check_stats) {
     auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
     ASSERT_NE(ptr, pinned_tensor.data_ptr());
     ASSERT_NE(ctx, pinned_tensor.storage().data_ptr().get_context());
-    ASSERT_EQ(stats.allocation.current, 1);
-    ASSERT_EQ(stats.allocation.peak, 2);
-    ASSERT_EQ(stats.allocation.allocated, 3);
-    ASSERT_EQ(stats.allocation.freed, 2);
-    ASSERT_EQ(stats.segment.allocated, 2);
-    ASSERT_EQ(stats.segment.freed, 0);
-    ASSERT_EQ(stats.reserved_bytes.current, round_size + new_round_size);
-    ASSERT_EQ(stats.allocated_bytes.current, new_round_size);
+    ASSERT_EQ(stats.allocations.current, 2);
+    ASSERT_EQ(stats.allocations.peak, 2);
+    ASSERT_EQ(stats.allocations.allocated, 2);
+    ASSERT_EQ(stats.allocated_bytes.current, new_round_size + round_size);
     ASSERT_NE(stats.host_alloc_time.total, stats.host_alloc_time.min);
   }
 
@@ -83,13 +71,10 @@ TEST(CachingHostAllocatorTest, check_stats) {
   {
     at::getHostAllocator(at::kCUDA)->empty_cache();
     auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
-    ASSERT_EQ(stats.allocation.current, 0);
+    ASSERT_EQ(stats.allocations.current, 0);
     ASSERT_EQ(stats.allocated_bytes.current, 0);
-    ASSERT_EQ(stats.allocation.peak, 2);
-    ASSERT_EQ(stats.allocation.allocated, 3);
-    ASSERT_EQ(stats.allocation.freed, 3);
-    ASSERT_EQ(stats.segment.allocated, 2);
-    ASSERT_EQ(stats.segment.freed, 2);
+    ASSERT_EQ(stats.allocations.peak, 2);
+    ASSERT_EQ(stats.allocations.allocated, 2);
     ASSERT_EQ(stats.num_host_alloc, 2);
     ASSERT_EQ(stats.num_host_free, 2);
     ASSERT_NE(stats.host_free_time.total, stats.host_free_time.min);
@@ -100,9 +85,9 @@ TEST(CachingHostAllocatorTest, check_stats) {
     at::getHostAllocator(at::kCUDA)->reset_accumulated_stats();
     at::getHostAllocator(at::kCUDA)->reset_peak_stats();
     auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
-    ASSERT_EQ(stats.allocation.peak, 0);
-    ASSERT_EQ(stats.allocation.allocated, 0);
-    ASSERT_EQ(stats.allocation.freed, 0);
+    ASSERT_EQ(stats.allocations.peak, 0);
+    ASSERT_EQ(stats.allocations.allocated, 0);
+    ASSERT_EQ(stats.allocations.freed, 0);
     ASSERT_EQ(stats.allocated_bytes.peak, 0);
     ASSERT_EQ(stats.num_host_alloc, 0);
     ASSERT_EQ(stats.num_host_free, 0);

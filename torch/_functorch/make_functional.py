@@ -6,8 +6,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import copy
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, NoReturn, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, NoReturn, Union
 
 import torch
 import torch.nn as nn
@@ -42,7 +42,9 @@ def create_names_map(
     This function creates a mapping from the names in named_params to the
     names in tied_named_params: {'A': ['A'], 'B': ['B', 'B_tied']}.
     """
+    # pyrefly: ignore [no-matching-overload]
     named_params = dict(named_params)
+    # pyrefly: ignore [no-matching-overload]
     tied_named_params = dict(tied_named_params)
 
     tensors_dict_keys = set(named_params.keys())
@@ -51,9 +53,11 @@ def create_names_map(
 
     tensor_to_mapping: dict[Tensor, tuple[str, list[str]]] = {}
     for key, tensor in named_params.items():
+        # pyrefly: ignore [unsupported-operation]
         tensor_to_mapping[tensor] = (key, [])
     for key, tensor in tied_named_params.items():
         assert tensor in tensor_to_mapping
+        # pyrefly: ignore [bad-argument-type]
         tensor_to_mapping[tensor][1].append(key)
     return dict(tensor_to_mapping.values())
 
@@ -374,9 +378,11 @@ def make_functional(
         model = nn.Linear(3, 3)
         func, params = make_functional(model)
 
+
         def compute_loss(params, x, t):
             y = func(params, x)
             return nn.functional.mse_loss(y, t)
+
 
         grad_weights = grad(compute_loss)(params, x, t)
 
@@ -443,9 +449,11 @@ def make_functional_with_buffers(
         model = nn.Linear(3, 3)
         func, params, buffers = make_functional_with_buffers(model)
 
+
         def compute_loss(params, buffers, x, t):
             y = func(params, buffers, x)
             return nn.functional.mse_loss(y, t)
+
 
         grad_weights = grad(compute_loss)(params, buffers, x, t)
 
@@ -469,7 +477,7 @@ def make_functional_with_buffers(
 
 
 def transpose_stack(
-    tuple_of_tuple_of_tensors: tuple[tuple[Tensor, ...], ...]
+    tuple_of_tuple_of_tensors: tuple[tuple[Tensor, ...], ...],
 ) -> tuple[Tensor, ...]:
     tuple_of_tuple_of_tensors = tuple(zip(*tuple_of_tuple_of_tensors))
     results = tuple(
@@ -528,7 +536,7 @@ def combine_state_for_ensemble(
             "have the same training/eval mode."
         )
     model0_typ = type(models[0])
-    if not all(type(m) == model0_typ for m in models):
+    if not all(type(m) is model0_typ for m in models):
         raise RuntimeError(
             "combine_state_for_ensemble: Expected all models to be of the same class."
         )
@@ -542,7 +550,7 @@ def combine_state_for_ensemble(
 
 def functional_init(
     model_class: type[nn.Module],
-    ensemble_shape: Union[tuple[()], tuple[int]] = (),
+    ensemble_shape: Union[tuple[()], tuple[int, ...]] = (),
     device: torch.types.Device = "cpu",
 ):
     def wrapped(*args, **kwargs):
@@ -569,7 +577,7 @@ def functional_init(
 
 def functional_init_with_buffers(
     model_class: type[nn.Module],
-    ensemble_shape: Union[tuple[()], tuple[int]] = (),
+    ensemble_shape: Union[tuple[()], tuple[int, ...]] = (),
     device: torch.types.Device = "cpu",
 ):
     def wrapped(*args, **kwargs):

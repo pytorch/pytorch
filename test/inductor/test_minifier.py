@@ -7,12 +7,7 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
 from torch.export import load as export_load
-from torch.testing._internal.common_utils import (
-    IS_JETSON,
-    IS_MACOS,
-    skipIfXpu,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -75,9 +70,7 @@ def inner(x):
     return x - torch.tensor(655, dtype=torch.half, device='GPU_TYPE') * 100
 
 inner(torch.tensor(655 * 100, dtype=torch.half, device='GPU_TYPE'))
-""".replace(
-            "GPU_TYPE", GPU_TYPE
-        )
+""".replace("GPU_TYPE", GPU_TYPE)
 
         # If we disable RMSE against fp64, this triggers accuracy error,
         # as the increased precision from torch.compile changes the result
@@ -251,7 +244,7 @@ with torch.no_grad():
         assert res is not None
         ep_file_path = res.get_exported_program_path()
         assert ep_file_path is not None
-        gm = export_load(ep_file_path).module()
+        gm = export_load(ep_file_path).module(check_guards=False)
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
@@ -280,7 +273,6 @@ def forward(self, linear):
         self._aoti_check_relu_repro(res)
 
     @requires_gpu
-    @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch(
         "triton.inject_relu_bug_TESTING_ONLY",
         "compile_error",
@@ -290,7 +282,6 @@ def forward(self, linear):
         self._aoti_check_relu_repro(res)
 
     @requires_gpu
-    @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch(
         "triton.inject_relu_bug_TESTING_ONLY",
         "compile_error",
@@ -306,7 +297,6 @@ def forward(self, linear):
         self._aoti_check_relu_repro(res)
 
     @requires_gpu
-    @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_aoti_gpu_accuracy_error(self):
         res = self._test_aoti(GPU_TYPE, "AccuracyError")

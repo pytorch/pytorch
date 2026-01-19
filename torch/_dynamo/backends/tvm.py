@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """
 This module provides TVM backend integration for TorchDynamo.
 
@@ -28,10 +26,13 @@ import logging
 import os
 import sys
 import tempfile
+from collections.abc import Callable
+from pathlib import Path
 from types import MappingProxyType
-from typing import Optional
+from typing import Any, Optional
 
 import torch
+from torch import fx
 
 from .common import device_from_inputs, fake_tensor_unsupported
 from .registry import register_backend
@@ -41,15 +42,16 @@ log = logging.getLogger(__name__)
 
 
 @register_backend
-@fake_tensor_unsupported
+@fake_tensor_unsupported  # type: ignore[arg-type]
 def tvm(
-    gm,
-    example_inputs,
+    gm: fx.GraphModule,
+    example_inputs: list[torch.Tensor],
     *,
-    options: Optional[MappingProxyType] = MappingProxyType(
-        {"scheduler": None, "trials": 20000, "opt_level": 3}
-    ),
-):
+    options: Optional[MappingProxyType[str, Any]] = None,
+) -> Callable[..., Any]:
+    if options is None:
+        options = MappingProxyType({"scheduler": None, "trials": 20000, "opt_level": 3})
+    assert options is not None
     import tvm  # type: ignore[import]
     from tvm import relay  # type: ignore[import]
     from tvm.contrib import graph_executor  # type: ignore[import]
@@ -77,36 +79,19 @@ def tvm(
     opt_level = options.get("opt_level", 3)
 
     if scheduler == "auto_scheduler":
+        # pyrefly: ignore [import-error, missing-import]
         from tvm import auto_scheduler
 
-        log_file = tempfile.NamedTemporaryFile()
-
-        if not os.path.exists(log_file):
-            tasks, task_weights = auto_scheduler.extract_tasks(
-                mod["main"], params, target
-            )
-            if len(tasks) != 0:
-                tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
-                if not os.path.exists(log_file):
-                    assert trials > 0
-                    tune_option = auto_scheduler.TuningOptions(
-                        num_measure_trials=trials,
-                        measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-                        early_stopping=2000,
-                    )
-                    try:
-                        tuner.tune(tune_option)
-                    except Exception:
-                        if os.path.exists(log_file):
-                            os.unlink(log_file)
-                        raise
-
-        with auto_scheduler.ApplyHistoryBest(log_file):
-            with tvm.transform.PassContext(
+        with (
+            tempfile.NamedTemporaryFile() as log_file,
+            auto_scheduler.ApplyHistoryBest(log_file),
+            tvm.transform.PassContext(
                 opt_level=opt_level, config={"relay.backend.use_auto_scheduler": True}
-            ):
-                lib = relay.build(mod, target=target, params=params)
+            ),
+        ):
+            lib = relay.build(mod, target=target, params=params)
     elif scheduler == "meta_schedule":
+        # pyrefly: ignore [import-error, missing-import]
         from tvm import meta_schedule as ms
 
         with tempfile.TemporaryDirectory() as work_dir:
@@ -147,7 +132,7 @@ def tvm(
         )
     m = graph_executor.GraphModule(lib["default"](dev))
 
-    def to_torch_tensor(nd_tensor):
+    def to_torch_tensor(nd_tensor: tvm.nd.array) -> torch.Tensor:
         """A helper function to transfer a NDArray to torch.tensor."""
         if nd_tensor.dtype == "bool":
             # DLPack does not support boolean so it can't be handled by
@@ -156,7 +141,7 @@ def tvm(
             return torch.from_numpy(nd_tensor.numpy())
         return torch.utils.dlpack.from_dlpack(nd_tensor.to_dlpack())
 
-    def to_tvm_tensor(torch_tensor):
+    def to_tvm_tensor(torch_tensor: torch.Tensor) -> tvm.nd.array:
         """A helper function to transfer a torch.tensor to NDArray."""
         if torch_tensor.dtype == torch.bool:
             # same reason as above, fallback to numpy conversion which
@@ -164,7 +149,7 @@ def tvm(
             return tvm.nd.array(torch_tensor.cpu().numpy())
         return tvm.nd.from_dlpack(torch_tensor)
 
-    def exec_tvm(*i_args):
+    def exec_tvm(*i_args: torch.Tensor) -> list[torch.Tensor]:
         args = [a.contiguous() for a in i_args]
         shape_info, _ = m.get_input_info()
         active_inputs = {name for name, _ in shape_info.items()}
@@ -193,7 +178,7 @@ tvm_meta_schedule = functools.partial(tvm, scheduler="meta_schedule")
 tvm_auto_scheduler = functools.partial(tvm, scheduler="auto_scheduler")
 
 
-def has_tvm():
+def has_tvm() -> bool:
     try:
         importlib.import_module("tvm")
         return True
@@ -201,10 +186,10 @@ def has_tvm():
         return False
 
 
-@functools.lru_cache(None)
-def llvm_target():
+@functools.cache
+def llvm_target() -> str:
     if sys.platform == "linux":
-        cpuinfo = open("/proc/cpuinfo").read()
+        cpuinfo = Path("/proc/cpuinfo").read_text()
         if "avx512" in cpuinfo:
             return "llvm -mcpu=skylake-avx512"
         elif "avx2" in cpuinfo:

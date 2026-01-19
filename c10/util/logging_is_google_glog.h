@@ -47,57 +47,53 @@ INSTANTIATE_FOR_CONTAINER(set)
 
 #endif
 
+#include <c10/util/logging_common.h>
 #include <glog/logging.h>
 
-// Additional macros on top of glog
-#define TORCH_CHECK_EQ(val1, val2) CHECK_EQ(val1, val2)
-#define TORCH_CHECK_NE(val1, val2) CHECK_NE(val1, val2)
-#define TORCH_CHECK_LE(val1, val2) CHECK_LE(val1, val2)
-#define TORCH_CHECK_LT(val1, val2) CHECK_LT(val1, val2)
-#define TORCH_CHECK_GE(val1, val2) CHECK_GE(val1, val2)
-#define TORCH_CHECK_GT(val1, val2) CHECK_GT(val1, val2)
+namespace c10 {
 
-#ifndef NDEBUG
-#define TORCH_DCHECK_EQ(val1, val2) DCHECK_EQ(val1, val2)
-#define TORCH_DCHECK_NE(val1, val2) DCHECK_NE(val1, val2)
-#define TORCH_DCHECK_LE(val1, val2) DCHECK_LE(val1, val2)
-#define TORCH_DCHECK_LT(val1, val2) DCHECK_LT(val1, val2)
-#define TORCH_DCHECK_GE(val1, val2) DCHECK_GE(val1, val2)
-#define TORCH_DCHECK_GT(val1, val2) DCHECK_GT(val1, val2)
-#else // !NDEBUG
-// These versions generate no code in optimized mode.
-#define TORCH_DCHECK_EQ(val1, val2) \
-  while (false)                     \
-  DCHECK_EQ(val1, val2)
-#define TORCH_DCHECK_NE(val1, val2) \
-  while (false)                     \
-  DCHECK_NE(val1, val2)
-#define TORCH_DCHECK_LE(val1, val2) \
-  while (false)                     \
-  DCHECK_LE(val1, val2)
-#define TORCH_DCHECK_LT(val1, val2) \
-  while (false)                     \
-  DCHECK_LT(val1, val2)
-#define TORCH_DCHECK_GE(val1, val2) \
-  while (false)                     \
-  DCHECK_GE(val1, val2)
-#define TORCH_DCHECK_GT(val1, val2) \
-  while (false)                     \
-  DCHECK_GT(val1, val2)
-#endif // NDEBUG
+[[noreturn]] void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller);
 
-// Check that a pointer is not null.
-#define TORCH_CHECK_NOTNULL(val) CHECK_NOTNULL(val)
+template <typename T>
+T& CheckNotNullCommon(
+    const char* file,
+    int line,
+    const char* names,
+    T& t,
+    bool fatal) {
+  if (t == nullptr) {
+    MessageLogger(file, line, ::google::GLOG_FATAL, fatal).stream()
+        << "Check failed: '" << names << "' must be non NULL. ";
+  }
+  return t;
+}
 
-#ifndef NDEBUG
-// Debug only version of TORCH_CHECK_NOTNULL
-#define TORCH_DCHECK_NOTNULL(val) DCHECK_NOTNULL(val)
-#else // !NDEBUG
-// Optimized version - generates no code.
-#define TORCH_DCHECK_NOTNULL(val) \
-  while (false)                   \
-  DCHECK_NOTNULL(val)
-#endif // NDEBUG
+template <typename T>
+T* CheckNotNull(
+    const char* file,
+    int line,
+    const char* names,
+    T* t,
+    bool fatal) {
+  return CheckNotNullCommon(file, line, names, t, fatal);
+}
+
+template <typename T>
+T& CheckNotNull(
+    const char* file,
+    int line,
+    const char* names,
+    T& t,
+    bool fatal) {
+  return CheckNotNullCommon(file, line, names, t, fatal);
+}
+
+} // namespace c10
 
 // Log with source location information override (to be used in generic
 // warning/error handlers implemented as functions, not macros)

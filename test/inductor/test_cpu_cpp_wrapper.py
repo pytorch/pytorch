@@ -97,6 +97,7 @@ def make_test_case(
     slow=False,
     func_inputs=None,
     code_string_count=None,
+    test_build_separate=False,
 ):
     test_name = f"{name}_{device}" if device else name
     if code_string_count is None:
@@ -105,8 +106,12 @@ def make_test_case(
     func = getattr(tests, test_name)
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
+    new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
+    @config.patch(
+        cpp_wrapper=True,
+        cpp_wrapper_build_separate=test_build_separate,
+    )
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -123,6 +128,8 @@ def make_test_case(
                 # happen for tests validating build-dependent features (e.g. datatypes
                 # that are available on some platforms and not others).
                 if code:
+                    if test_build_separate:
+                        self.assertIn("kernel_src", code)
                     self.assertIn("CppWrapperCodeCache", code)
                     self.assertTrue(
                         all(
@@ -134,14 +141,14 @@ def make_test_case(
             tests.tearDown()
             tests.tearDownClass()
 
-    fn.__name__ = test_name
+    fn.__name__ = new_test_name
     import copy
 
     fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
             CppWrapperTemplate,
-            test_name,
+            new_test_name,
             fn,
         )
 
@@ -156,36 +163,21 @@ if RUN_CPU:
         slow: bool = False
         func_inputs: list = None
         code_string_count: dict = {}
+        test_build_separate: bool = False
 
     for item in [
         BaseTest("test_add_complex"),
+        BaseTest("test_add_complex", test_build_separate=True),
         BaseTest("test_add_complex4"),
+        BaseTest("test_add_complex4", test_build_separate=True),
         BaseTest("test_as_strided"),  # buffer reuse
-        BaseTest("test_bernoulli1"),
+        BaseTest("test_bernoulli1_combo_kernels_False"),
+        BaseTest("test_bernoulli1_combo_kernels_True"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
+        BaseTest("test_bmm1", test_build_separate=True),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
-        BaseTest(
-            "test_conv2d_binary_inplace_fusion_failed",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
-            func_inputs=[
-                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
-                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
-            ],
-        ),
-        BaseTest(
-            "test_conv2d_binary_inplace_fusion_pass",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available(),
-            func_inputs=[
-                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary_("],
-                ["aoti_torch_cpu_mkldnn__convolution_pointwise_binary("],
-            ],
-        ),
         BaseTest(
             "test_conv2d_unary",
             "cpu",
@@ -213,16 +205,18 @@ if RUN_CPU:
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
             if func.startswith(
                 (
-                    "test_linear_with_pointwise",
+                    # skip for now since it's flaky:
+                    # https://github.com/pytorch/pytorch/actions/runs/19916391966/job/57096613509?pr=169151
+                    # "test_linear_with_pointwise",
                     "test_grouped_linear",
                 )
             )
         ],
         BaseTest("test_polar"),
         BaseTest(
-            "test_linear_binary_cpu",
+            "test_linear_binary",
             "",
-            test_mkldnn_pattern_matcher.TestPatternMatcherGenericCPU(),
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
@@ -257,80 +251,9 @@ if RUN_CPU:
             "test_multi_threading",
             condition=not IS_WINDOWS,
             # Two threads compile, so we expect the output code to be printed twice.
-            code_string_count={"py::gil_scoped_release release;": 2},
+            code_string_count={"py::gil_scoped_release_simple release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
-        BaseTest(
-            "test_qconv2d",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qconv2d_relu",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qconv2d_add",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qconv2d_add_relu",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qconv2d_dequant_promotion",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_qconv2d_maxpool2d_linear_dynamic",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-            func_inputs=[
-                [
-                    "aoti_torch_cpu__qconv_pointwise_tensor",
-                    "torch.ops.quantized.max_pool2d",
-                    "aoti_torch_cpu__qlinear_pointwise_tensor",
-                ]
-            ],
-        ),
-        *[
-            BaseTest(
-                func,
-                "",
-                test_mkldnn_pattern_matcher.TestPatternMatcher(),
-                condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-            )
-            for func in dir(test_mkldnn_pattern_matcher.TestPatternMatcher())
-            if func.startswith("test_qlinear")
-        ],
-        BaseTest(
-            "test_qconv2d_with_concat",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_dynamic_qlinear",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
-        BaseTest(
-            "test_dynamic_qlinear_qat",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-        ),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),
         BaseTest("test_reduction1"),  # Reduction
@@ -358,11 +281,6 @@ if RUN_CPU:
         ),  # multiple outputs, buffer clear
         BaseTest("test_view_as_complex"),
         BaseTest("test_view_as_real"),
-        BaseTest(
-            "test_woq_int4",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestPatternMatcher(),
-        ),
     ]:
         make_test_case(
             item.name,
@@ -372,6 +290,7 @@ if RUN_CPU:
             item.slow,
             item.func_inputs,
             item.code_string_count,
+            item.test_build_separate,
         )
 
     test_torchinductor.copy_tests(

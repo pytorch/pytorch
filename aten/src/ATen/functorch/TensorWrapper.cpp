@@ -22,7 +22,7 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
     if (batched) {
       ss << "Batched[lvl=" << batched->level() << " dim=" << batched->bdim() << ", ";
       dumpTensor(ss, batched->value());
-      ss << "]";
+      ss << ']';
       return;
     }
     ss << "Tensor" << tensor.sizes();
@@ -36,7 +36,7 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
     ss << "dead, ";
   }
   dumpTensor(ss, wrapped->value());
-  ss << "]";
+  ss << ']';
 }
 
 void TensorWrapper::refreshMetadata() {
@@ -56,7 +56,8 @@ void dumpTensorCout(const Tensor& tensor) {
 
 static c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
   auto keys_to_propagate = kKeysToPropagateToWrapper | DispatchKeySet({
-      DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA});
+      DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA,
+      DispatchKey::AutogradPrivateUse1});
   auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
   key_set = key_set.add(DispatchKey::FuncTorchGradWrapper);
   return c10::make_intrusive<TensorWrapper>(key_set, tensor, level, life_handle);
@@ -76,7 +77,8 @@ static Tensor unsafeMakeTensorWrapper(
   }
 
   auto keys_to_propagate = kKeysToPropagateToWrapper | DispatchKeySet({
-      DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA});
+      DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA,
+      DispatchKey::AutogradPrivateUse1});
   auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
   key_set = key_set.add(DispatchKey::FuncTorchGradWrapper);
   auto result = at::detail::make_tensor<TensorWrapper>(

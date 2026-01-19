@@ -78,9 +78,7 @@ namespace aten {
 using namespace ::c10::aten;
 }
 namespace cuda {
-#if !defined(USE_ROCM)
 using namespace ::c10::cuda;
-#endif
 } // namespace cuda
 
 struct Function;
@@ -330,7 +328,7 @@ struct TORCH_API Node {
   // subblocks
   std::vector<Block*> blocks_;
   Graph* graph_;
-  Block* owning_block_;
+  Block* owning_block_{nullptr};
   std::optional<SourceRange> source_range_;
   ScopePtr scope_;
   std::optional<InlinedCallStackPtr> callstack_;
@@ -338,7 +336,7 @@ struct TORCH_API Node {
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
   // change the schema. note: mutable because schema_ is effectively a cache
-  mutable const Operator* op_;
+  mutable const Operator* op_{nullptr};
   topo_position_t topo_position_ = 0;
   // a managing wrapper for Python to allow invalidation
   std::shared_ptr<Wrap<Node>> wrap_;
@@ -616,7 +614,7 @@ struct TORCH_API Node {
   // as the equivalents phi-nodes in standard SSA form,
   // defining a new Value to represent any term that has multiple
   // definitions depending on how control flowed. Outputs of the node containing
-  // control flow serve a similiar purpose defining new values for variables
+  // control flow serve a similar purpose defining new values for variables
   // that would have different definitions depending on which way control
   // flowed.
 
@@ -1374,7 +1372,7 @@ struct Graph : std::enable_shared_from_this<Graph> {
   // kwargs using Python argument matching rules, and checks that the op matches
   // a known schema.
   //
-  // If this node successfully completes, it guarentees the node
+  // If this node successfully completes, it guarantees the node
   // is a correctly-formed invocation of opname
   TORCH_API Value* insert(
       Symbol opname,

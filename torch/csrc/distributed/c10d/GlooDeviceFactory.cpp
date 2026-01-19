@@ -1,10 +1,6 @@
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 
-#include <torch/csrc/distributed/c10d/Utils.hpp>
-
 #ifdef USE_C10D_GLOO
-
-#include <cstdlib>
 
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
@@ -196,7 +192,7 @@ std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
   static auto transportName = c10::utils::get_env("GLOO_DEVICE_TRANSPORT");
   if (transportName.has_value()) {
     return GlooDeviceRegistry()->Create(
-        transportName.value().c_str(), interfaceName, hostName, lazyInit);
+        transportName.value(), interfaceName, hostName, lazyInit);
   }
 
 #ifdef __linux__

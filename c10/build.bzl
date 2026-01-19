@@ -1,6 +1,6 @@
-def define_targets(rules):
+def define_targets(rules, c10_name = "c10"):
     rules.cc_library(
-        name = "c10",
+        name = c10_name,
         visibility = ["//visibility:public"],
         deps = [
             "//c10/core:CPUAllocator",
@@ -24,13 +24,12 @@ def define_targets(rules):
     )
 
     rules.cc_library(
-        name = "c10_headers",
+        name = c10_name + "_headers",
         deps = [
             "//c10/core:base_headers",
             "//c10/macros",
             "//c10/util:base_headers",
             "//c10/util:bit_cast",
-            "//c10/util:ssize",
         ],
         visibility = ["//visibility:public"],
     )

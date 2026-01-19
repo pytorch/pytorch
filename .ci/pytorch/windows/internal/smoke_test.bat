@@ -99,7 +99,6 @@ goto end
 :libtorch
 echo "install and test libtorch"
 
-if "%VC_YEAR%" == "2019" powershell internal\vs2019_install.ps1
 if "%VC_YEAR%" == "2022" powershell internal\vs2022_install.ps1
 
 if ERRORLEVEL 1 exit /b 1
@@ -111,10 +110,6 @@ pushd tmp\libtorch
 
 set VC_VERSION_LOWER=17
 set VC_VERSION_UPPER=18
-IF "%VC_YEAR%" == "2019" (
-    set VC_VERSION_LOWER=16
-    set VC_VERSION_UPPER=17
-)
 
 for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -legacy -products * -version [%VC_VERSION_LOWER%^,%VC_VERSION_UPPER%^) -property installationPath`) do (
     if exist "%%i" if exist "%%i\VC\Auxiliary\Build\vcvarsall.bat" (
@@ -153,14 +148,7 @@ if "%NVIDIA_GPU_EXISTS%" == "0" (
     goto end
 )
 
-set BUILD_SPLIT_CUDA=
-if exist "%install_root%\lib\torch_cuda_cu.lib" if exist "%install_root%\lib\torch_cuda_cpp.lib" set BUILD_SPLIT_CUDA=ON
-
-if "%BUILD_SPLIT_CUDA%" == "ON" (
-    cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-cuda.cpp torch_cpu.lib c10.lib torch_cuda_cu.lib torch_cuda_cpp.lib /EHsc /std:c++17 /link /INCLUDE:?warp_size@cuda@at@@YAHXZ /INCLUDE:?_torch_cuda_cu_linker_symbol_op_cuda@native@at@@YA?AVTensor@2@AEBV32@@Z
-) else (
-    cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-cuda.cpp torch_cpu.lib c10.lib torch_cuda.lib /EHsc /std:c++17 /link /INCLUDE:?warp_size@cuda@at@@YAHXZ
-)
+cl %PYTORCH_ROOT%\.ci\pytorch\test_example_code\check-torch-cuda.cpp torch_cpu.lib c10.lib torch_cuda.lib /EHsc /std:c++17 /link /INCLUDE:?warp_size@cuda@at@@YAHXZ
 .\check-torch-cuda.exe
 if ERRORLEVEL 1 exit /b 1
 

@@ -1,6 +1,5 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/TensorBase.h>
-#include <c10/core/Layout.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -24,7 +23,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
     }
   }
 
-  if (t->is_non_overlapping_and_dense()) {
+  if (t->is_non_overlapping_and_dense_or_false()) {
     return MemOverlap::No;
   }
 
@@ -35,7 +34,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
     // SymInts.  Thus, if I have u0 size, we should assume that this has > 1
     // elements (first expression), but if I have a u0 stride, I should NOT
     // assume that it is not zero (second expression)
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_gt(1)) && strides[i] == 0) {
+    if (TORCH_GUARD_OR_FALSE(sizes[i].sym_gt(1)) && strides[i] == 0) {
       return MemOverlap::Yes;
     }
   }
@@ -63,7 +62,7 @@ MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   if (a->numel() == 0 || b->numel() == 0) {
     return MemOverlapStatus::No;
   }
-  if (!a->is_non_overlapping_and_dense() || !b->is_non_overlapping_and_dense()) {
+  if (!a->is_non_overlapping_and_dense_or_false() || !b->is_non_overlapping_and_dense_or_false()) {
     return MemOverlapStatus::TooHard;
   }
   // Test for storage equality, rather than pointer equality.

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable, cast
+from typing import Any, cast, TYPE_CHECKING
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def gh_fetch_url_and_headers(

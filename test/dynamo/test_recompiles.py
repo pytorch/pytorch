@@ -4,9 +4,58 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import config as dc
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
+    def test_inline_inbuilt_nn_modules_candidate(self):
+        def hook_flag_on(guard_manager, f_locals, builder):
+            self.assertTrue(
+                "[inline-inbuilt-nn-modules-candidate]" not in str(guard_manager)
+            )
+
+        def hook_flag_off(guard_manager, f_locals, builder):
+            self.assertTrue(
+                "[inline-inbuilt-nn-modules-candidate]" in str(guard_manager)
+            )
+
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            @torch.compile(backend="eager")
+            def forward(self, x):
+                return self.linear(x)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sm1 = SubMod()
+                self.sm2 = SubMod()
+
+            def forward(self, x):
+                return self.sm1(x) + self.sm2(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        with (
+            install_guard_manager_testing_hook(hook_flag_on),
+            dc.patch(inline_inbuilt_nn_modules=True),
+        ):
+            mod = Mod()
+            mod(torch.randn(2, 2))
+
+        with (
+            install_guard_manager_testing_hook(hook_flag_off),
+            dc.patch(inline_inbuilt_nn_modules=False),
+        ):
+            mod = Mod()
+            mod(torch.randn(2, 2))
+
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
@@ -196,6 +245,32 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_object_alias_relation_guards_without_lambda(self):
+        class Box:
+            pass
+
+        def foo(box_a, box_b, t):
+            entries = {box_a, box_b}
+            if len(entries) == 1:
+                return t + 1
+            return t - 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        x = torch.tensor(0)
+
+        with dc.patch(use_lamba_guard_for_object_aliasing=False):
+            compiled = torch.compile(foo, backend=cnt, fullgraph=True)
+
+            shared = Box()
+            res_alias = compiled(shared, shared, x)
+            self.assertEqual(res_alias.item(), 1)
+
+            res_unique = compiled(Box(), Box(), x)
+            self.assertEqual(res_unique.item(), -1)
+            self.assertEqual(cnt.frame_count, 2)
+
+        torch._dynamo.reset()
 
     def test_aliasing_guard_failures_with_globals(self):
         g1 = torch.randn([3])
@@ -393,39 +468,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious(self):
-        counter = torch._dynamo.testing.CompileCounter()
-
-        def f(x):
-            if x.size(0) < 10:
-                return x * 1
-            else:
-                return x + 10
-
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
-
-        for i in [3, 2, 1, 0]:
-            self.assertEqual(f(torch.zeros(i)), opt_f(torch.zeros(i)))
-
-        self.assertEqual(counter.frame_count, 2)  # not three or four!
-
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
-        counter = torch._dynamo.testing.CompileCounter()
-
-        def f(x):
-            if x.size(0) < 2:
-                return x * 1
-            else:
-                return x + 10
-
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
-
-        opt_f(torch.randn(1))
-        with self.assertRaises(torch._dynamo.exc.UserError):
-            opt_f(torch.randn(0))
-
     def test_ambient_autocast_recompile(self):
         weights = torch.randn(10, 10)
         counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -498,6 +540,29 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         Foo.__call__ = lambda self, x: x + 2
         f(x, foo1)
         self.assertEqual(counter.frame_count, 2)
+
+    def test_no_recompile_over_unused_objects(self):
+        # This is a regression test case that imitates
+        # https://github.com/city96/ComfyUI-GGUF/blob/47bec6147569a138dd30ad3e14f190a36a3be456/ops.py#L169-L182
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x, key, patches):
+            return x * x + 1
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def apply_patches(f, x, keys):
+            patches = []
+            for key, patch in keys:  # noqa: F402
+                patches.append(patch)
+            x = f(x, key, patches)
+            return x
+
+        # no recompilation
+        x = torch.rand(10)
+        apply_patches(f, x, [("a", 1), ("b", 2)])
+        self.assertEqual(counter.frame_count, 1)
+        apply_patches(f, x, [("c", 3), ("d", 4)])
+        self.assertEqual(counter.frame_count, 1)
 
 
 if __name__ == "__main__":

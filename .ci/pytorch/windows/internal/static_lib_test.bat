@@ -63,7 +63,7 @@ if errorlevel 1 exit /b 1
 call %CONDA_HOME%\condabin\activate.bat testenv
 if errorlevel 1 exit /b 1
 
-call conda install  -y -q -c conda-forge libuv=1.39
+call conda install  -y -q -c conda-forge libuv=1.51
 call conda install -y -q intel-openmp
 
 echo "install and test libtorch"

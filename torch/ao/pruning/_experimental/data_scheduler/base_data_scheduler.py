@@ -98,7 +98,9 @@ class BaseDataScheduler:
             >>> def get_schedule_param(self):
             ...     new_param = {}
             ...     for name in self.sparsifier.data_groups.keys():
-            ...         new_param[name] = self.sparsifier.data_groups[name][self.schedule_param] * 0.5
+            ...         new_param[name] = (
+            ...             self.sparsifier.data_groups[name][self.schedule_param] * 0.5
+            ...         )
             ...     return new_param
 
         When the step() function is called, the value in self.sparsifier.data_groups[name][self.schedule_param]
@@ -156,6 +158,7 @@ class BaseDataScheduler:
                     "initialization. Please, make sure to call `data_sparsifier.step()` before "
                     "`scheduler.step()`.",
                     UserWarning,
+                    stacklevel=2,
                 )
 
             # Just check if there were two first scheduler.step() calls before sparsifier.step()
@@ -165,6 +168,7 @@ class BaseDataScheduler:
                     "You have to make sure you run the data_sparsifier.step() BEFORE any "
                     "calls to the scheduler.step().",
                     UserWarning,
+                    stacklevel=2,
                 )
         self._step_count += 1
 

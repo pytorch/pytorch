@@ -23,7 +23,6 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/stack.h>
 #include <ATen/record_function.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
@@ -109,29 +108,30 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   using ID = size_t;
 
   // Mapping of each thread to its own operator stack
-  std::map<size_t, std::stack<ID>> opStack{};
+  std::map<size_t, std::stack<ID>> opStack;
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
-  std::map<const void*, ID> objectId{};
+
+  std::map<const void*, ID> objectId;
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
   // Mutex for multithreaded access to the shared containers.
-  std::recursive_mutex gMutex{};
+  std::recursive_mutex gMutex;
   // Stream to write output JSON.
-  std::ofstream out{};
+  std::ofstream out;
 
   // Full path to the output file.
-  std::string fileName{};
+  std::string fileName;
 
-  std::string resourceDir{};
+  std::string resourceDir;
 
   // RecordFunction callback handle for this observer.
   CallbackHandle cbHandle{INVALID_CALLBACK_HANDLE};
 
   // Process ID.
   int32_t pid{-1};
-  std::string recordTime{};
+  std::string recordTime;
 
   ExecutionTraceObserver() = default;
 
@@ -158,7 +158,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   bool record_integral_tensor_range{false};
 
-  std::unordered_set<std::string> nodeListForSavingIntegerTensor{};
+  std::unordered_set<std::string> nodeListForSavingIntegerTensor;
 
  private:
   static bool callbackShouldBeEnabled(RunState run_state) {
@@ -171,7 +171,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   // All tensors and operators have an unique id assigned. Increment id for each
   // new tensor or operator node.
-  // 0 -> unintialized
+  // 0 -> uninitialized
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
@@ -225,7 +225,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   std::ofstream stream;
   stream.open(name, std::ofstream::out | std::ofstream::trunc);
   if (!stream) {
-    LOG(ERROR) << "Failed to open '" << name << "'";
+    LOG(ERROR) << "Failed to open '" << name << '\'';
   } else {
     VLOG(1) << "PyTorch Execution Trace: writing to " << name;
   }
@@ -270,7 +270,7 @@ static void writeJsonNode(
     const std::string& kernelBackend = "",
     const std::string& kernelFile = "",
     const std::string& tensor_range = "",
-    const std::string& additiona_attrs = "") {
+    const std::string& additional_attrs = "") {
   if (!out.is_open() || out.fail() || out.bad()) {
     return;
   }
@@ -305,7 +305,7 @@ static void writeJsonNode(
         kernelBackend,
         kernelFile,
         tensor_range,
-        additiona_attrs);
+        additional_attrs);
   } catch (const std::exception& e) {
     LOG(ERROR) << "Failed to write json node to execution trace: " << e.what();
   }
@@ -700,7 +700,7 @@ static void recordOperatorStart(
                 RecordScope::USER_SCOPE),
             tid,
             0); // fw_tid
-        ob.out << ",";
+        ob.out << ',';
       }
     }
 
@@ -842,7 +842,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
 
-      const std::string additiona_attrs =
+      const std::string additional_attrs =
           fn.isNcclMeta() ? getCommsNodeAttrs(fn) : "";
       {
         const std::lock_guard<std::recursive_mutex> lock(ob->gMutex);
@@ -873,8 +873,8 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
             fc.kernelBackend,
             fc.kernelFile,
             fc.get_string_for_tensor_range(),
-            additiona_attrs);
-        ob->out << ",";
+            additional_attrs);
+        ob->out << ',';
       }
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
@@ -923,7 +923,7 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
       // 5 is the length of ".json"
       ob.resourceDir.replace(ext_pos, 5, "_resources/");
       VLOG(1) << "Execution trace resource directory: " << ob.resourceDir
-              << "\n";
+              << '\n';
     } else {
       LOG(WARNING)
           << "Execution trace output file does not end with \".json\".";

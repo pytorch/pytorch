@@ -90,7 +90,7 @@ struct DinicFlowGraph {
     // The residual level graph is constructed by:
     //   1. doing a BFS on the residual graph, assigning levels
     //      to each vertex.
-    //   2. only include edges u->v where level[v] == leve[u] + 1
+    //   2. only include edges u->v where level[v] == level[u] + 1
     std::queue<size_t> q;
     // let level[u] = 0 if it has not been visited yet.
     std::vector<size_t> level(graph_size, 0);

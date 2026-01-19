@@ -1,6 +1,7 @@
 #pragma once
-#include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/vec_quant.h>
 #include <c10/util/bit_cast.h>
 #include <c10/util/irange.h>
 #include <gtest/gtest.h>
@@ -21,7 +22,9 @@
 #else
 #define CACHE_LINE 32
 #endif
-
+#ifndef _WIN32
+#include <ATen/native/cpu/utils.h>
+#endif
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
 #define not_inline __attribute__((noinline))
@@ -528,7 +531,7 @@ template <typename T>
 std::enable_if_t<is_complex<T>::value, void>
 filter_div_ub(T& val1, T& val2) {
     //missing
-    //at least consdier zero division
+    //at least consider zero division
     auto ret = std::abs(val2);
     if (ret == 0) {
         val2 = T(1, 2);
@@ -840,22 +843,22 @@ public:
         std::stringstream stream;
         stream.precision(std::numeric_limits<UVT>::max_digits10);
         stream << "Failure Details:\n";
-        stream << additionalInfo << "\n";
+        stream << additionalInfo << '\n';
         if (hasSeed)
         {
-            stream << "Test Seed to reproduce: " << testSeed << "\n";
+            stream << "Test Seed to reproduce: " << testSeed << '\n';
         }
         if (argSize > 0)
         {
             stream << "Arguments:\n";
-            stream << "#\t " << arg0 << "\n";
+            stream << "#\t " << arg0 << '\n';
             if (argSize == 2)
             {
-                stream << "#\t " << arg1 << "\n";
+                stream << "#\t " << arg1 << '\n';
             }
             if (argSize == 3)
             {
-                stream << "#\t " << arg2 << "\n";
+                stream << "#\t " << arg2 << '\n';
             }
         }
         stream << "Expected:\n#\t" << exp << "\nActual:\n#\t" << act;
@@ -887,7 +890,7 @@ public:
         else if (checkWithTolerance)
         {
             for (const auto i : c10::irange(sizeX)) {
-                EXPECT_EQ(nearlyEqual<UVT>(expArr[i], actArr[i], absErr), true) << expArr[i] << "!=" << actArr[i] << "\n" << getDetail(i / unitStorageCount);
+                EXPECT_EQ(nearlyEqual<UVT>(expArr[i], actArr[i], absErr), true) << expArr[i] << "!=" << actArr[i] << '\n' << getDetail(i / unitStorageCount);
                 if (::testing::Test::HasFailure())
                     return true;
             }
@@ -1113,11 +1116,11 @@ void test_binary_fp8(
             if (is_bit_wise) {
                 EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
                     << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_0.x)
-                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << "\n";
+                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << '\n';
             } else {
                 EXPECT_EQ(ref_res_scalar, res_scalar)
                     << "Test failed for input0: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_0.x)
-                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << "\n";
+                    << " input1: " << c10::detail::fp8e4m3fn_to_fp32_value(f8_1.x) << '\n';
             }
         } else {
             at::vec::cvtfp8e5m2_fp32(_mm512_castsi512_si128(res), res_fp32_512);
@@ -1125,11 +1128,11 @@ void test_binary_fp8(
             if (is_bit_wise) {
                 EXPECT_EQ(static_cast<bool>(ref_res_scalar), static_cast<bool>(res_scalar))
                     << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
-                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << '\n';
             } else {
                 EXPECT_EQ(ref_res_scalar, res_scalar)
                     << "Test failed for input0: " << c10::detail::fp8e5m2_to_fp32_value(f8_0.x)
-                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << "\n";
+                    << " input1: " << c10::detail::fp8e5m2_to_fp32_value(f8_1.x) << '\n';
             }
         }
       }
@@ -1288,7 +1291,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T y_real = y.real();
     T y_imag = y.imag();
 #if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
-    //check multiplication considerin swap and fma
+    //check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;
@@ -1359,7 +1362,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Compl
     return Complex<T>(rr, ii);
 #else /* defined(CPU_CAPABILITY_ZVECTOR) */
 #if defined(CPU_CAPABILITY_VSX)
-    //check multiplication considerin swap and fma
+    //check multiplication considering swap and fma
     T rr = x_real * y_real;
     T ii = x_imag * y_real;
     T neg_imag = -y_imag;

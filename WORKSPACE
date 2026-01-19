@@ -81,13 +81,6 @@ http_archive(
     ],
 )
 
-http_archive(
-    name = "com_github_opentelemetry-cpp",
-    urls = [
-        "https://github.com/open-telemetry/opentelemetry-cpp/archive/refs/tags/v1.14.2.tar.gz",
-    ],
-)
-
 new_local_repository(
     name = "gloo",
     build_file = "//third_party:gloo.BUILD",
@@ -182,6 +175,12 @@ new_local_repository(
     name = "nlohmann",
     build_file = "//third_party:nlohmann.BUILD",
     path = "third_party/nlohmann",
+)
+
+new_local_repository(
+    name = "moodycamel",
+    build_file = "//third_party:moodycamel.BUILD",
+    path = "third_party/concurrentqueue",
 )
 
 new_local_repository(

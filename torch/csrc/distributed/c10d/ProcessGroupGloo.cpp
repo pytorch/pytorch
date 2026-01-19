@@ -4,10 +4,11 @@
 
 #ifdef USE_C10D_GLOO
 
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
-#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <chrono>
 #include <exception>
 
@@ -20,18 +21,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
-#include <sys/types.h>
 
-#include <type_traits>
 #include <utility>
 
 #include <ATen/ThreadLocalState.h>
-#include <ATen/native/SparseTensorUtils.h>
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <gloo/config.h>
+#include <c10/util/thread_name.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
@@ -232,15 +230,31 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
   return future_;
 }
 
+std::chrono::milliseconds ProcessGroupGloo::AsyncWork::getTimeout() const {
+  return timeout_ == kUnsetTimeout ? context_->getTimeout() : timeout_;
+}
+
 namespace {
 c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  // We need to set device in future construction otherwise CUDA streams in
+  // futures are ignored.
+  std::vector<at::Device> devices{};
+  for (const auto& outputTensor : outputTensors) {
+    for (const auto& tensor : outputTensor) {
+      auto device = tensor.device();
+      if (!device.is_cpu()) {
+        devices.push_back(device);
+      }
+    }
+  }
   if (outputTensors.size() > 1) {
     return c10::make_intrusive<c10::ivalue::Future>(
-        c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+        c10::ListType::create(c10::ListType::create(c10::TensorType::get())),
+        devices);
   }
   return c10::make_intrusive<c10::ivalue::Future>(
-      c10::ListType::create(c10::TensorType::get()));
+      c10::ListType::create(c10::TensorType::get()), devices);
 }
 
 void returnFutureWithOutput(
@@ -289,20 +303,25 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
 }
 
 ProcessGroupGloo::AsyncWork::AsyncWork(
+    std::shared_ptr<gloo::Context> context,
     std::vector<std::vector<at::Tensor>> outputTensors,
     OpType opType,
     uint64_t seq,
+    std::chrono::milliseconds timeout,
     const char* profilingTitle,
     const std::optional<std::vector<at::Tensor>>& inputTensors)
     // Profiler: Pass nullptr as profilingTitle to parent constructor to
     // replace default profiler implementation with async version that reports
     // correct timestamps for work that is asynchronously executed.
     : Work(-1, opType, nullptr, inputTensors),
+      context_(std::move(context)),
+      timeout_(timeout == kUnsetTimeout ? context_->getTimeout() : timeout),
       outputTensors_(std::move(outputTensors)),
       future_(createFutureAsOutput(outputTensors_)),
       seq_(seq) {
   if (profilingTitle != nullptr) {
     recordAsyncWorkProfilingInfo(profilingTitle, inputTensors);
+    profilingTitle_ = profilingTitle;
   }
 }
 
@@ -378,7 +397,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
           std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
-      srcRank_(-1),
+
       seq_(seq) {}
 
 uint64_t ProcessGroupGloo::RecvWork::getSequencenumber() const {
@@ -418,7 +437,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : Backend::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
+    : Backend::Options(GLOO_BACKEND_NAME, timeout) {}
 
 namespace {
 
@@ -517,16 +536,16 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   // use. Note: if the hostname does not resolve to an address (e.g.
   // because of misconfigured /etc/hosts file), this will not work.
   const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
-  auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
-  auto rv = gethostname(hostname.get(), hostNameMax);
+  std::string hostname(hostNameMax, '\0');
+  auto rv = gethostname(hostname.data(), hostNameMax);
   if (rv != 0) {
     C10_THROW_ERROR(DistBackendError, c10::utils::str_error(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
-  if (doesHostnameResolveToUsableAddress(hostname.get())) {
+  if (doesHostnameResolveToUsableAddress(hostname.data())) {
     return ::c10d::GlooDeviceFactory::makeDeviceForHostname(
-        hostname.get(), lazyInit);
+        hostname.data(), lazyInit);
   }
 
   // Otherwise, use the loopback address.
@@ -538,6 +557,34 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
 }
 #endif
 
+static std::atomic<size_t> process_group_id = 0;
+
+c10::intrusive_ptr<ProcessGroupGloo::Options> ProcessGroupGloo::Options::
+    create_default(std::chrono::milliseconds timeout) {
+  auto options = ::c10d::ProcessGroupGloo::Options::create();
+  bool lazyInit = ::c10d::getDefaultGlooLazyInit();
+
+  // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
+  auto ifnameEnv = c10::utils::get_env("GLOO_SOCKET_IFNAME");
+  if (ifnameEnv && ifnameEnv->size() > 1) {
+    for (const auto& iface : ::c10d::split(',', *ifnameEnv)) {
+      options->devices.push_back(
+          ::c10d::ProcessGroupGloo::createDeviceForInterface(iface, lazyInit));
+    }
+  } else {
+    // If no hostname is specified, this function looks up
+    // the machine's hostname and returns a device instance
+    // associated with the address that the hostname resolves to.
+    options->devices.push_back(
+        ::c10d::ProcessGroupGloo::createDefaultDevice(lazyInit));
+  }
+
+  options->timeout = timeout;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  options->threads = options->devices.size() * 2;
+  return options;
+}
+
 ProcessGroupGloo::ProcessGroupGloo(
     const c10::intrusive_ptr<Store>& store,
     int rank,
@@ -546,8 +593,8 @@ ProcessGroupGloo::ProcessGroupGloo(
     : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(std::move(options)),
-      stop_(false),
-      collectiveCounter_(0) {
+
+      local_id_(process_group_id++) {
   auto& devices = options_->devices;
   if (devices.empty()) {
     TORCH_CHECK(false, "No device(s) specified");
@@ -606,8 +653,14 @@ ProcessGroupGloo::ProcessGroupGloo(
   for (const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
+  this->setGroupUid(options_->group_name);
 
+  // TODO: If gloo has version, we also need to log gloo version into FR.
+  FlightRecorder<c10::Event>::get()->record_pg_ranks(
+      std::make_tuple(pg_uid_, pg_desc_), groupRanks());
   init();
+
+  // TODO: Add configs print like ProcessGroupNCCL.
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -637,6 +690,7 @@ std::shared_ptr<::gloo::Context> ProcessGroupGloo::getContext(uint32_t tag) {
 }
 
 void ProcessGroupGloo::runLoop(int workerIndex) {
+  c10::setThreadName("pt_gloo_runloop");
   std::unique_lock<std::mutex> lock(workMutex_);
 
   while (!stop_) {
@@ -655,13 +709,103 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
     workConsumeCV_.notify_one();
 
     AsyncWork::execute(work);
+    // TODO: Need to find a way to calculate the difference of duration of two
+    // c10d::Event
+    pgStatus_->lastCompletedSeq = static_cast<int64_t>(work->seq_);
+    pgStatus_->lastCompletedWorkName = opTypeToString(work->opType_);
+    // TODO: We need to have numel of tensors for gloo as well.
+    pgStatus_->lastCompletedNumelIn = 0;
+    pgStatus_->lastCompletedNumelOut = 0;
+    FlightRecorder<c10::Event>::get()->retire_id(
+        work->trace_id_, work->trace_reset_epoch_, false);
     lock.lock();
     workInProgress_[workerIndex].reset();
   }
 }
 
+const std::vector<uint64_t>& ProcessGroupGloo::groupRanks() const {
+  if (options_->global_ranks_in_group.empty() && local_id_ == 0) {
+    static std::vector<uint64_t> globalRanks(size_);
+    std::iota(globalRanks.begin(), globalRanks.end(), 0);
+    return globalRanks;
+  }
+  return options_->global_ranks_in_group;
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
+    const c10::intrusive_ptr<Store>& store,
+    const std::vector<int>& ranks,
+    const c10::intrusive_ptr<Backend::Options>& opts) {
+  auto it = std::find(ranks.begin(), ranks.end(), rank_);
+  int groupRank;
+  if (it == ranks.end()) {
+    return nullptr;
+  } else {
+    groupRank = std::distance(ranks.begin(), it);
+  }
+
+  auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+  if (glooOpts == nullptr) {
+    TORCH_WARN_ONCE(
+        "Tried to pass options to ProcessGroupGloo::split that are not ProcessGroupGloo::Options."
+        "Falling back to default options.");
+    glooOpts = ProcessGroupGloo::Options::create_default();
+  }
+
+  // TODO: we need to get rid of globalRanksInGroup eventually.
+  std::vector<uint64_t> globalRanksInGroup;
+  for (auto rank : ranks) {
+    globalRanksInGroup.emplace_back(groupRanks()[rank]);
+  }
+  glooOpts->global_ranks_in_group = std::move(globalRanksInGroup);
+  auto pg = c10::make_intrusive<ProcessGroupGloo>(
+      store->clone(), groupRank, ranks.size(), glooOpts);
+  return c10::static_intrusive_pointer_cast<Backend>(pg);
+}
+
+c10::intrusive_ptr<Backend> ProcessGroupGloo::merge(
+    const c10::intrusive_ptr<Store>& store,
+    const c10::intrusive_ptr<Backend::Options>& opts,
+    const int& rank,
+    const int& size) {
+  auto glooOpts = c10::dynamic_intrusive_pointer_cast<Options>(opts);
+  if (glooOpts == nullptr) {
+    TORCH_WARN_ONCE(
+        "Tried to pass options to ProcessGroupGloo::merge that are not ProcessGroupGloo::Options."
+        "Falling back to default options.");
+    glooOpts = ProcessGroupGloo::Options::create_default();
+  }
+  auto pg = c10::make_intrusive<ProcessGroupGloo>(
+      store->clone(), rank, size, glooOpts);
+  return c10::static_intrusive_pointer_cast<Backend>(pg);
+}
+
 void ProcessGroupGloo::enqueue(c10::intrusive_ptr<AsyncWork> work) {
   std::unique_lock<std::mutex> lock(workMutex_);
+  pgStatus_->lastEnqueuedSeq = static_cast<int64_t>(work->seq_);
+  pgStatus_->lastEnqueuedWorkName = opTypeToString(work->opType_);
+  // TODO: We need to have numel of tensors for gloo as well.
+  pgStatus_->lastEnqueuedNumelIn = 0;
+  pgStatus_->lastEnqueuedNumelOut = 0;
+  // using c10d::FlightRecorder;
+  // TODO: We need to have a way to use c10::Event inside gloo as well.
+  auto traceId = FlightRecorder<c10::Event>::get()->recordWithResetEnabled(
+      local_id_,
+      std::make_tuple(pg_uid_, pg_desc_),
+      collectiveCounter_,
+      0, // p2p_seq_id, set 0 for now since p2p does not call enqueue
+      work->getSequencenumber(), // We need to differentiate between p2p and
+                                 // non-p2p op.
+      work->getProfilerTitle(),
+      work->getInputTensors(),
+      work->getOutputTensors(),
+      nullptr,
+      nullptr,
+      work->getTimeout(),
+      pgStatus_,
+      false);
+  work->trace_id_ = traceId.id;
+  work->trace_reset_epoch_ = traceId.reset_epoch;
   workQueue_.push_back(std::move(work));
   lock.unlock();
 
@@ -680,32 +824,45 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
       int rootRank,
       int rootTensor,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {inputs},
             OpType::BROADCAST,
             seq,
+            timeout,
             "gloo:broadcast",
             inputs),
-        context(std::move(context)),
         inputs(inputs),
         rootRank(rootRank),
         rootTensor(rootTensor),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> inputs{};
+  std::vector<at::Tensor> inputs;
   const int rootRank;
   const int rootTensor;
   const uint32_t tag;
 
-  void broadcast(at::Tensor& tensor) {
+  void broadcast(at::Tensor tensor) {
+    if (tensor.is_complex()) {
+      tensor = at::view_as_real(tensor);
+    }
     const auto& scalarType = tensor.scalar_type();
-    gloo::BroadcastOptions opts(context);
+    gloo::BroadcastOptions opts(context_);
     opts.setRoot(rootRank);
     opts.setTag(tag);
+    opts.setTimeout(getTimeout());
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
     gloo::broadcast(opts);
+  }
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return inputs;
   }
 
   void run() override {
@@ -729,14 +886,22 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
       int rootRank,
       int rootTensor,
       uint32_t tag,
-      uint64_t seq)
-      : AsyncBroadcastWork(context, inputs, rootRank, rootTensor, tag, seq) {
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : AsyncBroadcastWork(
+            context,
+            inputs,
+            rootRank,
+            rootTensor,
+            tag,
+            seq,
+            timeout) {
     initializeStreamsEvents(inputs, streams, events);
 
     // Create pinned host side tensors.
     tmp = pinnedLike(inputs[rootTensor]);
     c10::OptionalStreamGuard guard;
-    if (context->rank == rootRank) {
+    if (context_->rank == rootRank) {
       guard.reset_stream(streams[rootTensor]);
       tmp.copy_(inputs[rootTensor], /* non_blocking */ true);
     }
@@ -744,7 +909,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
   void run() override {
     // Synchronize with copy operation if applicable.
-    if (context->rank == rootRank) {
+    if (context_->rank == rootRank) {
       streams[rootTensor].synchronize();
     }
 
@@ -770,8 +935,8 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   at::Tensor tmp;
-  std::vector<c10::Stream> streams{};
-  std::vector<c10::Event> events{};
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
 
 } // namespace
@@ -807,10 +972,22 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::broadcast(
   ++seq_;
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncBroadcastWork>(
-        std::move(context), inputs, opts.rootRank, opts.rootTensor, tag, seq_);
+        std::move(context),
+        inputs,
+        opts.rootRank,
+        opts.rootTensor,
+        tag,
+        seq_,
+        opts.timeout);
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncBroadcastCUDAWork>(
-        std::move(context), inputs, opts.rootRank, opts.rootTensor, tag, seq_);
+        std::move(context),
+        inputs,
+        opts.rootRank,
+        opts.rootTensor,
+        tag,
+        seq_,
+        opts.timeout);
   } else {
     TORCH_CHECK(false, "Invalid backend");
   }
@@ -855,7 +1032,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce(
   ++seq_;
 
   work = GlooAllreduceRegistry()->Create(
-      device.type(), context, inputs, opts.reduceOp, tag, seq_);
+      device.type(), context, inputs, opts.reduceOp, tag, seq_, opts.timeout);
 
   enqueue(work);
   return work;
@@ -866,15 +1043,16 @@ static c10::intrusive_ptr<ProcessGroupGloo::AsyncWork> makeAllreduceCPUWork(
     std::vector<at::Tensor>& inputs,
     ReduceOp reduceOp,
     uint32_t tag,
-    uint64_t seq) {
+    uint64_t seq,
+    std::chrono::milliseconds timeout) {
   auto layout = inputs[0].layout();
 
   if (layout == c10::kStrided) {
     return c10::make_intrusive<AsyncAllreduceWork>(
-        std::move(context), inputs, reduceOp, tag, seq);
+        std::move(context), inputs, reduceOp, tag, seq, timeout);
   } else if (layout == c10::kSparse) {
     return c10::make_intrusive<AsyncSparseAllreduceWork>(
-        std::move(context), inputs, tag, seq);
+        std::move(context), inputs, tag, seq, timeout);
   } else {
     TORCH_CHECK(false, "ProcessGroupGloo::allreduce: unsupported layout");
   }
@@ -889,7 +1067,8 @@ C10_DEFINE_TYPED_REGISTRY(
     std::vector<at::Tensor>&,
     ReduceOp,
     uint32_t,
-    uint64_t)
+    uint64_t,
+    std::chrono::milliseconds)
 
 C10_REGISTER_TYPED_CREATOR(
     GlooAllreduceRegistry,
@@ -901,7 +1080,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_sparse(
     const AllreduceOptions& opts) {
   // all reduce sparse calls into default allreduce which
   // implemented with all_gathering indices and values
-  // we do ths we do not have a native cuda implementation
+  // we do this we do not have a native cuda implementation
   return allreduce(inputs, opts);
 }
 
@@ -954,7 +1133,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_coalesced(
   if (device.type() == c10::kCPU) {
     if (layout == c10::kStrided) {
       work = c10::make_intrusive<AsyncAllreduceCoalescedWork>(
-          std::move(context), tensors, opts.reduceOp, tag, seq_);
+          std::move(context), tensors, opts.reduceOp, tag, seq_, opts.timeout);
     } else {
       invalidArgument("unsupported layout");
     }
@@ -976,44 +1155,63 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
       int rootTensor,
       ReduceOp reduceOp,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {inputs},
             OpType::REDUCE,
             seq,
+            timeout,
             "gloo:reduce",
             inputs),
-        context(std::move(context)),
         inputs(inputs),
         rootRank(rootRank),
         rootTensor(rootTensor),
         reduceOp(std::move(reduceOp)),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> inputs{};
+  std::vector<at::Tensor> inputs;
   const int rootRank;
   const int rootTensor;
   const ReduceOp reduceOp;
   const uint32_t tag;
 
   void reduce(std::vector<at::Tensor>& tensors) {
-    const auto& scalarType = tensors[0].scalar_type();
-    gloo::ReduceOptions opts(context);
+    auto tensor = tensors[0];
+    if (tensor.is_complex()) {
+      TORCH_CHECK(
+          c10d::isComplexViewAsRealAllowed(reduceOp),
+          "reduce does not support",
+          reduceOp,
+          "on complex tensors");
+      tensor = at::view_as_real(tensor);
+    }
+    gloo::ReduceOptions opts(context_);
+    const auto& scalarType = tensor.scalar_type();
     opts.setRoot(rootRank);
     opts.setTag(tag);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
-    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensors[0]);
+    opts.setTimeout(getTimeout());
+    GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
     gloo::reduce(opts);
 
     // Gloo doesn't support AVG so we use SUM + division.
     if (reduceOp == ReduceOp::AVG) {
-      tensors[0] /= context->size;
+      tensors[0] /= context_->size;
     }
   }
 
   void run() override {
     reduce(inputs);
+  }
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return inputs;
   }
 
  protected:
@@ -1040,7 +1238,8 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
       int rootTensor,
       ReduceOp reduceOp,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : AsyncReduceWork(
             context,
             inputs,
@@ -1048,7 +1247,8 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
             rootTensor,
             std::move(reduceOp),
             tag,
-            seq) {
+            seq,
+            timeout) {
     initializeStreamsEvents(inputs, streams, events);
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
@@ -1087,9 +1287,9 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
     }
   }
 
-  std::vector<at::Tensor> tmp{};
-  std::vector<c10::Stream> streams{};
-  std::vector<c10::Event> events{};
+  std::vector<at::Tensor> tmp;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
 
 } // namespace
@@ -1131,7 +1331,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce(
         opts.rootTensor,
         opts.reduceOp,
         tag,
-        seq_);
+        seq_,
+        opts.timeout);
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncReduceCUDAWork>(
         std::move(context),
@@ -1140,7 +1341,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce(
         opts.rootTensor,
         opts.reduceOp,
         tag,
-        seq_);
+        seq_,
+        opts.timeout);
   } else {
     TORCH_CHECK(false, "Invalid backend");
   }
@@ -1157,29 +1359,31 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             outputs,
             OpType::ALLGATHER,
             seq,
+            timeout,
             "gloo:all_gather",
             inputs),
-        context(std::move(context)),
         outputs(outputs),
         inputs(inputs),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
-  std::vector<std::vector<at::Tensor>> outputs{};
-  std::vector<at::Tensor> inputs{};
+  std::vector<std::vector<at::Tensor>> outputs;
+  std::vector<at::Tensor> inputs;
   const uint32_t tag;
 
   void allgather(
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs) {
     const auto& scalarType = inputs[0].scalar_type();
-    gloo::AllgatherOptions opts(context);
+    gloo::AllgatherOptions opts(context_);
     opts.setTag(tag);
+    opts.setTimeout(getTimeout());
 
     // Use single flattened input tensor.
     at::Tensor flatInputTensor = flattenDenseTensors(inputs);
@@ -1200,6 +1404,14 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return {newLikeFlat(outputs[0])};
+  }
+
   void run() override {
     allgather(outputs, inputs);
   }
@@ -1214,8 +1426,9 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag,
-      uint64_t seq)
-      : AsyncAllgatherWork(context, outputs, inputs, tag, seq) {
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : AsyncAllgatherWork(context, outputs, inputs, tag, seq, timeout) {
     initializeStreamsEvents(inputs, inputStreams, inputEvents);
     initializeStreamsEvents(outputs, outputStreams, outputEvents);
 
@@ -1269,13 +1482,13 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
     }
   }
 
-  std::vector<at::Tensor> tmpInputs{};
-  std::vector<c10::Stream> inputStreams{};
-  std::vector<c10::Event> inputEvents{};
+  std::vector<at::Tensor> tmpInputs;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 
-  std::vector<std::vector<at::Tensor>> tmpOutputs{};
-  std::vector<c10::Stream> outputStreams{};
-  std::vector<c10::Event> outputEvents{};
+  std::vector<std::vector<at::Tensor>> tmpOutputs;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 };
 
 // A work that takes an lambda on construction and calls it on wait.
@@ -1331,7 +1544,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
     std::vector<at::Tensor> inp = {buffers[i]};
     AllreduceOptions arOpts;
     arOpts.reduceOp = opts.reduceOp;
-    works.push_back(allreduce(inp));
+    arOpts.timeout = opts.timeout;
+    works.push_back(allreduce(inp, arOpts));
   }
   return c10::make_intrusive<LambdaWork>(
       [rank, worldSize, buffers, outputTensors, works = std::move(works)]() {
@@ -1409,10 +1623,10 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather(
   ++seq_;
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncAllgatherWork>(
-        std::move(context), outputs, inputs, tag, seq_);
+        std::move(context), outputs, inputs, tag, seq_, opts.timeout);
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncAllgatherCUDAWork>(
-        std::move(context), outputs, inputs, tag, seq_);
+        std::move(context), outputs, inputs, tag, seq_, opts.timeout);
   } else {
     TORCH_CHECK(false, "Invalid backend");
   }
@@ -1429,21 +1643,22 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& output_lists,
       std::vector<at::Tensor>& input_list,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             output_lists,
             OpType::ALLGATHER_COALESCED,
             seq,
+            timeout,
             "gloo:all_gather",
             input_list),
-        context(std::move(context)),
         output_lists(output_lists),
         input_list(input_list),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
-  std::vector<std::vector<at::Tensor>> output_lists{};
-  std::vector<at::Tensor> input_list{};
+  std::vector<std::vector<at::Tensor>> output_lists;
+  std::vector<at::Tensor> input_list;
   const uint32_t tag;
 
   void allgather_coalesced() {
@@ -1452,8 +1667,9 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
     assert(!input_list.empty());
 
     const auto& scalarType = input_list[0].scalar_type();
-    gloo::AllgatherOptions opts(context);
+    gloo::AllgatherOptions opts(context_);
     opts.setTag(tag);
+    opts.setTimeout(getTimeout());
 
     // Use single flattened input tensor.
     at::Tensor flatInputTensor = flattenDenseTensors(input_list);
@@ -1484,6 +1700,14 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
     }
   }
 
+  const std::vector<at::Tensor> getInputTensors() override {
+    return input_list;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return {newLikeFlat(output_lists[0])};
+  }
+
   void run() override {
     allgather_coalesced();
   }
@@ -1494,7 +1718,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
 c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& output_lists,
     std::vector<at::Tensor>& input_list,
-    const AllgatherOptions& /* unused */) {
+    const AllgatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::allgather_coalesced: " + msg);
   };
@@ -1542,7 +1766,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
   auto context = getContext(tag);
   ++seq_;
   auto work = c10::make_intrusive<AsyncAllgatherCoalescedWork>(
-      std::move(context), output_lists, input_list, tag, seq_);
+      std::move(context), output_lists, input_list, tag, seq_, opts.timeout);
   enqueue(work);
   return work;
 }
@@ -1572,22 +1796,23 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             outputs,
             OpType::GATHER,
             seq,
+            timeout,
             "gloo:gather",
             inputs),
-        context(std::move(context)),
         outputs(outputs),
         inputs(inputs),
         root(root),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
-  std::vector<std::vector<at::Tensor>> outputs{};
-  std::vector<at::Tensor> inputs{};
+  std::vector<std::vector<at::Tensor>> outputs;
+  std::vector<at::Tensor> inputs;
   const int root;
   const uint32_t tag;
 
@@ -1595,28 +1820,39 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs) {
     const auto scalarType = inputs[0].scalar_type();
-    gloo::GatherOptions opts(context);
+    gloo::GatherOptions opts(context_);
     opts.setRoot(root);
     opts.setTag(tag);
+    opts.setTimeout(getTimeout());
 
     // Set single temporary tensor on root process.
     // This is later scattered to the separate output tensors.
     at::Tensor flatOutputTensor;
-    if (context->rank == root) {
+    if (context_->rank == root) {
       flatOutputTensor = newLikeFlat(outputs[0]);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     }
 
     // Set single input tensor on all processes.
-    GENERATE_ALL_TYPES(scalarType, setInput, opts, inputs[0]);
+    at::Tensor flatInputTensor = flattenDenseTensors(inputs[0]);
+    GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
     gloo::gather(opts);
 
     // Unflatten into output tensors on root process.
-    if (context->rank == root) {
+    if (context_->rank == root) {
       for (const auto i : c10::irange(outputs[0].size())) {
         outputs[0][i].copy_(flatOutputTensor[static_cast<int64_t>(i)]);
       }
     }
+  }
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return outputs.empty() ? std::vector<at::Tensor>{}
+                           : std::vector<at::Tensor>{newLikeFlat(outputs[0])};
   }
 
   void run() override {
@@ -1637,8 +1873,9 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
       std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag,
-      uint64_t seq)
-      : AsyncGatherWork(context, outputs, inputs, root, tag, seq) {
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : AsyncGatherWork(context, outputs, inputs, root, tag, seq, timeout) {
     initializeStreamsEvents(inputs, inputStreams, inputEvents);
     initializeStreamsEvents(outputs, outputStreams, outputEvents);
 
@@ -1692,13 +1929,13 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
     }
   }
 
-  std::vector<at::Tensor> tmpInputs{};
-  std::vector<c10::Stream> inputStreams{};
-  std::vector<c10::Event> inputEvents{};
+  std::vector<at::Tensor> tmpInputs;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 
-  std::vector<std::vector<at::Tensor>> tmpOutputs{};
-  std::vector<c10::Stream> outputStreams{};
-  std::vector<c10::Event> outputEvents{};
+  std::vector<std::vector<at::Tensor>> tmpOutputs;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 };
 
 } // namespace
@@ -1756,10 +1993,22 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
   ++seq_;
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncGatherWork>(
-        std::move(context), outputs, inputs, opts.rootRank, tag, seq_);
+        std::move(context),
+        outputs,
+        inputs,
+        opts.rootRank,
+        tag,
+        seq_,
+        opts.timeout);
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncGatherCUDAWork>(
-        std::move(context), outputs, inputs, opts.rootRank, tag, seq_);
+        std::move(context),
+        outputs,
+        inputs,
+        opts.rootRank,
+        tag,
+        seq_,
+        opts.timeout);
   } else {
     TORCH_CHECK(false, "Invalid backend");
   }
@@ -1777,23 +2026,24 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& inputs,
       int root,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {outputs},
             OpType::SCATTER,
             seq,
+            timeout,
             "gloo:scatter",
             !inputs.empty() ? std::optional<std::vector<at::Tensor>>(inputs[0])
                             : std::nullopt),
-        context(std::move(context)),
         outputs(outputs),
         inputs(inputs),
         root(root),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> outputs{};
-  std::vector<std::vector<at::Tensor>> inputs{};
+  std::vector<at::Tensor> outputs;
+  std::vector<std::vector<at::Tensor>> inputs;
   const int root;
   const uint32_t tag;
 
@@ -1801,18 +2051,28 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<at::Tensor>>& inputs) {
     const auto scalarType = outputs[0].scalar_type();
-    gloo::ScatterOptions opts(context);
+    gloo::ScatterOptions opts(context_);
     opts.setRoot(root);
     opts.setTag(tag);
+    opts.setTimeout(getTimeout());
 
     // Set list of input tensors on root process
-    if (context->rank == root) {
+    if (context_->rank == root) {
       GENERATE_ALL_TYPES(scalarType, setInputs, opts, inputs[0]);
     }
 
     // Set single output tensor on all processes
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputs[0]);
     gloo::scatter(opts);
+  }
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs.empty() ? std::vector<at::Tensor>{}
+                          : std::vector<at::Tensor>{newLikeFlat(inputs[0])};
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return outputs;
   }
 
   void run() override {
@@ -1828,8 +2088,9 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
       std::vector<std::vector<at::Tensor>>& inputs,
       int root,
       uint32_t tag,
-      uint64_t seq)
-      : AsyncScatterWork(context, outputs, inputs, root, tag, seq) {
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
+      : AsyncScatterWork(context, outputs, inputs, root, tag, seq, timeout) {
     initializeStreamsEvents(inputs, inputStreams, inputEvents);
     initializeStreamsEvents(outputs, outputStreams, outputEvents);
 
@@ -1881,13 +2142,13 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
     }
   }
 
-  std::vector<at::Tensor> tmpOutputs{};
-  std::vector<c10::Stream> outputStreams{};
-  std::vector<c10::Event> outputEvents{};
+  std::vector<at::Tensor> tmpOutputs;
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 
-  std::vector<std::vector<at::Tensor>> tmpInputs{};
-  std::vector<c10::Stream> inputStreams{};
-  std::vector<c10::Event> inputEvents{};
+  std::vector<std::vector<at::Tensor>> tmpInputs;
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 };
 
 } // namespace
@@ -1944,10 +2205,22 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
   ++seq_;
   if (device.type() == at::kCPU) {
     work = c10::make_intrusive<AsyncScatterWork>(
-        std::move(context), outputs, inputs, opts.rootRank, tag, seq_);
+        std::move(context),
+        outputs,
+        inputs,
+        opts.rootRank,
+        tag,
+        seq_,
+        opts.timeout);
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncScatterCUDAWork>(
-        std::move(context), outputs, inputs, opts.rootRank, tag, seq_);
+        std::move(context),
+        outputs,
+        inputs,
+        opts.rootRank,
+        tag,
+        seq_,
+        opts.timeout);
   } else {
     TORCH_CHECK(false, "Invalid backend");
   }
@@ -1989,7 +2262,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter(
     std::vector<at::Tensor> inp = {buffers[i]};
     AllreduceOptions arOpts;
     arOpts.reduceOp = opts.reduceOp;
-    works.push_back(allreduce(inp));
+    arOpts.timeout = opts.timeout;
+    works.push_back(allreduce(inp, arOpts));
   }
   return c10::make_intrusive<LambdaWork>(
       [worldSize, works = std::move(works)]() {
@@ -2010,54 +2284,65 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       std::vector<int64_t>& outputCounts,
       std::vector<int64_t>& inputCounts,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {{outputTensor}},
             OpType::ALLTOALL,
             seq,
+            timeout,
             "gloo:all_to_all",
             std::optional<std::vector<at::Tensor>>({inputTensor})),
-        context(std::move(context)),
         outputTensor(outputTensor),
         inputTensor(inputTensor),
         outputCounts(std::move(outputCounts)),
         inputCounts(std::move(inputCounts)),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
   at::Tensor outputTensor;
   at::Tensor inputTensor;
-  std::vector<int64_t> outputCounts{};
-  std::vector<int64_t> inputCounts{};
+  std::vector<int64_t> outputCounts;
+  std::vector<int64_t> inputCounts;
   const uint32_t tag;
 
   void alltoall(at::Tensor& outputTensor, at::Tensor& inputTensor) {
     const auto scalarType = outputTensor.scalar_type();
     if (outputCounts.empty() && inputCounts.empty()) {
       // Gloo alltoall
-      gloo::AlltoallOptions opts(context);
+      gloo::AlltoallOptions opts(context_);
       opts.setTag(tag);
+      opts.setTimeout(getTimeout());
       GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor);
       gloo::alltoall(opts);
     } else {
       // Gloo alltoallv
-      c10d::checkSplitSizes(inputCounts, inputTensor, context->size);
-      c10d::checkSplitSizes(outputCounts, outputTensor, context->size);
-      std::vector<int64_t> sendCounts(context->size);
-      std::vector<int64_t> recvCounts(context->size);
-      std::vector<int64_t> sendOffsets(context->size);
-      std::vector<int64_t> recvOffsets(context->size);
+      c10d::checkSplitSizes(inputCounts, inputTensor, context_->size);
+      c10d::checkSplitSizes(outputCounts, outputTensor, context_->size);
+      std::vector<int64_t> sendCounts(context_->size);
+      std::vector<int64_t> recvCounts(context_->size);
+      std::vector<int64_t> sendOffsets(context_->size);
+      std::vector<int64_t> recvOffsets(context_->size);
       c10d::computeLengthsAndOffsets(
           inputCounts, inputTensor, &sendCounts, &sendOffsets);
       c10d::computeLengthsAndOffsets(
           outputCounts, outputTensor, &recvCounts, &recvOffsets);
-      gloo::AlltoallvOptions opts(context);
+      gloo::AlltoallvOptions opts(context_);
       opts.setTag(tag);
+      opts.setTimeout(getTimeout());
       GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor, sendCounts);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor, recvCounts);
       gloo::alltoallv(opts);
     }
+  }
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return {inputTensor};
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return {outputTensor};
   }
 
   void run() override {
@@ -2074,7 +2359,8 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
       std::vector<int64_t>& outputCounts,
       std::vector<int64_t>& inputCounts,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : AsyncAlltoallWork(
             context,
             outputTensor,
@@ -2082,7 +2368,8 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
             outputCounts,
             inputCounts,
             tag,
-            seq) {
+            seq,
+            timeout) {
     initializeStreamsEvents({inputTensor}, inputStreams, inputEvents);
     initializeStreamsEvents({outputTensor}, outputStreams, outputEvents);
 
@@ -2118,12 +2405,12 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
   }
 
   at::Tensor cpuOutput;
-  std::vector<c10::Stream> outputStreams{};
-  std::vector<c10::Event> outputEvents{};
+  std::vector<c10::Stream> outputStreams;
+  std::vector<c10::Event> outputEvents;
 
   at::Tensor cpuInput;
-  std::vector<c10::Stream> inputStreams{};
-  std::vector<c10::Event> inputEvents{};
+  std::vector<c10::Stream> inputStreams;
+  std::vector<c10::Event> inputEvents;
 };
 
 } // namespace
@@ -2133,7 +2420,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputCounts,
     std::vector<int64_t>& inputCounts,
-    const AllToAllOptions& /* unused */) {
+    const AllToAllOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
     TORCH_CHECK(false, "ProcessGroupGloo::alltoall_base: " + msg);
   };
@@ -2162,7 +2449,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
         outputCounts,
         inputCounts,
         tag,
-        seq_);
+        seq_,
+        opts.timeout);
   } else if (device.type() == at::kCUDA) {
     work = c10::make_intrusive<AsyncAlltoallCUDAWork>(
         std::move(context),
@@ -2171,7 +2459,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
         outputCounts,
         inputCounts,
         tag,
-        seq_);
+        seq_,
+        opts.timeout);
   } else {
     invalidArgument(c10::str("unsupported device type ", device.type()));
   }
@@ -2195,7 +2484,7 @@ static at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
 
 static uint32_t checkTag(int32_t tag) {
   TORCH_CHECK(tag >= 0, "Tag must be nonnegative");
-  return (uint32_t)tag;
+  return static_cast<uint32_t>(tag);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupGloo::send(
@@ -2282,20 +2571,30 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
       std::shared_ptr<gloo::Context> context,
       std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork,
       uint32_t tag,
-      uint64_t seq)
+      uint64_t seq,
+      std::chrono::milliseconds timeout)
       : ProcessGroupGloo::AsyncWork(
+            std::move(context),
             {},
             OpType::BARRIER,
             seq,
+            timeout,
             "gloo:barrier",
             std::nullopt),
-        context(std::move(context)),
         priorWork(std::move(priorWork)),
         tag(tag) {}
 
-  std::shared_ptr<gloo::Context> context;
-  std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork{};
+  std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork;
   const uint32_t tag;
+  std::vector<at::Tensor> inputs;
+
+  const std::vector<at::Tensor> getInputTensors() override {
+    return inputs;
+  }
+
+  const std::vector<at::Tensor> getOutputTensors() override {
+    return inputs;
+  }
 
   void run() override {
     // Wait on prior work to complete
@@ -2306,8 +2605,9 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
       }
     }
 
-    gloo::BarrierOptions opts(context);
+    gloo::BarrierOptions opts(context_);
     opts.setTag(tag);
+    opts.setTimeout(getTimeout());
     gloo::barrier(opts);
   }
 };
@@ -2331,7 +2631,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::barrier(const BarrierOptions& opts) {
   auto context = getContext(tag);
   ++seq_;
   auto work = c10::make_intrusive<AsyncBarrierWork>(
-      std::move(context), std::move(priorWork), tag, seq_);
+      std::move(context), std::move(priorWork), tag, seq_, opts.timeout);
   enqueue(work);
   return work;
 }

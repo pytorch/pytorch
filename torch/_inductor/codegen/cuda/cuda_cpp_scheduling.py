@@ -144,8 +144,9 @@ class CUDACPPScheduling(BaseScheduling):
         assert all(isinstance(n, ComputedBuffer) for n in epilogue_ir_nodes), (
             "Epilogue nodes must all be instances of ir.ComputedBuffer"
         )
-        kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_nodes)
-
+        kernel, render = ctb.make_kernel_render(  # type: ignore[misc]
+            ctb, epilogue_nodes=epilogue_nodes
+        )
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.mark_run()
@@ -174,6 +175,7 @@ class CUDACPPScheduling(BaseScheduling):
             call_args, kernel_name, arg_signatures, kernel
         )
         with debug_printer_manager:
+            self.codegen_comment(node_schedule, kernel_name)
             kernel.call_kernel(kernel_name, ctb)
 
         V.graph.removed_buffers |= kernel.removed_buffers
@@ -188,6 +190,7 @@ class CUDACPPScheduling(BaseScheduling):
         assert all(n.node is not None for n in nodes), (
             "All epilogue nodes should have an IRNode"
         )
+        # pyrefly: ignore [redundant-cast]
         return cast(
             list[BaseSchedulerNode], [n for n in nodes if n.node is not template_node]
         )

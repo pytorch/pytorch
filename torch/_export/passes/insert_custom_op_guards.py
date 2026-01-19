@@ -16,12 +16,16 @@ def insert_custom_op_guards(gm: torch.fx.GraphModule, ops_to_guard: set[str]) ->
     """
     for node in gm.graph.nodes:
         if node.op == "call_function" and str(node.target) in ops_to_guard:
-            with _set_node_metadata_hook(
-                gm,
-                functools.partial(
-                    _node_metadata_hook, stack_trace=node.meta.get("stack_trace")
+            with (
+                _set_node_metadata_hook(
+                    gm,
+                    functools.partial(
+                        _node_metadata_hook,
+                        metadata={"stack_trace": node.meta.get("stack_trace")},
+                    ),
                 ),
-            ), gm.graph.inserting_before(node):
+                gm.graph.inserting_before(node),
+            ):
                 for arg in (*node.args, *node.kwargs.values()):
                     if isinstance(arg, torch.fx.Node) and isinstance(
                         arg.meta.get("val"), torch.Tensor
@@ -50,12 +54,10 @@ def get_op_profiles(
 
     def _get_op_profile(node: torch.fx.Node) -> OpProfile:
         args_profile = tuple(
-            [
-                TensorMetadata.maybe_from_tensor(arg.meta.get("val"))
-                if isinstance(arg, torch.fx.Node)
-                else None
-                for arg in (*node.args, *node.kwargs.values())
-            ]
+            TensorMetadata.maybe_from_tensor(arg.meta.get("val"))
+            if isinstance(arg, torch.fx.Node)
+            else None
+            for arg in (*node.args, *node.kwargs.values())
         )
 
         out_profile = None
@@ -64,7 +66,7 @@ def get_op_profiles(
         if isinstance(meta, torch.Tensor):
             out_profile = TensorMetadata.maybe_from_tensor(meta)
         elif isinstance(meta, (list, tuple)):
-            out_profile = tuple([TensorMetadata.maybe_from_tensor(m) for m in meta])  # type: ignore[assignment]
+            out_profile = tuple(TensorMetadata.maybe_from_tensor(m) for m in meta)  # type: ignore[assignment]
         assert out_profile is not None
 
         return OpProfile(args_profile, out_profile)  # type: ignore[arg-type]

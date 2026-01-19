@@ -8,7 +8,12 @@ import torch
 from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, OffloadPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
-from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TEST_HPU
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_CUDA,
+    TEST_HPU,
+    TEST_XPU,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -54,15 +59,29 @@ class TestFullyShardMemory(FSDPTest):
             )
         ):
             return  # skip since not a common use case
-        assert (
-            self.world_size == 2
-        ), f"Requires world size of 2 since some values are hard coded: {self.world_size}"
+        assert self.world_size == 2, (
+            f"Requires world size of 2 since some values are hard coded: {self.world_size}"
+        )
         torch.manual_seed(42)
         # Pre-run a linear forward (gemm and bias) and backward (gemm) to
         # allocate the cuBLAS workspaces before measuring the memory usage
         # since the workspace size can differ between hardwares
         lin = torch.nn.Linear(768, 768, device=device_type)
-        inp = torch.randn(1, 768, device=device_type)
+        # NOTE: before https://github.com/pytorch/pytorch/pull/163955,
+        # the input shape was (1, 768), so that the forward gemm used
+        # cublaslt, and the backward used cublas.
+        # With the aforementioned PR, and with shape (1, 768),
+        # the cublas path is used both in forward and in backward,
+        # altering peak memory usage not accounting for cublaslt.
+        # Here we change the input shape to (2, 768), and that swaps
+        # the cublas/cublaslt selection in the forward/backward,
+        # but that does not affect the peak memory usage stored in `base_mem_mb`.
+        # Reasons for the flip:
+        # before PR: no Lt in addmm when mat2 has nrows/ncols <= 1,
+        # after PR: no Lt in addmm when either mat1 or mat2 have nrows/ncols <= 1,
+        # since the input preparation can swap matrices based on output
+        # row-/col-majorness.
+        inp = torch.randn(2, 768, device=device_type)
         lin(inp).sum().backward()
         torch.get_device_module(device_type).empty_cache()
         base_mem_mb = self._get_peak_active_memory_mb()
@@ -236,14 +255,15 @@ class TestFullyShardMemory(FSDPTest):
 
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-        if TEST_CUDA:
+
+        if TEST_CUDA or TEST_XPU:
             return round(mem_stats["active_bytes.all.peak"] / 1e6)
         if TEST_HPU:
             return round(mem_stats["MaxInUse"] / 1e6)
 
     def _get_curr_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-        if TEST_CUDA:
+        if TEST_CUDA or TEST_XPU:
             return round(mem_stats["active_bytes.all.current"] / 1e6)
         if TEST_HPU:
             return round(mem_stats["InUse"] / 1e6)

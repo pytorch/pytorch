@@ -1,10 +1,11 @@
 # mypy: ignore-errors
 
-""" Implementation of reduction operations, to be wrapped into arrays, dtypes etc
+"""Implementation of reduction operations, to be wrapped into arrays, dtypes etc
 in the 'public' layer.
 
 Anything here only deals with torch objects, e.g. "dtype" is a torch.dtype instance etc
 """
+
 from __future__ import annotations
 
 import functools
@@ -192,7 +193,10 @@ def sum(
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
 ):
-    assert dtype is None or isinstance(dtype, torch.dtype)
+    if dtype is not None and not isinstance(dtype, torch.dtype):
+        raise AssertionError(
+            f"dtype must be None or a torch.dtype, got {type(dtype).__name__}"
+        )
 
     if dtype == torch.bool:
         dtype = _dtypes_impl.default_dtypes().int_dtype
@@ -427,7 +431,7 @@ def percentile(
     interpolation: NotImplementedType = None,
 ):
     # np.percentile(float_tensor, 30) : q.dtype is int64 => q / 100.0 is float32
-    if _dtypes_impl.python_type_for_torch(q.dtype) == int:
+    if _dtypes_impl.python_type_for_torch(q.dtype) is int:
         q = q.to(_dtypes_impl.default_dtypes().float_dtype)
     qq = q / 100.0
 

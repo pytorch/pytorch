@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 import torch
 
@@ -11,7 +11,7 @@ __all__ = ["FPGMPruner"]
 
 class FPGMPruner(BaseStructuredSparsifier):
     r"""Filter Pruning via Geometric Median (FPGM) Structured Pruner
-    This sparsifier prune fliter (row) in a tensor according to distances among filters according to
+    This sparsifier prune filter (row) in a tensor according to distances among filters according to
     `Filter Pruning via Geometric Median for Deep Convolutional Neural Networks Acceleration <https://arxiv.org/abs/1811.00250>`_.
 
     This sparsifier is controlled by three variables:
@@ -27,9 +27,7 @@ class FPGMPruner(BaseStructuredSparsifier):
             - W: width of kernel
     """
 
-    def __init__(
-        self, sparsity_level: float = 0.5, dist: Optional[Union[Callable, int]] = None
-    ):
+    def __init__(self, sparsity_level: float = 0.5, dist: Callable | int | None = None):
         defaults = {
             "sparsity_level": sparsity_level,
         }
@@ -71,6 +69,7 @@ class FPGMPruner(BaseStructuredSparsifier):
         dist_matrix = self.dist_fn(t_flatten)
 
         # more similar with other filter indicates large in the sum of row
+        # pyrefly: ignore [bad-argument-type]
         distance = torch.sum(torch.abs(dist_matrix), 1)
 
         return distance

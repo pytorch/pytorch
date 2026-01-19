@@ -14,6 +14,8 @@ import torch
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
+
+    # pyrefly: ignore [import-error, missing-import]
     from monkeytype import trace as monkeytype_trace
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.db.base import (  # type: ignore[import]
@@ -26,7 +28,7 @@ except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
 
-# Checks whether a class is defind in `torch.*` modules
+# Checks whether a class is defined in `torch.*` modules
 def is_torch_native_class(cls):
     if not hasattr(cls, "__module__"):
         return False
@@ -66,7 +68,7 @@ def get_optional_of_element_type(types):
     from the list of consolidated types and returns `Optional[element type]`.
     TODO: To remove this check once Union support lands.
     """
-    elem_type = types[1] if type(None) == types[0] else types[0]
+    elem_type = types[1] if type(None) is types[0] else types[0]
     elem_type = get_type(elem_type)
 
     # Optional type is internally converted to Union[type, NoneType], which
@@ -83,10 +85,8 @@ if _IS_MONKEYTYPE_INSTALLED:
     class JitTypeTraceStoreLogger(CallTraceStoreLogger):
         """A JitTypeCallTraceLogger that stores logged traces in a CallTraceStore."""
 
-        def __init__(self, store: CallTraceStore):
-            super().__init__(store)
-
         def log(self, trace: CallTrace) -> None:
+            # pyrefly: ignore [missing-attribute]
             self.traces.append(trace)
 
     class JitTypeTraceStore(CallTraceStore):
@@ -97,7 +97,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             # value is list of all CallTrace
             self.trace_records: dict[str, list] = defaultdict(list)
 
-        def add(self, traces: Iterable[CallTrace]):
+        def add(self, traces: Iterable[CallTrace]) -> None:
             for t in traces:
                 qualified_name = get_qualified_name(t.func)
                 self.trace_records[qualified_name].append(t)
@@ -130,7 +130,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                 types = list(types)
                 type_length = len(types)
                 if type_length == 2 and type(None) in types:
-                    # TODO: To remove this check once Union suppport in TorchScript lands.
+                    # TODO: To remove this check once Union support in TorchScript lands.
                     all_args[arg] = get_optional_of_element_type(types)
                 elif type_length > 1:
                     all_args[arg] = "Any"
@@ -142,12 +142,13 @@ if _IS_MONKEYTYPE_INSTALLED:
             return self.consolidate_types(qualified_name)
 
     class JitTypeTraceConfig(monkeytype.config.Config):
-        def __init__(self, s: JitTypeTraceStore):
+        def __init__(self, s: JitTypeTraceStore) -> None:
             super().__init__()
             self.s = s
 
         def trace_logger(self) -> JitTypeTraceStoreLogger:
             """Return a JitCallTraceStoreLogger that logs to the configured trace store."""
+            # pyrefly: ignore [bad-argument-count]
             return JitTypeTraceStoreLogger(self.trace_store())
 
         def trace_store(self) -> CallTraceStore:

@@ -29,6 +29,7 @@ from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     IS_SANDCASTLE,
+    raise_on_run_directly,
     skipIfCompiledWithoutNumpy,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -44,14 +45,6 @@ from torch.testing._internal.jit_utils import (
     RUN_CUDA,
     RUN_CUDA_MULTI_GPU,
 )
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
@@ -967,8 +960,9 @@ class TestTracer(JitTestCase):
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
         ge = torch.jit.trace(foo, (a, b))
-        a, b = V(torch.rand(1), requires_grad=True), V(
-            torch.rand(1), requires_grad=True
+        a, b = (
+            V(torch.rand(1), requires_grad=True),
+            V(torch.rand(1), requires_grad=True),
         )
         (r,) = ge(a, b)
         da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
@@ -2031,7 +2025,7 @@ class TestTracer(JitTestCase):
         module = torch.jit.trace_module(n, inputs)
 
         check_inputs = []
-        for i in range(2):
+        for _ in range(2):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append(
@@ -2826,3 +2820,7 @@ class TestMixTracingScripting(JitTestCase):
         for n in fn_t.graph.nodes():
             if n.kind() == "prim::CallFunction":
                 self.assertTrue(n.output().isCompleteTensor())
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

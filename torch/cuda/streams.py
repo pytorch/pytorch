@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
 import ctypes
 
 import torch
@@ -32,6 +33,9 @@ class Stream(torch._C._CudaStreamBase):
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
+        # Check CUDA availability
+        if not torch.backends.cuda.is_built():
+            raise RuntimeError("torch.cuda.Stream requires CUDA support")
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
             return super().__new__(cls, priority=priority, **kwargs)
@@ -116,6 +120,16 @@ class Stream(torch._C._CudaStreamBase):
     def __repr__(self):
         return f"<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>"
 
+    def __cuda_stream__(self):
+        """Implements the CUDA Stream Protocol:
+        https://nvidia.github.io/cuda-python/cuda-core/latest/interoperability.html#cuda-stream-protocol
+
+        Returns:
+            tuple: A 2-tuple of (version, handle) where version is the protocol version
+                   and handle is the address of cudaStream_t (CUDA) or hipStream_t (ROCm) as a Python int.
+        """
+        return (0, self.cuda_stream)
+
 
 class ExternalStream(Stream):
     r"""Wrapper around an externally allocated CUDA stream.
@@ -158,17 +172,21 @@ class Event(torch._C._CudaEventBase):
         blocking (bool, optional): if ``True``, :meth:`wait` will be blocking (default: ``False``)
         interprocess (bool): if ``True``, the event can be shared between processes
             (default: ``False``)
+        external (bool, optional): indicates whether this event should create event record and event wait nodes, or create an internal cross-stream dependency, when captured in a cuda graph. See `cross-stream dependencies <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-c-programming-guide/index.html#cross-stream-dependencies-and-events>`_, `cudaEventRecordExternal <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g3457b81d1d32c6a00f6132fbc2693d47>`_, and `cudaEventWaitExternal <https://docs.nvidia.com/cuda/archive/12.9.0/cuda-runtime-api/group__CUDART__TYPES.html#group__CUDART__TYPES_1g0c23426b7252eaa9cef695859991304e>`_ for more information about internal vs. external events. (default: ``False``)
 
     .. _CUDA Event Documentation:
        https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
-    """
+    """  # noqa: B950
 
-    def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
+    def __new__(
+        cls, enable_timing=False, blocking=False, interprocess=False, external=False
+    ):
         return super().__new__(
             cls,
             enable_timing=enable_timing,
             blocking=blocking,
             interprocess=interprocess,
+            external=external,
         )
 
     @classmethod

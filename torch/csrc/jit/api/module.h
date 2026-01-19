@@ -93,7 +93,7 @@ struct TORCH_API Module : public Object {
   Module(Module&&) noexcept = default;
   Module& operator=(Module&&) noexcept = default;
   Module(
-      c10::QualifiedName,
+      c10::QualifiedName /*class_name*/,
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
   Module(ModulePtr module_value) : Object(std::move(module_value)) {}
@@ -327,7 +327,7 @@ struct TORCH_API Module : public Object {
   // Map of function names to the traced inputs that they have been traced with
   c10::Dict<std::string, c10::impl::GenericList> traced_inputs_;
 
-  // Mutex to keep registring buffer or parameter thread safe.
+  // Mutex to keep registering buffer or parameter thread safe.
   std::shared_ptr<std::mutex> register_mutex_ = std::make_shared<std::mutex>();
 };
 
@@ -652,7 +652,7 @@ struct NamedPolicy {
       std::ostringstream ss;
       for (const auto i : c10::irange(cursors.size())) {
         if (i > 0) {
-          ss << ".";
+          ss << '.';
         }
         ss << nameFragment(cursors[i]);
       }

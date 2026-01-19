@@ -6,15 +6,8 @@ from typing import Callable, List
 import torch
 from torch import nn
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import _inline_everything, JitTestCase, RUN_CUDA
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestPeephole(JitTestCase):
@@ -159,7 +152,7 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", test.graph)
         FileCheck().check_not("prim::unchecked_cast").run(test.graph)
 
-        # refinement not optimzied out
+        # refinement not optimized out
         def is_int_tensor(x):
             scalar = x.item()
             if isinstance(scalar, int):
@@ -367,7 +360,7 @@ class TestPeephole(JitTestCase):
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
         torch._C._jit_pass_constant_propagation(foo.graph)
-        # cant infer anything
+        # can't infer anything
         test_const_tuple_output(foo.graph, [])
 
         @torch.jit.script
@@ -381,7 +374,7 @@ class TestPeephole(JitTestCase):
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
         torch._C._jit_pass_constant_propagation(foo.graph)
-        # we cant infer anything, only len(b) != 4
+        # we can't infer anything, only len(b) != 4
         test_const_tuple_output(foo.graph, [])
 
         @torch.jit.script
@@ -890,3 +883,7 @@ class TestPeephole(JitTestCase):
 
         self.run_pass("peephole", foo.graph)
         FileCheck().check("aten::slice").run(foo.graph)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

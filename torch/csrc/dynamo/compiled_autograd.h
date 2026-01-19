@@ -78,7 +78,8 @@ struct TORCH_API PyCompilerInterface {
   virtual void call_accumulate_grad(
       PyObject* py_compiler,
       const at::Tensor& variable,
-      const at::Tensor& grad) const {
+      const at::Tensor& grad,
+      bool has_post_hooks) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 };
@@ -97,7 +98,7 @@ struct TORCH_API PyCompilerGuard {
 // including torch/csrc/autograd/engine.h breaks BC by somehow introducing
 // symbol resolution issues. Instead requiring downstream users to include
 // engine.h to access collect_input_metadata, we provide it here (with a
-// different name to avoid ambigous symbols...)
+// different name to avoid ambiguous symbols...)
 TORCH_API std::vector<std::optional<InputMetadata>> get_input_metadata(
     const edge_list& edges);
 
@@ -143,7 +144,7 @@ struct CacheKey {
         std::memcmp(key, other.key, key_size) == 0;
   }
 
-  size_t hash() const {
+  size_t hash() const noexcept {
     // don't bother hashing the key data, common case 1 cache entry per node
     return std::hash<std::type_index>()(node_type) ^ key_size;
   }
@@ -364,8 +365,10 @@ struct AutogradCompilerCall {
   std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
-  // pynode -> backward and backward state idx
-  std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
+  // pynode -> backward idx, backward state idx, opaque object indices
+  std::unordered_map<
+      const Node*,
+      std::tuple<size_t, std::optional<size_t>, std::vector<size_t>>>
       pynode_objs;
 };
 
@@ -571,7 +574,8 @@ class CompiledNodeArgs {
     }
   }
   void collect(const InputMetadata& t) {
-    TORCH_CHECK(!t.is_nested_tensor(), "NestedTensor not implemented");
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !t.is_nested_tensor(), "NestedTensor support not implemented. ");
     collect(t.options());
     collect(t.is_tensor_subclass());
     collect(t.shape_as_dim_vector());
@@ -640,14 +644,20 @@ class CompiledNodeArgs {
   void collect_pynode_objs(
       const Node* pynode,
       c10::SafePyObject&& bwd,
-      std::optional<c10::SafePyObject>&& bwd_state) {
+      std::optional<c10::SafePyObject>&& bwd_state,
+      std::vector<c10::SafePyObject>&& opaque_objs) {
     size_t bwd_idx = _compiler.emplace_hook(std::move(bwd));
     std::optional<size_t> bwd_state_idx;
     if (auto state = std::move(bwd_state); state.has_value()) {
       bwd_state_idx = _compiler.emplace_hook(std::move(state.value()));
     }
+    std::vector<size_t> opaque_indices(opaque_objs.size());
+    for (size_t i = 0; i < opaque_objs.size(); i += 1) {
+      opaque_indices[i] = _compiler.emplace_hook(std::move(opaque_objs[i]));
+    }
     _compiler.pynode_objs.emplace(
-        pynode, std::make_pair(bwd_idx, bwd_state_idx));
+        pynode,
+        std::make_tuple(bwd_idx, bwd_state_idx, std::move(opaque_indices)));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
@@ -783,8 +793,8 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
-  std::pair<size_t, std::optional<size_t>> retrieve_pynode_objs(
-      Node* pynode) const {
+  std::tuple<size_t, std::optional<size_t>, std::vector<size_t>>
+  retrieve_pynode_objs(Node* pynode) const {
     auto it = compiler.pynode_objs.find(pynode);
     TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
     return it->second;
@@ -1066,7 +1076,7 @@ class SwapSavedVariables {
 // (e.g. MulBackward0_apply_functional). Compiled Autograd's initial graph
 // capture wants to take a variant of this function and proxy it into the graph.
 // Every autograd node defines an apply_with_saved function, that when invoked,
-// proxys a call to a function into the Compiled Autograd graph.
+// proxies a call to a function into the Compiled Autograd graph.
 //
 // Some requirements that we have are:
 // - The proxy'ed function must have inputs that are FX-graphable types.
@@ -1104,12 +1114,14 @@ struct IValuePacker {
   // That's what the TypePtr is for: it contains the information to do the
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
-#ifdef _WIN32
+    // On windows CPU is support compiled autograd.
+#if defined(_WIN32) && (defined(USE_CUDA) || defined(USE_ROCM))
     // NB: the if-constexpr usage triggers compilation errors on Windows
     // with certain compiler settings
     // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
     // It's not clear what the problem is, so we're going to ignore it for now.
-    TORCH_INTERNAL_ASSERT(false, "torch.compile not supported on Windows");
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "torch.compile not supported on Windows");
 #else
     if constexpr (::std::is_same_v<T, at::Tensor>) {
       return at::TensorType::get();
@@ -1146,7 +1158,8 @@ struct IValuePacker {
       // define how to pack and unpack an object of this time into an IValue
       // by creating a specialization of IValuePacker for this type.
       // See NOTE: [Compiled Autograd and backward functions] for context.
-      TORCH_INTERNAL_ASSERT(false, "IValuePacker not implemented for type");
+      TORCH_CHECK_NOT_IMPLEMENTED(
+          false, "IValuePacker not implemented for type");
       return at::NoneType::get();
     }
 #endif
@@ -1269,11 +1282,11 @@ inline at::TensorOptions unpack_TensorOptions(
   at::TensorOptions result;
   auto maybe_requires_grad = std::get<0>(tuple);
   if (maybe_requires_grad.has_value()) {
-    result = result.requires_grad(maybe_requires_grad.value());
+    result = result.requires_grad(maybe_requires_grad);
   }
   auto maybe_memory_format = std::get<1>(tuple);
   if (maybe_memory_format.has_value()) {
-    result = result.memory_format(maybe_memory_format.value());
+    result = result.memory_format(maybe_memory_format);
   }
   auto maybe_device = std::get<2>(tuple);
   if (maybe_device.has_value()) {
@@ -1286,11 +1299,11 @@ inline at::TensorOptions unpack_TensorOptions(
   }
   auto maybe_layout = std::get<4>(tuple);
   if (maybe_layout.has_value()) {
-    result = result.layout(maybe_layout.value());
+    result = result.layout(maybe_layout);
   }
   auto maybe_pinned_memory = std::get<5>(tuple);
   if (maybe_pinned_memory.has_value()) {
-    result = result.pinned_memory(maybe_pinned_memory.value());
+    result = result.pinned_memory(maybe_pinned_memory);
   }
   return result;
 }
@@ -1380,7 +1393,8 @@ struct IValuePacker<std::vector<T>> {
     }
     std::vector<T> result;
     auto lst = t.toList();
-    for (const at::IValue& elt : lst) {
+    for (size_t i = 0; i < lst.size(); ++i) {
+      const at::IValue& elt = lst.get(i);
       result.emplace_back(IValuePacker<T>::unpack(elt));
     }
     return result;
@@ -1452,24 +1466,30 @@ struct IValuePacker<InputMetadata> {
     auto tuple = std::make_tuple(
         pack_TensorOptions(t.options()),
         t.shape_as_dim_vector().vec(),
-        t.is_tensor_subclass());
+        t.is_tensor_subclass(),
+        t.grad_dtype());
     return tuple;
   }
   static InputMetadata unpack(const at::IValue& t) {
-    auto tuple = t.to<
-        std::tuple<packed_tensoroptions_t, std::vector<at::SymInt>, bool>>();
+    auto tuple = t.to<std::tuple<
+        packed_tensoroptions_t,
+        std::vector<at::SymInt>,
+        bool,
+        std::optional<c10::ScalarType>>>();
 
     return InputMetadata(
         unpack_TensorOptions(std::get<0>(tuple)),
         SymIntSmallVec(std::get<1>(tuple)),
         std::get<2>(tuple),
-        false);
+        false,
+        std::get<3>(tuple));
   }
   static at::TypePtr packed_type() {
     return at::TupleType::create(
         {IValuePacker<at::TensorOptions>::packed_type(),
          IValuePacker<std::vector<at::SymInt>>::packed_type(),
-         at::BoolType::get()});
+         at::BoolType::get(),
+         IValuePacker<std::optional<at::ScalarType>>::packed_type()});
   }
 };
 
@@ -1543,7 +1563,7 @@ struct PackedArgs {
 
 template <>
 struct std::hash<torch::dynamo::autograd::CacheKey> {
-  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const {
+  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const noexcept {
     return k.hash();
   }
 };

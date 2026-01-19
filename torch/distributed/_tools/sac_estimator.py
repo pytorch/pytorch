@@ -3,7 +3,7 @@ import os
 import sys
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 from typing_extensions import Self
 
 import torch
@@ -125,7 +125,7 @@ class MSPS(NamedTuple):
 
     Attributes:
         func_names (set[str]): Set of operator/operator group names.
-        op_idx (int): Operator index (group head index incase of operator groups).
+        op_idx (int): Operator index (group head index in case of operator groups).
         memory (int): Memory usage in bytes.
         runtime (float): Runtime in milliseconds.
         msps (float): Memory per second calculated as memory/runtime.
@@ -194,7 +194,7 @@ class SACEstimator(TorchDispatchMode):
     estimation modes, `operator-level-benchmark` and (`operator-level-cost-model` (roofline model).
 
     Attributes:
-        sac_mod_stats (Dict[str, SACStats]): Dictionary from module FQN (fuly qualified name) to ``SACStats``.
+        sac_mod_stats (Dict[str, SACStats]): Dictionary from module FQN (fully qualified name) to ``SACStats``.
         sac_mod_tradeoff_stats (Dict[str, SACTradeOffStats]): Dictionary from module FQN to ``SACTradeOffStats``.
         sac_mod_greedy_order_meta (Dict[str, SACGreedyOrderMeta]): Dictionary from module FQN to ``SACGreedyOrderMeta``.
 
@@ -364,7 +364,7 @@ class SACEstimator(TorchDispatchMode):
         # 5. Initialize the parent op ids of the inplace op for each of the active modules
         mod_op_parent_idxs: dict[str, int] = dict.fromkeys(active_mod_fqns, -1)
         for i, d in enumerate(self._sac_metadata):
-            # 6. Find the first occurence of a tensor corresponding to each module that
+            # 6. Find the first occurrence of a tensor corresponding to each module that
             # shares the same storage as the current tensor
             past_output_ids = d.output_ids
             if set(output_ids).issubset(set(past_output_ids)):
@@ -429,6 +429,7 @@ class SACEstimator(TorchDispatchMode):
         # sdpa has non-deterministic seed, but might be deterministic
         # if no dropout is applied
         if func.overloadpacket.__name__ == "_scaled_dot_product_flash_attention":
+            # pyrefly: ignore [missing-attribute]
             is_rand_op = kwargs.get("dropout_p", 0) != 0
         # 5. Create metadata information per active non-leaf module
         for mod_fqn in self._mod_tracker.parents:
@@ -483,7 +484,7 @@ class SACEstimator(TorchDispatchMode):
         #   a) If the head of this group is an inplace op, then we have to store the entire group.
         #   b) If any op in the group is random and force_store_random is set, then entire group will be stored.
         #   c) If none of ops in the group are random and the head of the group is not an in-place op, then
-        #       this group can be considered for recomputation in its entireity
+        #       this group can be considered for recomputation in its entirety
         stored_ops: set[int] = set()
         recomputed_ops: set[int] = set()
         # Case 1:
@@ -533,7 +534,7 @@ class SACEstimator(TorchDispatchMode):
             func_names = {sac_stats.func_names[op_idx] for op_idx in op_indices}
             msps = (mem / runtime) if runtime > 0 else sys.float_info.max
             msps_meta.append(MSPS(func_names, cand_idx, mem, runtime, msps))
-        # We choose canidates to be recomputed based on increasing msps
+        # We choose candidates to be recomputed based on increasing msps
         msps_meta.sort(key=lambda x: x.msps, reverse=True)
         return SACGreedyOrderMeta(
             recomputed_ops, stored_ops, inplace_op_groups, random_ops_group, msps_meta
@@ -560,7 +561,7 @@ class SACEstimator(TorchDispatchMode):
             greedy_order_meta.random_ops_group,
             greedy_order_meta.msps_meta,
         )
-        # 1. Intitialize the discarded memory and recomputation runtime to sum of already chosen recomputed_ops
+        # 1. Initialize the discarded memory and recomputation runtime to sum of already chosen recomputed_ops
         recomp_indices: set[int] = set()
         for r_idx in recomputed_ops:
             recomp_indices.add(r_idx)
@@ -574,7 +575,7 @@ class SACEstimator(TorchDispatchMode):
         # 2. Initialize the max recomputation time and total recomputation memory
         sac_runtime = sum(sac_stats.runtimes)
         sac_memory = sum(sac_stats.memory)
-        # 3. Tradeoff curve stores the KV pair of the dicarded memory to total memory and,
+        # 3. Tradeoff curve stores the KV pair of the discarded memory to total memory and,
         # recomputation time to total runtime incurred.
         delta = 1e-2
         tradeoff_curve = OrderedDict()
@@ -710,7 +711,7 @@ class SACEstimator(TorchDispatchMode):
                 str(i in sac_stats.view_like_ops),
                 str(i in sac_stats.rand_ops),
                 str(i in sac_stats.saved_autograd_ops),
-                str(op_parent.get(i, None)),
+                str(op_parent.get(i)),
             ]
             table_data.append(row)
         # Define headers
@@ -776,9 +777,9 @@ class SACEstimator(TorchDispatchMode):
         def append_row(
             op_indices: set[int],
             func_names: set[str],
-            msps: Optional[float] = None,
-            stored: Optional[bool] = False,
-            recomputed: Optional[bool] = False,
+            msps: float | None = None,
+            stored: bool | None = False,
+            recomputed: bool | None = False,
         ) -> None:
             row = [
                 str(op_indices),

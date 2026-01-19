@@ -1,11 +1,8 @@
 #include <torch/csrc/lazy/core/tensor_impl.h>
 
-#include <c10/core/Allocator.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
 namespace torch::lazy {
@@ -195,13 +192,14 @@ bool LTCTensorImpl::is_strides_like_custom(
   return false;
 }
 
-bool LTCTensorImpl::is_non_overlapping_and_dense_custom() const {
+c10::SymBool LTCTensorImpl::sym_is_non_overlapping_and_dense_custom() const {
   // This should be true, but false as a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   return false;
 }
 
-bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
+c10::SymBool LTCTensorImpl::sym_is_contiguous_custom(
+    c10::MemoryFormat _unused) const {
   // TODO(ezyang): I don't think this branch is actually necessary
   // TODO(ezyang): I don't think this logic is right, shouldn't we pass on
   // the memory format?

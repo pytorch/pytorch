@@ -1,19 +1,13 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
 import copy
-import logging
 import warnings
 
 import torch
 from torch import nn
 from torch.ao.pruning._experimental.data_scheduler import BaseDataScheduler
 from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
-from torch.testing._internal.common_utils import TestCase
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class ImplementedDataScheduler(BaseDataScheduler):
@@ -149,7 +143,7 @@ class TestBaseDataScheduler(TestCase):
 
         # checking step count
         step_cnt = 5
-        for _ in range(0, step_cnt):
+        for _ in range(step_cnt):
             sparsifier.step()
             scheduler.step()
 
@@ -180,3 +174,7 @@ class TestBaseDataScheduler(TestCase):
             name, _, _ = self._get_name_data_config(some_data, defaults)
             assert scheduler1.base_param[name] == scheduler2.base_param[name]
             assert scheduler1._last_param[name] == scheduler2._last_param[name]
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

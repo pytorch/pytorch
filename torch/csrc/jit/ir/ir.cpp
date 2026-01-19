@@ -1,16 +1,13 @@
 #include <torch/csrc/jit/ir/ir.h>
 
-#include <ATen/core/builtin_function.h>
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
-#include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/serialization/python_print.h>
 
 #include <algorithm>
 #include <iostream>
@@ -64,7 +61,7 @@ constexpr topo_position_t kMidPoint = 0;
 constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
 void printValueRef(std::ostream& out, const Value* n) {
-  out << "%" << n->debugName();
+  out << '%' << n->debugName();
 }
 
 bool isNumber(std::string_view str) {
@@ -160,7 +157,7 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
   // 1-elem tensors are usually boxed scalars, so print them like it
   if (tensor.numel() == 1) {
     auto scalar_tensor = tensor.view(std::vector<int64_t>{}).item();
-    out << "{";
+    out << '{';
     if (scalar_tensor.isFloatingPoint()) {
       out << scalar_tensor.toDouble();
     } else if (scalar_tensor.isComplex()) {
@@ -168,7 +165,7 @@ static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
     } else {
       out << scalar_tensor.toLong();
     }
-    out << "}";
+    out << '}';
   } else if (tensor.numel() <= max_tensor_display_size) {
     // TODO: This is awful code.  Also it doesn't work on Windows.
     std::ostringstream tensor_ss;
@@ -191,7 +188,7 @@ static void printAttribute(std::ostream& out, const IValue& ival) {
       ss << "[<Tensors>]";
       return true;
     } else if (input.isObject() && !input.type()->is_module()) {
-      ss << "object(" << &input.toObjectRef() << ")";
+      ss << "object(" << &input.toObjectRef() << ')';
       return true;
     }
     return false;
@@ -202,14 +199,14 @@ static void printAttribute(std::ostream& out, const IValue& ival) {
 static void printTypeList(
     std::ostream& out,
     const std::vector<TypePtr>& items) {
-  out << "[";
+  out << '[';
   int i = 0;
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
     out << *item;
   }
-  out << "]";
+  out << ']';
 }
 
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
@@ -265,7 +262,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
 
 void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
     const {
-  out << "[";
+  out << '[';
   auto names = attributeNames();
   int i = 0;
   for (auto name : names) {
@@ -279,11 +276,11 @@ void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
     // don't want to print the qualifier since it should always
     // be attribute, but you might be able to track down a weird
     // bug by printing it out.
-    out << name.toUnqualString() << "=";
+    out << name.toUnqualString() << '=';
 
     printAttrValue(out, name);
   }
-  out << "]";
+  out << ']';
 }
 
 SourceRange Node::sourceRange() const {
@@ -313,11 +310,11 @@ std::ostream& Node::print(
   out << " = ";
   if (kind() == prim::PythonOp) {
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
-    out << "^" << pyOp->name();
+    out << '^' << pyOp->name();
     printAttributes(out, /*ignore_subgraph=*/false);
     pyOp->writeScalars(out);
   } else if (hasAttribute(attr::Subgraph) && groups) {
-    out << kind().toQualString() << "_" << groups->size();
+    out << kind().toQualString() << '_' << groups->size();
     if (print_attributes && numAttributes() > 1 &&
         kind() != prim::DifferentiableGraph) {
       printAttributes(out, /*ignore_subgraph=*/true);
@@ -330,7 +327,7 @@ std::ostream& Node::print(
       printAttributes(out);
     }
   }
-  out << "(" << inputs() << ")";
+  out << '(' << inputs() << ')';
 
   if (print_scopes) {
     std::string scName = scopeName();
@@ -350,7 +347,7 @@ std::ostream& Node::print(
     }
     if (auto file_line_col = r.file_line_col()) {
       auto [filename, line, col] = *file_line_col;
-      out << " # " << filename << ":" << line << ":" << col;
+      out << " # " << filename << ':' << line << ':' << col;
     }
   }
 
@@ -358,11 +355,11 @@ std::ostream& Node::print(
     return out;
   }
 
-  out << "\n";
+  out << '\n';
 
   for (const auto i : c10::irange(blocks().size())) {
     auto b = blocks()[i];
-    indent(out, level + 1) << "block" << i << "("
+    indent(out, level + 1) << "block" << i << '('
                            << const_value_list_with_types(b->inputs())
                            << "):\n";
     for (auto nested : b->nodes()) {
@@ -389,7 +386,7 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
   out << "  return (" << outputs() << ")\n";
   size_t i = 0;
   for (auto fg : groups) {
-    out << "with " << fg->kind().toQualString() << "_" << i++ << " = "
+    out << "with " << fg->kind().toQualString() << '_' << i++ << " = "
         << *fg->g(attr::Subgraph);
   }
   out.flush();
@@ -397,7 +394,7 @@ std::ostream& Graph::print(std::ostream& out, bool print_source_locations)
   /*
   // Uncomment this to debug all_nodes issues
   {
-    out << "\n";
+    out << '\n';
     out << "all_nodes:\n";
     for (auto& n : all_nodes) {
       printNode(out, const_cast<Node*>(n), nullptr);
@@ -654,7 +651,7 @@ void Graph::lint() const {
 }
 
 void Graph::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 void Graph::push_scope(const std::string& scope_name) {
@@ -842,10 +839,7 @@ bool Value::isValidName(const std::string& name) {
 }
 
 Value* Value::setDebugName(const std::string& name) {
-  if (!isValidName(name)) {
-    throw std::runtime_error("Invalid name: '" + name + "'");
-  }
-
+  TORCH_CHECK(isValidName(name), "Invalid name: '", name, "'")
   auto& names = node()->owningGraph()->unique_names_;
 
   // clear any old name from the map
@@ -891,7 +885,7 @@ Value* Value::setDebugName(const std::string& name) {
       static std::locale c_locale("C");
       ss.imbue(c_locale);
 #endif
-      ss << name_base << "." << suffix++;
+      ss << name_base << '.' << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
 
@@ -970,8 +964,7 @@ static size_t findArgument(
       return i;
     }
   }
-  throw std::runtime_error(
-      std::string("Couldn't find an argument called ") + unqualName);
+  TORCH_CHECK(false, "Couldn't find an argument called ", unqualName);
 }
 
 static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
@@ -1073,7 +1066,7 @@ bool Node::mustBeNone() const {
 }
 
 void Node::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 const FunctionSchema& Node::schema() const {
@@ -1110,7 +1103,7 @@ const Operator& Node::getOperator() const {
 
   auto er = ErrorReport(sourceRange());
   er << "Schema not found for node. File a bug report.\n";
-  er << "Node: " << *this << "\n";
+  er << "Node: " << *this << '\n';
   er << "Input types:";
   for (const auto i : c10::irange(inputs().size())) {
     if (i > 0)
@@ -1121,13 +1114,13 @@ const Operator& Node::getOperator() const {
   if (!candidates.empty()) {
     er << "\ncandidates were:\n";
     for (auto& candidate : candidates) {
-      er << "  " << candidate->schema() << "\n";
+      er << "  " << candidate->schema() << '\n';
     }
   } else {
     er << "\nno candidates found\n";
   }
   er << "within the graph:\n";
-  er << *owningGraph() << "\n";
+  er << *owningGraph() << '\n';
   throw er;
 }
 
@@ -1143,7 +1136,7 @@ bool Node::isNondeterministic() const {
   if (!kind().is_aten()) {
     return false;
   }
-  // All aten ops are expecte to have a schema. However this is left as a
+  // All aten ops are expected to have a schema. However this is left as a
   // warning instead of an assert to ensure that previous use cases do not
   // break.
   if (!schema) {
@@ -1179,12 +1172,10 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
-#if !defined(USE_ROCM)
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
     case cuda::synchronize:
-#endif
     case prim::Enter:
     case prim::Exit:
       return true;
@@ -1297,10 +1288,9 @@ void Node::assignTopoPosition() {
 Node::Node(Graph* graph_, NodeKind kind_)
     : kind_(kind_),
       graph_(graph_),
-      owning_block_(nullptr),
+
       scope_(graph_->current_scope_),
-      callstack_(std::nullopt),
-      op_(nullptr) {
+      callstack_(std::nullopt) {
   graph_->all_nodes.emplace(this);
 }
 
@@ -1648,7 +1638,7 @@ Block* Node::findCommonAncestorBlockWith(Node* n) {
     n2 = n2->owningBlock()->owningNode();
   }
 
-  // Now they are the same numer of blocks from the graph block,
+  // Now they are the same number of blocks from the graph block,
   // recurse upwards, checking if they are on the same block
   while (true) {
     if (n1->owningBlock() == n2->owningBlock()) {
@@ -1773,7 +1763,7 @@ Node* Graph::createTupleSlice(
 
   int64_t i = beg;
   for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
-    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto idx = insertConstant(IValue(i));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
     new_vals.push_back(tupleIndex->output());

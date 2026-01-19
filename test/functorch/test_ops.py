@@ -399,6 +399,38 @@ skip_noncontig = {
     "as_strided_copy",
 }
 
+bool_unsupported_ordered_ops = {
+    "topk",
+    "argmin",
+    "ceil",
+    "argmax",
+    "floor",
+}
+bool_ordered_op_db = tuple(
+    filter(lambda op: op.name in bool_unsupported_ordered_ops, op_db)
+)
+
+complex_unsupported_ordered_ops = {
+    "sort",
+    "topk",
+    "lt",
+    "argmin",
+    "le",
+    "ge",
+    "amax",
+    "maximum",
+    "minimum",
+    "clamp",
+    "amin",
+    "gt",
+    "ceil",
+    "argmax",
+    "floor",
+}
+complex_ordered_op_db = tuple(
+    filter(lambda op: op.name in complex_unsupported_ordered_ops, op_db)
+)
+
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
@@ -436,13 +468,6 @@ class TestOperators(TestCase):
                 ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
-                # RuntimeError: Expected contiguous tensor, but got
-                # non-contiguous tensor for argument #2 'grad_output'
-                decorate(
-                    "_batch_norm_with_update",
-                    decorator=expectedFailureIf(TEST_WITH_ROCM),
-                    device_type="cuda",
-                ),
             }
         ),
     )
@@ -2154,9 +2179,9 @@ class TestOperators(TestCase):
                 else:
                     weight = torch.randn(weight_shape, device=device)
                 target = torch.randint(0, C, target_shape, device=device)
-                target[
-                    0
-                ] = 1  # since we're ignoring index 0, at least one element must be non-zero
+                target[0] = (
+                    1  # since we're ignoring index 0, at least one element must be non-zero
+                )
 
                 fn = functools.partial(
                     torch.nn.functional.nll_loss, target=target, weight=weight, **kwargs
@@ -2368,13 +2393,6 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-            # RuntimeError: Expected contiguous tensor, but got
-            # non-contiguous tensor for argument #2 'grad_output'
-            decorate(
-                "_batch_norm_with_update",
-                decorator=expectedFailureIf(TEST_WITH_ROCM),
-                device_type="cuda",
-            ),
         },
     )
     @opsToleranceOverride(
@@ -2383,7 +2401,7 @@ class TestOperators(TestCase):
         (
             tol1(
                 "ldexp",
-                {torch.float32: tol(atol=3e-04, rtol=1.6e-06)},
+                {torch.float32: tol(atol=6e-04, rtol=5e-06)},
                 device_type="cuda",
             ),
             tol1(
@@ -2967,6 +2985,39 @@ class TestOperators(TestCase):
             expected_fn(torch.ones_like(expected_o)),
             actual_fn(torch.ones_like(actual_o)),
         )
+
+    @ops(bool_ordered_op_db, dtypes=[torch.bool])
+    def test_ordered_bool_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
+
+    @ops(
+        complex_ordered_op_db,
+        dtypes=[torch.complex32, torch.complex64, torch.complex128],
+    )
+    def test_ordered_complex_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
 
 
 only_for = ("cpu", "cuda")

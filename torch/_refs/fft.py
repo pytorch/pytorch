@@ -95,7 +95,10 @@ def _resize_fft_input(
     Fixes the shape of x such that x.size(dims[i]) == sizes[i],
     either by zero-padding, or by slicing x starting from 0.
     """
-    assert len(dims) == len(sizes)
+    if len(dims) != len(sizes):
+        raise AssertionError(
+            f"dims and sizes must have the same length, got {len(dims)} and {len(sizes)}"
+        )
     must_copy = False
     x_sizes = x.shape
     pad_amount = [0] * len(x_sizes) * 2
@@ -106,6 +109,7 @@ def _resize_fft_input(
         if x_sizes[dims[i]] < sizes[i]:
             must_copy = True
             pad_idx = len(pad_amount) - 2 * dims[i] - 1
+
             pad_amount[pad_idx] = sizes[i] - x_sizes[dims[i]]
 
         if x_sizes[dims[i]] > sizes[i]:
@@ -313,7 +317,8 @@ def _canonicalize_fft_shape_and_dim_args(
 
         # Translate any -1 values in shape to the default length
         ret_shape = tuple(
-            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)  # type: ignore[possibly-undefined]
+            s if s != -1 else input_sizes[d]
+            for (s, d) in zip(shape, ret_dims)  # type: ignore[possibly-undefined]
         )
     elif dim is None:
         # No shape, no dim

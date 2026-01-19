@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.fx
@@ -46,12 +47,12 @@ class NormalizeArgs(Transformer):
 
         def get_type(arg):
             if isinstance(arg, fx.Node):
-                return n.meta["type"] if "type" in n.meta else None
+                return n.meta.get("type")
             return type(arg)
 
         arg_types = map_aggregate(n.args, get_type)
         assert isinstance(arg_types, tuple)
-        arg_types = tuple([create_type_hint(i) for i in arg_types])
+        arg_types = tuple(create_type_hint(i) for i in arg_types)
         kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
         if n.op == "call_function":
             out = self.call_function(n.target, args, kwargs, arg_types, kwarg_types)

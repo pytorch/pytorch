@@ -83,15 +83,17 @@ def autograd_registration_check(op, args, kwargs):
 
     # Determine which AutogradBACKEND key to check
     all_device_types = {arg.device.type for arg in all_tensors}
-    if not all_device_types.issubset(["cpu", "cuda"]):
+    if not all_device_types.issubset(["cpu", "cuda", "xpu"]):
         # Don't want to support other keys yet
         raise NotImplementedError(
-            f"autograd_registration_check: NYI devices other than CPU/CUDA, got {all_device_types}"
+            f"autograd_registration_check: NYI devices other than CPU/CUDA/XPU, got {all_device_types}"
         )
     if "cuda" in all_device_types:
         key = "AutogradCUDA"
     elif "cpu" in all_device_types:
         key = "AutogradCPU"
+    elif "xpu" in all_device_types:
+        key = "AutogradXPU"
 
     if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), key):
         return
@@ -127,6 +129,6 @@ def autograd_registration_check(op, args, kwargs):
         f"which may lead to silently incorrect results. If your operator consists "
         f"of regular PyTorch operations, consider not using an operator at all "
         f"or registering your operator as CompositeImplicitAutograd. If you have "
-        f"an autograd.Function registered to a backend (CPU/CUDA) key, the correct "
+        f"an autograd.Function registered to a backend (CPU/CUDA/XPU) key, the correct "
         f"location for it is the Autograd key."
     )

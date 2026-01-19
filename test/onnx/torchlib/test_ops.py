@@ -25,7 +25,7 @@ errors.
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import error_reproduction
 import numpy as np
@@ -44,7 +44,7 @@ from torch.utils import _pytree as pytree
 
 if TYPE_CHECKING:
     import unittest
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.testing._internal.opinfo import core as opinfo_core
 

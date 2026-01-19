@@ -1,5 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <c10/util/irange.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/variable.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -53,7 +55,7 @@ using at::Tensor;
 //
 // This layout constraint is ensured in the `set_fw_grad` function below
 
-// More complex cases arrise when non-dual Tensor interact with dual Tensors.
+// More complex cases arise when non-dual Tensor interact with dual Tensors.
 // The two most important cases are:
 //
 //     # Have:
@@ -222,7 +224,7 @@ void AutogradMeta::set_fw_grad(
           if (utils::has_same_meta(new_grad, base) &&
               utils::has_same_meta(new_grad, self)) {
             // TODO extend this special case to when the underlying storage of
-            // new_grad can be re-used.
+            // new_grad can be reused.
             new_base_fw_grad = new_grad;
           } else {
             new_base_fw_grad =

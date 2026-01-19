@@ -36,7 +36,7 @@ from __future__ import annotations
 import itertools
 import re
 from collections import defaultdict
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -77,7 +77,7 @@ from .gen_trace_type import should_trace
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
 
 #
@@ -97,6 +97,7 @@ _SKIP_PYTHON_BINDINGS = [
     "is_sparse_csr",
     "size",
     "stride",
+    "sym_is_contiguous",
     "sym_size",
     "sym_stride",
     "sym_storage_offset",
@@ -148,7 +149,7 @@ _SKIP_PYTHON_BINDINGS = [
     "mH",  # these need to be an attributes in Python, not functions
     "nonzero(_(out|numpy))?",
     "set_data",
-    ".*_overrideable",  # overrideable functions for backend extension
+    ".*_overrideable",  # overridable functions for backend extension
     "data",
     "is_leaf",
     "output_nr",
@@ -617,7 +618,7 @@ def load_deprecated_signatures(
         schema_args_by_name = {a.name: a for a in schema.arguments.flat_all}
         for name in call_args:
             assert name in schema_args_by_name or name in known_constants, (
-                f"deprecation definiton: Unrecognized value {name}"
+                f"deprecation definition: Unrecognized value {name}"
             )
 
         # Map deprecated signature arguments to their aten signature and test

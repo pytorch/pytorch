@@ -1,11 +1,14 @@
 # mypy: allow-untyped-defs
 import logging
-import pdb
 import sys
 import traceback
 import typing
+from datetime import timedelta
 
 import torch
+
+
+RankType = int | torch.SymInt
 
 
 log = logging.getLogger(__name__)
@@ -64,25 +67,31 @@ if is_available():
         Work as _Work,
     )
 
-    class _DistributedPdb(pdb.Pdb):
+    def _make_distributed_pdb():
         """
         Supports using PDB from inside a multiprocessing child process.
 
         Usage:
-        _DistributedPdb().set_trace()
+        _make_distributed_pdb().set_trace()
         """
 
-        def interaction(self, *args, **kwargs):
-            _stdin = sys.stdin
-            try:
-                sys.stdin = open("/dev/stdin")
-                pdb.Pdb.interaction(self, *args, **kwargs)
-            finally:
-                sys.stdin = _stdin
+        # Lazy import pdb only if we set breakpoints.
+        import pdb
+
+        class _DistributedPdb(pdb.Pdb):
+            def interaction(self, *args, **kwargs):
+                _stdin = sys.stdin
+                try:
+                    with open("/dev/stdin") as sys.stdin:
+                        pdb.Pdb.interaction(self, *args, **kwargs)
+                finally:
+                    sys.stdin = _stdin
+
+        return _DistributedPdb()
 
     _breakpoint_cache: dict[int, typing.Any] = {}
 
-    def breakpoint(rank: int = 0, skip: int = 0):
+    def breakpoint(rank: int = 0, skip: int = 0, timeout_s=3600):
         """
         Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
         done with the breakpoint before continuing.
@@ -99,8 +108,15 @@ if is_available():
                 log.warning("Skip the breakpoint, counter=%d", counter)
                 return
 
+        # avoid having the default timeout (if short) interrupt your debug session
+        if timeout_s is not None:
+            for group in torch.distributed.distributed_c10d._pg_map:
+                torch.distributed.distributed_c10d._set_pg_timeout(
+                    timedelta(seconds=timeout_s), group
+                )
+
         if get_rank() == rank:
-            pdb = _DistributedPdb()
+            pdb = _make_distributed_pdb()
             pdb.message(
                 "\n!!! ATTENTION !!!\n\n"
                 f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"

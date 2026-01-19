@@ -32,7 +32,7 @@ This happens when the accelerator's runtime is not fork safe and is initialized 
 runtime errors in child processes.
 
 To prevent such errors:
-    - Avoid initializing the accelerator in the main process beofre forking child processes.
+    - Avoid initializing the accelerator in the main process before forking child processes.
     - Use an alternative process start methods, such as ``spawn`` or ``forkserver``, which ensures a clean initialization of each process.
 
 .. _multiprocessing-cuda-note:

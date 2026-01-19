@@ -63,12 +63,16 @@ def convert_conv2d_weight_memory_format(
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # xdoctest: +REQUIRES(env:CUBLAS_WORKSPACE_CONFIG)
-        >>> input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float16, device="cuda")
+        >>> input = torch.randint(
+        ...     1, 10, (2, 8, 4, 4), dtype=torch.float16, device="cuda"
+        ... )
         >>> model = nn.Sequential(
         >>>     nn.Conv2d(8, 4, 3)).cuda().half()
         >>> # This is identical to:
         >>> # nn.utils.convert_conv2d_weight_memory_format(model, torch.channels_last)
-        >>> model = nn.utils.convert_conv2d_weight_memory_format(model, torch.channels_last)
+        >>> model = nn.utils.convert_conv2d_weight_memory_format(
+        ...     model, torch.channels_last
+        ... )
         >>> out = model(input)
     """
     # TODO: expand this to `_ConvNd` when channels_last support is extended
@@ -80,6 +84,7 @@ def convert_conv2d_weight_memory_format(
         )
     for child in module.children():
         convert_conv2d_weight_memory_format(child, memory_format)
+
     return module
 
 
@@ -137,12 +142,16 @@ def convert_conv3d_weight_memory_format(
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> # xdoctest: +REQUIRES(env:CUBLAS_WORKSPACE_CONFIG)
-        >>> input = torch.randint(1, 10, (2, 8, 4, 4, 4), dtype=torch.float16, device="cuda")
+        >>> input = torch.randint(
+        ...     1, 10, (2, 8, 4, 4, 4), dtype=torch.float16, device="cuda"
+        ... )
         >>> model = nn.Sequential(
         >>>     nn.Conv3d(8, 4, 3)).cuda().half()
         >>> # This is identical to:
         >>> # nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last_3d)
-        >>> model = nn.utils.convert_conv3d_weight_memory_format(model, torch.channels_last_3d)
+        >>> model = nn.utils.convert_conv3d_weight_memory_format(
+        ...     model, torch.channels_last_3d
+        ... )
         >>> out = model(input)
     """
 
@@ -155,6 +164,7 @@ def convert_conv3d_weight_memory_format(
         )
     for child in module.children():
         convert_conv3d_weight_memory_format(child, memory_format)
+
     return module
 
 

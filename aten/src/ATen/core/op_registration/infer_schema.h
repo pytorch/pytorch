@@ -44,7 +44,7 @@ constexpr int checkStaticTypes() {
 }
 
 template <typename... Ts, size_t... Is>
-constexpr std::array<ArgumentDef, sizeof...(Ts)> createArgumentVectorFromTypes(std::index_sequence<Is...>) {
+constexpr std::array<ArgumentDef, sizeof...(Ts)> createArgumentVectorFromTypes(std::index_sequence<Is...> /*unused*/) {
   return (
     // Check types for common errors
     checkStaticTypes<Ts...>(),

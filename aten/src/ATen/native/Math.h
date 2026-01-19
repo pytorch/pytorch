@@ -189,10 +189,10 @@ Date:  February 1996
 #endif
   }
   /* Two steps of Newton-Raphson correction */
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(c10::pi<double>)))*std::exp(-x*x));
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(c10::pi<double>)))*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
 
-  return(x);
+  return x;
 }
 
 #undef CENTRAL_RANGE
@@ -581,7 +581,7 @@ scalar_t ratevl(scalar_t x, const scalar_t num[], int64_t M,
 template <typename scalar_t>
 static scalar_t lanczos_sum_expg_scaled(scalar_t x) {
   // lanczos approximation
-  static const scalar_t lanczos_sum_expg_scaled_num[13] = {
+  static constexpr scalar_t lanczos_sum_expg_scaled_num[13] = {
     0.006061842346248906525783753964555936883222,
     0.5098416655656676188125178644804694509993,
     19.51992788247617482847860966235652136208,
@@ -596,7 +596,7 @@ static scalar_t lanczos_sum_expg_scaled(scalar_t x) {
     103794043.1163445451906271053616070238554,
     56906521.91347156388090791033559122686859
   };
-  static const scalar_t lanczos_sum_expg_scaled_denom[13] = {
+  static constexpr scalar_t lanczos_sum_expg_scaled_denom[13] = {
     1.,
     66.,
     1925.,
@@ -712,7 +712,7 @@ static scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
 template <typename scalar_t>
 static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam) {
   // Compute igam/igamc using DLMF 8.12.3/8.12.4 [igam1]
-  static const scalar_t d[25][25] =
+  static constexpr scalar_t d[25][25] =
     {{-3.3333333333333333e-1, 8.3333333333333333e-2, -1.4814814814814815e-2,
       1.1574074074074074e-3, 3.527336860670194e-4, -1.7875514403292181e-4,
       3.9192631785224378e-5, -2.1854485106799922e-6, -1.85406221071516e-6,
@@ -1068,7 +1068,7 @@ inline scalar_t calc_igammac(scalar_t a, scalar_t x) {
    *   result at the boundary
    * - if a is large and a ~ x, then using Uniform Asymptotic Expansions for
    *   Large Parameter (see DLMF 8.12.4 [igam1])
-   * - if x > 1.1 and x < a, using the substraction from the regularized lower
+   * - if x > 1.1 and x < a, using the subtraction from the regularized lower
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (5)
    */
@@ -1148,7 +1148,7 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
    *   result at the boundary
    * - if a is large and a ~ x, then using Uniform Asymptotic Expansions for
    *   Large Parameter (see DLMF 8.12.3 [igam1])
-   * - if x > 1 and x > a, using the substraction from the regularized upper
+   * - if x > 1 and x > a, using the subtraction from the regularized upper
    *   incomplete gamma
    * - otherwise, calculate the series from [igam2] eq (4)
    */
@@ -1730,7 +1730,7 @@ inline C10_HOST_DEVICE T calc_ndtri(T y0) {
    with the usual checks for overflow etcetera.
 
    Performance-wise, it seems to be substantially faster than either
-   the SLATEC DERFC function [or an erfcx function derived therefrom]
+   the SLATEC DERFC function [or an erfcx function derived there from]
    or Cody's CALERF function (from netlib.org/specfun), while
    retaining near machine precision in accuracy.  */
 
@@ -2862,7 +2862,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -2910,7 +2910,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
     T q = x + x;
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -2966,7 +2966,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
     T q = x + x - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -3026,7 +3026,7 @@ inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
     T q = x + x + T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x) * q - p;
         p = q;
         q = r;
@@ -3150,7 +3150,7 @@ inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     T q = T(1.0) - x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
         r = (((k + k) + (T(1.0) - x)) * q - k * p) / (k + 1);
         p = q;
         q = r;
@@ -3190,7 +3190,7 @@ inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
     T q = x;
     T r;
 
-    for (int64_t k = 1; k < n; k++) {
+    for (int64_t k = 1; (k < n) && !std::isnan(q); k++) {
         r = ((k + k + 1) * x * q - k * p) / (k + 1);
         p = q;
         q = r;
@@ -3733,7 +3733,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) 
     T q = x + x - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3785,7 +3785,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0));
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3819,7 +3819,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) 
 
     if ((n > 6) && (std::abs(x + x - T(1.0)) < T(1.0))) {
         if (std::sin(std::acos(x + x - T(1.0)) / T(2.0)) != T(1.0)) {
-            return std::cos(((n) + T(0.5)) * std::acos(x + x - T(1.0))) / std::cos(std::acos(x + x - T(1.0)) / T(2.0));
+            return std::cos((n + T(0.5)) * std::acos(x + x - T(1.0))) / std::cos(std::acos(x + x - T(1.0)) / T(2.0));
         }
 
         if (n % 2 == 0) {
@@ -3841,7 +3841,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0)) - T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;
@@ -3897,7 +3897,7 @@ inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) 
     T q = x + x - T(1.0) + (x + x - T(1.0)) + T(1.0);
     T r;
 
-    for (int64_t k = 2; k <= n; k++) {
+    for (int64_t k = 2; (k <= n) && !std::isnan(q); k++) {
         r = (x + x - T(1.0) + (x + x - T(1.0))) * q - p;
         p = q;
         q = r;

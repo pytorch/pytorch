@@ -16,7 +16,7 @@ namespace torch::distributed::rpc {
 namespace {
 
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
-  // add GIL as it is contructing a py::object
+  // add GIL as it is constructing a py::object
   pybind11::gil_scoped_acquire ag;
   return py::make_tuple(
       rrefForkData.ownerId_,
@@ -86,12 +86,14 @@ TypePtr tryInferTypeWithTypeHint(
   // Check if value is an instance of a ScriptClass. If not, skip type inference
   // because it will try to script the class that value is in instance of, and
   // this should be avoided.
-  py::bool_ can_compile = py::module::import("torch._jit_internal")
-                              .attr("can_compile_class")(value.get_type());
+  py::bool_ can_compile =
+      py::module::import("torch._jit_internal")
+          .attr("can_compile_class")(py::type::handle_of(value));
 
   if (py::cast<bool>(can_compile)) {
-    py::object existing_ty = py::module::import("torch.jit._state")
-                                 .attr("_get_script_class")(value.get_type());
+    py::object existing_ty =
+        py::module::import("torch.jit._state")
+            .attr("_get_script_class")(py::type::handle_of(value));
 
     if (existing_ty.is_none()) {
       return PyObjectType::get();
@@ -319,7 +321,7 @@ void PyRRef::backwardOwnerRRef(
     py::object obj = torch::jit::toPyObject(value);
     try {
       value = torch::jit::toIValue(obj, c10::TensorType::get());
-    } catch (py::cast_error& e) {
+    } catch (py::cast_error&) {
       TORCH_CHECK(false, "RRef should contain a tensor for .backward()");
     }
   }

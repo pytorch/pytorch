@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch.ao.ns.fx.mappings import get_node_type_to_io_type_map
@@ -23,7 +24,7 @@ from .utils import (
 )
 
 
-def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
+def _maybe_get_fqn(node: Node, gm: GraphModule) -> str | None:
     fqn = None
     if hasattr(gm, "_node_name_to_scope"):
         # fqn on observers is not present, because they do not
@@ -31,7 +32,8 @@ def _maybe_get_fqn(node: Node, gm: GraphModule) -> Optional[str]:
         # an observer, get the fqn of the node being observed.
         node_to_use_for_fqn = node
         if node.op == "call_module":
-            assert isinstance(node.target, str)
+            if not isinstance(node.target, str):
+                raise AssertionError(f"Expected str, got {type(node.target)}")
             module = getattr_from_fqn(gm, node.target)
             if _is_activation_post_process(module):
                 node_to_use_for_fqn = get_normalized_nth_input(node, gm, 0)
@@ -51,7 +53,7 @@ def _insert_logger_after_node(
     results_type: str,
     index_within_arg: int,
     index_of_arg: int,
-    fqn: Optional[str],
+    fqn: str | None,
 ) -> Node:
     """
     Given a starting graph of
@@ -127,7 +129,7 @@ def add_loggers_to_model(
                 arg_indices_to_log = get_arg_indices_of_inputs_to_log(node)
                 for node_arg_idx in arg_indices_to_log:
                     node_arg = get_normalized_nth_input(node, gm, node_arg_idx)
-                    if type(node_arg) == Node:
+                    if type(node_arg) is Node:
                         # create a single input logger
                         prev_node = env[node_arg.name]
                         env[node_arg.name] = _insert_logger_after_node(
@@ -145,7 +147,7 @@ def add_loggers_to_model(
                             fqn=fqn,
                         )
                     elif (
-                        type(node_arg) == torch.fx.immutable_collections.immutable_list
+                        type(node_arg) is torch.fx.immutable_collections.immutable_list
                     ):
                         # create N input loggers, one for each node
                         for arg_idx, arg in enumerate(node_arg):  # type: ignore[var-annotated, arg-type]
@@ -164,8 +166,6 @@ def add_loggers_to_model(
                                 index_of_arg=node_arg_idx,
                                 fqn=fqn,
                             )
-                    else:
-                        pass
 
             # ensure env is populated with base node
             # Note: runs for both inputs and outputs
@@ -203,8 +203,8 @@ def _insert_quantize_per_tensor_node(
     node_a: Node,
     gm_b: GraphModule,
     graph_c: Graph,
-    scale: Union[torch.Tensor, float],
-    zero_point: Union[torch.Tensor, int],
+    scale: torch.Tensor | float,
+    zero_point: torch.Tensor | int,
     dtype_cast_name: str,
 ) -> Node:
     # copy scale
@@ -234,14 +234,14 @@ def _insert_quantize_per_tensor_node(
 def _insert_dtype_cast_after_node(
     node_a: Node,
     node_c: Node,
-    prev_node_c: Union[Node, list[Node]],
+    prev_node_c: Node | list[Node],
     gm_a: GraphModule,
     gm_b: GraphModule,
     graph_c: Graph,
     node_name_prefix: str,
     logger_cls: Callable,
     node_type_to_io_type_map: dict[str, set[NSNodeTargetType]],
-) -> Union[Node, list[Node]]:
+) -> Node | list[Node]:
     """
     Given a starting graph C (derived from graph B) of
 
@@ -349,7 +349,8 @@ def _insert_dtype_cast_after_node(
                 new_dtype_cast_name,
             )
         else:
-            assert dtype_cast_mod_cls
+            if not dtype_cast_mod_cls:
+                raise AssertionError("Expected dtype_cast_mod_cls to be not None")
             dtype_cast_mod = dtype_cast_mod_cls()
             setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
             return graph_c.create_node(
@@ -374,7 +375,8 @@ def _insert_dtype_cast_after_node(
                 )
                 results.append(new_dtype_cast_node)
             else:
-                assert dtype_cast_mod_cls
+                if not dtype_cast_mod_cls:
+                    raise AssertionError("Expected dtype_cast_mod_cls to be not None")
                 dtype_cast_mod = dtype_cast_mod_cls()
                 setattr(gm_b, new_dtype_cast_name, dtype_cast_mod)
                 new_dtype_cast_node = graph_c.create_node(
@@ -413,10 +415,8 @@ def _copy_node_from_a_to_c(
         )
         return node_a_copy
     elif node_a.op == "call_method":
-        assert node_a.target in (
-            "dequantize",
-            "to",
-        ), f"target {node_a.target} is not implemented"
+        if node_a.target not in ("dequantize", "to"):
+            raise AssertionError(f"target {node_a.target} is not implemented")
         if node_a.target == "dequantize":
             arg_copy = _copy_node_from_a_to_c(
                 get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c
@@ -526,8 +526,8 @@ def _can_insert_copy_of_subgraph_a(
 
 
 def _insert_copy_of_subgraph_a_after_input_node_c(
-    input_node_c: Union[Node, list[Node]],
-    input_node_c_2: Optional[Union[Node, list[Node]]],
+    input_node_c: Node | list[Node],
+    input_node_c_2: Node | list[Node] | None,
     subgraph_a: NSSubgraph,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -536,7 +536,8 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     """
     TODO(before land): real docblock
     """
-    assert isinstance(input_node_c, (Node, list))
+    if not isinstance(input_node_c, (Node, list)):
+        raise AssertionError(f"Expected Node or list, got {type(input_node_c)}")
 
     # create a sequential list of the subgraphs' nodes from start to end,
     # because we need to add the nodes to graph C in non-reverse order
@@ -569,8 +570,8 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
 
 
 def _insert_copy_of_node_a_after_input_node_c(
-    input_node_c: Union[Node, list[Node]],
-    input_node_c_2: Optional[Union[Node, list[Node]]],
+    input_node_c: Node | list[Node],
+    input_node_c_2: Node | list[Node] | None,
     node_a: Node,
     gm_a: GraphModule,
     gm_b: GraphModule,
@@ -622,7 +623,8 @@ def _insert_copy_of_node_a_after_input_node_c(
     if isinstance(input_node_c, Node):
         graph_c = input_node_c.graph
     else:
-        assert isinstance(input_node_c, list)
+        if not isinstance(input_node_c, list):
+            raise AssertionError(f"Expected list, got {type(input_node_c)}")
         graph_c = input_node_c[0].graph
 
     norm_args_kwargs = node_a.normalized_arguments(
@@ -646,9 +648,10 @@ def _insert_copy_of_node_a_after_input_node_c(
             return arg
         elif isinstance(kwarg_val, (list, tuple)):
             for el in kwarg_val:
-                assert not isinstance(
-                    el, Node
-                ), "handling of Node inside list is not implemented"
+                if isinstance(el, Node):
+                    raise AssertionError(
+                        "handling of Node inside list is not implemented"
+                    )
             return arg
         else:
             raise AssertionError(
@@ -685,17 +688,27 @@ def _insert_copy_of_node_a_after_input_node_c(
         # if target is a module, we point to the module from gm_b
         new_mod_copy_name = get_new_attr_name_with_prefix(node_name_prefix)(gm_b)
         # fetch the corresponding module from gm_a
-        assert isinstance(node_a.target, str)
+        if not isinstance(node_a.target, str):
+            raise AssertionError(f"Expected str, got {type(node_a.target)}")
         mod_a = getattr_from_fqn(gm_a, node_a.target)
         setattr(gm_b, new_mod_copy_name, mod_a)
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, new_mod_copy_name, new_args, new_kwargs, node_a_shadows_c_name  # type: ignore[arg-type]
+            node_a.op,
+            new_mod_copy_name,
+            new_args,  # type: ignore[arg-type]
+            new_kwargs,  # type: ignore[arg-type]
+            node_a_shadows_c_name,
         )
         return node_a_shadows_c
     else:
-        assert node_a.op in ("call_function", "call_method")
+        if node_a.op not in ("call_function", "call_method"):
+            raise AssertionError(f"Unexpected op: {node_a.op}")
         node_a_shadows_c = graph_c.create_node(
-            node_a.op, node_a.target, new_args, new_kwargs, node_a_shadows_c_name  # type: ignore[arg-type]
+            node_a.op,
+            node_a.target,
+            new_args,  # type: ignore[arg-type]
+            new_kwargs,  # type: ignore[arg-type]
+            node_a_shadows_c_name,
         )
         return node_a_shadows_c
 
@@ -708,7 +721,7 @@ def create_a_shadows_b(
     matched_subgraph_pairs: dict[str, tuple[NSSubgraph, NSSubgraph]],
     logger_cls: Callable,
     should_log_inputs: bool,
-    node_type_to_io_type_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
+    node_type_to_io_type_map: dict[str, set[NSNodeTargetType]] | None = None,
 ) -> GraphModule:
     """
     Creates a new GraphModule consisting of the graph of C, with the meaningful
@@ -784,7 +797,8 @@ def create_a_shadows_b(
                     ref_node_type_b,
                 ) = start_node_b_to_matched_subgraph_a_and_name[node_b]
             else:
-                assert node_b_is_end_node
+                if not node_b_is_end_node:
+                    raise AssertionError("Expected node_b_is_end_node to be not false")
                 (
                     subgraph_a,
                     ref_name,
@@ -895,8 +909,7 @@ def create_a_shadows_b(
                         # is added
                         prev_node_c_list = [env_c[arg.name] for arg in prev_node_b]
 
-                        for arg_idx, arg in enumerate(prev_node_b):
-                            prev_node_c = prev_node_c_list[arg_idx]
+                        for arg_idx, prev_node_c in enumerate(prev_node_c_list):
                             env_c[prev_node_c.name] = _insert_logger_after_node(
                                 prev_node_c,
                                 gm_b,
@@ -945,6 +958,7 @@ def create_a_shadows_b(
                 if should_log_inputs:
                     # skip the input logger when inserting a dtype cast
                     if isinstance(prev_node_c, Node):
+                        # pyrefly: ignore [unbound-name]
                         prev_node_c = get_normalized_nth_input(node_c, gm_b, 0)
                     elif isinstance(prev_node_c, list):
                         prev_node_c = [
@@ -953,6 +967,7 @@ def create_a_shadows_b(
                         ]
                 dtype_cast_node = _insert_dtype_cast_after_node(
                     subgraph_a.start_node,
+                    # pyrefly: ignore [unbound-name]
                     node_c,
                     prev_node_c,
                     gm_a,
@@ -990,9 +1005,12 @@ def create_a_shadows_b(
                             index_of_arg=0,
                             fqn=fqn_base_a,
                         )
-                        input_logger: Union[Node, list[Node]] = dtype_cast_node
+                        input_logger: Node | list[Node] = dtype_cast_node
                     else:
-                        assert isinstance(dtype_cast_node, list)
+                        if not isinstance(dtype_cast_node, list):
+                            raise AssertionError(
+                                f"Expected list, got {type(dtype_cast_node)}"
+                            )
                         new_loggers = []
                         for dtype_cast_idx, dtype_cast_node_inner in enumerate(
                             dtype_cast_node
@@ -1033,7 +1051,10 @@ def create_a_shadows_b(
                 if num_non_param_args_node_a == 2:
                     # node_c_second_non_param_arg = node_c.args[1]
                     node_c_second_non_param_arg = get_normalized_nth_input(
-                        node_c, gm_b, 1
+                        # pyrefly: ignore [unbound-name]
+                        node_c,
+                        gm_b,
+                        1,
                     )
                 node_a_shadows_c = _insert_copy_of_subgraph_a_after_input_node_c(
                     dtype_cast_node,
@@ -1041,6 +1062,7 @@ def create_a_shadows_b(
                     subgraph_a,
                     gm_a,
                     gm_b,
+                    # pyrefly: ignore [unbound-name]
                     node_c.name + "_shadow_copy_",
                 )
                 env_c[node_a_shadows_c.name] = node_a_shadows_c
@@ -1063,11 +1085,19 @@ def create_a_shadows_b(
                     cur_node = node_a_shadows_c
                     while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:  # type: ignore[possibly-undefined]
                         cur_node = get_normalized_nth_input(cur_node, gm_b, 0)  # type: ignore[assignment]
+                    # pyrefly: ignore [unbound-name]
                     if isinstance(input_logger, Node):
+                        # pyrefly: ignore [unbound-name]
                         input_logger_mod = getattr(gm_b, input_logger.name)
                         input_logger_mod.ref_node_name = cur_node.name
                     else:
-                        assert isinstance(input_logger, list)
+                        # pyrefly: ignore [unbound-name]
+                        if not isinstance(input_logger, list):
+                            raise AssertionError(
+                                # pyrefly: ignore [unbound-name]
+                                f"Expected list, got {type(input_logger)}"
+                            )
+                        # pyrefly: ignore [unbound-name]
                         for input_logger_inner in input_logger:
                             input_logger_mod = getattr(gm_b, input_logger_inner.name)
                             input_logger_mod.ref_node_name = cur_node.name
@@ -1116,7 +1146,7 @@ def create_a_shadows_b(
                 # (prev_node_c+) -> (logger_c_input)? -> node_start_c -> ... -> node_end_c -> logger_c
                 #
                 # Note: node_start_c may be the same node as node_end_c, or they
-                # may have nodes inbetween.
+                # may have nodes in between.
 
         else:
             env_c[node_b.name] = graph_c.node_copy(node_b, load_arg)

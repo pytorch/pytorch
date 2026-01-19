@@ -47,10 +47,19 @@ typedef struct CacheEntry CacheEntry;
 
 #ifdef __cplusplus
 
+typedef struct VISIBILITY_HIDDEN PrecompileEntry {
+  py::object guard_manager;
+  py::object code;
+  void* root_mgr;
+
+  PrecompileEntry(py::object gm, py::object c);
+} PrecompileEntry;
+
 typedef struct VISIBILITY_HIDDEN ExtraState {
   // A pointer to the orig_code object to prevent race conditions in invalidate
   // function.
   PyCodeObject* orig_code;
+  std::list<PrecompileEntry> precompile_entries;
   // List of cache entries for compiled code objects
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
@@ -68,6 +77,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
 #else
 
 typedef struct ExtraState ExtraState;
+typedef struct PrecompileEntry PrecompileEntry;
 
 #endif
 
@@ -122,7 +132,7 @@ void destroy_extra_state(void* obj);
 // Clears the existing object sitting on the extra scratch spance and sets it
 // up with the new state. Note that _PyCode_SetExtra calls the
 // destroy_extra_state deleter internally, and therefore we don't call it
-// explicity here.
+// explicitly here.
 
 // Ownership contract
 // args
@@ -138,7 +148,7 @@ void destroy_extra_state(void* obj);
 // scratch space.
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 
-// Creates a new extra state and put it on the extra scrach space of the code
+// Creates a new extra state and put it on the extra scratch space of the code
 // object.
 
 // Ownership contract
@@ -187,5 +197,12 @@ PyObject* get_backend(PyObject* callback);
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++
 py::list _debug_get_cache_entry_list(const py::handle& code_obj);
+void _reset_precompile_entries(const py::handle& code_obj);
+void _load_precompile_entry(
+    const py::handle& code_obj,
+    py::object guard_manager,
+    py::object dynamo_code);
+py::list _debug_get_precompile_entries(const py::handle& code_obj);
+void _set_lru_cache(py::object boolean);
 
 #endif

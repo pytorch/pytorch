@@ -21,6 +21,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_utils import gradcheck, TEST_XPU
 from torch.utils.cpp_extension import (
+    _get_cuda_arch_flags,
     _TORCH_PATH,
     check_compiler_is_gcc,
     CUDA_HOME,
@@ -118,47 +119,85 @@ class TestCppExtensionJIT(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
-    def _test_jit_xpu_extension(self):
-        name = "torch_test_xpu_extension_"
-        # randomizing name for the case when we test building few extensions
-        # in a row using this function
-        name += "".join(random.sample(string.ascii_letters, 5))
-        module = torch.utils.cpp_extension.load(
-            name=name,
-            sources=[
-                "cpp_extensions/xpu_extension.sycl",
-            ],
-            verbose=True,
-            keep_intermediates=False,
-        )
+    def _test_jit_xpu_extension(self, extra_sycl_cflags):
+        # randomizing extension name and names of extension methods
+        # for the case when we test building few extensions in a row
+        # using this function
+        rand = "".join(random.sample(string.ascii_letters, 5))
+        name = f"torch_test_xpu_extension_{rand}"
+        temp_dir = tempfile.mkdtemp()
+        try:
+            with open("cpp_extensions/xpu_extension.sycl") as f:
+                text = f.read()
+                for fn in ["sigmoid_add", "SigmoidAddKernel"]:
+                    text = text.replace(fn, f"{fn}_{rand}")
 
-        x = torch.zeros(100, device="xpu", dtype=torch.float32)
-        y = torch.zeros(100, device="xpu", dtype=torch.float32)
+            sycl_file = f"{temp_dir}/xpu_extension.sycl"
+            with open(sycl_file, "w") as f:
+                f.write(text)
 
-        z = module.sigmoid_add(x, y).cpu()
+            module = torch.utils.cpp_extension.load(
+                name=name,
+                sources=[sycl_file],
+                extra_sycl_cflags=extra_sycl_cflags,
+                verbose=True,
+                build_directory=temp_dir,
+            )
 
-        # 2 * sigmoid(0) = 2 * 0.5 = 1
-        self.assertEqual(z, torch.ones_like(z))
+            x = torch.zeros(100, device="xpu", dtype=torch.float32)
+            y = torch.zeros(100, device="xpu", dtype=torch.float32)
+
+            method = f"sigmoid_add_{rand}"
+            self.assertTrue(hasattr(module, method))
+            z = getattr(module, method)(x, y).cpu()
+
+            # 2 * sigmoid(0) = 2 * 0.5 = 1
+            self.assertEqual(z, torch.ones_like(z))
+        finally:
+            if IS_WINDOWS:
+                # rmtree returns permission error: [WinError 5] Access is denied
+                # on Windows, this is a workaround
+                subprocess.run(["rd", "/s", "/q", temp_dir], stdout=subprocess.PIPE)
+            else:
+                shutil.rmtree(temp_dir)
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_extension(self):
         # NOTE: this test can be affected by setting TORCH_XPU_ARCH_LIST
-        self._test_jit_xpu_extension()
+        self._test_jit_xpu_extension(extra_sycl_cflags=[])
 
     @unittest.skipIf(not (TEST_XPU), "XPU not found")
     def test_jit_xpu_archlists(self):
         # NOTE: in this test we explicitly test few different options
         # for TORCH_XPU_ARCH_LIST. Setting TORCH_XPU_ARCH_LIST in the
         # environment before the test won't affect it.
-        archlists = [
-            "",  # expecting JIT compilation
-            ",".join(torch.xpu.get_arch_list()),
+        cases = [
+            {
+                # Testing JIT compilation
+                "archlist": "",
+                "extra_sycl_cflags": [],
+            },
+            {
+                # Testing JIT + AOT (full torch AOT arch list)
+                # NOTE: default cpp extension AOT arch list might be reduced
+                # from the full list
+                "archlist": ",".join(torch.xpu.get_arch_list()),
+                "extra_sycl_cflags": [],
+            },
+            {
+                # Testing AOT (full torch AOT arch list)
+                # NOTE: default cpp extension AOT arch list might be reduced
+                # from the full list
+                "archlist": ",".join(torch.xpu.get_arch_list()),
+                # below excludes spir64 target responsible for JIT
+                "extra_sycl_cflags": ["-fsycl-targets=spir64_gen"],
+            },
         ]
         old_envvar = os.environ.get("TORCH_XPU_ARCH_LIST", None)
         try:
-            for al in archlists:
-                os.environ["TORCH_XPU_ARCH_LIST"] = al
-                self._test_jit_xpu_extension()
+            for c in cases:
+                os.environ["TORCH_XPU_ARCH_LIST"] = c["archlist"]
+                self._test_jit_xpu_extension(extra_sycl_cflags=c["extra_sycl_cflags"])
         finally:
             if old_envvar is None:
                 os.environ.pop("TORCH_XPU_ARCH_LIST")
@@ -184,6 +223,12 @@ class TestCppExtensionJIT(common.TestCase):
         mps_output = module.get_mps_add_output(x.to("mps"), y.to("mps"))
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/163721
+        lib = torch.mps.compile_shader("void kernel noop(device float *x) {}")
+        lib.noop(mps_output)
+        module.mps_add_one_new_context(mps_output)
+        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
 
     def _run_jit_cuda_archflags(self, flags, expected):
         # Compile an extension with given `flags`
@@ -287,12 +332,15 @@ class TestCppExtensionJIT(common.TestCase):
                 [f"{capability[0]}{capability[1]}" for capability in capabilities],
                 None,
             ),
-            "Maxwell+Tegra;6.1": (["53", "61"], None),
-            "Volta": (["70"], ["70"]),
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
-        archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        if int(torch.version.cuda.split(".")[0]) < 12:
+        major, minor = map(int, torch.version.cuda.split(".")[:2])
+        if major < 12 or (major == 12 and minor <= 9):
+            # Compute capability <= 7.0 is only supported up to CUDA 12.9
+            archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
+            archflags["Volta"] = (["70"], ["70"])
+            archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
+        if major < 12:
             # CUDA 12 drops compute capability < 5.0
             archflags["Pascal 3.5"] = (["35", "60", "61"], None)
 
@@ -312,6 +360,35 @@ class TestCppExtensionJIT(common.TestCase):
                 # Ignore any error, e.g. unsupported PTX code on current device
                 # to avoid errors from here leaking into other tests
                 pass
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_non_default_gencode(self):
+        user_arch_flags = ["-gencode=arch=compute_86,code=sm_86"]
+        result = _get_cuda_arch_flags(user_arch_flags)
+
+        self.assertEqual(
+            len(result),
+            0,
+            f"User arch flags should prevent default generation. "
+            f"Expected: [], Got: {result}",
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_cuda_arch_flags_default_gencode(self):
+        default_flags = _get_cuda_arch_flags()
+        self.assertGreater(
+            len(default_flags), 0, "No args should generate default flags"
+        )
+
+        non_arch_flags = _get_cuda_arch_flags(["-O2", "--use-fast-math"])
+        self.assertGreater(
+            len(non_arch_flags), 0, "Non-arch flags should still generate defaults"
+        )
+
+        empty_flags = _get_cuda_arch_flags([])
+        self.assertGreater(
+            len(empty_flags), 0, "Empty list should generate default flags"
+        )
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
@@ -967,7 +1044,7 @@ class TestCppExtensionJIT(common.TestCase):
         t = torch.rand(2).double()
         cpp_tensor_name = r"CPUDoubleType"
 
-        # Without error handling, the warnings cannot be catched
+        # Without error handling, the warnings cannot be caught
         warn_mod = torch.utils.cpp_extension.load_inline(
             name="warn_mod",
             cpp_sources=[source],
@@ -1001,23 +1078,23 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         with warnings.catch_warnings(record=True) as w:
-            # Catched with no error should be detected
+            # Caught with no error should be detected
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should also be detected
+            # Caught with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 2)
 
-            # Catched with python error should also be detected
+            # Caught with python error should also be detected
             with self.assertRaisesRegex(
                 SystemError, "bad argument to internal function"
             ):
                 warn_mod.foo(t, 2)
             self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should also be detected
+            # Caught with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)
@@ -1160,25 +1237,25 @@ class TestCppExtensionJIT(common.TestCase):
         #include <torch/csrc/inductor/aoti_runtime/utils.h>
         #include <torch/csrc/inductor/aoti_torch/utils.h>
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-        #include <torch/csrc/stable/library.h>
+        #include <torch/csrc/stable/stableivalue_conversions.h>
 
         using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 
         at::Tensor my_abs(at::Tensor x) {
         StableIValue stack[1];
         RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
-        stack[0] = from(raii.release());
+        stack[0] = torch::stable::detail::from(raii.release());
         aoti_torch_call_dispatcher("aten::abs", "", stack);
-        RAIIATH res(to<AtenTensorHandle>(stack[0]));
+        RAIIATH res(torch::stable::detail::to<AtenTensorHandle>(stack[0]));
         return *reinterpret_cast<at::Tensor*>(res.release());
         }
 
         at::Tensor my_floor(at::Tensor x) {
         StableIValue stack[1];
         RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
-        stack[0] = from(raii.release());
+        stack[0] = torch::stable::detail::from(raii.release());
         aoti_torch_call_dispatcher("aten::floor", "", stack);
-        RAIIATH res(to<AtenTensorHandle>(stack[0]));
+        RAIIATH res(torch::stable::detail::to<AtenTensorHandle>(stack[0]));
         return *reinterpret_cast<at::Tensor*>(res.release());
         }
         """
@@ -1193,6 +1270,144 @@ class TestCppExtensionJIT(common.TestCase):
         abs_t = module.my_abs(t)
         self.assertEqual(abs_t, torch.abs(t))
         self.assertEqual(floor_t, torch.floor(t))
+
+    def test_from_blob_stable_api(self):
+        source = """
+        #include <torch/csrc/stable/ops.h>
+        #include <torch/extension.h>
+        #include <vector>
+
+        // Test using the stable API torch::stable::from_blob
+        at::Tensor test_stable_from_blob() {
+            // Allocate data buffer with known values
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            // Create tensor using stable API
+            torch::stable::Tensor stable_tensor = torch::stable::from_blob(
+                data.data(),
+                {2, 3},
+                {3, 1},
+                torch::stable::Device(torch::headeronly::DeviceType::CPU, 0),
+                torch::headeronly::ScalarType::Float
+            );
+
+            // Convert stable::Tensor to at::Tensor for return
+            // The stable::Tensor wraps an AtenTensorHandle, we need to extract the underlying tensor
+            AtenTensorHandle handle = stable_tensor.get();
+            return *reinterpret_cast<at::Tensor*>(handle);
+        }
+
+        // Test using the standard torch::from_blob as reference
+        at::Tensor test_reference_from_blob() {
+            // Use the same data buffer
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            // Create tensor using standard API
+            auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+            at::Tensor ref_tensor = torch::from_blob(
+                data.data(),
+                {2, 3},
+                {3, 1},
+                options
+            );
+
+            return ref_tensor;
+        }
+
+        // Test with non-contiguous strides
+        at::Tensor test_stable_from_blob_strided() {
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            // Create a non-contiguous view: shape [2, 2] with stride [3, 1]
+            // This will select elements at indices [0,1] and [3,4]
+            torch::stable::Tensor stable_tensor = torch::stable::from_blob(
+                data.data(),
+                {2, 2},
+                {3, 1},
+                torch::stable::Device(torch::headeronly::DeviceType::CPU, 0),
+                torch::headeronly::ScalarType::Float
+            );
+
+            AtenTensorHandle handle = stable_tensor.get();
+            return *reinterpret_cast<at::Tensor*>(handle);
+        }
+
+        at::Tensor test_reference_from_blob_strided() {
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+            at::Tensor ref_tensor = torch::from_blob(
+                data.data(),
+                {2, 2},
+                {3, 1},
+                options
+            );
+
+            return ref_tensor;
+        }
+
+        // Test with storage offset
+        at::Tensor test_stable_from_blob_offset() {
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            // Create tensor starting from offset 2 (third element)
+            torch::stable::Tensor stable_tensor = torch::stable::from_blob(
+                data.data(),
+                {2, 2},
+                {2, 1},
+                torch::stable::Device(torch::headeronly::DeviceType::CPU, 0),
+                torch::headeronly::ScalarType::Float,
+                2  // storage_offset - start from data[2]
+            );
+
+            AtenTensorHandle handle = stable_tensor.get();
+            return *reinterpret_cast<at::Tensor*>(handle);
+        }
+
+        at::Tensor test_reference_from_blob_offset() {
+            static std::vector<float> data = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+
+            auto options = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+            // Note: torch::from_blob doesn't support storage_offset directly,
+            // so we create from blob and then apply offset
+            at::Tensor ref_tensor = torch::from_blob(
+                data.data() + 2,  // pointer offset instead
+                {2, 2},
+                {2, 1},
+                options
+            );
+
+            return ref_tensor;
+        }
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_from_blob_stable",
+            cpp_sources=[source],
+            functions=[
+                "test_stable_from_blob",
+                "test_reference_from_blob",
+                "test_stable_from_blob_strided",
+                "test_reference_from_blob_strided",
+                "test_stable_from_blob_offset",
+                "test_reference_from_blob_offset",
+            ],
+        )
+
+        # Test basic from_blob
+        stable_result = module.test_stable_from_blob()
+        reference_result = module.test_reference_from_blob()
+        self.assertEqual(stable_result, reference_result)
+
+        # Test with non-contiguous strides
+        stable_strided = module.test_stable_from_blob_strided()
+        reference_strided = module.test_reference_from_blob_strided()
+        self.assertEqual(stable_strided, reference_strided)
+
+        # Test with storage offset
+        stable_offset = module.test_stable_from_blob_offset()
+        reference_offset = module.test_reference_from_blob_offset()
+        self.assertEqual(stable_offset, reference_offset)
 
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_cuda_pluggable_allocator_include(self):
@@ -1235,6 +1450,40 @@ class TestCppExtensionJIT(common.TestCase):
 
         # test if build was successful
         self.assertEqual(success, True)
+
+    @unittest.skipIf(
+        not IS_LINUX or not check_compiler_is_gcc(get_cxx_compiler()),
+        "PCH is only available on Linux with GCC",
+    )
+    def test_pch_command_injection(self):
+        """Tests that PCH compilation is not vulnerable to command injection."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exploit_file = os.path.join(tmpdir, "pch_exploit")
+            # If executed by shell, this would create exploit_file
+            payload = f'; echo vulnerable > "{exploit_file}"'
+            cpp_source = "void foo() {}"
+
+            # Try to compile with malicious payload in extra_cflags
+            # The compilation may succeed or fail, but the key test is whether
+            # the shell command in the payload gets executed
+            try:
+                torch.utils.cpp_extension.load_inline(
+                    name="test_pch_injection",
+                    cpp_sources=cpp_source,
+                    functions=["foo"],
+                    extra_cflags=[payload],
+                    use_pch=True,
+                    verbose=True,
+                )
+            except RuntimeError:
+                # Compilation failure is expected since payload is not a valid flag
+                pass
+
+            # The critical security check: verify the shell command was NOT executed
+            self.assertFalse(
+                os.path.exists(exploit_file),
+                "Command injection vulnerability detected!",
+            )
 
 
 if __name__ == "__main__":

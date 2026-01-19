@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 
 number = Union[int, float]
@@ -86,7 +87,7 @@ def broadcast_inplace(a: list[int], b: list[int]):
     dimsB = len(b)
     if dimsB > dimsA:
         raise AssertionError(
-            f"The dims of tensor b ({dimsB}) must be less than or equal tothe dims of tensor a ({dimsA}) "
+            f"The dims of tensor b ({dimsB}) must be less than or equal to the dims of tensor a ({dimsA}) "
         )
     for dimA in range(dimsA):
         dimB = dimsB - dimsA + dimA
@@ -280,15 +281,15 @@ def max_pool2d(
     dilation: list[int],
     ceil_mode: bool,
 ):
-    assert (
-        len(kernel_size) == 1 or len(kernel_size) == 2
-    ), "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
+    assert len(kernel_size) == 1 or len(kernel_size) == 2, (
+        "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
+    )
     kH = kernel_size[0]
     kW = kH if len(kernel_size) == 1 else kernel_size[1]
 
-    assert (
-        len(stride) == 0 or len(stride) == 1 or len(stride) == 2
-    ), "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
+    assert len(stride) == 0 or len(stride) == 1 or len(stride) == 2, (
+        "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
+    )
     dH = kH if len(stride) == 0 else stride[0]
     if len(stride) == 0:
         dW = kW
@@ -297,15 +298,15 @@ def max_pool2d(
     else:
         dW = stride[1]
 
-    assert (
-        len(padding) == 1 or len(padding) == 2
-    ), "max_pool2d: padding must either be a single int, or a tuple of two ints"
+    assert len(padding) == 1 or len(padding) == 2, (
+        "max_pool2d: padding must either be a single int, or a tuple of two ints"
+    )
     padH = padding[0]
     padW = padH if len(padding) == 1 else padding[1]
 
-    assert (
-        len(dilation) == 1 or len(dilation) == 2
-    ), "max_pool2d: dilation must be either a single int, or a tuple of two ints"
+    assert len(dilation) == 1 or len(dilation) == 2, (
+        "max_pool2d: dilation must be either a single int, or a tuple of two ints"
+    )
     dilationH = dilation[0]
     dilationW = dilationH if len(dilation) == 1 else dilation[1]
 
@@ -367,17 +368,17 @@ def upsample_nearest2d(
         assert 0, "Either output_size or scale_factors must be presented"
 
     if output_size is not None:
-        assert (
-            scale_factors is None
-        ), "Must specify exactly one of output_size and scale_factors"
+        assert scale_factors is None, (
+            "Must specify exactly one of output_size and scale_factors"
+        )
         assert len(output_size) == 2
         out.append(output_size[0])
         out.append(output_size[1])
 
     if scale_factors is not None:
-        assert (
-            output_size is None
-        ), "Must specify exactly one of output_size and scale_factors"
+        assert output_size is None, (
+            "Must specify exactly one of output_size and scale_factors"
+        )
         assert len(scale_factors) == 2
         out.append(int(input[2] * scale_factors[0]))
         out.append(int(input[3] * scale_factors[1]))
@@ -540,9 +541,9 @@ def check_cat_shape_except_dim(
     assert first_dims == second_dims, "Tensors must have same number of dimensions"
     for dim in range(0, first_dims):
         if dim != dimension:
-            assert (
-                first[dim] == second[dim]
-            ), "Sizes of tensors must match except in dimension"
+            assert first[dim] == second[dim], (
+                "Sizes of tensors must match except in dimension"
+            )
 
 
 def cat(tensors: list[list[int]], dim: int):
@@ -1088,9 +1089,9 @@ def topk(self: list[int], k: int, dim: int = -1) -> tuple[list[int], list[int]]:
     if len(self) == 0:
         result: list[int] = []
     else:
-        assert (
-            k <= self[dim]
-        ), f"k ({k}) is too big for dimension {dim} of size {self[dim]}"
+        assert k <= self[dim], (
+            f"k ({k}) is too big for dimension {dim} of size {self[dim]}"
+        )
         result = _copy(self)
         result[dim] = k
     return result, result
@@ -1172,7 +1173,7 @@ Currently deferring the enabling of this, as part of the propoasal to suspend
 adding ops.
 There are currently cases in the test case where this is being called
 in the SSA opinfo tests with with unexpected values (eg list of two ints, see the first
-opinfo test). The behavoir of index is significantly dependent on the inputs.
+opinfo test). The behavior of index is significantly dependent on the inputs.
 
 This could be an error with how we are matching up shape functions, or that this
 function needs to just implement everything.
@@ -1452,7 +1453,7 @@ add_shape_compute_mapping(
 # add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
-# These are duplicated here so that the functions will be serialiazed
+# These are duplicated here so that the functions will be serialized
 add_shape_compute_mapping(
     "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
     broadcast_three,

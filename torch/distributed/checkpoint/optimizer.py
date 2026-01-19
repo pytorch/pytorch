@@ -2,7 +2,7 @@
 
 import dataclasses
 from collections.abc import Sequence
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -29,6 +29,8 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_read_items,
     create_read_items_for_chunk_list,
 )
+
+# pyrefly: ignore [deprecated]
 from torch.distributed.checkpoint.state_dict_loader import load_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
 from torch.distributed.checkpoint.utils import (
@@ -42,7 +44,7 @@ from torch.distributed.remote_device import _remote_device
 from torch.distributed.tensor import DTensor
 
 
-STATE_DICT_2D_LAYOUT = dict[str, tuple[Optional[Sequence[int]], Sequence[int]]]
+STATE_DICT_2D_LAYOUT = dict[str, tuple[Sequence[int] | None, Sequence[int]]]
 
 
 # TODO: Update docstrings for optimizer.py
@@ -63,7 +65,7 @@ def _gen_rank_device(global_rank: int, device_type: str = "cuda") -> str:
 
 
 def _create_colwise_spec(
-    pg: Optional[dist.ProcessGroup] = None,
+    pg: dist.ProcessGroup | None = None,
 ) -> ChunkShardingSpec:
     pg_device_type = dist.distributed_c10d._get_pg_default_device(pg).type
     if pg is None:
@@ -78,7 +80,7 @@ def _create_colwise_spec(
         ]
     return ChunkShardingSpec(
         dim=0,
-        placements=cast(list[Union[_remote_device, str]], placements),
+        placements=cast(list[_remote_device | str], placements),
     )
 
 
@@ -89,7 +91,7 @@ def _is_nested_tensor(val: torch.Tensor) -> bool:
         if type(val.local_shards()[0].tensor) is ShardedTensor:
             return True
         if type(val.local_shards()[0].tensor) is DTensor:
-            raise ValueError("Cannot handle DTensor nested insided ShardedTensor")
+            raise ValueError("Cannot handle DTensor nested inside ShardedTensor")
     elif type(val) is DTensor and (
         type(val._local_tensor) is DTensor or type(val._local_tensor) is ShardedTensor
     ):
@@ -119,7 +121,7 @@ def _alloc_tensor(
 
 def _get_state_dict_2d_layout(
     state_dict: STATE_DICT_TYPE,
-) -> tuple[STATE_DICT_2D_LAYOUT, Optional[dist.ProcessGroup]]:
+) -> tuple[STATE_DICT_2D_LAYOUT, dist.ProcessGroup | None]:
     """
     Load the right TP slice of the optimizer state.
 
@@ -131,16 +133,14 @@ def _get_state_dict_2d_layout(
     N.B. The state_dict *MUST* come from FSDP.sharded_state_dict.
     """
     specs: STATE_DICT_2D_LAYOUT = {}
-    dp_pg: Optional[dist.ProcessGroup] = None
+    dp_pg: dist.ProcessGroup | None = None
     for key, value in state_dict.items():
         specs[key] = (None, value.size())
         if _is_nested_tensor(value):
-            assert len(value.local_shards()) == 1, (
-                "Cannot handle ST with multiple shards"
-            )
-            assert isinstance(value, ShardedTensor), (
-                "Can only handle nested ShardedTensor"
-            )
+            if not len(value.local_shards()) == 1:
+                raise AssertionError("Cannot handle ST with multiple shards")
+            if not isinstance(value, ShardedTensor):
+                raise AssertionError("Can only handle nested ShardedTensor")
             shard = value.local_shards()[0]
             specs[key] = (
                 shard.metadata.shard_offsets,
@@ -157,6 +157,7 @@ def _get_state_dict_2d_layout(
 class _ReaderWithOffset(DefaultLoadPlanner):
     translation: dict[MetadataIndex, MetadataIndex]
     state_dict: STATE_DICT_TYPE
+    # pyrefly: ignore [bad-override]
     metadata: Metadata
 
     def __init__(self, fqn_to_offset: dict[str, Sequence[int]]) -> None:
@@ -181,7 +182,8 @@ class _ReaderWithOffset(DefaultLoadPlanner):
 
             offset = self.fqn_to_offset[fqn]
 
-            assert len(obj.local_shards()) == 1
+            if not len(obj.local_shards()) == 1:
+                raise AssertionError("Expected exactly one local shard")
             original_shard = obj.local_shards()[0]
             local_chunks = [
                 ChunkStorageMetadata(
@@ -198,7 +200,8 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             # TODO: The ReadItems will have a displaced MetadataIndex, fix it.
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
             for ri in reqs:
-                assert ri.dest_index.offset is not None
+                if ri.dest_index.offset is None:
+                    raise AssertionError("dest_index.offset must not be None")
                 original_offset = _element_wise_sub(ri.dest_index.offset, offset)
                 original_index = dataclasses.replace(
                     ri.dest_index, offset=torch.Size(original_offset)
@@ -216,7 +219,7 @@ def load_sharded_optimizer_state_dict(
     model_state_dict: STATE_DICT_TYPE,
     optimizer_key: str,
     storage_reader: StorageReader,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner | None = None,
 ) -> STATE_DICT_TYPE:
     """
     Load a state_dict in conjunction with FSDP sharded optimizer state.

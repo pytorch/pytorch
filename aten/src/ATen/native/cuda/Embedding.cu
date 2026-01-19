@@ -15,9 +15,7 @@
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/thread_constants.h>
 
-#if CUB_SUPPORTS_SCAN_BY_KEY()
 #include <thrust/iterator/reverse_iterator.h>
-#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -36,9 +34,9 @@ namespace at::native {
 namespace {
 
 #if defined(USE_ROCM)
-static const int BLOCKDIMY = 16;
+static constexpr int BLOCKDIMY = 16;
 #else
-static const int BLOCKDIMY = 32;
+static constexpr int BLOCKDIMY = 32;
 #endif
 
 template
@@ -240,10 +238,6 @@ __global__ void renorm_kernel(
 
 } // anonymous namespace
 
-#if !CUB_SUPPORTS_SCAN_BY_KEY()
-template<typename index_t>
-void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
-#endif
 
 Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices_,
                                int64_t num_weights, int64_t padding_idx,
@@ -306,7 +300,6 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
 
   if (scale_grad_by_freq) {
     count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-#if CUB_SUPPORTS_SCAN_BY_KEY()
     AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
       cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -317,7 +310,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       auto count_data = count.mutable_data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
-        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<index_t>(1),
+        ATEN_CUB_CONSTANT_ITERATOR(index_t)(1),
         count_data,
         num_indices
       );
@@ -329,15 +322,10 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
         thrust::make_reverse_iterator(sorted_data + num_indices),
         thrust::make_reverse_iterator(static_cast<const index_t*>(count_data) + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
-        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max(),
+        ATEN_CUB_MAXIMUM(),
         num_indices
       );
     });
-#else
-    AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
-      embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
-    });
-#endif
   }
 
   return embedding_backward_cuda_kernel(grad, orig_indices,
@@ -369,7 +357,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
     int warp_size = at::cuda::warp_size();
     TORCH_INTERNAL_ASSERT(num_threads() % warp_size == 0 &&
-                  num_threads() <= cuda_utils::kCUDABlockReduceMaxThreads,
+                  num_threads() <= static_cast<uint32_t>(cuda_utils::kCUDABlockReduceMaxThreads()),
                   "BlockReduceSum requires all warps be active");
     const int64_t *num_unique_indices_ptr = num_unique_indices.const_data_ptr<int64_t>();
     dim3 grid = unique_indices.numel();

@@ -11,8 +11,9 @@ import subprocess
 import sys
 import textwrap
 from typing import (
-    cast, Any, Callable, NamedTuple,
-    Optional, Union, TYPE_CHECKING)
+    cast, Any, NamedTuple,
+    Union, TYPE_CHECKING)
+from collections.abc import Callable
 from collections.abc import Iterator
 
 import torch
@@ -54,7 +55,7 @@ class FunctionCounts:
 
     # For normal use, torch._tensor_str.PRINT_OPTS.linewidth determines
     # the print settings. This is simply to allow hermetic unit tests.
-    _linewidth: Optional[int] = None
+    _linewidth: int | None = None
 
     def __iter__(self) -> Iterator[FunctionCount]:
         yield from self._data
@@ -63,8 +64,9 @@ class FunctionCounts:
         return len(self._data)
 
     def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
-        data: Union[FunctionCount, tuple[FunctionCount, ...]] = self._data[item]
+        data: FunctionCount | tuple[FunctionCount, ...] = self._data[item]
         return (
+            # pyrefly: ignore [bad-return]
             FunctionCounts(cast(tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
             if isinstance(data, tuple) else data
         )
@@ -104,7 +106,7 @@ class FunctionCounts:
     ) -> "FunctionCounts":
         return self._merge(other, operator.neg)
 
-    def __mul__(self, other: Union[int, float]) -> "FunctionCounts":
+    def __mul__(self, other: int | float) -> "FunctionCounts":
         return self._from_dict({
             fn: int(c * other) for c, fn in self._data
         }, self.inclusive)
@@ -144,7 +146,8 @@ class FunctionCounts:
         second: "FunctionCounts",
         merge_fn: Callable[[int], int]
     ) -> "FunctionCounts":
-        assert self.inclusive == second.inclusive, "Cannot merge inclusive and exclusive counts."
+        if self.inclusive != second.inclusive:
+            raise AssertionError("Cannot merge inclusive and exclusive counts.")
         counts: collections.defaultdict[str, int] = collections.defaultdict(int)
         for c, fn in self:
             counts[fn] += c
@@ -176,7 +179,7 @@ class CallgrindStats:
     baseline_exclusive_stats: FunctionCounts
     stmt_inclusive_stats: FunctionCounts
     stmt_exclusive_stats: FunctionCounts
-    stmt_callgrind_out: Optional[str]
+    stmt_callgrind_out: str | None
 
     def __repr__(self) -> str:
         base_stats = self.baseline_exclusive_stats
@@ -309,11 +312,11 @@ class CopyIfCallgrind:
 
     See `GlobalsBridge` for why this matters.
     """
-    def __init__(self, value: Any, *, setup: Optional[str] = None):
+    def __init__(self, value: Any, *, setup: str | None = None) -> None:
         for method, supported_types in _GLOBALS_ALLOWED_TYPES.items():
             if any(isinstance(value, t) for t in supported_types):
                 self._value: Any = value
-                self._setup: Optional[str] = setup
+                self._setup: str | None = setup
                 self._serialization: Serialization = method
                 break
         else:
@@ -332,7 +335,7 @@ class CopyIfCallgrind:
         return self._value
 
     @property
-    def setup(self) -> Optional[str]:
+    def setup(self) -> str | None:
         return self._setup
 
     @property
@@ -447,11 +450,13 @@ class GlobalsBridge:
         load_lines = []
         for name, wrapped_value in self._globals.items():
             if wrapped_value.setup is not None:
+                # pyrefly: ignore [bad-argument-type]
                 load_lines.append(textwrap.dedent(wrapped_value.setup))
 
             if wrapped_value.serialization == Serialization.PICKLE:
                 path = os.path.join(self._data_dir, f"{name}.pkl")
                 load_lines.append(
+                    # pyrefly: ignore [bad-argument-type]
                     f"with open({repr(path)}, 'rb') as f:\n    {name} = pickle.load(f)")
                 with open(path, "wb") as f:
                     pickle.dump(wrapped_value.value, f)
@@ -461,11 +466,13 @@ class GlobalsBridge:
                 # TODO: Figure out if we can use torch.serialization.add_safe_globals here
                 # Using weights_only=False after the change in
                 # https://dev-discuss.pytorch.org/t/bc-breaking-change-torch-load-is-being-flipped-to-use-weights-only-true-by-default-in-the-nightlies-after-137602/2573
+                # pyrefly: ignore [bad-argument-type]
                 load_lines.append(f"{name} = torch.load({repr(path)}, weights_only=False)")
                 torch.save(wrapped_value.value, path)
 
             elif wrapped_value.serialization == Serialization.TORCH_JIT:
                 path = os.path.join(self._data_dir, f"{name}.pt")
+                # pyrefly: ignore [bad-argument-type]
                 load_lines.append(f"{name} = torch.jit.load({repr(path)})")
                 with open(path, "wb") as f:
                     torch.jit.save(wrapped_value.value, f)  # type: ignore[no-untyped-call]
@@ -479,7 +486,7 @@ class GlobalsBridge:
 
 class _ValgrindWrapper:
     def __init__(self) -> None:
-        self._bindings_module: Optional[CallgrindModuleType] = None
+        self._bindings_module: CallgrindModuleType | None = None
         valgrind_symbols = (
             "_valgrind_supported_platform",
             "_valgrind_toggle",
@@ -491,7 +498,8 @@ class _ValgrindWrapper:
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
             self._bindings_module = cpp_jit.get_compat_bindings()
-            assert all(hasattr(self._bindings_module, symbol) for symbol in valgrind_symbols)
+            if not all(hasattr(self._bindings_module, symbol) for symbol in valgrind_symbols):
+                raise AssertionError("JIT-compiled callgrind bindings are missing required symbols")
             self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
         self._commands_available: dict[str, bool] = {}
@@ -504,7 +512,7 @@ class _ValgrindWrapper:
                     check=False,
                 ).returncode
 
-        self._build_type: Optional[str] = None
+        self._build_type: str | None = None
         build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())  # type: ignore[no-untyped-call]
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
@@ -530,7 +538,8 @@ class _ValgrindWrapper:
     ) -> tuple[CallgrindStats, ...]:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
-        assert is_python or not collect_baseline
+        if not is_python and collect_baseline:
+            raise AssertionError("collect_baseline is only supported for Python timers")
 
         *task_stats, baseline_stats = self._invoke(
             task_spec=task_spec,
@@ -541,7 +550,8 @@ class _ValgrindWrapper:
             is_python=is_python,
             retain_out_file=retain_out_file,
         )
-        assert len(task_stats) == repeats
+        if len(task_stats) != repeats:
+            raise AssertionError("Unexpected number of task stats returned from _invoke")
 
         return tuple(
             CallgrindStats(
@@ -567,7 +577,7 @@ class _ValgrindWrapper:
         collect_baseline: bool,
         is_python: bool,
         retain_out_file: bool,
-    ) -> tuple[tuple[FunctionCounts, FunctionCounts, Optional[str]], ...]:
+    ) -> tuple[tuple[FunctionCounts, FunctionCounts, str | None], ...]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -598,8 +608,7 @@ class _ValgrindWrapper:
 
         def run(args: list[str], **kwargs: Any) -> tuple[CompletedProcessType, str]:
             # https://thraxil.org/users/anders/posts/2008/03/13/Subprocess-Hanging-PIPE-is-your-enemy/
-            f_stdout_stderr = open(stdout_stderr_log, "wb")
-            try:
+            with open(stdout_stderr_log, "wb") as f_stdout_stderr:
                 invocation = subprocess.run(
                     args,
                     stdout=f_stdout_stderr,
@@ -608,8 +617,6 @@ class _ValgrindWrapper:
                 )
                 with open(stdout_stderr_log) as f:
                     return invocation, f.read()
-            finally:
-                f_stdout_stderr.close()
 
         try:
             if is_python:
@@ -633,7 +640,8 @@ class _ValgrindWrapper:
 
                 run_loop_cmd = ["python", script_file]
             else:
-                assert not collect_baseline
+                if collect_baseline:
+                    raise AssertionError("collect_baseline must be False for non-Python timers")
                 run_loop_exec = cpp_jit.compile_callgrind_template(
                     stmt=task_spec.stmt,
                     setup=task_spec.setup,
@@ -699,7 +707,8 @@ class _ValgrindWrapper:
                             scan_state = ScanState.PARSING
 
                     else:
-                        assert scan_state == ScanState.PARSING
+                        if scan_state != ScanState.PARSING:
+                            raise AssertionError("Failed to enter PARSING state while parsing callgrind_annotate output")
                         fn_match = function_pattern.match(l)
                         if fn_match:
                             ir_str, file_function = fn_match.groups()
@@ -717,10 +726,11 @@ class _ValgrindWrapper:
                         else:
                             break
 
-                assert scan_state == ScanState.PARSING, f"Failed to parse {fpath}"
+                if scan_state != ScanState.PARSING:
+                    raise AssertionError(f"Failed to parse {fpath}")
                 return FunctionCounts(tuple(sorted(fn_counts, reverse=True)), inclusive=inclusive)
 
-            def read_results(i: int) -> tuple[FunctionCounts, FunctionCounts, Optional[str]]:
+            def read_results(i: int) -> tuple[FunctionCounts, FunctionCounts, str | None]:
                 if i == repeats and not collect_baseline:
                     # Null baseline.
                     return (
@@ -730,7 +740,7 @@ class _ValgrindWrapper:
                     )
 
                 fpath = f"{callgrind_out}.{i + 1}"  # Callgrind one-indexes files.
-                callgrind_out_contents: Optional[str] = None
+                callgrind_out_contents: str | None = None
                 if retain_out_file:
                     with open(fpath) as f:
                         callgrind_out_contents = f.read()
@@ -755,7 +765,7 @@ class _ValgrindWrapper:
         collect_baseline: bool,
         error_log: str,
         stat_log: str,
-        bindings: Optional[CallgrindModuleType],
+        bindings: CallgrindModuleType | None,
     ) -> str:
         def block_stmt(stmt: str, indent: int = 0) -> str:
             """Partially unroll benchmark loop.
@@ -902,7 +912,7 @@ class _ValgrindWrapper:
         )
 
 
-CALLGRIND_SINGLETON: Optional[_ValgrindWrapper] = None
+CALLGRIND_SINGLETON: _ValgrindWrapper | None = None
 def wrapper_singleton() -> _ValgrindWrapper:
     global CALLGRIND_SINGLETON
     if CALLGRIND_SINGLETON is None:

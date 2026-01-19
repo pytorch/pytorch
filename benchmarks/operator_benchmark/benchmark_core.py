@@ -4,8 +4,11 @@ import csv
 import functools
 import json
 import os
+import platform
 import timeit
 from collections import namedtuple
+from dataclasses import asdict, dataclass
+from typing import Any, Optional
 
 import benchmark_utils
 
@@ -15,6 +18,7 @@ import torch
 
 # needs to be imported after torch
 import torch.utils.cpp_extension as cpp_extension  # noqa: F401
+from torch.utils.benchmark import Timer
 
 
 """Performance microbenchmarks.
@@ -189,11 +193,15 @@ class BenchmarkRunner:
         self.predefined_minimum_secs = 1
         self.max_iters = 1e6
         self.use_jit = args.use_jit
+        self.use_compile = args.use_compile
+        if self.use_jit and self.use_compile:
+            raise ValueError(
+                "use_jit and use_compile are mutually exclusive, please specify one."
+            )
         self.num_runs = args.num_runs
         self.print_per_iter = False
-        self.output_dir = args.output_dir
+        self.output_csv = args.output_csv
         self.operator_range = benchmark_utils.get_operator_range(args.operator_range)
-        self.disable_output = args.disable_output
         # 100 is the default warmup iterations
         if self.args.warmup_iterations == -1:
             self.args.warmup_iterations = 100
@@ -221,7 +229,7 @@ class BenchmarkRunner:
             if self.args.operators:
                 print(f"# {self.args.operators}")
 
-    def _print_perf_result(self, reported_run_time_us, test_case):
+    def _print_perf_result(self, results, test_case):
         if self.args.report_aibench:
             # Output for AIBench
             # Print out per iteration execution time instead of avg time
@@ -235,12 +243,14 @@ class BenchmarkRunner:
                             "type": test_name,
                             "metric": "latency",
                             "unit": "us",
-                            "value": str(reported_run_time_us[run]),
+                            "value": str(results["reported_run_time_us"[run]]),
                         }
                     )
                 )
         else:
-            print(f"# Mode: {'JIT' if self.use_jit else 'Eager'}")
+            print(
+                f"# Mode: {'JIT' if self.use_jit else 'Compile' if self.use_compile else 'Eager'}"
+            )
             print(
                 f"# Name: {test_case.test_config.test_name}\n# Input: {test_case.test_config.input_config}"
             )
@@ -249,25 +259,41 @@ class BenchmarkRunner:
             if self.num_runs > 1:
                 for run in range(self.num_runs):
                     print(
-                        f"Run: {run}, {mode} Execution Time (us) : {reported_run_time_us[run]:.3f}"
+                        f"Run: {run}, {mode} Execution Time (us) : {results['reported_run_time_us'][run]:.3f}"
                     )
                 print()
             else:
-                print(f"{mode} Execution Time (us) : {reported_run_time_us[0]:.3f}\n")
+                print(
+                    f"{mode} Execution Time (us) : {results['reported_run_time_us'][0]:.3f}"
+                )
+                print(f"Peak Memory (KB) : {results['peak_memory']}")
+                # Calculate and print memory bandwidth if operator provides memory traffic
+                if results.get("memory_bandwidth_gb_s") is not None:
+                    print(
+                        f"Memory Bandwidth (GB/s) : {results['memory_bandwidth_gb_s']:.2f}"
+                    )
+                print()
 
-    def _perf_result_to_dict(self, reported_run_time_us, test_case):
+    def _perf_result_to_dict(self, results, test_case):
         """This function is the parallel of _print_perf_result, which instead of
         writing information to terminal, returns a dictionary.
         """
         if self.args.report_aibench:
             return {}
+
         out = {
             "test_name": test_case.test_config.test_name,
             "input_config": test_case.test_config.input_config,
-            "mode": "JIT" if self.use_jit else "Eager",
+            "runtime": (
+                "JIT" if self.use_jit else "Compile" if self.use_compile else "Eager"
+            ),
             "run": "Backward" if test_case.test_config.run_backward else "Forward",
-            "latency": round(reported_run_time_us[0], 3),
+            "latency": round(results["reported_run_time_us"][0], 3),
             "latency unit": "us",
+            "peak memory": results["peak_memory"],
+            "memory unit": "KB",
+            "memory bandwidth": results.get("memory_bandwidth_gb_s"),
+            "memory bandwidth unit": "GB/s",
         }
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
@@ -279,7 +305,7 @@ class BenchmarkRunner:
             break_idxs = [-1]
             curr_brackets = []
             for i, c in enumerate(s):
-                if c in open_to_close.keys():
+                if c in open_to_close:
                     curr_brackets.append(c)
                 elif c in open_to_close.values():
                     assert curr_brackets and open_to_close[curr_brackets[-1]] == c, (
@@ -329,10 +355,26 @@ class BenchmarkRunner:
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
-        forward_time = timeit.timeit(
-            functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+        if self.use_compile:
+            func = test_case.run_compile_forward
+
+        if not cuda_sync:
+            forward_time = timeit.timeit(
+                functools.partial(func, iters, print_per_iter, cuda_sync), number=1
+            )
+            return forward_time
+        # Stable timing with Timer
+        timer = Timer(
+            stmt="func(iters, print_per_iter, cuda_sync)",
+            globals={
+                "func": func,
+                "iters": iters,
+                "print_per_iter": print_per_iter,
+                "cuda_sync": cuda_sync,
+            },
         )
-        return forward_time
+        result = timer.adaptive_autorange(min_run_time=0.0001)
+        return result.median * iters
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """This function runs forward path of an op to get an output. Then the backward path is executed
@@ -345,7 +387,7 @@ class BenchmarkRunner:
         )
         return backward_time
 
-    def _measure_time(self, launch_test, test_case, iters, print_per_iter):
+    def _measure_metrics(self, launch_test, test_case, iters, print_per_iter):
         """
         This function execute the operator for <iters> iterations then look at the time.
         If it's not significant, the number of iterations will be increased before rerun.
@@ -353,8 +395,25 @@ class BenchmarkRunner:
         """
         curr_test_total_time = 0
         time_trace = []
+        peak_memory = 0
+        input_values = test_case.op_bench.inputs.values()
+        device, device_module = None, None
+        if input_values and isinstance(next(iter(input_values)), torch.Tensor):
+            # The device and device module information are crucial for memory metric calculation,
+            # In case of ops where inputs are integers (not tensor), memory metrics need not be calculated.
+            sample_input = next(iter(input_values))
+            device = sample_input.device
+            device_module = torch.get_device_module(device.type)
+        # TODO: add support for cpu memory measurement
         while True:
+            if hasattr(device_module, "reset_peak_memory_stats"):
+                device_module.reset_peak_memory_stats(device)
             run_time_sec = launch_test(test_case, iters, print_per_iter)
+            if hasattr(device_module, "synchronize"):
+                device_module.synchronize(device)
+            # Memory measurement process
+            if hasattr(device_module, "max_memory_allocated"):
+                peak_memory = device_module.max_memory_allocated(device)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(
@@ -368,7 +427,13 @@ class BenchmarkRunner:
             time_trace.append(report_run_time)
             # Print out the time spent in each epoch in ms
             if self.args.report_aibench:
-                mode = "JIT" if self.use_jit else "Eager"
+                mode = (
+                    "JIT"
+                    if self.use_jit
+                    else "Compile"
+                    if self.use_compile
+                    else "Eager"
+                )
                 test_name = "_".join(
                     [test_case.framework, test_case.test_config.test_name, mode]
                 )
@@ -380,7 +445,7 @@ class BenchmarkRunner:
                             "metric": "latency",
                             "unit": "ms",
                             "value": str(report_run_time / 1e3),
-                        }
+                        },
                     )
                 )
             if results_are_significant:
@@ -390,7 +455,7 @@ class BenchmarkRunner:
             # iteration count, and run the benchmark again...
             iters = self._predict_num_iter_needed(iters)
         reported_run_time_us = np.percentile(np.array(time_trace), 50)
-        return reported_run_time_us
+        return reported_run_time_us, peak_memory / 1024
 
     def _check_keep(self, test_flag, cmd_flag):
         return cmd_flag is None or test_flag == cmd_flag
@@ -457,8 +522,6 @@ class BenchmarkRunner:
         return False
 
     def _output_csv(self, filename, headers, row):
-        if self.args.disable_output is True:
-            return
         if os.path.exists(filename):
             with open(filename) as fd:
                 lines = list(csv.reader(fd)) or [[]]
@@ -475,19 +538,156 @@ class BenchmarkRunner:
             for line in lines:
                 writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
+    def _output_json(
+        self,
+        perf_list,
+        output_file,
+        benchmark_name="PyTorch operator benchmark",
+    ):
+        """
+        Write the result into JSON format, so that it can be uploaded to the benchmark database
+        to be displayed on OSS dashboard. The JSON format is defined at
+        https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+        """
+        if not perf_list:
+            return
+
+        # Prepare headers and records for JSON output
+        records = []
+        for perf_item in perf_list:
+            # Extract data from perf_item
+            test_name = perf_item.get("test_name", "unknown")
+            input_config = perf_item.get("input_config", "")
+            run_type = perf_item.get("run")
+            latency = perf_item.get("latency", 0)
+            peak_memory = perf_item.get("peak memory", 0)
+            memory_bandwidth = perf_item.get("memory bandwidth", 0)
+            device = perf_item.get("device", "unknown")
+            dtype = perf_item.get("dtype", "torch.float").split(".")[1]
+            runtime = perf_item.get("runtime", None)
+
+            # Extract mode based on run_type
+            mode = None
+            if run_type == "Forward":
+                mode = "inference"
+            elif run_type == "Backward":
+                mode = "training"
+
+            # Extract use_compile from it
+            if runtime == "Compile":
+                use_compile = True
+            elif runtime == "Eager":
+                use_compile = False
+            else:
+                use_compile = None
+
+            device_arch = (
+                torch.cuda.get_device_name(0)
+                if device == "cuda"
+                else platform.processor()
+                if device == "cpu"
+                else "unknown"
+            )
+
+            # Extract operator name from test_name
+            operator_name = test_name.split("_")[0]
+
+            # Create the record
+            @dataclass
+            class BenchmarkInfo:
+                name: str
+                mode: Optional[str]
+                dtype: str
+                extra_info: dict[str, Any]
+
+            @dataclass
+            class ModelInfo:
+                name: str
+                type: str
+                origins: list[str]
+                extra_info: dict[str, Any]
+
+            @dataclass
+            class MetricInfo:
+                name: str
+                unit: str
+                benchmark_values: list[float]
+                target_value: Optional[float]
+
+            @dataclass
+            class BenchmarkRecord:
+                benchmark: BenchmarkInfo
+                model: ModelInfo
+                metric: MetricInfo
+
+            # Add record for latency
+            record_latency = BenchmarkRecord(
+                benchmark=BenchmarkInfo(
+                    name=benchmark_name,
+                    mode=mode,
+                    dtype=dtype,
+                    extra_info={
+                        "input_config": input_config,
+                        "device": device,
+                        "arch": device_arch,
+                        "use_compile": use_compile,
+                        "operator_name": operator_name,
+                    },
+                ),
+                model=ModelInfo(
+                    name=test_name,
+                    type="micro-benchmark",
+                    origins=["pytorch"],
+                    extra_info={"operator_name": operator_name},
+                ),
+                metric=MetricInfo(
+                    name="latency",
+                    unit="us",
+                    benchmark_values=[latency],
+                    target_value=None,
+                ),
+            )
+            records.append(asdict(record_latency))
+
+            # Add record for peak memory
+            record_memory = copy.deepcopy(record_latency)
+            record_memory.metric = MetricInfo(
+                name="peak memory",
+                unit="KB",
+                benchmark_values=[peak_memory],
+                target_value=None,
+            )
+            records.append(asdict(record_memory))
+
+            # Add record for memory bandwidth
+            record_memory_bandwidth = copy.deepcopy(record_latency)
+            record_memory_bandwidth.metric = MetricInfo(
+                name="memory bandwidth",
+                unit="GB/s",
+                benchmark_values=[memory_bandwidth],
+                target_value=None,
+            )
+            records.append(asdict(record_memory_bandwidth))
+
+        # Write all records to the output file
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2)
+
     def run(self):
         self._print_header()
-        output_filename = self.args.output_dir
+        output_csv_filename = self.args.output_csv
         headers = [
             "Benchmarking Framework",
-            "Benchamrking Module Name",
+            "Benchmarking Module Name",
             "Case Name",
             "tag",
             "run_backward",
             "Execution Time",
+            "Peak Memory (KB)",
+            "Memory Bandwidth (GB/s)",
         ]
 
-        if self.args.output_json:
+        if self.args.output_json or self.args.output_json_for_dashboard:
             perf_list = []
 
         for test_metainfo in BENCHMARK_TESTER:
@@ -522,17 +722,31 @@ class BenchmarkRunner:
                     test_case, self.args.warmup_iterations, print_per_iter=False
                 )
                 # Actual Execution
-                reported_time = [
-                    self._measure_time(
+                results = [
+                    self._measure_metrics(
                         launch_func, test_case, self.iters, self.print_per_iter
                     )
                     for _ in range(self.num_runs)
                 ]
-                self._print_perf_result(reported_time, test_case)
+                result_dict = dict()
+                result_dict["reported_run_time_us"] = [r[0] for r in results]
+                result_dict["peak_memory"] = results[0][1]
+
+                # Calculate memory bandwidth if operator provides memory traffic
+                memory_traffic_bytes = test_case.op_bench.get_memory_traffic_bytes()
+                if memory_traffic_bytes is not None:
+                    execution_time_s = result_dict["reported_run_time_us"][0] / 1e6
+                    result_dict["memory_bandwidth_gb_s"] = (
+                        memory_traffic_bytes / execution_time_s / 1e9
+                    )
+                else:
+                    result_dict["memory_bandwidth_gb_s"] = None
+
+                self._print_perf_result(results=result_dict, test_case=test_case)
 
                 # output results to csv
                 self._output_csv(
-                    output_filename,
+                    output_csv_filename,
                     headers,
                     [
                         test_case.framework,
@@ -544,13 +758,18 @@ class BenchmarkRunner:
                         ),
                         test_case.test_config.tag,
                         test_case.test_config.run_backward,
-                        reported_time[0],
+                        result_dict["reported_run_time_us"][0],
+                        result_dict["peak_memory"],
+                        result_dict["memory_bandwidth_gb_s"],
                     ],
                 )
-                if self.args.output_json:
-                    perf_list.append(
-                        self._perf_result_to_dict(reported_time, test_case)
-                    )
+                if self.args.output_json or self.args.output_json_for_dashboard:
+                    perf_list.append(self._perf_result_to_dict(result_dict, test_case))
+
+        if self.args.output_json_for_dashboard:
+            self._output_json(
+                perf_list, self.args.output_json_for_dashboard, self.args.benchmark_name
+            )
 
         if self.args.output_json:
             with open(self.args.output_json, "w") as f:

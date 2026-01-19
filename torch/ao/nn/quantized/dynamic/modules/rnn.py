@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import numbers
 import warnings
@@ -137,7 +136,8 @@ class RNNBase(torch.nn.Module):
                 "dropout option adds dropout after all but last "
                 "recurrent layer, so non-zero dropout expects "
                 f"num_layers greater than 1, but got dropout={dropout} and "
-                f"num_layers={num_layers}"
+                f"num_layers={num_layers}",
+                stacklevel=2,
             )
 
         if mode == "LSTM":
@@ -352,11 +352,12 @@ class RNNBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) in {
-            torch.nn.LSTM,
-            torch.nn.GRU,
-        }, "nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU"
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        if type(mod) not in {torch.nn.LSTM, torch.nn.GRU}:
+            raise AssertionError(
+                "nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU"
+            )
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer_method = mod.qconfig.weight
@@ -405,7 +406,8 @@ class RNNBase(torch.nn.Module):
 
         num_directions = 2 if mod.bidirectional else 1
 
-        assert mod.bias
+        if not mod.bias:
+            raise AssertionError("mod.bias must be True")
 
         _all_weight_values = []
         for layer in range(qRNNBase.num_layers):
@@ -521,6 +523,8 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
+
+    # pyrefly: ignore [bad-override]
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -663,8 +667,11 @@ class LSTM(RNNBase):
 
     @classmethod
     def from_reference(cls, ref_mod):
-        assert hasattr(ref_mod, "weight_ih_l0_dtype"), "We are assuming weight_ih_l0 "
-        "exists in LSTM, may need to relax the assumption to support the use case"
+        if not hasattr(ref_mod, "weight_ih_l0_dtype"):
+            raise AssertionError(
+                "We are assuming weight_ih_l0 exists in LSTM, "
+                "may need to relax the assumption to support the use case"
+            )
         qmod = cls(
             ref_mod.input_size,
             ref_mod.hidden_size,
@@ -805,6 +812,8 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+
+    # pyrefly: ignore [bad-override]
     _FLOAT_MODULE = nn.GRU
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -928,8 +937,11 @@ class GRU(RNNBase):
 
     @classmethod
     def from_reference(cls, ref_mod):
-        assert hasattr(ref_mod, "weight_ih_l0_dtype"), "We are assuming weight_ih_l0 "
-        "exists in LSTM, may need to relax the assumption to support the use case"
+        if not hasattr(ref_mod, "weight_ih_l0_dtype"):
+            raise AssertionError(
+                "We are assuming weight_ih_l0 exists in GRU, "
+                "may need to relax the assumption to support the use case"
+            )
         qmod = cls(
             ref_mod.input_size,
             ref_mod.hidden_size,
@@ -1032,13 +1044,13 @@ class RNNCellBase(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
-        assert type(mod) in {
-            torch.nn.LSTMCell,
-            torch.nn.GRUCell,
-            torch.nn.RNNCell,
-        }, "nn.quantized.dynamic.RNNCellBase.from_float \
-                                 only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell"
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        if type(mod) not in {torch.nn.LSTMCell, torch.nn.GRUCell, torch.nn.RNNCell}:
+            raise AssertionError(
+                "nn.quantized.dynamic.RNNCellBase.from_float "
+                "only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell"
+            )
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer_method = mod.qconfig.weight
@@ -1059,15 +1071,15 @@ class RNNCellBase(torch.nn.Module):
 
         qRNNCellBase: Union[LSTMCell, GRUCell, RNNCell]
 
-        if type(mod) == torch.nn.LSTMCell:
+        if type(mod) is torch.nn.LSTMCell:
             qRNNCellBase = LSTMCell(
                 mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype
             )
-        elif type(mod) == torch.nn.GRUCell:
+        elif type(mod) is torch.nn.GRUCell:
             qRNNCellBase = GRUCell(
                 mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype
             )
-        elif type(mod) == torch.nn.RNNCell:
+        elif type(mod) is torch.nn.RNNCell:
             qRNNCellBase = RNNCell(
                 mod.input_size,
                 mod.hidden_size,
@@ -1081,7 +1093,8 @@ class RNNCellBase(torch.nn.Module):
             are supported for QuantizedRNN for now"
             )
 
-        assert mod.bias
+        if not mod.bias:
+            raise AssertionError("mod.bias must be True")
 
         def _observe_and_quantize_weight(weight):
             if dtype == torch.qint8:
@@ -1102,8 +1115,11 @@ class RNNCellBase(torch.nn.Module):
 
     @classmethod
     def from_reference(cls, ref_mod):
-        assert hasattr(ref_mod, "weight_ih_dtype"), "We are assuming weight_ih "
-        "exists in reference module, may need to relax the assumption to support the use case"
+        if not hasattr(ref_mod, "weight_ih_dtype"):
+            raise AssertionError(
+                "We are assuming weight_ih exists in reference module, "
+                "may need to relax the assumption to support the use case"
+            )
         if hasattr(ref_mod, "nonlinearity"):
             qmod = cls(
                 ref_mod.input_size,
@@ -1210,6 +1226,7 @@ class RNNCell(RNNCellBase):
         ...     hx = rnn(input[i], hx)
         ...     output.append(hx)
     """
+
     __constants__ = ["input_size", "hidden_size", "bias", "nonlinearity"]
 
     def __init__(

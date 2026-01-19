@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/codegen/fuser/executor.h>
 
-#include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/functional.h>
 #include <ATen/core/stack.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
@@ -13,7 +11,6 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <optional>
 
-#include <algorithm>
 #include <vector>
 
 namespace torch::jit::fuser {
@@ -28,7 +25,7 @@ static std::optional<std::vector<int64_t>> getMapSize(
   // exactly how much storage do we need, so this could be fixed in-place at
   // every step. We're just missing a few functions for ATen, but the fix
   // should be straightforward.
-  // Note: left unitialized since empty shape is broadcastable to any shape
+  // Note: left uninitialized since empty shape is broadcastable to any shape
   std::vector<int64_t> map_size;
   map_size.reserve(8);
   for (const auto arg_idx : arg_subset) {
@@ -201,7 +198,7 @@ static void launchFusion(
   for (const auto& c : fusion.concatDesc())
     flat_outputs_size += c.nSubTensors();
 
-  // Fails if the elements of the first (any) tensor are not expressable as
+  // Fails if the elements of the first (any) tensor are not expressible as
   // a 32-bit integer.
   // Note: this code assumes that inputs are 32-bit addressable
   // Note: this code assumes that all inputs are of the same size

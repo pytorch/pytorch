@@ -71,7 +71,10 @@ from torch.testing._internal.common_quantized import (
     qengine_is_fbgemm,
     qengine_is_qnnpack,
 )
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    set_default_dtype,
+)
 from torch.testing._internal.jit_utils import (
     attrs_with_prefix,
     get_forward,
@@ -121,11 +124,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             "aten::dequantize"
         ).check_not("aten::quantize_per_channel").check("aten::dequantize").check_next(
             "aten::conv2d"
-        ).check_next(
-            "aten::quantize_per_tensor"
-        ).check_next(
-            "aten::dequantize"
-        ).run(
+        ).check_next("aten::quantize_per_tensor").check_next("aten::dequantize").run(
             freezed.graph
         )
 
@@ -332,7 +331,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             def __init__(self, dim, num_blocks, enable_bias, enable_affine):
                 super().__init__()
                 layers = []
-                for i in range(num_blocks):
+                for _ in range(num_blocks):
                     layers.append(conv_module[dim](20, 20, 5, 1, bias=enable_bias))
                     bn_obj = bn_module[dim](num_features=20, affine=enable_affine)
                     if enable_affine:
@@ -667,9 +666,9 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         }
         assert len(activation_dtypes) == 1, "Expected to have 1 activation dtype"
         assert len(weight_dtypes) == 1, "Expected to have 1 weight dtype"
-        assert next(iter(activation_dtypes)) != next(
-            iter(weight_dtypes)
-        ), "Expected activation dtype to "
+        assert next(iter(activation_dtypes)) != next(iter(weight_dtypes)), (
+            "Expected activation dtype to "
+        )
         " be different from wegiht dtype"
 
     def test_insert_observers_for_reused_weight(self):
@@ -703,9 +702,9 @@ class TestQuantizeJitPasses(QuantizationTestCase):
         conv2_observers = attrs_with_prefix(m.conv2, "_observer_")
         assert len(conv1_observers) == 1, "Expected to have 1 observer submodules"
         assert len(conv2_observers) == 1, "Expected to have 1 observer submodules"
-        assert (
-            conv1_observers == conv2_observers
-        ), "Expect conv1 and conv2 to have same observers since the class type is shared"
+        assert conv1_observers == conv2_observers, (
+            "Expect conv1 and conv2 to have same observers since the class type is shared"
+        )
 
     def test_insert_observers_for_general_ops(self):
         """Make sure we skip observers for ops that doesn't require
@@ -731,13 +730,9 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             'prim::GetAttr[name="conv"]'
         ).check("prim::CallMethod").check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            "aten::flatten"
-        ).check_not(
+        ).check("aten::flatten").check_not(
             'Observer = prim::GetAttr[name="_observer_'
-        ).run(
-            m.graph
-        )
+        ).run(m.graph)
 
     # TODO: this is too long, split this to test_insert_observers.py and remove
     # insrt_observers prefix
@@ -767,17 +762,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             'prim::GetAttr[name="conv1"]'
         ).check("prim::CallMethod").check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            "aten::flatten"
-        ).check_not(
+        ).check("aten::flatten").check_not(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            'prim::GetAttr[name="conv2"]'
-        ).check(
+        ).check('prim::GetAttr[name="conv2"]').check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).run(
-            m.graph
-        )
+        ).run(m.graph)
 
     def test_insert_observers_propagate_observed_in_submodule(self):
         """Make sure we propagate observed property through general ops"""
@@ -806,17 +795,11 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             'prim::GetAttr[name="conv1"]'
         ).check("prim::CallMethod").check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            "prim::CallMethod"
-        ).check_not(
+        ).check("prim::CallMethod").check_not(
             'Observer = prim::GetAttr[name="_observer_'
-        ).check(
-            'prim::GetAttr[name="conv2"]'
-        ).check(
+        ).check('prim::GetAttr[name="conv2"]').check(
             'Observer = prim::GetAttr[name="_observer_'
-        ).run(
-            m.graph
-        )
+        ).run(m.graph)
 
     def test_insert_observers_propagate_observed_for_function(self):
         def channel_shuffle(x: torch.Tensor, groups: int) -> torch.Tensor:
@@ -1052,9 +1035,9 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
             m(data)
             m = convert_jit(m, debug=True)
-            assert (
-                len(m._modules._c.items()) == 1
-            ), "Expected to have single submodule of conv"
+            assert len(m._modules._c.items()) == 1, (
+                "Expected to have single submodule of conv"
+            )
             # make sure the quantized model is executable
             m(data)
             quant_func = (
@@ -1085,17 +1068,17 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             qconfig_dict = {"": qconfig}
             m = prepare_jit(m, qconfig_dict)
             # observers for input, output and value between conv1/conv2
-            assert (
-                len(attrs_with_prefix(m, "_observer_")) == 3
-            ), "Expected to have 3 obervers"
+            assert len(attrs_with_prefix(m, "_observer_")) == 3, (
+                "Expected to have 3 observers"
+            )
             # observer for weight
-            assert (
-                len(attrs_with_prefix(m.conv1, "_observer_")) == 1
-            ), "Expected to have 1 obervers"
+            assert len(attrs_with_prefix(m.conv1, "_observer_")) == 1, (
+                "Expected to have 1 observers"
+            )
             # observer for weight
-            assert (
-                len(attrs_with_prefix(m.conv2, "_observer_")) == 1
-            ), "Expected to have 1 obervers"
+            assert len(attrs_with_prefix(m.conv2, "_observer_")) == 1, (
+                "Expected to have 1 observers"
+            )
 
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
             m(data)
@@ -1104,15 +1087,15 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             assert m.conv1._c._type() == m.conv2._c._type()
 
             # check all observers have been removed
-            assert (
-                len(attrs_with_prefix(m, "_observer_")) == 0
-            ), "Expected to have 0 obervers"
-            assert (
-                len(attrs_with_prefix(m.conv1, "_observer_")) == 0
-            ), "Expected to have 0 obervers"
-            assert (
-                len(attrs_with_prefix(m.conv2, "_observer_")) == 0
-            ), "Expected to have 0 obervers"
+            assert len(attrs_with_prefix(m, "_observer_")) == 0, (
+                "Expected to have 0 observers"
+            )
+            assert len(attrs_with_prefix(m.conv1, "_observer_")) == 0, (
+                "Expected to have 0 observers"
+            )
+            assert len(attrs_with_prefix(m.conv2, "_observer_")) == 0, (
+                "Expected to have 0 observers"
+            )
 
             quant_func = (
                 "aten::quantize_per_channel"
@@ -1331,11 +1314,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
             "aten::avg_pool2d"
         ).check("aten::q_scale").check_next("aten::q_zero_point").check_next(
             "prim::dtype"
-        ).check_next(
-            "aten::quantize_per_tensor"
-        ).check(
-            "aten::dequantize"
-        ).run(
+        ).check_next("aten::quantize_per_tensor").check("aten::dequantize").run(
             model.graph
         )
 
@@ -1754,9 +1733,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu"
                 ).check_not(f"quantized::conv{dim}d(").check_not(
                     "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_alpha(self):
@@ -1907,9 +1884,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not("quantized::add(").check_not(
                     "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add(self):
@@ -2116,9 +2091,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not("quantized::add(").check_not(
                     "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_scalar_relu(self):
@@ -2202,11 +2175,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not(
                     "quantized::add_scalar("
-                ).check_not(
-                    "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).check_not("quantized::relu(").run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_cat(self):
@@ -2541,9 +2510,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not("quantized::mul(").check_not(
                     "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).run(m.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_mul_scalar_relu(self):
@@ -2626,11 +2593,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     "aten::relu("
                 ).check_not("aten::relu_(").check_not(
                     "quantized::mul_scalar("
-                ).check_not(
-                    "quantized::relu("
-                ).run(
-                    m.graph
-                )
+                ).check_not("quantized::relu(").run(m.graph)
 
     @override_qengines
     def test_hardswish(self):
@@ -2963,7 +2926,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 m._c, "forward", {"": qconfig}, inplace=False
             )
         )
-        # Checking the model before fianlize contain unfused patterns
+        # Checking the model before finalize contain unfused patterns
         # that numerically matches the model after quantize by checking
         # number of aten::quantize_per_tensor functions
         # conv has 3 quantize_per_tensor for activations and 1 for weight
@@ -3100,9 +3063,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
             'Observer = prim::GetAttr[name="_observer_'
         ).check("prim::CallMethod").check_not(
             'Observer = prim::GetAttr[name="_observer_'
-        ).run(
-            m.graph
-        )
+        ).run(m.graph)
 
     def test_insert_quant_dequant_linear_dynamic(self):
         class M(torch.nn.Module):
@@ -3123,9 +3084,9 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                 else default_dynamic_qconfig
             )
             m = quantize_dynamic_jit(m, {"": qconfig}, debug=True)
-            assert (
-                len(m._modules._c.items()) == 2
-            ), "Expected to have two submodule of linear"
+            assert len(m._modules._c.items()) == 2, (
+                "Expected to have two submodule of linear"
+            )
 
             wt_quant_func = (
                 "aten::quantize_per_channel"
@@ -3138,21 +3099,11 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                 act_quant_func
             ).check_next("aten::dequantize").check(
                 "aten::_choose_qparams_per_tensor"
-            ).check_next(
-                act_quant_func
-            ).check_next(
-                "aten::dequantize"
-            ).check(
+            ).check_next(act_quant_func).check_next("aten::dequantize").check(
                 wt_quant_func
-            ).check_next(
-                "aten::dequantize"
-            ).check_not(
-                wt_quant_func
-            ).check(
+            ).check_next("aten::dequantize").check_not(wt_quant_func).check(
                 "return"
-            ).run(
-                m.graph
-            )
+            ).run(m.graph)
 
     @override_qengines
     def test_dynamic_multi_op(self):
@@ -3880,3 +3831,7 @@ class TestQuantizeJit(QuantizationTestCase):
                 )
             # compare result with eager mode
             self.assertEqual(quantized_model(self.calib_data[0][0]), result_eager)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

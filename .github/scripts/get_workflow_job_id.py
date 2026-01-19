@@ -11,7 +11,8 @@ import sys
 import time
 import urllib
 import urllib.parse
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 from urllib.request import Request, urlopen
 
 
@@ -64,7 +65,7 @@ def fetch_url(
             )
         exception_message = (
             "Is github alright?",
-            f"Recieved status code '{err.code}' when attempting to retrieve {url}:\n",
+            f"Received status code '{err.code}' when attempting to retrieve {url}:\n",
             f"{err.reason}\n\nheaders={err.headers}",
         )
         raise RuntimeError(exception_message) from err
@@ -86,8 +87,9 @@ def parse_args() -> Any:
 def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
-    assert type(jobs) is list
-    while "next" in links.keys():
+    if type(jobs) is not list:
+        raise AssertionError(f"Expected jobs to be a list, got {type(jobs).__name__}")
+    while "next" in links:
         response, links = fetch_url(
             links["next"]["url"], headers=headers, reader=parse_json_and_links
         )
@@ -136,10 +138,10 @@ def find_job_id_name(args: Any) -> tuple[str, str]:
 
 
 def set_output(name: str, val: Any) -> None:
+    print(f"Setting output {name}={val}")
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
             print(f"{name}={val}", file=env)
-        print(f"setting {name}={val}")
     else:
         print(f"::set-output name={name}::{val}")
 

@@ -2,7 +2,8 @@
 import enum
 import timeit
 import textwrap
-from typing import overload, Any, Callable, NoReturn, Optional, Union
+from typing import overload, Any, NoReturn
+from collections.abc import Callable
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
@@ -13,21 +14,9 @@ from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valg
 __all__ = ["Timer", "timer", "Language"]
 
 
-if torch.backends.cuda.is_built() and torch.cuda.is_available():  # type: ignore[no-untyped-call]
+if torch.accelerator.is_available():
     def timer() -> float:
-        torch.cuda.synchronize()
-        return timeit.default_timer()
-elif torch.xpu.is_available():
-    def timer() -> float:
-        torch.xpu.synchronize()
-        return timeit.default_timer()
-elif torch._C._get_privateuse1_backend_name() != "privateuseone":
-    privateuse1_device_handler = getattr(torch, torch._C._get_privateuse1_backend_name(), None) \
-        if torch._C._get_privateuse1_backend_name() != "cpu" else None
-
-    def timer() -> float:
-        if privateuse1_device_handler:
-            privateuse1_device_handler.synchronize()
+        torch.accelerator.synchronize()
         return timeit.default_timer()
 else:
     timer = timeit.default_timer
@@ -49,12 +38,12 @@ class CPPTimer:
     ) -> None:
         if timer is not timeit.default_timer:
             raise NotImplementedError(
-                "PyTorch was built with CUDA and a GPU is present; however "
-                "Timer does not yet support GPU measurements. If your "
+                "PyTorch was built with accelerators and an accelerator is present; however "
+                "Timer does not yet support accelerator measurements. If your "
                 "code is CPU only, pass `timer=timeit.default_timer` to the "
                 "Timer's constructor to indicate this. (Note that this will "
-                "produce incorrect results if the GPU is in fact used, as "
-                "Timer will not synchronize CUDA.)"
+                "produce incorrect results if an accelerator is in fact used, as "
+                "Timer will not synchronize the accelerator.)"
             )
 
         if globals:
@@ -63,7 +52,7 @@ class CPPTimer:
         self._stmt: str = textwrap.dedent(stmt)
         self._setup: str = textwrap.dedent(setup)
         self._global_setup: str = textwrap.dedent(global_setup)
-        self._timeit_module: Optional[TimeitModuleType] = None
+        self._timeit_module: TimeitModuleType | None = None
 
     def timeit(self, number: int) -> float:
         if self._timeit_module is None:
@@ -88,7 +77,7 @@ class Timer:
     1) Runtime aware:
         Timer will perform warmups (important as some elements of PyTorch are
         lazily initialized), set threadpool size so that comparisons are
-        apples-to-apples, and synchronize asynchronous CUDA functions when
+        apples-to-apples, and synchronize asynchronous accelerator functions when
         necessary.
 
     2) Focus on replicates:
@@ -131,8 +120,8 @@ class Timer:
 
         timer:
             Callable which returns the current time. If PyTorch was built
-            without CUDA or there is no GPU present, this defaults to
-            `timeit.default_timer`; otherwise it will synchronize CUDA before
+            without accelerators or there is no accelerator present, this defaults to
+            `timeit.default_timer`; otherwise it will synchronize accelerators before
             measuring the time.
 
         globals:
@@ -192,14 +181,14 @@ class Timer:
         setup: str = "pass",
         global_setup: str = "",
         timer: Callable[[], float] = timer,
-        globals: Optional[dict[str, Any]] = None,
-        label: Optional[str] = None,
-        sub_label: Optional[str] = None,
-        description: Optional[str] = None,
-        env: Optional[str] = None,
+        globals: dict[str, Any] | None = None,
+        label: str | None = None,
+        sub_label: str | None = None,
+        description: str | None = None,
+        env: str | None = None,
         num_threads: int = 1,
-        language: Union[Language, str] = Language.PYTHON,
-    ):
+        language: Language | str = Language.PYTHON,
+    ) -> None:
         if not isinstance(stmt, str):
             raise ValueError("Currently only a `str` stmt is supported.")
 
@@ -219,7 +208,8 @@ class Timer:
                 )
 
         elif language in (Language.CPP, "cpp", "c++"):
-            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
+            if self._timer_cls is not timeit.Timer:
+                raise AssertionError("_timer_cls has already been swapped.")
             self._timer_cls = CPPTimer
             setup = ("" if setup == "pass" else setup)
             self._language = Language.CPP
@@ -243,6 +233,7 @@ class Timer:
         stmt = (stmt[1:] if stmt and stmt[0] == "\n" else stmt).rstrip()
         setup = textwrap.dedent(setup)
         setup = (setup[1:] if setup and setup[0] == "\n" else setup).rstrip()
+
 
         self._timer = self._timer_cls(
             stmt=stmt,
@@ -286,7 +277,7 @@ class Timer:
     def repeat(self, repeat: int = -1, number: int = -1) -> None:
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def autorange(self, callback: Optional[Callable[[int, float], NoReturn]] = None) -> None:
+    def autorange(self, callback: Callable[[int, float], NoReturn] | None = None) -> None:
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
     def _threaded_measurement_loop(
@@ -295,8 +286,8 @@ class Timer:
         time_hook: Callable[[], float],
         stop_hook: Callable[[list[float]], bool],
         min_run_time: float,
-        max_run_time: Optional[float] = None,
-        callback: Optional[Callable[[int, float], NoReturn]] = None
+        max_run_time: float | None = None,
+        callback: Callable[[int, float], NoReturn] | None = None
     ) -> list[float]:
         total_time = 0.0
         can_stop = False
@@ -334,7 +325,7 @@ class Timer:
 
     def blocked_autorange(
         self,
-        callback: Optional[Callable[[int, float], NoReturn]] = None,
+        callback: Callable[[int, float], NoReturn] | None = None,
         min_run_time: float = 0.2,
     ) -> common.Measurement:
         """Measure many replicates while keeping timer overhead to a minimum.
@@ -359,7 +350,7 @@ class Timer:
 
             2) A large block size better amortizes the cost of `timer`
                invocation, and results in a less biased measurement. This is
-               important because CUDA synchronization time is non-trivial
+               important because accelerator synchronization time is non-trivial
                (order single to low double digit microseconds) and would
                otherwise bias the measurement.
 
@@ -398,7 +389,7 @@ class Timer:
             *,
             min_run_time: float = 0.01,
             max_run_time: float = 10.0,
-            callback: Optional[Callable[[int, float], NoReturn]] = None,
+            callback: Callable[[int, float], NoReturn] | None = None,
     ) -> common.Measurement:
         """Similar to `blocked_autorange` but also checks for variablility in measurements
         and repeats until iqr/median is smaller than `threshold` or `max_run_time` is reached.
@@ -481,7 +472,7 @@ class Timer:
         self,
         number: int = 100,
         *,
-        repeats: Optional[int] = None,
+        repeats: int | None = None,
         collect_baseline: bool = True,
         retain_out_file: bool = False,
     ) -> Any:
@@ -496,7 +487,7 @@ class Timer:
         the fact that a small number of iterations is generally sufficient to
         obtain good measurements.
 
-        In order to to use this method `valgrind`, `callgrind_control`, and
+        In order to use this method `valgrind`, `callgrind_control`, and
         `callgrind_annotate` must be installed.
 
         Because there is a process boundary between the caller (this process)
@@ -527,7 +518,8 @@ class Timer:
         # the parent process rather than the valgrind subprocess.
         self._timeit(1)
         is_python = (self._language == Language.PYTHON)
-        assert is_python or not self._globals
+        if not is_python and self._globals:
+            raise AssertionError("_timer globals are only supported for Python timers")
         result = valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
             globals=self._globals,

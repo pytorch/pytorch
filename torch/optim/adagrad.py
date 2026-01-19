@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -28,17 +28,17 @@ class Adagrad(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-2,
+        lr: float | Tensor = 1e-2,
         lr_decay: float = 0,
         weight_decay: float = 0,
         initial_accumulator_value: float = 0,
         eps: float = 1e-10,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         *,
         maximize: bool = False,
         differentiable: bool = False,
-        fused: Optional[bool] = None,
-    ):
+        fused: bool | None = None,
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -54,17 +54,17 @@ class Adagrad(Optimizer):
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps}")
 
-        defaults = dict(
-            lr=lr,
-            lr_decay=lr_decay,
-            eps=eps,
-            weight_decay=weight_decay,
-            initial_accumulator_value=initial_accumulator_value,
-            foreach=foreach,
-            maximize=maximize,
-            differentiable=differentiable,
-            fused=fused,
-        )
+        defaults = {
+            "lr": lr,
+            "lr_decay": lr_decay,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "initial_accumulator_value": initial_accumulator_value,
+            "foreach": foreach,
+            "maximize": maximize,
+            "differentiable": differentiable,
+            "fused": fused,
+        }
         super().__init__(params, defaults)
 
         if fused:
@@ -116,7 +116,8 @@ class Adagrad(Optimizer):
                     float(s["step"]), dtype=_get_scalar_dtype(is_fused=fused)
                 )
 
-    def share_memory(self):
+    def share_memory(self) -> None:
+        """Calls tensor.share_memory_() on the state sum tensors."""
         for group in self.param_groups:
             for p in group["params"]:
                 state = self.state[p]
@@ -245,13 +246,13 @@ def adagrad(
     grads: list[Tensor],
     state_sums: list[Tensor],
     state_steps: list[Tensor],
-    fused: Optional[bool] = None,
-    grad_scale: Optional[Tensor] = None,
-    found_inf: Optional[Tensor] = None,
+    fused: bool | None = None,
+    grad_scale: Tensor | None = None,
+    found_inf: Tensor | None = None,
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting these as kwargs for now as functional API is compiled by torch/distributed/optim
     has_sparse_grad: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     differentiable: bool = False,
     has_complex: bool = False,
     *,
@@ -260,7 +261,7 @@ def adagrad(
     lr_decay: float,
     eps: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs Adagrad algorithm computation.
 
     See :class:`~torch.optim.Adagrad` for details.
@@ -324,8 +325,8 @@ def _single_tensor_adagrad(
     grads: list[Tensor],
     state_sums: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     lr: float,
     weight_decay: float,
@@ -335,13 +336,16 @@ def _single_tensor_adagrad(
     maximize: bool,
     differentiable: bool,
     has_complex: bool,
-):
-    assert grad_scale is None and found_inf is None
+) -> None:
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
-    for param, grad, state_sum, step_t in zip(params, grads, state_sums, state_steps):
+    for param, grad, state_sum, step_t in zip(
+        params, grads, state_sums, state_steps, strict=True
+    ):
         # update step
         step_t += 1
         step = _get_value(step_t)
@@ -389,8 +393,8 @@ def _multi_tensor_adagrad(
     grads: list[Tensor],
     state_sums: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     lr: float,
     weight_decay: float,
@@ -400,9 +404,11 @@ def _multi_tensor_adagrad(
     maximize: bool,
     differentiable: bool,
     has_complex: bool,
-):
-    assert not differentiable, "_foreach ops don't support autograd"
-    assert grad_scale is None and found_inf is None
+) -> None:
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
+    if grad_scale is not None or found_inf is not None:
+        raise AssertionError("Expected grad_scale and found_inf to be None")
 
     # Foreach functions will throw errors if given empty lists
     if len(params) == 0:
@@ -466,7 +472,7 @@ def _multi_tensor_adagrad(
             torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            # Reuse the intermediate memory (device_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
             else:
@@ -484,7 +490,7 @@ def _multi_tensor_adagrad(
         torch._foreach_add_(std, eps)
 
         if weight_decay != 0 or maximize:
-            # Again, re-use the intermediate memory (device_grads) already allocated
+            # Again, reuse the intermediate memory (device_grads) already allocated
             torch._foreach_mul_(device_grads, minus_clr)
             numerator = device_grads
         else:
@@ -498,8 +504,8 @@ def _fused_adagrad(
     grads: list[Tensor],
     state_sums: list[Tensor],
     state_steps: list[Tensor],
-    grad_scale: Optional[Tensor],
-    found_inf: Optional[Tensor],
+    grad_scale: Tensor | None,
+    found_inf: Tensor | None,
     *,
     lr: float,
     weight_decay: float,

@@ -14,6 +14,7 @@ memory.
 Because of the similarity of APIs we do not document most of this package
 contents, and we recommend referring to very good docs of the original module.
 """
+
 import multiprocessing
 import sys
 
@@ -37,7 +38,7 @@ torch._C._multiprocessing_init()
 
 
 """Add helper function to spawn N processes and wait for completion of any of
-them. This depends `mp.get_context` which was added in Python 3.4."""
+them."""
 from .spawn import (
     ENV_VAR_PARALLEL_START,
     ProcessContext,
@@ -65,7 +66,11 @@ def set_sharing_strategy(new_strategy):
             the values returned by :func:`get_all_sharing_strategies()`.
     """
     global _sharing_strategy
-    assert new_strategy in _all_sharing_strategies
+    if new_strategy not in _all_sharing_strategies:
+        raise AssertionError(
+            f"invalid sharing strategy {new_strategy!r}, "
+            f"expected one of {_all_sharing_strategies}"
+        )
     _sharing_strategy = new_strategy
 
 
@@ -98,3 +103,24 @@ def _get_thread_name() -> str:
 
 
 init_reductions()
+
+# Leak ResourceTracker at exit for Python-3.12 on MacOS
+# See https://github.com/pytorch/pytorch/issues/153050 and
+# https://github.com/python/cpython/issues/88887 for more details
+from multiprocessing.resource_tracker import ResourceTracker as _RT
+
+
+if (
+    sys.platform == "darwin"
+    and sys.version_info >= (3, 12, 2)
+    and hasattr(_RT, "__del__")
+):
+    import atexit
+
+    def _leak_RT_at_exit():
+        def _noop(x):
+            pass
+
+        _RT.__del__ = _noop  # type: ignore[attr-defined]
+
+    atexit.register(_leak_RT_at_exit)

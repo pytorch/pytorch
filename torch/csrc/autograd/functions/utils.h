@@ -71,7 +71,10 @@ inline void set_history(
     // If the codegen triggers this, you most likely want to add your newly
     // added function to the DONT_REQUIRE_DERIVATIVE list in
     // tools/autograd/gen_variable_type.py
-    TORCH_INTERNAL_ASSERT(isDifferentiableType(variable.scalar_type()));
+    TORCH_CHECK(
+        isDifferentiableType(variable.scalar_type()),
+        "Autograd not support dtype: ",
+        variable.scalar_type());
     auto output_nr = grad_fn->add_input_metadata(variable);
     impl::set_gradient_edge(variable, {grad_fn, output_nr});
   } else {

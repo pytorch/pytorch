@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import re
 from collections import defaultdict, OrderedDict
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch.ao.nn.intrinsic import _FusedModule
@@ -117,7 +118,7 @@ def _generate_node_name_to_qconfig(
                 qconfig_mapping, type(modules[module_name]), module_name, global_qconfig
             )
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(
-                qconfig, modules.get(node.target, None)
+                qconfig, modules.get(node.target)
             )
         elif node.op == "call_function":
             # precedence: module_name_qconfig
@@ -139,7 +140,7 @@ def _generate_node_name_to_qconfig(
                 qconfig_mapping, module_path, node.target, cur_object_type_idx, qconfig
             )
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(
-                qconfig, modules.get(node.target, None)
+                qconfig, modules.get(node.target)
             )
 
         elif node.op == "call_method":
@@ -158,7 +159,7 @@ def _generate_node_name_to_qconfig(
             # currently call_method does not support modifying qconfig
             # by order, we can add this later if it is needed.
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(
-                qconfig, modules.get(node.target, None)
+                qconfig, modules.get(node.target)
             )
 
         elif node.op == "call_module":
@@ -182,7 +183,7 @@ def _generate_node_name_to_qconfig(
                 qconfig_mapping, parent_name, module_type, cur_object_type_idx, qconfig
             )
             qconfig_with_device_check = _add_module_to_qconfig_obs_ctr(
-                qconfig, modules.get(node.target, None)
+                qconfig, modules.get(node.target)
             )
 
             # regex is not supported eager mode propagate_qconfig_, we'll
@@ -205,7 +206,7 @@ def _check_is_valid_config_dict(
       `config_dict`: dictionary whose keys we want to check
     """
 
-    for k in config_dict.keys():
+    for k in config_dict:
         if k not in allowed_keys:
             raise ValueError(
                 "Expected "
@@ -227,9 +228,12 @@ def _compare_prepare_convert_qconfig_mappings(
       `prepare_qconfig_mapping`: configuration for prepare quantization step
       `convert_qconfig_mapping`: configuration for convert quantization step
     """
-    assert qconfig_equals(
+    if not qconfig_equals(
         prepare_qconfig_mapping.global_qconfig, convert_qconfig_mapping.global_qconfig
-    ), "Expected global qconfigs to be the same in the prepare and convert quantization configs"
+    ):
+        raise AssertionError(
+            "Expected global qconfigs to be the same in the prepare and convert quantization configs"
+        )
     prepare_dicts: list[OrderedDict] = [
         prepare_qconfig_mapping.object_type_qconfigs,
         prepare_qconfig_mapping.module_name_qconfigs,
@@ -246,15 +250,18 @@ def _compare_prepare_convert_qconfig_mappings(
         _MODULE_NAME_REGEX_DICT_KEY,
     ]
     for i in range(len(prepare_dicts)):
-        for name in prepare_dicts[i].keys():
-            assert (
-                name in convert_dicts[i]
-            ), f"Missing key {dict_names[i]} {name} in convert QConfigMapping \
-                when it was present in prepare"
-            assert convert_dicts[i][name] is None or qconfig_equals(
+        for name in prepare_dicts[i]:
+            if name not in convert_dicts[i]:
+                raise AssertionError(
+                    f"Missing key {dict_names[i]} {name} in convert QConfigMapping when it was present in prepare"
+                )
+            if convert_dicts[i][name] is not None and not qconfig_equals(
                 prepare_dicts[i][name], convert_dicts[i][name]
-            ), f"Expected convert QConfigMapping to have the same qconfig as prepare for key {dict_names[i]} {name}; \
-                prepare: {prepare_dicts[i][name]}; convert: {convert_dicts[i][name]}"
+            ):
+                raise AssertionError(
+                    "Expected convert QConfigMapping to have the same qconfig as prepare for key "
+                    f"{dict_names[i]} {name}; prepare: {prepare_dicts[i][name]}; convert: {convert_dicts[i][name]}"
+                )
 
 
 def _is_qconfig_supported_by_dtype_configs(
@@ -304,7 +311,7 @@ def _is_qconfig_supported_by_dtype_configs(
 
 def _get_object_type_qconfig(
     qconfig_mapping: QConfigMapping,
-    object_type: Union[Callable, str],
+    object_type: Callable | str,
     fallback_qconfig: QConfigAny,
 ) -> QConfigAny:
     return qconfig_mapping.object_type_qconfigs.get(object_type, fallback_qconfig)
@@ -349,7 +356,7 @@ def _maybe_adjust_qconfig_for_module_type_or_name(
 
 def _get_flattened_qconfig_dict(
     qconfig_mapping: QConfigMapping,
-) -> dict[Union[Callable, str], QConfigAny]:
+) -> dict[Callable | str, QConfigAny]:
     """flatten the global, object_type and module_name qconfig
     to the same qconfig_dict so that it can be used by
     propagate_qconfig_ function.
@@ -373,9 +380,7 @@ def _get_flattened_qconfig_dict(
       "conv": qconfig
     }
     """
-    flattened: dict[Union[Callable, str], QConfigAny] = {
-        "": qconfig_mapping.global_qconfig
-    }
+    flattened: dict[Callable | str, QConfigAny] = {"": qconfig_mapping.global_qconfig}
     flattened.update(qconfig_mapping.object_type_qconfigs)
     flattened.update(qconfig_mapping.module_name_qconfigs)  # type: ignore[arg-type]
     return flattened

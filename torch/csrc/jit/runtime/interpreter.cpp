@@ -1,17 +1,10 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 
-#include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
-#include <c10/core/thread_pool.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -40,7 +33,6 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
-#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -55,7 +47,7 @@ C10_DEFINE_bool(
 C10_DEFINE_bool(
     torch_jit_enable_expanded_stacks,
     false,
-    "When true we will attemps to pre-expand node stacks and cache expanded stacks.")
+    "When true we will attempts to pre-expand node stacks and cache expanded stacks.")
 
 C10_DEFINE_bool(
     torch_jit_expanded_stacks_mangled,
@@ -213,7 +205,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     out << "Stack:\n";
     for (const auto& val : stack) {
       out << val;
-      out << "\n";
+      out << '\n';
     }
   }
 
@@ -929,7 +921,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         python_class_name ? *python_class_name : "RuntimeError";
     ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
-    ss << class_name << ": " << msg << "\n";
+    ss << class_name << ": " << msg << '\n';
     if (future_) {
       future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
@@ -942,7 +934,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           not_implemented_error->caller());
     } else {
       if (get_cpp_stacktraces_enabled()) {
-        ss << e.what() << "\n";
+        ss << e.what() << '\n';
       }
       throw std::runtime_error(ss.str());
     }
@@ -1143,7 +1135,7 @@ std::vector<std::string> currentModuleHierarchy() {
 }
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
-  out << *code.pImpl->graph_ << "\n";
+  out << *code.pImpl->graph_ << '\n';
   code.pImpl->dump(out);
   return out;
 }

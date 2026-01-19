@@ -96,11 +96,14 @@ static void pow_tensor_scalar_kernel(
       dtype == kBFloat16 || isComplexType(dtype)) {
     // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
     if (exp_scalar.equal(.5)) {
-      return sqrt_kernel(iter);
+      sqrt_kernel(iter);
+      return;
     } else if (exp_scalar.equal(-0.5)) {
-      return rsqrt_kernel(iter);
+      rsqrt_kernel(iter);
+      return;
     } else if (exp_scalar.equal(-1.0)) {
-      return reciprocal_kernel(iter);
+      reciprocal_kernel(iter);
+      return;
     }
   }
 
@@ -117,7 +120,7 @@ static void pow_tensor_scalar_kernel(
   } else if (dtype == ScalarType::Half) {
     [&]() {
       using scalar_t =
-          decltype(c10::impl::ScalarTypeToCPPType<ScalarType::Half>::t);
+          c10::impl::ScalarTypeToCPPTypeT<ScalarType::Half>;
       const auto exp = exp_scalar.to<scalar_t>();
       using Vec = Vectorized<scalar_t>;
       cpu_kernel_vec(iter,

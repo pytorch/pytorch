@@ -7,7 +7,7 @@ import torch
 import torch.fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import detect_fake_mode
-from torch._prims_common import definitely_contiguous_for_memory_format
+from torch._prims_common import is_contiguous_for_memory_format_or_false
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_aggregate, Node
@@ -35,8 +35,8 @@ class TensorMetadata(NamedTuple):
 
 # When include_contiguity is True, we will set contiguity when its always true for the tensor.
 # Some tensors can represent both contiguous and non-contiguous tensors. e.g: (u0, u1) with (u2, u3).
-# In such situation contiguity is not set. We could also make it a tri-state i.e: (definitely_contiguous,
-# contiguous, and unknown).
+# In such situation contiguity is not set. We could also make it a tri-state i.e: (def_contiguous,
+# def_not_contiguous and unknown).
 def _extract_tensor_metadata(
     result: torch.Tensor, include_contiguity=True
 ) -> TensorMetadata:
@@ -51,13 +51,13 @@ def _extract_tensor_metadata(
     memory_format = None
 
     if include_contiguity and not is_sparse_any(result):
-        memory_formats = {
+        memory_formats = (
             torch.contiguous_format,
             torch.channels_last,
             torch.channels_last_3d,
-        }
+        )
         for query_format in memory_formats:
-            if definitely_contiguous_for_memory_format(
+            if is_contiguous_for_memory_format_or_false(
                 result, memory_format=query_format
             ):
                 memory_format = query_format
@@ -68,14 +68,14 @@ def _extract_tensor_metadata(
     if is_quantized:
         qscheme = result.qscheme()
         qparams["qscheme"] = qscheme
-        if qscheme in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+        if qscheme in (torch.per_tensor_affine, torch.per_tensor_symmetric):
             qparams["scale"] = result.q_scale()  # type: ignore[assignment]
             qparams["zero_point"] = result.q_zero_point()  # type: ignore[assignment]
-        elif qscheme in {
+        elif qscheme in (
             torch.per_channel_affine,
             torch.per_channel_affine_float_qparams,
             torch.per_channel_symmetric,
-        }:
+        ):
             # In this branch, scale and zero_point are expected to be tensors,
             # we store the values as immutable_list in TensorMetadata for
             # easier serialization downstream

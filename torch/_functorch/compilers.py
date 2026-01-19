@@ -5,9 +5,10 @@ import logging
 import os
 import pickle
 import random
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import partial
-from typing import Callable, Union
+from typing import Union
 
 import sympy
 
@@ -31,7 +32,7 @@ from .partitioners import (
 log = logging.getLogger(__name__)
 
 
-# These canonicalizations are needed here (and not decompositions), as the ops
+# These canonicalization are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
 def _canonicalize(fx_g):
     for node in fx_g.graph.find_nodes(
@@ -150,13 +151,13 @@ class DebugInterpreter(fx.Interpreter):
         def check(nv, rv, desc):
             assert callable(desc)
             assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
-            assert (
-                subst_symint_tuple(nv.size()) == rv.size()
-            ), f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            assert subst_symint_tuple(nv.size()) == rv.size(), (
+                f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            )
             same_strides = check_significant_strides(nv, rv)
-            assert (
-                same_strides
-            ), f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+            assert same_strides, (
+                f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+            )
 
         r = super().run_node(n)
         if "val" in n.meta:
@@ -249,7 +250,7 @@ def memory_efficient_fusion(
 
     Args:
         fn (Union[Callable, nn.Module]): A Python function or a ``nn.Module``
-            that takes one ore more arguments. Must return one or more Tensors.
+            that takes one or more arguments. Must return one or more Tensors.
         **kwargs: Any other overrides you want to make to the settings
 
     Returns:
@@ -360,7 +361,7 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
             input_meta += get_input_meta(args[1])
             return input_meta
         for arg in args:
-            if type(arg) == int or type(arg) == float:
+            if type(arg) is int or type(arg) is float:
                 input_meta.append((type(arg),))
             else:
                 input_meta.append(
@@ -390,13 +391,10 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         gm.to_folder(
             f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}"
         )
-        pickle.dump(
-            input_meta,
-            open(
-                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input",  # noqa: B950
-                "wb",
-            ),
-        )  # noqa: E501
+        with open(
+            f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input"
+        ) as f:
+            pickle.dump(input_meta, f)
         if dump_example_input:
             torch.save(
                 args,

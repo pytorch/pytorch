@@ -33,7 +33,7 @@ __device__ void test(){
   // use the std namespace, but just "::" so that the function
   // gets resolved from nvcc math_functions.hpp
 
-  float threshold = 0.00001;
+  [[maybe_unused]] float threshold = 0.00001;
   assert(::abs(::lgamma(Half(10.0)) - ::lgamma(10.0f)) <= threshold);
   assert(::abs(::exp(Half(1.0)) - ::exp(1.0f)) <= threshold);
   assert(::abs(::log(Half(1.0)) - ::log(1.0f)) <= threshold);

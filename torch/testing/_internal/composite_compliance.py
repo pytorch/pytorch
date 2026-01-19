@@ -10,7 +10,7 @@ from torch.utils import _pytree as pytree
 from functools import partial
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 import torch.autograd.forward_ad as fwAD
-from typing import Callable
+from collections.abc import Callable
 import re
 
 
@@ -186,7 +186,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             def wrap(e):
                 return CompositeCompliantTensor(e, self) if isinstance(e, torch.Tensor) else e
 
-            if func == torch.ops.aten._local_scalar_dense.default:
+            if func is torch.ops.aten._local_scalar_dense.default:
                 raise RuntimeError(
                     ".item() is not allowed to be called inside of composite "
                     "functions in the PyTorch library because not all backends "
@@ -234,7 +234,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
                     #    tensor results to be that of the tensors that alias the input
                     result = func(*args, **kwargs)
                     if isinstance(result, (tuple, list)):
-                        for a, b in zip(rs, result):
+                        for a, b in zip(rs, result, strict=True):
                             a.set_(b)
                     else:
                         rs.set_(result)
@@ -303,7 +303,7 @@ def generate_subclass_choices(flat_args, CCT, cct_mode):
     for which_args_are_wrapped in itertools.product(*subclass_options):
 
         result = [maybe_map(partial(wrap, CCT=CCT, cct_mode=cct_mode), should_wrap_arg, arg)
-                  for should_wrap_arg, arg in zip(which_args_are_wrapped, flat_args)]
+                  for should_wrap_arg, arg in zip(which_args_are_wrapped, flat_args, strict=True)]
         yield result, which_args_are_wrapped
 
 
@@ -359,7 +359,7 @@ def check_all_permutations(op, args, kwargs, assert_equal_fn):
         # - data_ptr accesses
         # The first is easy to filter for (we could make the error a different
         # error class), the second is always going to be a RuntimeError due to
-        # how it is implemented (if you try to access the data_ptr of thex
+        # how it is implemented (if you try to access the data_ptr of the
         # wrapper Tensor, it raises you some internal RuntimeError).
         #
         # So the most general thing to catch here was RuntimeError. If you
@@ -539,11 +539,11 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
                 return fwAD.make_dual(primal.detach(), tangent)
             elif is_tensorlist(primal):
                 return tuple(fwAD.make_dual(pri.detach(), tang) if tang is not None else pri
-                             for pri, tang in zip(primal, tangent))
+                             for pri, tang in zip(primal, tangent, strict=True))
             return primal
 
         def compute_expected_grad(args, tangent_args, kwargs, tangent_kwargs):
-            op_args = tuple(map(maybe_make_dual, zip(args, tangent_args)))
+            op_args = tuple(map(maybe_make_dual, zip(args, tangent_args, strict=True)))
             op_kwargs = {k: maybe_make_dual((v, tangent_kwargs[k])) for k, v in kwargs.items()}
 
             if gradcheck_wrapper is None:
@@ -572,7 +572,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
                 new_tang_args, new_tang_kwargs, \
                     which_tang_args_are_wrapped, which_tang_kwargs_are_wrapped = tang_choice
 
-                op_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args)))
+                op_args = tuple(map(maybe_make_dual, zip(new_args, new_tang_args, strict=True)))
                 op_kwargs = {k: maybe_make_dual((v, new_tang_kwargs[k])) for k, v in new_kwargs.items()}
 
                 try:

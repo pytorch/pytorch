@@ -5,7 +5,7 @@ namespace {
     template <typename T>
     class Memory : public ::testing::Test {};
     template <typename T>
-    class Arithmetics : public ::testing::Test {};
+    class Arithmetic : public ::testing::Test {};
     template <typename T>
     class Comparison : public ::testing::Test {};
     template <typename T>
@@ -61,6 +61,8 @@ namespace {
     template <typename T>
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
+    class Quantization8BitTests : public ::testing::Test {};
+    template <typename T>
     class Quantization8BitWithTailTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTests : public ::testing::Test {};
@@ -79,6 +81,7 @@ namespace {
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
+    using Quantization8BitTestedTypes = ::testing::Types<vqint8, vquint8>;
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     using Quantization8BitWithTailTestedTypes =
         ::testing::Types<vqint8, vquint8>;
@@ -89,7 +92,7 @@ namespace {
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
-    TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(Arithmetic, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
     TYPED_TEST_SUITE(MinMax, RealFloatIntTestedTypes);
@@ -116,6 +119,7 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatReducedFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_SUITE(Quantization8BitTests, Quantization8BitTestedTypes);
     TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     TYPED_TEST_SUITE(
@@ -522,6 +526,41 @@ namespace {
             [](const vec& v) { return v.expm1(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+    TYPED_TEST(Exponents, ExpU20) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        using UVT = UvalueType<TypeParam>;
+
+        // Explicit edge values
+        VT v_too_small = VT(-100.0); // much less than -87.3
+        VT exp_too_small = std::exp(v_too_small);
+        VT v_neg_edge = VT(-0x1.5d5e2ap+6f);   // just at the edge
+        VT exp_neg_edge = std::exp(v_neg_edge);
+        VT v_zero = VT(0.0);         // middle, normal case
+        VT exp_zero = std::exp(v_zero);
+        VT v_pos_edge = VT(0x1.5d5e2ap+6f);    // just at the edge
+        VT exp_pos_edge = std::exp(v_pos_edge);
+        VT v_too_large = VT(100.0);  // much more than 87.3
+        VT exp_too_large = std::exp(v_too_large);
+
+        auto test_case = TestingCase<vec>::getBuilder()
+            // Randoms in normal range, but the .addCustom() below guarantees we hit the special/fallback cases
+            .addDomain(CheckWithinDomains<UVT>{{{-100, 100}}, false, getDefaultTolerance<UVT>()})
+            .addCustom({ {v_too_small}, exp_too_small })
+            .addCustom({ {v_neg_edge}, exp_neg_edge })
+            .addCustom({ {v_zero}, exp_zero })
+            .addCustom({ {v_pos_edge}, exp_pos_edge })
+            .addCustom({ {v_too_large}, exp_too_large })
+            .setTrialCount(65536)
+            .setTestSeed(TestSeed());
+
+        test_unary<vec>(
+            NAME_INFO(exp_u20_edge_cases),
+            RESOLVE_OVERLOAD(std::exp),
+            [](const vec& v) { return v.exp_u20(); },
+            test_case
+        );
+    }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -687,7 +726,7 @@ namespace {
         AssertVectorized<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
         AssertVectorized<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
     }
-    TYPED_TEST(Arithmetics, Plus) {
+    TYPED_TEST(Arithmetic, Plus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
@@ -699,7 +738,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_add_overflow));
     }
-    TYPED_TEST(Arithmetics, Minus) {
+    TYPED_TEST(Arithmetic, Minus) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
@@ -711,7 +750,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_sub_overflow));
     }
-    TYPED_TEST(Arithmetics, Multiplication) {
+    TYPED_TEST(Arithmetic, Multiplication) {
         using vec = TypeParam;
         test_binary<vec>(
             NAME_INFO(mult),
@@ -720,7 +759,7 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
-    TYPED_TEST(Arithmetics, Division) {
+    TYPED_TEST(Arithmetic, Division) {
         using vec = TypeParam;
         TestSeed seed;
         test_binary<vec>(
@@ -1424,7 +1463,6 @@ namespace {
         CACHE_ALIGN underlying qint_vals[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying qint_b[vec::size()];
-        typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
         for ([[maybe_unused]] const auto i : c10::irange(trials)) {
@@ -1496,6 +1534,100 @@ namespace {
             },
             test_case);
     }
+#ifndef _WIN32
+    TYPED_TEST(Quantization8BitTests, Transpose) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto M = 4;
+        constexpr auto N = 64;
+        constexpr auto L = M * N;
+        constexpr auto ld_src = N;
+        constexpr auto ld_dst = M;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::native::utils::transpose<uint8_t>(
+            M, N,
+            reinterpret_cast<uint8_t*>(x), ld_src,
+            reinterpret_cast<uint8_t*>(y), ld_dst);
+        for (int64_t j = 0; j < N; j++) {
+          for (int64_t i = 0; i < M; i++) {
+            ref[j * ld_dst + i] = c10::load(&(x[i * ld_src + j]));
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
+#if defined(CPU_CAPABILITY_AVX512)
+    TYPED_TEST(Quantization8BitTests, PackVNNI4) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto K = 8;
+        constexpr auto N = 128;
+        constexpr auto L = K * N;
+        constexpr auto ld_src = N;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::vec::pack_vnni4(x, y, ld_src, K, N);
+        int64_t _K = K / 4;
+        for (int64_t k = 0; k < _K; k++) {
+          for(int64_t n = 0; n < N; n++) {
+            for(int64_t l = 0; l < 4; l++) {
+              ref[k * N * 4 + n * 4 + l] =
+                  c10::load(&(x[k * ld_src * 4 + l * ld_src + n]));
+            }
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
+#if defined(CPU_CAPABILITY_AVX512)
+    TYPED_TEST(Quantization8BitTests, TransposePackVNNI4) {
+        using VT = ValueType<TypeParam>;
+        constexpr auto K = 197;
+        constexpr auto N = 64;
+        constexpr auto L = K * N;
+        constexpr auto ld_src = N;
+        constexpr auto ld_dst = K * 4;
+        CACHE_ALIGN VT x[L];
+        CACHE_ALIGN VT y[L];
+        CACHE_ALIGN VT ref[L];
+        auto seed = TestSeed();
+        ValueGen<VT> generator(VT(-100), VT(100), seed);
+        for (const auto i : c10::irange(L)) {
+          x[i] = generator.get();
+        }
+        at::vec::transpose_pack_vnni4(x, y, ld_src, K, N);
+        int64_t _N = N / 4;
+        for (int64_t k = 0; k < K; k++) {
+          for(int64_t n = 0; n < _N; n++) {
+            for(int64_t l = 0; l < 4; l++) {
+              ref[n * ld_dst + k * 4 + l] =
+                  c10::load(&(x[k * ld_src + n * 4 + l]));
+            }
+          }
+        }
+        for (const auto i : c10::irange(L)) {
+          ASSERT_EQ(y[i], ref[i])
+              << "Failure Details:\nTest Seed to reproduce: " << seed;
+        }
+    }
+#endif
     TYPED_TEST(FunctionalTests, Map) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1695,9 +1827,9 @@ namespace {
       #endif
 
         EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
-            << "Test failed for float to uint16 " << f32s[i] << "\n";
+            << "Test failed for float to uint16 " << f32s[i] << '\n';
         EXPECT_EQ(x, c10::detail::fp16_ieee_to_fp32_value(u16))
-            << "Test failed for uint16 to float " << u16 << "\n";
+            << "Test failed for uint16 to float " << u16 << '\n';
       }
     }
     TEST(FP8E4M3Test, FP8E4M3ConversionFloat) {
@@ -1715,10 +1847,10 @@ namespace {
           EXPECT_TRUE(std::isnan(f32));
         } else {
           EXPECT_EQ(f32, c10::detail::fp8e4m3fn_to_fp32_value(input))
-              << "Test failed for u8 to float " << input << "\n";
+              << "Test failed for u8 to float " << input << '\n';
         }
         EXPECT_EQ(u8, c10::detail::fp8e4m3fn_from_fp32_value(f32))
-            << "Test failed for float to u8 " << f32 << "\n";
+            << "Test failed for float to u8 " << f32 << '\n';
       }
     }
     TEST(FP8E4M3Test, FP8E4M3BinaryAdd) {
@@ -1882,10 +2014,10 @@ namespace {
           EXPECT_TRUE(std::isnan(f32));
         } else {
           EXPECT_EQ(f32, c10::detail::fp8e5m2_to_fp32_value(input))
-              << "Test failed for u8 to float " << input << "\n";
+              << "Test failed for u8 to float " << input << '\n';
         }
         EXPECT_EQ(u8, c10::detail::fp8e5m2_from_fp32_value(f32))
-            << "Test failed for float to u8 " << f32 << "\n";
+            << "Test failed for float to u8 " << f32 << '\n';
       }
     }
     TEST(FP8E5M2Test, FP8E5M2BinaryAdd) {

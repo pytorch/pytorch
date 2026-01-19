@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import functools
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 import torch.nn as nn
@@ -29,7 +30,7 @@ class TracingConfig:
     """
 
     tracer: torch.fx.Tracer = field(default_factory=torch.fx.Tracer)
-    concrete_args: Optional[dict[str, Any]] = None
+    concrete_args: dict[str, Any] | None = None
 
 
 class _ParamUsageInfo(NamedTuple):
@@ -89,7 +90,7 @@ class _ExecutionInfo:
 
 class _ExecOrderTracer:
     def __init__(self) -> None:
-        self.exec_info: Optional[_ExecutionInfo] = None
+        self.exec_info: _ExecutionInfo | None = None
 
     @contextmanager
     def patch_tracer(self, tracer: torch.fx.Tracer, root_module: nn.Module):
@@ -143,9 +144,10 @@ class _ExecOrderTracer:
         named_params = list(module.named_parameters())
         curr_module = exec_info.curr_module
         if named_params:
-            assert curr_module in exec_info.module_to_param_usage_infos, (
-                "The current module should have already been processed by a patched `call_module`"
-            )
+            if curr_module not in exec_info.module_to_param_usage_infos:
+                raise AssertionError(
+                    "The current module should have already been processed by a patched `call_module`"
+                )
             exec_info.module_to_param_usage_infos[exec_info.curr_module].append(
                 _ParamUsageInfo(module, named_params)
             )
@@ -166,9 +168,9 @@ class _ExecOrderTracer:
         target: torch.fx.node.Target,
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
-        proxy_factory_fn: Optional[Callable[[torch.fx.Node], torch.fx.Proxy]] = None,
+        name: str | None = None,
+        type_expr: Any | None = None,
+        proxy_factory_fn: Callable[[torch.fx.Node], torch.fx.Proxy] | None = None,
     ) -> torch.fx.Proxy:
         """
         Overrides ``create_proxy`` to save execution information to

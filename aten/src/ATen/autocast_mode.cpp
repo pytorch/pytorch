@@ -2,6 +2,8 @@
 
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
+#include <c10/core/GradMode.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/util/flat_hash_map.h>
 
 namespace at::autocast {
@@ -36,7 +38,7 @@ namespace {
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
 
-static ska::flat_hash_map<TensorImpl*, val_type>& get_cached_casts() {
+ska::flat_hash_map<TensorImpl*, val_type>& get_cached_casts() {
   static ska::flat_hash_map<TensorImpl*, val_type> cached_casts;
   return cached_casts;
 }
@@ -121,10 +123,14 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
   if (is_eligible(arg, device_type) && (arg.scalar_type() != to_type)) {
     // Heuristic:  Do what Apex does, and cache lower_precision_fp casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
+    //
+    // Fix #158232: Don't cache in inference_mode - those tensors can't be reused
+    // for training since enable_grad() cannot override inference_mode.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
                          arg.is_leaf() && !arg.is_view() && cache_enabled &&
-                         !at::caching::is_cached_tensor(arg));
+                         !at::caching::is_cached_tensor(arg) &&
+                         !c10::InferenceMode::is_enabled());
 
     if (can_try_cache) {
       const std::lock_guard<std::mutex> lock(cached_casts_mutex);
@@ -132,6 +138,12 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
       if (it != get_cached_casts().end()) {
         return std::get<1>(it->second);
       } else {
+        // Fix #158232: When caching in no_grad() context, we still need grad_fn
+        // on the cached tensor so it can be reused in grad-enabled contexts.
+        // The AutoGradMode RAII guard temporarily enables grad for .to() only.
+        // Note: arg.requires_grad() is guaranteed true here (checked in can_try_cache)
+        // and inference_mode is excluded above since enable_grad can't override it.
+        c10::AutoGradMode enable_grad(true);
         auto casted_arg = arg.to(to_type);
         get_cached_casts().emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
         return casted_arg;
@@ -148,7 +160,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
 Banned functions
 *******************************/
 
-static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const std::optional<Tensor>&, int64_t) {
+static Tensor binary_cross_entropy_banned(const Tensor & /*unused*/, const Tensor & /*unused*/, const std::optional<Tensor>& /*unused*/, int64_t /*unused*/) {
   TORCH_CHECK(false, "torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"
@@ -216,6 +228,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(_convolution, lower_precision_fp)
   KERNEL_MPS(conv1d, lower_precision_fp)
   KERNEL_MPS(conv2d, lower_precision_fp)
+  KERNEL_MPS(conv3d, lower_precision_fp)
   KERNEL_MPS(conv_tbc, lower_precision_fp)
   KERNEL_MPS(conv_transpose1d, lower_precision_fp)
   KERNEL_MPS(conv_transpose2d, input, lower_precision_fp)
@@ -239,6 +252,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   KERNEL_MPS(scaled_dot_product_attention, lower_precision_fp)
 
   // fp32
+  KERNEL_MPS(conv_transpose3d, input, fp32)
   KERNEL_MPS(acos, fp32)
   KERNEL_MPS(asin, fp32)
   KERNEL_MPS(cosh, fp32)

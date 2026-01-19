@@ -13,7 +13,7 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache, run_and_get_kernels
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
@@ -55,6 +55,19 @@ class TestKernelBenchmark(TestCase):
 
         self.assertTrue(compiled_module is not None)
         return compiled_module
+
+    def run_kernel_benchmark(self, kernel_path):
+        try:
+            bench_out = subprocess.check_output(
+                f"{sys.executable} {kernel_path}".split(),
+                stderr=subprocess.STDOUT,
+                env={**os.environ, "PYTHONPATH": self.python_path},
+            ).decode()
+        except subprocess.CalledProcessError as e:
+            print("Failed when running output code", e)
+            print(e.output.decode())
+            raise e
+        return bench_out
 
     def verify_compiled_kernels(self, GB_count=1):
         compiled_module = self.get_compiled_module()
@@ -135,6 +148,17 @@ class TestKernelBenchmark(TestCase):
             exactly=1,
         ).run(bench_out)
 
+    def test_plus1_kernel_benchmark(self):
+        @torch.compile
+        def f(x):
+            return x + 1
+
+        x = torch.randn(1024, device=GPU_TYPE)
+        _, (kernel_code,) = run_and_get_kernels(f, x, remove_quote=True)
+        _, path = PyCodeCache.write(kernel_code)
+        bench_output = self.run_kernel_benchmark(path)
+        self.assertTrue("GB/s" in bench_output)
+
     def test_pw_kernel_benchmark(self):
         @torch.compile
         def f(x):
@@ -152,7 +176,7 @@ class TestKernelBenchmark(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_matmul_triton_kernel_benchmark(self):
         M = 12544
         N = 256
@@ -170,7 +194,7 @@ class TestKernelBenchmark(TestCase):
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
     )
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_mm_triton_kernel_benchmark(self):
         M = 2048
         N = 2432
@@ -199,7 +223,7 @@ class TestKernelBenchmark(TestCase):
             def triton_(in_out_ptr0, xnumel, XBLOCK : tl.constexpr):
 
         Note the in_out_ptr0 argument. It's for a 1000x1000 tensor, but it's
-        inplace udpated, so when computing the bandwidth, we should count
+        inplace updated, so when computing the bandwidth, we should count
         the total memory access as 2 * 1000 * 1000 * 4 = 8MB. This amount is
         what this test asserts.
         """
@@ -386,6 +410,9 @@ class TestKernelBenchmark(TestCase):
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
     def test_slice_mm_bandwidth_computation(self):
+        if GPU_TYPE == "xpu" and not torch._inductor.utils.is_big_gpu():
+            raise unittest.SkipTest("unsupported device")
+
         M, N, K = 1000, 2000, 3000
 
         @torch.compile
@@ -470,7 +497,6 @@ class TestKernelBenchmark(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
-    @config.patch("triton.unique_kernel_names", True)
     @config.patch("triton.unique_kernel_names", True)
     @config.patch(benchmark_kernel=False)
     @config.patch(compile_threads=1)

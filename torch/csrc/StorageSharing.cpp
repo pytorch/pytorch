@@ -20,6 +20,7 @@
 #include <torch/csrc/StorageSharing.h>
 
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -86,8 +87,7 @@ static PyObject* THPStorage_pyNewFilenameStorage(
           THManagedMapAllocator::makeDataPtr(
               "", handle.c_str(), flags, static_cast<size_t>(size)),
           /*allocator=*/nullptr,
-          /*resizable=*/false),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+          /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
@@ -182,8 +182,7 @@ static PyObject* THPStorage_newSharedFilename(
           THManagedMapAllocator::makeDataPtr(
               manager_handle, object_handle, flags, size),
           /*allocator=*/nullptr,
-          /*resizable=*/false),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+          /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
@@ -197,9 +196,7 @@ static PyObject* THPStorage_pyNewFdStorage(PyObject* _unused, PyObject* args) {
     return nullptr;
   }
   return THPStorage_NewWithStorage(
-      THPStorageClass,
-      at::new_shm_fd_storage(size),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+      THPStorageClass, at::new_shm_fd_storage(size));
   END_HANDLE_TH_ERRORS
 }
 
@@ -260,7 +257,7 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
         "a file descriptor (int) and storage size (int)");
     return nullptr;
   }
-  int tmp_fd = (int)THPUtils_unpackLong(_tmp_fd);
+  int tmp_fd = THPUtils_unpackInt(_tmp_fd);
   int64_t size = THPUtils_unpackLong(_size);
   int fd = dup(tmp_fd);
   if (fd == -1) {
@@ -278,8 +275,7 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
           at::MapAllocator::makeDataPtr(
               at::WITH_FD, "", fd, flags, size, nullptr),
           /*allocator=*/nullptr,
-          /*resizable=*/false),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+          /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
@@ -317,8 +313,8 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
     auto shandle =
         c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());
     _handle = PyBytes_FromStringAndSize(
-        shandle.handle.c_str(), (Py_ssize_t)shandle.handle.size());
-    _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)shandle.offset);
+        shandle.handle.c_str(), static_cast<Py_ssize_t>(shandle.handle.size()));
+    _offset_bytes = PyLong_FromSsize_t(static_cast<Py_ssize_t>(shandle.offset));
 
     // Put Storage Data behind new ref counting context
     // See Note [CUDA IPC Refcounting implementation explained]
@@ -331,8 +327,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
     _ref_counter_offset = THPUtils_packUInt64(sent_data->offset());
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    cudaIpcEventHandle_t ipc_event_handle;
+    cudaIpcEventHandle_t ipc_event_handle{};
 
     if (sent_data->event_sync_required_) {
       C10_CUDA_CHECK(
@@ -340,7 +335,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
     }
 
     _event_handle = PyBytes_FromStringAndSize(
-        (char*)&ipc_event_handle, CUDA_IPC_HANDLE_SIZE);
+        reinterpret_cast<const char*>(&ipc_event_handle), CUDA_IPC_HANDLE_SIZE);
     _event_sync_required = PyBool_FromLong(sent_data->event_sync_required_);
   }
 
@@ -391,7 +386,7 @@ static PyObject* THPStorage_releaseIPCCounter(
   }
   std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
   ptrdiff_t ref_counter_offset =
-      (ptrdiff_t)THPUtils_unpackLong(_ref_counter_offset);
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
   // We don't want to break existing code, so resource deletion is best
   // effort basis. Exception expected if producer process terminated
   // before consumer released data.
@@ -403,7 +398,7 @@ static PyObject* THPStorage_releaseIPCCounter(
         sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
         nullptr);
     *(static_cast<int64_t*>(sptr.get()) + ref_counter_offset) -= 1;
-  } catch (c10::Error& err) {
+  } catch (c10::Error&) {
     // Already warned inside of producer process
   }
   Py_RETURN_NONE;
@@ -452,10 +447,9 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     return nullptr;
   }
 
-  size_t storage_size =
-      (size_t)THPUtils_unpackLong(_size_bytes) / sizeof(uint8_t);
+  size_t storage_size = THPUtils_unpackUInt64(_size_bytes) / sizeof(uint8_t);
   ptrdiff_t storage_offset_bytes =
-      (ptrdiff_t)THPUtils_unpackLong(_offset_bytes);
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_offset_bytes));
 
   const auto device = c10::checked_convert<c10::DeviceIndex>(
       THPUtils_unpackLong(_device), "c10::DeviceIndex");
@@ -470,10 +464,8 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     }
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
-    cudaEvent_t event = nullptr;
-    C10_CUDA_CHECK(cudaIpcOpenEventHandle(&event, *ipc_event_handle));
-    C10_CUDA_CHECK(
-        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+    at::cuda::CUDAEvent event(device, ipc_event_handle);
+    event.block(c10::cuda::getCurrentCUDAStream(device));
   }
 
   std::string s_handle = THPStorage_bytesAsHandleString(_handle);
@@ -486,11 +478,11 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   // Offset the basePtr to reconstruct the real storage
   // devPtr = basePtr + storage_offset
   void* devPtr = basePtr.get();
-  devPtr = (char*)devPtr + storage_offset_bytes;
+  devPtr = static_cast<char*>(devPtr) + storage_offset_bytes;
 
   std::string ref_counter_handle = PyBytes_AS_STRING(_ref_counter);
   ptrdiff_t ref_counter_offset =
-      (ptrdiff_t)THPUtils_unpackLong(_ref_counter_offset);
+      static_cast<ptrdiff_t>(THPUtils_unpackLong(_ref_counter_offset));
 
   struct IpcDeleterContext {
     std::string ref_counter_handle;
@@ -545,7 +537,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
               sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
               nullptr);
           *(static_cast<int64_t*>(sptr.get()) + ctx->ref_counter_offset) -= 1;
-        } catch (c10::Error& err) {
+        } catch (c10::Error&) {
           // Already warned inside of producer process
         }
       },
@@ -561,10 +553,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   base->set_resizable(false);
   base->set_received_cuda(true);
 
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      std::move(base),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
 #else
   TORCH_CHECK(false, "CUDA is not available");
 #endif
@@ -587,7 +576,8 @@ static PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "_new_with_weak_ptr(): arg must be an 'int'");
-  c10::StorageImpl* weak_storage = (c10::StorageImpl*)PyLong_AsVoidPtr(arg);
+  c10::StorageImpl* weak_storage =
+      static_cast<c10::StorageImpl*>(PyLong_AsVoidPtr(arg));
   if (auto* storage = c10::raw::weak_intrusive_ptr::lock(weak_storage)) {
     return THPStorage_Wrap(
         c10::intrusive_ptr<c10::StorageImpl>::reclaim(storage));
@@ -603,7 +593,8 @@ static PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
   }
   TORCH_CHECK(
       THPUtils_checkLong(arg), "_free_weak_ref(): arg must be an 'int'");
-  c10::StorageImpl* weak_storage = (c10::StorageImpl*)PyLong_AsVoidPtr(arg);
+  c10::StorageImpl* weak_storage =
+      static_cast<c10::StorageImpl*>(PyLong_AsVoidPtr(arg));
   c10::raw::weak_intrusive_ptr::decref(weak_storage);
 
   Py_RETURN_NONE;
@@ -613,7 +604,8 @@ static PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
 static PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "_expired(): arg must be an 'int'");
-  c10::StorageImpl* weak_storage = (c10::StorageImpl*)PyLong_AsVoidPtr(arg);
+  c10::StorageImpl* weak_storage =
+      static_cast<c10::StorageImpl*>(PyLong_AsVoidPtr(arg));
   return PyBool_FromLong(
       c10::raw::weak_intrusive_ptr::use_count(weak_storage) == 0);
   END_HANDLE_TH_ERRORS

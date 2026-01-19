@@ -119,7 +119,7 @@ Multi-instance inference
 Memory allocator
 ----------------
 
-"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allcator.
+"--enable-tcmalloc" and "--enable-jemalloc" can be used to enable different memory allocator.
 
 """
 
@@ -262,9 +262,11 @@ instance. Alternatively, please use --skip-cross-node-cores knob.",
 class _Launcher:
     r"""Class for launcher."""
 
-    msg_lib_notfound = f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
+    msg_lib_notfound = (
+        f"Unable to find the {{0}} library file lib{{1}}.so in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib \
 or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or \
 {expanduser('~')}/.local/lib/ so the LD_PRELOAD environment variable will not be set."
+    )
 
     def __init__(self) -> None:
         self.cpuinfo = _CPUinfo()
@@ -531,7 +533,11 @@ won't take effect even if it is set explicitly."
                             )
                             i += 1
                         cores = list(set(cores) - leftover_cores)
-                        assert len(cores) % args.ncores_per_instance == 0
+                        if len(cores) % args.ncores_per_instance != 0:
+                            raise AssertionError(
+                                f"Number of cores ({len(cores)}) must be divisible by "
+                                f"ncores_per_instance ({args.ncores_per_instance})"
+                            )
                         args.ninstances = len(cores) // args.ncores_per_instance
             else:
                 if args.ninstances * args.ncores_per_instance > len(cores):
@@ -611,14 +617,12 @@ won't take effect even if it is set explicitly."
                     args.rank == -1
                 ):  # sequentially assign ncores_per_instance to ninstances
                     core_list = cores[
-                        i
-                        * args.ncores_per_instance : (i + 1)
+                        i * args.ncores_per_instance : (i + 1)
                         * args.ncores_per_instance
                     ]
                 else:  # assign ncores_per_instance from rank
                     core_list = cores[
-                        args.rank
-                        * args.ncores_per_instance : (args.rank + 1)
+                        args.rank * args.ncores_per_instance : (args.rank + 1)
                         * args.ncores_per_instance
                     ]
 
@@ -626,9 +630,11 @@ won't take effect even if it is set explicitly."
                 if local_size > 1:
                     total_num_cores = len(core_list)
                     cores_per_rank = total_num_cores // local_size
-                    assert (
-                        cores_per_rank >= 1
-                    ), "At least one core needs to be assigned to each rank"
+                    if cores_per_rank < 1:
+                        raise AssertionError(
+                            f"At least one core needs to be assigned to each rank, "
+                            f"got {total_num_cores} cores for {local_size} ranks"
+                        )
                     core_list = core_list[
                         cores_per_rank * local_rank : cores_per_rank * (local_rank + 1)
                     ]
@@ -835,6 +841,7 @@ def create_args(parser=None):
 
     @retval ArgumentParser
     """
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "--multi-instance",
         "--multi_instance",
@@ -843,6 +850,7 @@ def create_args(parser=None):
         help="Enable multi-instance, by default one instance per node",
     )
 
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "-m",
         "--module",
@@ -853,6 +861,7 @@ def create_args(parser=None):
         '"python -m".',
     )
 
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "--no-python",
         "--no_python",
@@ -867,6 +876,7 @@ def create_args(parser=None):
 
     _add_multi_instance_params(parser)
     # positional
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument(
         "program",
         type=str,
@@ -875,6 +885,7 @@ def create_args(parser=None):
     )
 
     # rest from the training program
+    # pyrefly: ignore [missing-attribute]
     parser.add_argument("program_args", nargs=REMAINDER)
 
 

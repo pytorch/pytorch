@@ -17,7 +17,7 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  const string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
+  const std::string key = "mps_linear" + getTensorsStringKey({input, weight, bias}, true, true);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->endKernelCoalescing();
@@ -35,14 +35,15 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
                                                                                 shape:getMPSShape(weight.sizes())];
       weightDesc.preferPackedRows = YES;
       [weightDesc transposeDimension:0 withDimension:1];
-      MPSNDArray* weightNDArray = [[MPSNDArray alloc] initWithBuffer:weightBuf
-                                                              offset:weight.storage_offset() * weight.element_size()
-                                                          descriptor:weightDesc];
+      MPSNDArray* weightNDArray = [[[MPSNDArray alloc] initWithBuffer:weightBuf
+                                                               offset:weight.storage_offset() * weight.element_size()
+                                                           descriptor:weightDesc] autorelease];
 
       if (is_bias_defined) {
         auto biasNDArray = getMPSNDArray(bias, bias.sizes(), bias.strides());
-        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
-            key, [&]() { return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3]; });
+        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
+          return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:3] autorelease];
+        });
         auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
 
         getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
@@ -52,8 +53,9 @@ static void _mps_linear_nograph(const Tensor& input, const Tensor& weight, const
                       destinationArray:outNDArray];
         getMPSProfiler().endProfileKernel(kernel);
       } else {
-        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(
-            key, [&]() { return [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2]; });
+        auto cachedKernel = LookUpOrCreateCachedKernel<MPSCachedKernel>(key, [&]() {
+          return [[[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2] autorelease];
+        });
         auto kernel = cachedKernel->kernel<MPSNDArrayMatrixMultiplication>();
         getMPSProfiler().beginProfileKernel(kernel, "mps_linear", {input, weight, bias});
         [kernel encodeToCommandEncoder:computeEncoder
@@ -113,7 +115,10 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
     return output;
   }
 
-  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+  // No-graph execution causes nonsense if these are non-contiguous.
+  const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
+
+  if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS) && is_contiguous) {
     _mps_linear_nograph(input, weight, bias, output);
     // Squeeze last dim of 1D linear
     return weight_arg.dim() != 1 ? output : output.squeeze(-1);

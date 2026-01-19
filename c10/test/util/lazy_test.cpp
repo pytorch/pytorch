@@ -53,8 +53,8 @@ TEST(LazyTest, OptimisticLazy) {
   EXPECT_EQ(sCopy.ensure(factory), kLongString);
   EXPECT_EQ(invocations.load(), 0);
 
-  auto sMove = std::move(s);
-  EXPECT_EQ(sMove.ensure(factory), kLongString);
+  auto sMove = std::move(s); // codespell:ignore smove
+  EXPECT_EQ(sMove.ensure(factory), kLongString); // codespell:ignore smove
   EXPECT_EQ(invocations.load(), 0);
   // NOLINTNEXTLINE(bugprone-use-after-move)
   EXPECT_EQ(s.ensure(factory), kLongString);

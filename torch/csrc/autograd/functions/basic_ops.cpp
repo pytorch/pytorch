@@ -17,11 +17,11 @@ variable_list Error::apply(variable_list&& inputs) {
 }
 
 variable_list Error::apply(variable_list&& inputs) const {
-  throw std::runtime_error(msg);
+  TORCH_CHECK(false, msg);
 }
 
 void Error::compiled_args(CompiledNodeArgs& args) const {
-  // throw the error durring collect, the graph won't get compiled
+  // throw the error during collect, the graph won't get compiled
   apply(variable_list());
 }
 
@@ -57,13 +57,7 @@ auto UndefinedGrad::apply(variable_list&& inputs) -> variable_list {
 
 auto UndefinedGradBackward::apply(variable_list&& output_grads)
     -> variable_list {
-  tensor_list input_grads;
-  output_grads.reserve(input_grads.size());
-  for (auto& grad : output_grads) {
-    (void)grad; // Suppress unused variable warning
-    input_grads.emplace_back();
-  }
-  return input_grads;
+  return tensor_list(output_grads.size());
 }
 
 auto Identity::apply(variable_list&& grads) -> variable_list {

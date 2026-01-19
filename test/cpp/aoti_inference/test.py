@@ -1,4 +1,5 @@
 import torch
+import torch._inductor.config
 from torch._export import aot_compile
 from torch.export import Dim
 
@@ -31,6 +32,7 @@ class NetWithTensorConstants(torch.nn.Module):
 
 data = {}
 large_data = {}
+cuda_alloc_data = {}
 data_with_tensor_constants = {}
 
 
@@ -85,6 +87,18 @@ def generate_basic_tests():
             )
 
 
+def generate_basic_tests_consts_cpp():
+    backup_consts_asm_cfg: bool = (
+        torch._inductor.config.aot_inductor.use_consts_asm_build
+    )
+    torch._inductor.config.aot_inductor.use_consts_asm_build = False
+
+    # Test consts cpp build again.
+    generate_basic_tests()
+
+    torch._inductor.config.aot_inductor.use_consts_asm_build = backup_consts_asm_cfg
+
+
 def generate_large_tests():
     device = "cuda"
     model = Net(device, size=4096).to(device=device)
@@ -126,6 +140,32 @@ def generate_large_tests():
         )
 
 
+def generate_cuda_alloc_test():
+    device = "cuda"
+    model = Net(device, size=4096).to(device=device)
+    x = torch.randn((4096, 4096), device=device)
+    with torch.no_grad():
+        ref_output = model(x)
+
+    torch._dynamo.reset()
+    with torch.no_grad():
+        model_so_path = aot_compile(
+            model,
+            (x,),
+            options={"aot_inductor.weight_use_caching_allocator": True},
+        )
+
+    cuda_alloc_data.update(
+        {  # noqa: F541
+            "model_so_path": model_so_path,
+            "inputs": [x],
+            "outputs": [ref_output],
+            "w_pre": model.w_pre,
+            "w_add": model.w_add,
+        }
+    )
+
+
 # AOTI model which will create additional tensors during autograd.
 def generate_test_with_additional_tensors():
     if not torch.cuda.is_available():
@@ -157,8 +197,10 @@ def generate_test_with_additional_tensors():
 
 
 generate_basic_tests()
+generate_basic_tests_consts_cpp()
 generate_large_tests()
 generate_test_with_additional_tensors()
+generate_cuda_alloc_test()
 
 
 # Use this to communicate tensors to the cpp code
@@ -174,3 +216,4 @@ torch.jit.script(Serializer(large_data)).save("large_data.pt")
 torch.jit.script(Serializer(data_with_tensor_constants)).save(
     "data_with_tensor_constants.pt"
 )
+torch.jit.script(Serializer(cuda_alloc_data)).save("cuda_alloc_data.pt")

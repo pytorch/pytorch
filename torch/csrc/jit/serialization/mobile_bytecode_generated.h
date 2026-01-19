@@ -8,9 +8,9 @@
 
 // Ensure the included flatbuffers.h is the same version as when this file was
 // generated, otherwise it may not be compatible.
-static_assert(FLATBUFFERS_VERSION_MAJOR == 23 &&
-              FLATBUFFERS_VERSION_MINOR == 3 &&
-              FLATBUFFERS_VERSION_REVISION == 3,
+static_assert(FLATBUFFERS_VERSION_MAJOR == 24 &&
+              FLATBUFFERS_VERSION_MINOR == 12 &&
+              FLATBUFFERS_VERSION_REVISION == 23,
              "Non-compatible flatbuffers version included");
 
 namespace torch {
@@ -602,7 +602,7 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool requires_grad() const {
     return GetField<uint8_t>(VT_REQUIRES_GRAD, 0) != 0;
   }
-  bool mutate_requires_grad(bool _requires_grad = 0) {
+  bool mutate_requires_grad(bool _requires_grad = false) {
     return SetField<uint8_t>(VT_REQUIRES_GRAD, static_cast<uint8_t>(_requires_grad), 0);
   }
   const torch::jit::mobile::serialization::QuantizedSchema *quantized_schema() const {
@@ -2597,3 +2597,4 @@ inline void FinishSizePrefixedModuleBuffer(
 }  // namespace torch
 
 #endif  // FLATBUFFERS_GENERATED_MOBILEBYTECODE_TORCH_JIT_MOBILE_SERIALIZATION_H_
+// @generated

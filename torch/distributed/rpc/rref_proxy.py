@@ -40,7 +40,7 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
 
     rref_fut = rref._get_type(timeout=timeout, blocking=False)
 
-    if rpc_api != rpc_async:
+    if rpc_api is not rpc_async:
         rref_fut.wait()
         return _rref_type_cont(rref_fut)
     else:
@@ -53,13 +53,13 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
         def _wrap_rref_type_cont(fut):
             try:
                 _rref_type_cont(fut).then(_complete_op)
-            except BaseException as ex:
+            except BaseException as ex:  # noqa: B036
                 result.set_exception(ex)
 
         def _complete_op(fut):
             try:
                 result.set_result(fut.value())
-            except BaseException as ex:
+            except BaseException as ex:  # noqa: B036
                 result.set_exception(ex)
 
         rref_fut.then(_wrap_rref_type_cont)

@@ -7,6 +7,7 @@ import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
     ArgumentSpec,
@@ -142,6 +143,10 @@ def _unused_constant(node: torch.fx.Node) -> Optional[list[torch.fx.Node]]:
     if len(lift_fresh_node.users) > 1:
         return None
 
+    # Case 1: lift node is not used anywhere
+    if len(lift_fresh_node.users) == 0:
+        return [lift_fresh_node, node]
+
     detach_node = next(iter(lift_fresh_node.users.keys()))
     if not (
         detach_node.op == "call_function"
@@ -156,6 +161,7 @@ def _unused_constant(node: torch.fx.Node) -> Optional[list[torch.fx.Node]]:
     if len(detach_node.users) > 0:
         return None
     else:
+        # Case 2: Lift node's child is not used anywhere
         return [detach_node, lift_fresh_node, node]
 
 
@@ -165,7 +171,7 @@ def lift_constants_pass(
     constant_attrs: ConstantAttrMap,
 ) -> dict[str, _ConstantAttributeType]:
     """
-    Takes a graph module, graph signature, and modifies them implace to lift any
+    Takes a graph module, graph signature, and modifies them inplace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
     dictionary of names to constants.
 
@@ -183,12 +189,12 @@ def lift_constants_pass(
     """
     all_constants: dict[str, _ConstantAttributeType] = {}
 
-    inputs = graph_signature.input_specs
+    input_specs = graph_signature.input_specs
     num_custom_obj = sum(
-        input_specs.kind == InputKind.CUSTOM_OBJ for input_specs in inputs
+        input_spec.kind == InputKind.CUSTOM_OBJ for input_spec in input_specs
     )
     num_tensor_constants = sum(
-        input_specs.kind == InputKind.CONSTANT_TENSOR for input_specs in inputs
+        input_spec.kind == InputKind.CONSTANT_TENSOR for input_spec in input_specs
     )
 
     fake_mode = detect_fake_mode(
@@ -197,19 +203,14 @@ def lift_constants_pass(
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     used_target_names = set()
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if node.name in graph_signature.user_inputs:
-                first_user_input = node
-                break
-            used_target_names.add(inputs[first_user_input_loc].target)
-            first_user_input_loc += 1
-        # If we ever hit here, it means that
-        # there was no user input so the constants
-        # should be inserted right before the first
-        # non-placeholder node.
-        if node.op != "placeholder":
+
+    input_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    assert len(input_nodes) == len(input_specs)
+    for i, (node, input_spec) in enumerate(zip(input_nodes, input_specs)):
+        used_target_names.add(input_spec.target)
+        if input_spec.kind == InputKind.USER_INPUT:
             first_user_input = node
+            first_user_input_loc = i
             break
 
     lifted_objs = ConstantAttrMap()
@@ -253,7 +254,9 @@ def lift_constants_pass(
             # constant (e.g. x + torch.tensor(0)), and thus did not have a
             # specific location in the eager module. In that case, just generate
             # some name and attach it to the module in which it was used.
-            if isinstance(constant_val, (torch.ScriptObject, FakeScriptObject)):
+            if isinstance(
+                constant_val, (torch.ScriptObject, FakeScriptObject)
+            ) or is_opaque_reference_type(type(constant_val)):
                 constant_kind = InputKind.CUSTOM_OBJ
                 constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:
@@ -373,7 +376,7 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> dict[str, _ConstantAttributeType,]:
+) -> dict[str, _ConstantAttributeType]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 

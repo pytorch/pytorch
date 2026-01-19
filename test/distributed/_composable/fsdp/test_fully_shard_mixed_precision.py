@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import dataclasses
 import functools
 from typing import Optional, Union
 
@@ -27,7 +28,11 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
     reduce_scatter_with_assert,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TEST_HPU
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocmVersionLessThan,
+    TEST_HPU,
+)
 
 
 device_type = torch.device(get_devtype())
@@ -85,7 +90,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             use_shard_placement_fn_vals.append(True)
         return use_shard_placement_fn_vals
 
-    @skipIfRocm  # regressed in ROCm 6.4, but ROCm 6.5 fixes it
+    @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_compute_dtype(self):
@@ -122,7 +127,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+        predivide_factor, postdivide_factor, _, _ = _get_gradient_divide_factors(
             self.process_group, all_reduce_group=None, reduce_dtype=param_dtype
         )
 
@@ -165,7 +170,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             self.assertEqual(fsdp_loss, ref_loss)
             check_sharded_parity(self, ref_model, model)
 
-    @skipIfRocm  # regressed in ROCm 6.4, but ROCm 6.5 fixes it
+    @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self):
@@ -283,9 +288,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
                 )  # bf16 reduction
                 param.grad = funcol.all_gather_tensor(
                     sharded_grad, gather_dim=0, group=group
-                ).to(
-                    param.dtype
-                )  # upcast to fp32
+                ).to(param.dtype)  # upcast to fp32
             ref_optim.step()  # fp32 optimizer step
 
             self.assertEqual(fsdp_loss, ref_loss)
@@ -592,6 +595,30 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             inp = torch.randn((4, 32), device=device_type.type)
             loss = model(inp).sum()
             loss.backward()
+
+    @skip_if_lt_x_gpu(1)
+    def test_dataclass_input(self):
+        @dataclasses.dataclass
+        class Input:
+            x: torch.Tensor
+
+        class Model(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self._layer = nn.Linear(10, 10)
+
+            def forward(self, input: Input):
+                return self._layer(input.x)
+
+        mp_policy = MixedPrecisionPolicy(
+            torch.bfloat16, torch.bfloat16, torch.bfloat16, True
+        )
+        model = Model()
+        inp = Input(torch.randn(2, 10).to(device_type))
+
+        fully_shard(model, mp_policy=mp_policy)
+        loss = model(inp).sum()
+        loss.backward()
 
 
 if __name__ == "__main__":

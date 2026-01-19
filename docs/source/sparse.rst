@@ -360,8 +360,7 @@ Suppose we want to define a sparse tensor with the entry 3 at location
 Unspecified elements are assumed to have the same value, fill value,
 which is zero by default. We would then write:
 
-    >>> i = [[0, 1, 1],
-             [2, 0, 2]]
+    >>> i = [[0, 1, 1], [2, 0, 2]]
     >>> v =  [3, 4, 5]
     >>> s = torch.sparse_coo_tensor(i, v, (2, 3))
     >>> s
@@ -1070,7 +1069,7 @@ Tools for working with sparse compressed tensors
 ------------------------------------------------
 
 All sparse compressed tensors --- CSR, CSC, BSR, and BSC tensors ---
-are conceptionally very similar in that their indices data is split
+are conceptually very similar in that their indices data is split
 into two parts: so-called compressed indices that use the CSR
 encoding, and so-called plain indices that are orthogonal to the
 compressed indices. This allows various tools on these tensors to

@@ -3,13 +3,8 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 #include <ATen/CPUFunctions.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/ScalarOps.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/ssize.h>
@@ -529,7 +524,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
       const auto in1_i = p_node->Input(1).toOptional<at::ScalarType>();
       const auto in2_i = p_node->Input(2).toBool();
       const auto in3_i = p_node->Input(3).toBool();
-      // To mimick the behavior of the JIT interpreter, if both dtype
+      // To mimic the behavior of the JIT interpreter, if both dtype
       // and copy are not set, we return self. Otherwise, we assume
       // that dtype is set.
       if (!in1_i && !in3_i) {

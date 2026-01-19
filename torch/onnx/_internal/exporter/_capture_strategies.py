@@ -9,14 +9,15 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.export import _draft_export
+from torch.onnx import _flags
 
 
 if TYPE_CHECKING:
     import os
+    from collections.abc import Callable
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     """Prints messages based on `verbose`."""
     if verbose is False:
         return lambda *_, **__: None
+
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
@@ -46,6 +48,7 @@ def _patch_dynamo_unsupported_functions():
 
     # Replace torch.jit.isinstance with isinstance
     jit_isinstance = torch.jit.isinstance
+    # pyrefly: ignore [bad-assignment]
     torch.jit.isinstance = isinstance
     logger.info("Replaced torch.jit.isinstance with isinstance to allow dynamo tracing")
     try:
@@ -89,7 +92,7 @@ class CaptureStrategy(abc.ABC):
         dump: bool = False,
         artifacts_dir: str | os.PathLike = ".",
         timestamp: str | None = None,
-    ):
+    ) -> None:
         """Initialize the strategy.
 
         Args:
@@ -152,7 +155,11 @@ class TorchExportStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        with _patch_dynamo_unsupported_functions():
+        with (
+            _patch_dynamo_unsupported_functions(),
+            # Support the dynamism with 0/1 input dim
+            torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+        ):
             try:
                 return torch.export.export(
                     model,
@@ -160,6 +167,7 @@ class TorchExportStrictStrategy(CaptureStrategy):
                     kwargs=kwargs,
                     dynamic_shapes=dynamic_shapes,
                     strict=True,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
             except torch._dynamo.exc.UserError as exc:
                 # Refine the dynamic shapes based on the suggested fixes.
@@ -171,7 +179,12 @@ class TorchExportStrictStrategy(CaptureStrategy):
                     # If the dynamic shapes cannot be refined, re-raise the exception.
                     raise exc from None
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=True
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=new_shapes,
+                    strict=True,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
 
     def _enter(self, model) -> None:
@@ -198,22 +211,36 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        try:
-            return torch.export.export(
-                model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes, strict=False
-            )
-        except torch._dynamo.exc.UserError as exc:
-            # Refine the dynamic shapes based on the suggested fixes.
+        with (
+            # Support the dynamism with 0/1 input dim
+            torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+        ):
             try:
-                new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
-                    exc.msg, dynamic_shapes
+                return torch.export.export(
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=False,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
                 )
-            except Exception:
-                # If the dynamic shapes cannot be refined, re-raise the exception.
-                raise exc from None
-            return torch.export.export(
-                model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=False
-            )
+            except torch._dynamo.exc.UserError as exc:
+                # Refine the dynamic shapes based on the suggested fixes.
+                try:
+                    new_shapes = torch.export.dynamic_shapes.refine_dynamic_shapes_from_suggested_fixes(
+                        exc.msg, dynamic_shapes
+                    )
+                except Exception:
+                    # If the dynamic shapes cannot be refined, re-raise the exception.
+                    raise exc from None
+                return torch.export.export(
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=new_shapes,
+                    strict=False,
+                    prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
+                )
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
@@ -239,7 +266,7 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
     def _capture(
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
-        ep = _draft_export.draft_export(
+        ep = torch.export.draft_export(
             model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
         )
         report = ep._report  # type: ignore[attr-defined]
@@ -251,25 +278,27 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`..."
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`..."
         )
 
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... ✅"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export draft_export`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... ❌"
         )
 
 
-CAPTURE_STRATEGIES = (
+CAPTURE_STRATEGIES: tuple[type[CaptureStrategy], ...] = (
     TorchExportNonStrictStrategy,  # strict=False is preferred over strict=True because it does not have dynamo issues
     TorchExportStrictStrategy,
-    TorchExportDraftExportStrategy,
 )
+
+if _flags.ENABLE_DRAFT_EXPORT:
+    CAPTURE_STRATEGIES = (*CAPTURE_STRATEGIES, TorchExportDraftExportStrategy)

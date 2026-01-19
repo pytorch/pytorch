@@ -750,7 +750,7 @@ class InsertQuantDeQuantHelper {
     }
   }
 
-  void collectObserverNodesAndValueToQuantize(Module& module, Value*);
+  void collectObserverNodesAndValueToQuantize(Module& module, Value* /*v*/);
   void cleanup(Module& module, Graph* g);
   void removeObserverNodes(Graph* g);
   void quantizeTensors(Module& module, Graph* g, Value* self);
@@ -1230,7 +1230,7 @@ void removeDequantizeFromInputs(const std::unordered_set<Value*>& inputs) {
     TORCH_INTERNAL_ASSERT(
         dequantized_val->uses().size() == 1,
         "Expect to have one dequantize node for each use");
-    // Replace useses of dequantized_val with the input of
+    // Replace uses of dequantized_val with the input of
     // dequantize node
     dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
     dequantize_node->removeAllInputs();
@@ -1622,7 +1622,7 @@ void InsertQuantDeQuantHelper::insertCalculateQParamsAndQuantizationOps(
 void InsertQuantDeQuantHelper::runForOnDevicePTQ(
     Module& module,
     const std::string& method_name) {
-  // In all likelihood this really wont do anything because we expect that
+  // In all likelihood this really won't do anything because we expect that
   // the input method for quantization's prepare step will be inlined. Thus
   // only call methods we will see will belong to observer's forward calls.
   for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
@@ -1834,8 +1834,8 @@ Module InsertQuantDeQuantOnDevicePTQ(
   // ReplicateChooseQParamsQuantDequant: This is propagating dynamic quant's
   // quant dequant RemoveRedundantQuantizationOps: THis is removing activation
   // observers for dynamic quant when the op related to it is not dynamically
-  // quantizable. Doesnt really make sense. In our case we wont have those
-  // anyway since for dynamic quant activations wont be observed We can still
+  // quantizable. Doesn't really make sense. In our case we won't have those
+  // anyway since for dynamic quant activations won't be observed We can still
   // use this function because the above two methods should really be a noop
   h.propagateQuantizationOps(module);
   return module;

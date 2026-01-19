@@ -1,7 +1,6 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
 import copy
-import logging
 
 import torch
 import torch.nn as nn
@@ -10,11 +9,10 @@ from torch.ao.pruning._experimental.activation_sparsifier.activation_sparsifier 
     ActivationSparsifier,
 )
 from torch.ao.pruning.sparsifier.utils import module_to_fqn
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
 )
 
 
@@ -52,12 +50,12 @@ class TestActivationSparsifier(TestCase):
         sparsifier_defaults = activation_sparsifier.defaults
         combined_defaults = {**defaults, "sparse_config": sparse_config}
 
-        # more keys are populated in activation sparsifier (eventhough they may be None)
+        # more keys are populated in activation sparsifier (even though they may be None)
         assert len(combined_defaults) <= len(activation_sparsifier.defaults)
 
         for key, config in sparsifier_defaults.items():
             # all the keys in combined_defaults should be present in sparsifier defaults
-            assert config == combined_defaults.get(key, None)
+            assert config == combined_defaults.get(key)
 
     def _check_register_layer(
         self, activation_sparsifier, defaults, sparse_config, layer_args_list
@@ -192,7 +190,7 @@ class TestActivationSparsifier(TestCase):
                 if features is None:
                     assert torch.all(mask * input_data == output)
                 else:
-                    for feature_idx in range(0, len(features)):
+                    for feature_idx in range(len(features)):
                         feature = torch.Tensor(
                             [features[feature_idx]], device=input_data.device
                         ).long()
@@ -245,7 +243,7 @@ class TestActivationSparsifier(TestCase):
             if mask1 is None:
                 assert mask2 is None
             else:
-                assert type(mask1) == type(mask2)
+                assert type(mask1) is type(mask2)
                 if isinstance(mask1, list):
                     assert len(mask1) == len(mask2)
                     for idx in range(len(mask1)):
@@ -380,7 +378,7 @@ class TestActivationSparsifier(TestCase):
         # some dummy data
         data_list = []
         num_data_points = 5
-        for _ in range(0, num_data_points):
+        for _ in range(num_data_points):
             rand_data = torch.randn(16, 1, 28, 28)
             activation_sparsifier.model(rand_data)
             data_list.append(rand_data)
@@ -405,3 +403,7 @@ class TestActivationSparsifier(TestCase):
 
         # check state_dict() after squash_mask()
         self._check_state_dict(activation_sparsifier)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

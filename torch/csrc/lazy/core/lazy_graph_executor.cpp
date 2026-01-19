@@ -404,7 +404,7 @@ void LazyGraphExecutor::SyncLiveTensorsGraph(
     bool wait) {
   auto tensors = GetLiveTensors(device);
   VLOG(4) << tensors.size() << " live tensors: devices=("
-          << c10::Join(", ", devices) << ")";
+          << c10::Join(", ", devices) << ')';
   SyncTensorsGraph(&tensors, devices, wait, /*sync_ltc_data=*/true);
 }
 
@@ -830,7 +830,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
         const SyncTensorsConfig& config) {
   SyncTensorCollection coll = CollectSyncTensors(*tensors, config);
   if (coll.indices.empty()) {
-    /* Enure previous execution is complete before exiting this
+    /* Ensure previous execution is complete before exiting this
      * function */
     TensorCollectionBarrier(&coll);
     return nullptr;
@@ -1042,7 +1042,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
 void LazyGraphExecutor::TensorCollectionBarrier(SyncTensorCollection* coll) {
   if (coll) {
     static const std::string invalid_device(
-        "Unknown0"); /* Temp solution to idetify unassigned devices */
+        "Unknown0"); /* Temp solution to identify unassigned devices */
     if (coll->device.toString() == invalid_device || !coll->unlocker.empty()) {
       return;
     }

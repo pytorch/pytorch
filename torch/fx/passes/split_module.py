@@ -2,7 +2,8 @@
 import inspect
 import logging
 from collections import OrderedDict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -58,6 +59,9 @@ def split_module(
     qualname_map: Optional[dict[str, str]] = None,
     keep_original_order: Optional[bool] = False,
     keep_original_node_name: Optional[bool] = False,
+    keep_original_input_name: bool = True,
+    *,
+    partition_affix: Optional[str] = None,
 ):
     """
     Creates subgraphs out of main graph
@@ -76,7 +80,12 @@ def split_module(
             names in the original module.
         keep_original_order: Optional[bool]: keep the original order of the GraphModule
             or use the Topological order of the new constructed GraphModule
-
+        keep_original_node_name: Optional[bool]: If the partitioned graphs should
+            have the same node names as the original graph.
+        keep_original_input_name: bool: If the partitioned graphs should
+            have the same input names as the original graph.
+        partition_affix: Optional[str]: If specified, the submodules' names will contain
+            the affix, e.g. "submod_<affix>_<idx>".
 
     Returns:
         GraphModule: the module after split.
@@ -86,7 +95,7 @@ def split_module(
         This is a sample setup:
 
             import torch
-            from torch.fx.symbolic_trace import symbolic_trace
+            from torch.fx._symbolic_trace import symbolic_trace
             from torch.fx.graph_module import GraphModule
             from torch.fx.node import Node
             from torch.fx.passes.split_module import split_module
@@ -244,11 +253,18 @@ def split_module(
                                 s_def_partition = partitions[s_defined]
                                 s_def_partition.outputs.setdefault(s_node.name)
                                 s_def_partition.dependents.setdefault(used)
+                                use_partition.dependencies.setdefault(s_defined)
                 if defined is not None:
                     use_partition.dependencies.setdefault(defined)
 
     def instantiate_node_partition_mapping(node):
-        partition_name = str(split_callback(node))
+        partition_idx = split_callback(node)
+        partition_name = str(partition_idx)
+        if partition_affix is not None:
+            # For example, if user specifies partition_affix = "pp", then the
+            # partition name will be "pp_0", "pp_1", etc
+            partition_name = "_".join([partition_affix, partition_name])
+
         log.debug(
             "instantiate_node_partition_mapping %s (%s)", node.name, partition_name
         )
@@ -310,18 +326,18 @@ def split_module(
         instantiate_node_partition_mapping(node)
 
         if node.op == "call_function" and node.target in GLOBAL_STATE_NODES:
-            if node.target == torch._C._set_grad_enabled:
+            if node.target is torch._C._set_grad_enabled:
                 assert len(node.args) == 1
                 assert isinstance(node.args[0], bool)
                 active_grad = node
                 grad_regions[active_grad] = set({split_callback(node)})
-            elif node.target == torch.amp._enter_autocast:
+            elif node.target is torch.amp._enter_autocast:
                 # Should all be python constants
                 assert all(not isinstance(arg, Node) for arg in node.args)
                 active_autocasts.add(node)
                 autocast_regions[node] = set({split_callback(node)})
                 autocast_exits[node] = None
-            elif node.target == torch.amp._exit_autocast:
+            elif node.target is torch.amp._exit_autocast:
                 assert len(node.args) == 1
                 autocast_regions[node.args[0]].add(split_callback(node))
                 active_autocasts.remove(node.args[0])
@@ -335,7 +351,9 @@ def split_module(
 
     assert all(v is not None for v in autocast_exits.values()), "autocast must exit"
 
+    # pyrefly: ignore [bad-assignment]
     autocast_regions = {k: sorted(v) for k, v in autocast_regions.items()}
+    # pyrefly: ignore [bad-assignment]
     grad_regions = {k: sorted(v) for k, v in grad_regions.items()}
 
     if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -390,7 +408,7 @@ def split_module(
         root_partition = root_partitions.pop()
         sorted_partitions.append(root_partition)
         for dependent in partitions[root_partition].dependents:
-            partitions[dependent].dependencies.pop(root_partition)
+            partitions[dependent].dependencies.pop(root_partition)  # noqa: B909
             if not partitions[dependent].dependencies:
                 root_partitions.append(dependent)
     if len(sorted_partitions) != len(partitions):
@@ -400,7 +418,10 @@ def split_module(
     for regions_mapping in [autocast_regions, grad_regions]:
         for node, regions in regions_mapping.items():
             assert len(regions) > 0
+            # pyrefly: ignore [bad-index]
             partitions[str(regions[0])].environment[node] = node
+            # pyrefly: ignore [bad-index, index-error]
+            # pyrefly: ignore [bad-index, index-error]
             for r in regions[1:]:
                 partition = partitions[str(r)]
                 new_node = partition.graph.create_node(
@@ -419,10 +440,27 @@ def split_module(
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
         new_inputs: dict[str, None] = {}
+
+        counter = 0
+
         for inp in partition.inputs:
             orig_node = orig_nodes[inp]
             # We don't pass in get_attr nodes as inputs to the partition, but
             # instead set them as targets and use getattr within the module
+
+            def add_placeholder():
+                if keep_original_input_name:
+                    name = inp
+                else:
+                    nonlocal counter
+                    name = f"arg_{counter}"
+                    counter += 1
+                placeholder = partition.graph.placeholder(
+                    name,
+                    type_expr=orig_nodes[inp].type,
+                )
+                new_inputs[inp] = None
+                return placeholder
 
             if orig_node.op == "get_attr":
                 assert isinstance(orig_node.target, str)
@@ -432,17 +470,9 @@ def split_module(
                     placeholder = partition.graph.get_attr(orig_node.target)
                     partition.targets[orig_node.target] = orig_attr
                 else:
-                    placeholder = partition.graph.placeholder(
-                        inp,
-                        type_expr=orig_nodes[inp].type,
-                    )
-                    new_inputs[inp] = None
+                    placeholder = add_placeholder()
             else:
-                placeholder = partition.graph.placeholder(
-                    inp,
-                    type_expr=orig_nodes[inp].type,
-                )
-                new_inputs[inp] = None
+                placeholder = add_placeholder()
             placeholder.meta = orig_nodes[inp].meta.copy()
             partition.environment[orig_nodes[inp]] = placeholder
         partition.inputs = new_inputs
@@ -491,6 +521,7 @@ def split_module(
         for node in reversed(regions_mapping):
             regions = regions_mapping[node]
             assert len(regions) > 0
+            # pyrefly: ignore [bad-index, index-error]
             for r in regions[:-1]:
                 partition = partitions[str(r)]
                 exit_node = autocast_exits[node]

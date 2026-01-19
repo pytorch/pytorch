@@ -16,6 +16,7 @@ from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_MU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
     OpDTypes,
     ops,
@@ -37,12 +38,11 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
     run_tests,
-    skipIfRocmVersionLessThan,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
@@ -78,8 +78,13 @@ class ForeachFuncWrapper:
     def __call__(self, inputs, is_cuda, expect_fastpath, **kwargs):
         actual = None
         zero_size = kwargs.pop("zero_size", False)
+
+        # Skip profiler check for CUDA 12.6, 12.8 as the upgrade makes profiler results flaky
+        # https://github.com/pytorch/pytorch/issues/148681. TODO: ADD IT BACK!!!
+        skip_profiler_check = _get_torch_cuda_version() in [(12, 6), (12, 8)]
         if (
             is_cuda
+            and not skip_profiler_check
             and torch.autograd.kineto_available()
             and torch.profiler.ProfilerActivity.CUDA
             in torch.profiler.supported_activities()
@@ -90,6 +95,7 @@ class ForeachFuncWrapper:
                 torch.cuda.synchronize()
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
+
             assert mta_called == (expect_fastpath and (not zero_size)), (
                 f"{mta_called=}, {expect_fastpath=}, {zero_size=}, {self.func.__name__=}, {keys=}"
             )
@@ -189,7 +195,6 @@ class TestForeach(TestCase):
                         zero_size=True,
                     )
 
-    @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db
         + foreach_binary_op_db
@@ -313,13 +318,11 @@ class TestForeach(TestCase):
                 return arg
 
         scalar_self_arg_test_complete = False
-        for i, sample in enumerate(
-            op.sample_inputs(
-                device,
-                dtype,
-                noncontiguous=not is_fastpath,
-                allow_higher_dtype_scalars=True,
-            )
+        for sample in op.sample_inputs(
+            device,
+            dtype,
+            noncontiguous=not is_fastpath,
+            allow_higher_dtype_scalars=True,
         ):
             (rhs_arg,) = sample.args
             kwargs = {} or sample.kwargs
@@ -358,8 +361,6 @@ class TestForeach(TestCase):
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
-    # TODO: Remove skip CUDA 12.6 once resolved: https://github.com/pytorch/pytorch/issues/148681
-    @unittest.skipIf(_get_torch_cuda_version() >= (12, 6), "Failure on CUDA 12.6")
     def test_pointwise_op_with_tensor_of_scalarlist_overload(
         self, device, dtype, op, is_fastpath
     ):
@@ -1281,6 +1282,87 @@ class TestForeach(TestCase):
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
 
     @onlyCUDA
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_pointwise_op_with_0d_tensor1(self, device, dtype):
+        # Test that foreach_addcmul/addcdiv uses fast path when tensor1 is a list of 0D tensors
+        # This is a regression test for the optimization that allows 0D tensors in tensor1
+        # to use the fast CUDA kernel path instead of falling back to the slow path.
+        N = 5
+        # Create regular tensors for input and tensor2
+        inputs = [make_tensor((10, 10), dtype=dtype, device=device) for _ in range(N)]
+        tensor2s = [
+            make_tensor((10, 10), dtype=dtype, device=device, low=0.1) for _ in range(N)
+        ]
+        # Create 0D tensors for tensor1 (scalar tensors)
+        tensor1s_0d = [
+            torch.tensor(float(i + 1), dtype=dtype, device=device) for i in range(N)
+        ]
+
+        alpha = 0.5
+
+        # Test with 0D tensors in either tensor1 or tensor2 position
+        # For addcmul (commutative), both orderings should use the fast path
+        # For addcdiv (non-commutative), only 0D tensor1 uses the fast path
+        for swap_args in [False, True]:
+            if swap_args:
+                # 0D tensors in tensor2 position
+                t1_args, t2_args = tensor2s, tensor1s_0d
+            else:
+                # 0D tensors in tensor1 position
+                t1_args, t2_args = tensor1s_0d, tensor2s
+
+            # Test foreach_addcmul (commutative - both orderings use fast path)
+            foreach_addcmul = ForeachFuncWrapper(torch._foreach_addcmul)
+            actual_addcmul = foreach_addcmul(
+                [inputs, t1_args, t2_args],
+                is_cuda=True,
+                expect_fastpath=True,
+                value=alpha,
+            )
+            expected_addcmul = [
+                torch.addcmul(inp, t1, t2, value=alpha)
+                for inp, t1, t2 in zip(inputs, t1_args, t2_args)
+            ]
+            self.assertEqual(actual_addcmul, expected_addcmul)
+
+            # Test foreach_addcdiv (non-commutative - only 0D tensor1 uses fast path)
+            if not swap_args:
+                foreach_addcdiv = ForeachFuncWrapper(torch._foreach_addcdiv)
+                actual_addcdiv = foreach_addcdiv(
+                    [inputs, t1_args, t2_args],
+                    is_cuda=True,
+                    expect_fastpath=True,
+                    value=alpha,
+                )
+                expected_addcdiv = [
+                    torch.addcdiv(inp, t1, t2, value=alpha)
+                    for inp, t1, t2 in zip(inputs, t1_args, t2_args)
+                ]
+                self.assertEqual(actual_addcdiv, expected_addcdiv)
+
+            # Test inplace variants
+            inputs_copy = [t.clone() for t in inputs]
+            foreach_addcmul_inplace = ForeachFuncWrapper(torch._foreach_addcmul_)
+            foreach_addcmul_inplace(
+                [inputs_copy, t1_args, t2_args],
+                is_cuda=True,
+                expect_fastpath=True,
+                value=alpha,
+            )
+            self.assertEqual(inputs_copy, expected_addcmul)
+
+            if not swap_args:
+                inputs_copy = [t.clone() for t in inputs]
+                foreach_addcdiv_inplace = ForeachFuncWrapper(torch._foreach_addcdiv_)
+                foreach_addcdiv_inplace(
+                    [inputs_copy, t1_args, t2_args],
+                    is_cuda=True,
+                    expect_fastpath=True,
+                    value=alpha,
+                )
+                self.assertEqual(inputs_copy, expected_addcdiv)
+
+    @onlyCUDA
     def test_div_reciprocal(self):
         expect_m, expect_e = torch.frexp(
             torch.div(torch.tensor(0.1, device="cuda"), 10.0)
@@ -1340,6 +1422,7 @@ class TestForeach(TestCase):
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
         foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+
         for sample in op.sample_inputs(
             device, dtype, noncontiguous=False, allow_higher_dtype_scalars=True
         ):
@@ -1358,7 +1441,18 @@ class TestForeach(TestCase):
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
 
-    @requires_cuda
+    @onlyCUDA
+    @largeTensorTest("40GB", device="cuda")
+    def test_foreach_copy_with_multi_dtypes_large_input(self):
+        # see https://github.com/pytorch/pytorch/issues/156261
+        self_tensor = torch.empty(2**31 + 1, device="cuda", dtype=torch.float32)
+        src_tensor = torch.ones(2**31 + 1, device="cuda", dtype=torch.bfloat16)
+
+        torch._foreach_copy_([self_tensor], [src_tensor])
+        ref_out = torch.empty_like(self_tensor).copy_(src_tensor)
+        self.assertEqual(self_tensor, ref_out)
+
+    @requires_cuda_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_different_device_inputs(self, device, dtype, op):
         if dtype in (torch.complex128, torch.complex64):

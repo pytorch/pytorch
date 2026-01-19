@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
@@ -1702,7 +1700,7 @@ Module InsertObserversForOnDevicePTQ(
   // you will have multiple getattrs for the same attribute and thus potentially
   // multiple observers observing the same value. This will also lead to
   // increased size of the packed param struct. I dont expect this to be a
-  // common pattern but something to be aware fo Note that current quant
+  // common pattern but something to be aware of Note that current quant
   // workflow does not prevent this anyway since during inset quant dequant
   // things are inlined anyway
   helper.fillBoundaryValueMap(cloned_module, observer_method_name);

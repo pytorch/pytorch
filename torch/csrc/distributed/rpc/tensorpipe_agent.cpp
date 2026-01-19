@@ -131,6 +131,7 @@ std::vector<c10::Device> getDevicesOfTensors(
   devices.reserve(deviceCount);
   for (const auto idx : c10::irange(indexBitset.size())) {
     if (indexBitset[idx]) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       devices.emplace_back(impl->type(), static_cast<c10::DeviceIndex>(idx));
     }
   }
@@ -262,10 +263,12 @@ constexpr static int kNumUvThreads = 16;
 
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
+  contexts.reserve(kNumUvThreads);
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
+  listeners.reserve(kNumUvThreads);
   for ([[maybe_unused]] const auto laneIdx : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
-    std::string address = TensorPipeAgent::guessAddress();
+    const std::string& address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
     listeners.push_back(contexts.back()->listen(address));
   }
@@ -301,9 +304,10 @@ void TensorPipeAgent::TimeSeriesMetricsTracker::addData(uint64_t dataPoint) {
 }
 
 float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
-  return currentCount_ == 0
-      ? 0
-      : static_cast<float>((double)currentSum_ / (double)currentCount_);
+  return currentCount_ == 0 ? 0
+                            : static_cast<float>(
+                                  static_cast<double>(currentSum_) /
+                                  static_cast<double>(currentCount_));
 }
 
 ////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
@@ -371,7 +375,7 @@ void TensorPipeAgent::checkAndSetStaticGroup(
       isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
   std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
   // In both cases, the returned value should be the value of isStaticGroupStr,
-  // otherwise there is a discrepency with initialization among one of the
+  // otherwise there is a discrepancy with initialization among one of the
   // members
   TORCH_CHECK(
       returnedVal == isStaticGroupStr,
@@ -500,8 +504,9 @@ void TensorPipeAgent::startImpl() {
   for (const auto& p : workerNameToInfo_) {
     const auto& name = p.first;
     auto nodeAddrData = nameToAddressStore_.get(name);
-    auto nodeAddrStr =
-        std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
+    auto nodeAddrStr = std::string(
+        reinterpret_cast<const char*>(nodeAddrData.data()),
+        nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
   }
 
@@ -1237,8 +1242,9 @@ void TensorPipeAgent::updateGroupMembership(
     // TODO: we should get nodeAddrStr in the joining process, then pass in as
     // an argument rather than getting from store each time
     auto nodeAddrData = nameToAddressStore_.get(name);
-    auto nodeAddrStr =
-        std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
+    auto nodeAddrStr = std::string(
+        reinterpret_cast<const char*>(nodeAddrData.data()),
+        nodeAddrData.size());
     workerNameToURL_.insert({name, nodeAddrStr});
 
     for (const auto& it : reverseDeviceMaps) {

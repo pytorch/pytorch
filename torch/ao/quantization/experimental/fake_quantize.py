@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -20,7 +21,9 @@ class APoTFakeQuantize(FakeQuantizeBase):
         self.activation_post_process = observer(**observer_kwargs)
         self.dtype = self.activation_post_process.dtype
 
-    def calculate_qparams(self, signed: bool = False) -> tuple[Tensor, Tensor, Tensor, Tensor]:  # type: ignore[override]
+    def calculate_qparams(  # type: ignore[override]
+        self, signed: bool = False
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         return self.activation_post_process.calculate_qparams(signed=signed)
 
     def forward(self, X: torch.Tensor) -> Tensor:  # type: ignore[override]
@@ -33,15 +36,14 @@ class APoTFakeQuantize(FakeQuantizeBase):
             self.level_indices = result[3]
 
         if self.fake_quant_enabled[0] == 1:
-            assert (
-                self.alpha is not None
-                and self.gamma is not None
-                and self.quantization_levels is not None
-                and self.level_indices is not None
-            ), "Must set qparams for fake quant"
-
+            if (
+                self.alpha is None
+                or self.gamma is None
+                or self.quantization_levels is None
+                or self.level_indices is None
+            ):
+                raise AssertionError("Must set qparams for fake quant")
             X = fake_quantize_function.apply(
                 X, self.alpha, self.gamma, self.quantization_levels, self.level_indices
             )
-
         return X

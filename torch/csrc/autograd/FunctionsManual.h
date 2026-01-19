@@ -35,9 +35,7 @@ TORCH_API Tensor toNonOptFwGrad(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptPrimal(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptTensor(const std::optional<Tensor>& t);
 
-TORCH_API inline std::optional<Tensor> wrap_opt_if(
-    const Tensor& t,
-    const bool cond) {
+inline std::optional<Tensor> wrap_opt_if(const Tensor& t, const bool cond) {
   using OptTensor = std::optional<Tensor>;
   return cond ? OptTensor(t) : static_cast<OptTensor>(std::nullopt);
 }
@@ -45,6 +43,7 @@ TORCH_API inline std::optional<Tensor> wrap_opt_if(
 TORCH_API Tensor
 apply_loss_reduction(const Tensor& unreduced, int64_t reduction);
 TORCH_API bool any_variable_defined(const variable_list& variables);
+TORCH_API void update_wrapped_number(Tensor& input, Tensor& output);
 TORCH_API void copy_range(
     variable_list& out,
     IndexRange range,
@@ -281,7 +280,7 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
     const at::Tensor& self,
     const at::Tensor& min,
     const at::Tensor& max,
-    const std::array<bool, 2>&);
+    const std::array<bool, 2>& /*grad_input_mask*/);
 at::Tensor clamp_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -605,6 +604,11 @@ at::Tensor _cudnn_ctc_loss_backward(
     const at::Tensor& loss,
     const at::Tensor& raw_grad,
     bool zero_infinity);
+at::Tensor _miopen_ctc_loss_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& loss,
+    const at::Tensor& raw_grad,
+    bool zero_infinity);
 at::Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
@@ -828,6 +832,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask);
 
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
+    const Tensor& dY,
+    const Tensor& drstd,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt,
+    std::array<bool, 2> grad_input_mask);
+
 std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
     const Tensor& result,
@@ -889,8 +902,7 @@ Tensor linalg_solve_jvp(
     const Tensor& X,
     const Tensor& LU,
     const Tensor& pivots,
-    const bool left,
-    const bool use_A_T);
+    const bool left);
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
@@ -966,6 +978,20 @@ Tensor layer_norm_jvp(
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
     c10::SymIntArrayRef normalized_shape);
+
+Tensor rms_norm_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape);
+
+Tensor rms_norm_rstd_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape);
 
 Tensor group_norm_jvp(
     const Tensor& input_p,

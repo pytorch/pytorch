@@ -4,7 +4,7 @@ from typing import Any
 import torch
 from torch._inductor.kernel.mm_common import mm_args
 
-from . import config as inductor_config, lowering
+from . import config, lowering
 from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .lowering import expand, register_lowering
@@ -14,7 +14,7 @@ from .select_algorithm import (
     ExternKernelChoice,
     realize_inputs,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
+from .utils import use_aten_gemm_kernels, use_cpp_gemm_template
 from .virtualized import V
 
 
@@ -90,16 +90,6 @@ def register_woq_mm_ops() -> None:
                 epilogue_creator=_mul_epilogue,  # type: ignore[arg-type]
             )
 
-        if (
-            len(choices) == 0
-            and inductor_config.autotune_fallback_to_aten
-            and not use_aten_gemm_kernels()
-        ):
-            log.warning("No choices for GEMM, using ATen backend as fallback")
-            return aten__weight_int8pack_mm.bind(
-                (mat1, mat2, scale), aten_layout
-            ).output_node()
-
         return autotune_select_algorithm(
             "_weight_int8pack_mm", choices, [mat1, mat2, scale], aten_layout
         )
@@ -136,7 +126,7 @@ def register_woq_mm_ops() -> None:
             else []
         )
         if (
-            use_max_autotune()
+            (config.max_autotune or config.max_autotune_gemm)
             and use_cpp_gemm_template(
                 aten_layout,
                 mat1,
@@ -147,21 +137,12 @@ def register_woq_mm_ops() -> None:
             )
             and mat2.get_layout().is_contiguous()
         ):
+            # pyrefly: ignore [bad-specialization, missing-attribute, not-a-type]
             CppWoqInt4GemmTemplate[qGroupSize].add_choices(
                 choices,
                 aten_layout,
                 [mat1, mat2, group_size, qScaleAndZeros],
             )
-
-        if (
-            len(choices) == 0
-            and inductor_config.autotune_fallback_to_aten
-            and not use_aten_gemm_kernels()
-        ):
-            log.warning("No choices for GEMM, using ATen backend as fallback")
-            return aten__weight_int4pack_mm_cpu.bind(
-                (mat1, mat2, group_size, qScaleAndZeros), aten_layout
-            ).output_node()
 
         # define functions to generate example inputs for weight and group size
         # otherwise, autotuner generates example inputs of all zeros for them

@@ -9,14 +9,34 @@ import importlib
 import os
 import sys
 import time
+import unittest
+from unittest import mock
 from unittest.mock import patch
 
 import torch
 import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
+from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_CPU, RUN_GPU
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    IS_BIG_GPU,
+    requires_gpu,
+    requires_triton,
+    RUN_CPU,
+    RUN_GPU,
+)
+
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : Debug and confirm pass_fds status on Windows.
+    sys.stderr.write(
+        "Almost UTs failed: pass_fds not supported on Windows, skip them on Windows.\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("pass_fds not supported on Windows")
 
 
 # Make the helper files in test/ importable
@@ -42,6 +62,8 @@ test_failures = {
     "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
+    # can not pickle ParametrizedConv2d
+    "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
 }
 
 
@@ -50,7 +72,7 @@ class TestSubprocess(TestCase):
         torch._dynamo.reset()
         FxCompile._reset_stats()
 
-        TestCase.setUp(self)
+        super().setUp()
 
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(
@@ -72,6 +94,88 @@ class TestSubprocess(TestCase):
         TestCase.tearDown(self)
         torch._dynamo.reset()
 
+    @requires_gpu()
+    @requires_triton()
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
+    def test_progressive(self):
+        from triton.testing import do_bench
+
+        from torch._inductor.compile_fx_async import _ProgressiveFxCompile
+
+        torch._inductor.compile_fx.fx_compile_progressive = True
+
+        x = torch.randn(1152, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(1024, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def optimized(x, y):
+            return (x @ y).relu()
+
+        _ProgressiveFxCompile._reset_stats()
+
+        source_codes: list[str] = []
+
+        def save_output_code(code: str) -> None:
+            source_codes.append(code)
+
+        with contextlib.ExitStack() as stack:
+            # When this bug is fixed, remove the cache disabling below
+            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
+            stack.enter_context(
+                torch._inductor.config.patch(
+                    autotune_local_cache=False, fx_graph_cache=False
+                )
+            )
+            stack.enter_context(
+                mock.patch.object(GraphLowering, "save_output_code", save_output_code)
+            )
+            stack.enter_context(
+                torch._functorch.config.patch(enable_autograd_cache=False)
+            )
+
+            # How long to wait (in seconds) before giving up.
+            TIMEOUT = 300
+            # If non-None then how often (in seconds) to print a TICK message.
+            TICK_REPORT = None
+
+            start = time.time()
+            last_report = start
+            while _ProgressiveFxCompile._stat_optimized_runs < 4:
+                time.sleep(0.25)
+
+                optimized(x, y)
+
+                now = time.time()
+                if TICK_REPORT is not None and (now - last_report > TICK_REPORT):
+                    print(f"*** TICK {int(now - start)}")
+                    last_report = now
+
+                if now - start > TIMEOUT:
+                    raise RuntimeError(
+                        "Test timed out before producing a progressively optimized compiled artifact."
+                    )
+
+            self.assertEqual(_ProgressiveFxCompile._stat_optimized_runs, 4)
+            self.assertGreater(_ProgressiveFxCompile._stat_fast_runs, 0)
+            self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_started, 1)
+            self.assertGreaterEqual(_ProgressiveFxCompile._stat_bg_finished, 1)
+
+        torch._inductor.compile_fx.fx_compile_progressive = False
+
+        @torch.compile(fullgraph=True, backend="inductor")
+        def baseline(x, y):
+            return (x @ y).relu()
+
+        # Warmup
+        baseline(x, y)
+
+        self.assertGreater(
+            do_bench(lambda: baseline(x, y)), do_bench(lambda: optimized(x, y))
+        )
+        self.assertTrue("'max_autotune': True" in source_codes[-1])
+
     @patch("torch._inductor.compile_fx.fx_compile_async", True)
     def test_async(self):
         # Test that async+subprocess works.
@@ -80,14 +184,14 @@ class TestSubprocess(TestCase):
         @torch.compile(fullgraph=True, backend="inductor")
         def model_add(x, y):
             out = x
-            for i in range(500):
+            for _ in range(500):
                 out = torch.add(out, y)
             return out
 
         _AsyncFxCompile._reset_stats()
 
         with contextlib.ExitStack() as stack:
-            # TODO: Turn off local caches - they don't play nice w/ async currently.
+            assert torch._inductor.compile_fx_async.BUG_CACHES_DONT_WORK_WITH_ASYNC
             stack.enter_context(
                 torch._inductor.config.patch(
                     autotune_local_cache=False, fx_graph_cache=False
@@ -104,13 +208,22 @@ class TestSubprocess(TestCase):
 
             start = time.time()
             last_report = start
-            while _AsyncFxCompile._stat_compiled_runs < 4:
+            while True:
+                start_stat_compiled_runs = _AsyncFxCompile._stat_compiled_runs
                 # Sleep a bit so we don't drive the CPU unnecessarily.
                 time.sleep(0.25)
 
-                x = torch.randn(100, 100)
-                y = torch.randn(100, 100)
-                model_add(x, y)
+                x = torch.randn(100, 100, requires_grad=True)
+                y = torch.randn(100, 100, requires_grad=True)
+
+                # Forward pass
+                output = model_add(x, y)
+
+                # Backward pass
+                output.sum().backward()
+
+                if _AsyncFxCompile._stat_compiled_runs - start_stat_compiled_runs == 2:
+                    break
 
                 # DEBUGGING: Print a periodic message so we know we're still
                 # running...
@@ -124,12 +237,12 @@ class TestSubprocess(TestCase):
                         "Test timed out before producing a compiled artifact."
                     )
 
-            self.assertEqual(_AsyncFxCompile._stat_compiled_runs, 4)
+            self.assertGreater(_AsyncFxCompile._stat_compiled_runs, 1)
             # Make sure we ran eager at least once. Normally this will be
             # something like 80.
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)
-            self.assertEqual(_AsyncFxCompile._stat_bg_started, 1)
-            self.assertEqual(_AsyncFxCompile._stat_bg_finished, 1)
+            self.assertEqual(_AsyncFxCompile._stat_bg_started, 2)
+            self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
 
 
 if RUN_CPU:

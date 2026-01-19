@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Optional
 
 import torch
 import torch.nn
@@ -27,11 +26,11 @@ def _validate_sdpa_input(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
     dropout_p=0.0,
     is_causal=False,
     scale=None,
-):
+) -> None:
     if (
         not isinstance(query, NestedTensor)
         or not isinstance(key, NestedTensor)
@@ -142,7 +141,8 @@ def _check_head_dim_size_cudnn_nested(params: SDPAParams, debug=False) -> bool:
 def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
     param: torch.Tensor, param_name: str, debug=False
 ) -> bool:
-    assert isinstance(param, NestedTensor), "param should be a jagged NT"
+    if not isinstance(param, NestedTensor):
+        raise AssertionError("param should be a jagged NT")
 
     if param._ragged_idx == 1:
         # num_head_dims is ragged
@@ -364,17 +364,18 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> tuple[torch.Tensor, in
     return cumulative_seqlen, max_seqlen, n_elem
 
 
-def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor):
+def _is_safe_to_get_storage_as_tensor(tensor: torch.Tensor) -> bool:
     # This function checks if a nested tensor is valid for
     # use with the flash-attention and efficient_attention kernels without
     # needing to call contiguous on the nested tensor input.
     # It checks that the storage offsets' adjacent_differences are a constant
-    # mutiple of the previous tensor in the nested tensor and that the strides
+    # multiple of the previous tensor in the nested tensor and that the strides
     # are monitonically decreasing. This check is done after calling transpose on
     # the nested tensor resulting in a Nt of shape [bsz, {seq_len}, num_heads, dim]
 
     # Returns a boolean indicating if contiguous needs to be called for input
-    assert isinstance(tensor, NestedTensor)
+    if not isinstance(tensor, NestedTensor):
+        raise AssertionError("tensor must be a NestedTensor")
     offsets = tensor.offsets()
     strides = tensor._strides
 
@@ -438,7 +439,7 @@ def _view_as_dense(
 #     #     this is because needs_broadcast indicates that the batch_size is 1
 #     #     and hence there is only 1 value for seq_len
 #     # (2) The cum_seq_lens are given by [0, {*}_t.size(1), 2 * {*}_t.size(1),
-#     # ..., outut_batch_size * {*}_t.size(1)]
+#     # ..., output_batch_size * {*}_t.size(1)]
 #     # (3) Nnz_{*} is given by output_batch_size * {*}_t.size(1)
 
 #     if q_batch_size_needs_broadcast or not q_t.is_nested:
@@ -658,7 +659,7 @@ def _is_computing_meta_flops(x):
             torch.utils._python_dispatch._get_current_dispatch_mode_stack()
         )
         return any(
-            type(x) == torch.utils.flop_counter._FlopCounterMode
+            type(x) is torch.utils.flop_counter._FlopCounterMode
             for x in torch_dispatch_mode_stack
         )
     return False
@@ -668,8 +669,8 @@ def _autocast(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    attn_mask: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """
     [Autocasting SDPA for NJT]
 
@@ -714,7 +715,7 @@ def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
     dropout_p=0.0,
     is_causal=False,
     scale=None,
@@ -723,11 +724,12 @@ def jagged_scaled_dot_product_attention(
     query, key, value, attn_mask = _autocast(query, key, value, attn_mask)
     _validate_sdpa_input(query, key, value, attn_mask, dropout_p, is_causal, scale)
     # for mypy, ugh
-    assert (
+    if not (
         isinstance(query, NestedTensor)
         and isinstance(key, NestedTensor)
         and isinstance(value, NestedTensor)
-    )
+    ):
+        raise AssertionError("query, key, and value must all be NestedTensor instances")
     from torch.nested._internal.nested_tensor import (
         nested_view_from_values_offsets_lengths,
     )

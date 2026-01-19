@@ -9,7 +9,7 @@ __all__ = ["move_to_device_pass"]
 
 
 def move_to_device_pass(
-    ep: ExportedProgram, location: Union[torch.device, str, dict[str, str]]
+    ep: ExportedProgram, location: torch.device | str | dict[str, str]
 ) -> ExportedProgram:
     """
     Move the exported program to the given device.
@@ -27,10 +27,10 @@ def move_to_device_pass(
 
     def _get_new_device(
         curr_device: torch.device,
-        location: Union[torch.device, str, dict[str, str]],
+        location: torch.device | str | dict[str, str],
     ) -> str:
         if isinstance(location, dict):
-            if str(curr_device) in location.keys():
+            if str(curr_device) in location:
                 return location[str(curr_device)]
             else:
                 return str(curr_device)
@@ -52,19 +52,46 @@ def move_to_device_pass(
         if isinstance(v, torch.Tensor):
             ep._constants[k] = v.to(_get_new_device(v.device, location))
 
-    for node in ep.graph.nodes:
-        # move all the nodes kwargs with burnt-in device
-        if "device" in node.kwargs:
-            kwargs = node.kwargs.copy()
-            kwargs["device"] = _get_new_device(kwargs["device"], location)
-            node.kwargs = kwargs
-        # move all the tensor metadata
-        node.meta["val"] = pytree.tree_map(
-            lambda v: v.to(_get_new_device(v.device, location))
-            if isinstance(v, torch.Tensor)
-            else v,
-            node.meta.get("val"),
+    # move example_inputs if they exist
+    if ep.example_inputs is not None:
+        args, kwargs = ep.example_inputs
+        moved_args = pytree.tree_map_only(
+            torch.Tensor,
+            lambda tensor: tensor.to(_get_new_device(tensor.device, location)),
+            args,
         )
+        moved_kwargs = pytree.tree_map_only(
+            torch.Tensor,
+            lambda tensor: tensor.to(_get_new_device(tensor.device, location)),
+            kwargs,
+        )
+        ep._example_inputs = (moved_args, moved_kwargs)
+
+    for m in ep.graph_module.modules():
+        if isinstance(m, torch.fx.GraphModule):
+            for node in m.graph.nodes:
+                # move all the nodes kwargs with burnt-in device
+                if "device" in node.kwargs:
+                    kwargs = node.kwargs.copy()
+                    kwargs["device"] = _get_new_device(kwargs["device"], location)
+                    node.kwargs = kwargs
+
+                if (
+                    node.op == "call_function"
+                    and node.target is torch.ops.aten.to.device
+                ):
+                    args = list(node.args)
+                    # pyrefly: ignore [unsupported-operation]
+                    args[1] = _get_new_device(args[1], location)
+                    node.args = tuple(args)
+
+                # move all the tensor metadata
+                node.meta["val"] = pytree.tree_map(
+                    lambda v: v.to(_get_new_device(v.device, location))
+                    if isinstance(v, torch.Tensor)
+                    else v,
+                    node.meta.get("val"),
+                )
 
     ep.validate()
     return ep

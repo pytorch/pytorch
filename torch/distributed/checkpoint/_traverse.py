@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Collection, Mapping, MutableMapping
-from typing import Callable, cast, Optional, TypeVar, Union
+from collections.abc import Callable, Collection, Mapping, MutableMapping
+from typing import cast, TypeVar, Union
 
 import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
@@ -121,20 +121,21 @@ def set_element(
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val = cast(STATE_DICT_ITEM, {} if type(key) == str else [])
+        def_val = cast(STATE_DICT_ITEM, {} if type(key) is str else [])
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
                 CONTAINER_TYPE, cur_container.setdefault(prev_key, def_val)
             )
         else:
+            # pyrefly: ignore [bad-argument-type]
             extend_list(cur_container, prev_key)
             if cur_container[prev_key] is None:
                 cur_container[prev_key] = def_val
             cur_container = cur_container[prev_key]
 
     key = path[-1]
-    if type(key) == int:
+    if type(key) is int:
         extend_list(cast(list[STATE_DICT_ITEM], cur_container), key)
 
     cur_container[key] = value
@@ -143,8 +144,8 @@ def set_element(
 def get_element(
     root_dict: STATE_DICT_TYPE,
     path: OBJ_PATH,
-    default_value: Optional[T] = None,
-) -> Optional[T]:
+    default_value: T | None = None,
+) -> T | None:
     """Retrieve the value at ``path``from ``root_dict``, returning ``default_value`` if not found."""
     cur_value = cast(CONTAINER_TYPE, root_dict)
     for part in path:
@@ -155,7 +156,7 @@ def get_element(
             return default_value
 
         cur_value = cast(CONTAINER_TYPE, cur_value[part])
-    return cast(Optional[T], cur_value)
+    return cast(T | None, cur_value)
 
 
 def _print_nested(

@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import TestCase
 
 class TestNetMinBaseBlock(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         # Setup test fixtures for each test method
 
         class SimpleModule(torch.nn.Module):
@@ -100,3 +101,10 @@ class TestNetMinBaseBlock(TestCase):
 
     def test_continugous_partial_discrepancy_beginning(self) -> None:
         self.assert_problematic_nodes(["linear", "linear2"])
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

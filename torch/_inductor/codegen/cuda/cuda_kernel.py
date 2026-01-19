@@ -3,15 +3,17 @@ import functools
 import itertools
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr, symbols
 
+import torch._inductor.config as config
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
-from torch._inductor.utils import Placeholder
+from torch._inductor.utils import do_bench_using_profiling, OrderedSet, Placeholder
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
@@ -80,6 +82,7 @@ class CUDAKernel(Kernel):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.layout_args: dict[str, list[LayoutArg]] = defaultdict(list)
+        self.size_args: list[Union[Expr, int]] = []
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
 
@@ -171,6 +174,12 @@ class CUDAKernel(Kernel):
         LDD = get_ld(Y)
         return (M, N, K, B, LDA, LDB, LDC, LDD)
 
+    def get_dynamic_shape_args(self) -> list[Union[Expr, int]]:
+        return [*self.get_layout_args(), *self.size_args]
+
+    def get_offset_args(self) -> list[Expr]:
+        return [node.get_layout().offset for node in self.named_nodes.values()]
+
     @staticmethod
     def find_ld_idx(node: IRNode) -> int:
         strides = node.get_stride()
@@ -241,7 +250,6 @@ class CUDATemplateKernel(CUDAKernel):
         self,
         inputs: list[IRNode],
         outputs: list[IRNode],
-        epilogue_inputs: list[IRNode],
         names_str: str = "",
         input_reorder: Optional[list[int]] = None,
     ) -> str:
@@ -257,9 +265,11 @@ class CUDATemplateKernel(CUDAKernel):
                            e.g. The template might have input argument defined as [X, W, Bias],
                            and the actual input passed into this template could be [Bias, X, W].
                            In this case, the `input_reorder` would be [2, 0, 1].
+            additional_size_args: Additional size arguments for epilogue inputs
         """
+        # NB: name order matters here, it's used to match up offsets
         names = [x.strip() for x in names_str.strip().split(",")]
-        if len(inputs) + len(epilogue_inputs) + len(outputs) != len(names):
+        if len(inputs) + len(outputs) != len(names):
             raise RuntimeError(
                 f"{len(inputs) + len(outputs)=} != {len(names)=}, {inputs=}, {outputs=}, {names=}"
             )
@@ -276,32 +286,42 @@ class CUDATemplateKernel(CUDAKernel):
                 self.named_nodes[name] = node
                 self.args.input_buffers[node.get_name()] = name
 
-        for epilogue_input in epilogue_inputs:
-            if epilogue_input is not None:
-                self.named_nodes[epilogue_input.get_name()] = epilogue_input
-                self.args.input_buffers[epilogue_input.get_name()] = (
-                    epilogue_input.get_name()
-                )
-
+        free_symbols: OrderedSet[Expr] = OrderedSet()
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
+                # NB: named nodes must be populated in the order of names
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
+
+                if name not in (
+                    "X",
+                    "W",
+                    "Bias",
+                    "Y",
+                ):  # we handle these symbolic shapes explicitly
+                    for expr in itertools.chain(node.get_size(), node.get_stride()):
+                        if isinstance(expr, Expr):
+                            for s in expr.free_symbols:
+                                free_symbols.add(s)  # type: ignore[arg-type]
 
         arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE)
 
         self.init_layout_args()
-        size_args = [
-            f"const int {s}" for s in ("M", "N", "K", "B", "lda", "ldb", "ldc", "ldd")
-        ]
-
+        size_vars = ["M", "N", "K", "B", "lda", "ldb", "ldc", "ldd"]
+        size_vars.extend(str(s) for s in free_symbols)
+        self.size_args.extend(free_symbols)
+        size_args = [f"const int {s}" for s in size_vars]
+        offset_args = [f"const int {name}_offset" for name in self.named_nodes]
         runtime_arg_decls = ",".join(
             [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
         )
         if runtime_arg_decls:
             runtime_arg_decls += ", "
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {runtime_arg_decls}{self._EXTRA_CPP_ARGS})"
+        signature = (
+            f"int {self.kernel_name}({', '.join(arg_defs + size_args + offset_args)},\
+ {runtime_arg_decls}{self._EXTRA_CPP_ARGS})"
+        )
         self.signature = signature
         return signature
 
@@ -333,11 +353,14 @@ class CUDATemplateKernel(CUDAKernel):
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
 
-        layout_args = self.get_layout_args()
-        call_args.extend(layout_args)  # type: ignore[arg-type]
+        dynamic_shape_args = self.get_dynamic_shape_args()
+        offset_args = self.get_offset_args()
+        call_args.extend(dynamic_shape_args)  # type: ignore[arg-type]
+        call_args.extend(offset_args)  # type: ignore[arg-type]
         for arg in self.runtime_arg_values:
-            call_args.append(arg)
-        arg_types.extend("int" for a in layout_args)
+            call_args.append(str(arg))
+        arg_types.extend("const int" for _ in dynamic_shape_args)
+        arg_types.extend("const int" for _ in offset_args)
         for arg in self.runtime_arg_info:
             arg_types.append(arg.ty)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -413,15 +436,6 @@ class CUDATemplateKernel(CUDAKernel):
             max_valid_offset += (node.get_size()[i] - 1) * node.get_stride()[i]
         return max_valid_offset
 
-    def offset(self, node: IRNode) -> str:
-        """
-        Generates code which represents offset of a given node.
-        """
-
-        if node is None:
-            return "0"
-        return str(node.get_layout().offset)  # type: ignore[union-attr]
-
     def ptr(self, node: IRNode) -> str:
         """
         Generates code which represents pointer of a given node.
@@ -432,8 +446,7 @@ class CUDATemplateKernel(CUDAKernel):
         arg_name = self.arg_name(node)
         if arg_name is None:
             return "nullptr"
-        offset = self.offset(node)
-        return arg_name if offset == "0" else f"{arg_name} + {offset}"
+        return f"{arg_name} + {arg_name}_offset"
 
     def size(
         self,
@@ -593,9 +606,10 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(
-            *args, out=out
-        )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
         return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
@@ -603,7 +617,10 @@ class CUDATemplateCaller(ChoiceCaller):
     def call_name(self) -> str:
         return f"cuda_template_kernels.{self.name}"
 
-    def hash_key(self) -> str:
+    def kernel_hash_key(self) -> str:
+        """
+        Return kernel hash key that does not depend on swizzle.
+        """
         return "-".join(
             [
                 self.category,
@@ -611,8 +628,30 @@ class CUDATemplateCaller(ChoiceCaller):
             ]
         )
 
+    def hash_key(self) -> str:
+        """
+        Return kernel hash key that does not depend on swizzle.
+        """
+        swizzle_str: str = (
+            str(self.info_kwargs.get("swizzle"))
+            if isinstance(self.info_kwargs, dict)
+            else "None"
+        )
+        return "-".join(
+            [
+                self.category,
+                self.bmreq.hash_key,
+                swizzle_str,
+            ]
+        )
+
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
-        """Information returned here is logged to the autotune log file when that is enabled."""
+        """
+        Information returned here is logged to the autotune log file when that is enabled.
+
+        In general, we should avoid calling this function as it is expensive to compute,
+        and can add up very fast.
+        """
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op: Any = self.info_kwargs["op"]
             return {
@@ -635,13 +674,15 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
-        return TensorBox.create(
-            CUDATemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                workspace_size=self.bmreq.workspace_size,
-                supports_epilogue_fusion=self.supports_epilogue_fusion,
-                template=self.template,
-            )
+        buffer = CUDATemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            workspace_size=self.bmreq.workspace_size,
+            supports_epilogue_fusion=self.supports_epilogue_fusion,
+            template=self.template,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)

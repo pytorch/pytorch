@@ -8,6 +8,7 @@ from typing import NamedTuple, Optional
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
@@ -27,12 +28,14 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
+from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     MLPModule,
     ModelArgs,
@@ -281,6 +284,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     @skip_unless_torch_gpu
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("dtype", [torch.float64, torch.float32])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1555")
     def test_transformer_training(self, is_seq_parallel, dtype: torch.dtype):
         EXP_BASE_CC = ExpCommCounts(
             fwd={all_reduce: 6, all_gather: 1}, bwd={all_reduce: 9}
@@ -412,6 +416,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         + f"{str(dtype).split('.')[-1]}_"
         + f"thaw_{'__'.join(sorted({n.rpartition('.')[0].replace('.', '_') for n in thaw})) if thaw else 'all'}",
     )
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1555")
     def test_transformer_req_grad(self, thaw_params, is_seq_parallel, dtype, exp_cnts):
         # Sample a subset of `requires_grad` patterns
 
@@ -472,15 +477,19 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         torch.manual_seed(0)
         inp = torch.randint(16, input_size, device=self.device_type)
 
-        # Without weight tying.
-        self.assertNotEqual(
-            model.embedding.weight.to_local(), model.fc.weight.to_local()
-        )
+        @maybe_run_for_local_tensor
+        def assert_not_equal(a, b):
+            self.assertNotEqual(a, b)
+
+        assert_not_equal(model.embedding.weight.to_local(), model.fc.weight.to_local())
+
         output = model(inp)
         output.sum().backward()
-        self.assertNotEqual(
+
+        assert_not_equal(
             model.embedding.weight.grad.to_local(), model.fc.weight.grad.to_local()
         )
+
         model.zero_grad()
 
         # With weight tying.
@@ -551,6 +560,10 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
+
+DistTensorParallelExampleTestWithLocalTensor = create_local_tensor_test_class(
+    DistTensorParallelExampleTest,
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -88,9 +88,10 @@ def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
         >>> lr = nn.LeakyReLU(0.01)
         >>> m2 = _fuse_linear_bn_leaky_relu(m1, b1, lr)
     """
-    assert (
-        linear.training == bn.training and bn.training == leaky_relu.training
-    ), "Linear, BN and LeakyReLU all must be in the same mode (train or eval)."
+    if linear.training != bn.training or bn.training != leaky_relu.training:
+        raise AssertionError(
+            "Linear, BN and LeakyReLU all must be in the same mode (train or eval)."
+        )
 
     if is_qat:
         raise NotImplementedError(
@@ -100,7 +101,7 @@ def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
         map_to_fused_module_eval = {
             nn.Linear: nni.LinearLeakyReLU,
         }
-        fused_module = map_to_fused_module_eval.get(type(linear), None)
+        fused_module = map_to_fused_module_eval.get(type(linear))
         if fused_module is not None:
             fused_linear = nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
             fm = fused_module(fused_linear, leaky_relu)
@@ -200,9 +201,7 @@ for with_bn, add_op in conv_add_left_optioins:
     else:
         conv_configs.append(
             BackendPatternConfig()
-            ._set_pattern_complex_format(
-                (add_op, nn.Conv2d, MatchAllNode)
-            )  # noqa: E131
+            ._set_pattern_complex_format((add_op, nn.Conv2d, MatchAllNode))  # noqa: E131
             .set_observation_type(observation_type)
             .set_dtype_configs(conv_dtype_configs)
             .set_fuser_method(_fuse_conv_add_left)
@@ -285,9 +284,7 @@ for with_bn, add_op in conv_add_optioins:
     else:
         conv_configs.append(
             BackendPatternConfig()
-            ._set_pattern_complex_format(
-                (add_op, MatchAllNode, nn.Conv2d)
-            )  # noqa: E131
+            ._set_pattern_complex_format((add_op, MatchAllNode, nn.Conv2d))  # noqa: E131
             .set_observation_type(observation_type)
             .set_dtype_configs(conv_dtype_configs)
             .set_fuser_method(_fuse_conv_add_right)
@@ -390,9 +387,7 @@ for with_bn, add_op in conv_add_relu_left_optioins:
     else:
         conv_configs.append(
             BackendPatternConfig()
-            ._set_pattern_complex_format(
-                (nn.ReLU, (add_op, nn.Conv2d, MatchAllNode))
-            )  # noqa: E131
+            ._set_pattern_complex_format((nn.ReLU, (add_op, nn.Conv2d, MatchAllNode)))  # noqa: E131
             .set_observation_type(observation_type)
             .set_dtype_configs(conv_dtype_configs)
             .set_fuser_method(_fuse_conv_add_relu_left)
@@ -485,9 +480,7 @@ for with_bn, add_op in conv_add_relu_left_optioins:
     else:
         conv_configs.append(
             BackendPatternConfig()
-            ._set_pattern_complex_format(
-                (nn.ReLU, (add_op, MatchAllNode, nn.Conv2d))
-            )  # noqa: E131
+            ._set_pattern_complex_format((nn.ReLU, (add_op, MatchAllNode, nn.Conv2d)))  # noqa: E131
             .set_observation_type(observation_type)
             .set_dtype_configs(conv_dtype_configs)
             .set_fuser_method(_fuse_conv_add_relu_right)

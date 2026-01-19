@@ -71,7 +71,7 @@ Runtime instances in your code.
 Static runtime's memory planner does two things:
 
 1) Coalesces internal allocations for tensor storage
-2) Does static analysis to figure out how to efficiently re-use memory.
+2) Does static analysis to figure out how to efficiently reuse memory.
 
 ### Standard Resizing
 Static runtime will record the space required for each intermediate managed tensor it sees

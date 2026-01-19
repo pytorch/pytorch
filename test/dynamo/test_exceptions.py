@@ -10,6 +10,7 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -19,7 +20,7 @@ from torch.testing._internal.common_utils import (
 
 
 class CustomException(Exception):
-    ...
+    pass
 
 
 class CustomExceptionMeta(type):
@@ -28,7 +29,7 @@ class CustomExceptionMeta(type):
 
 
 class CustomExceptionWithInstanceCheck(Exception, metaclass=CustomExceptionMeta):
-    ...
+    pass
 
 
 class CustomExceptionWithArgs(Exception):
@@ -126,9 +127,23 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 x = torch.sigmoid(x)
                 try:
                     x = torch.cos(x)
-                    raise AssertionError
+                    raise AssertionError  # noqa: B904
                 except AssertionError:
                     x = torch.cos(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_exception_with_vars(self):
+        def fn(x):
+            try:
+                vars(42)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
 
         x = torch.randn(4)
         ref = fn(x)
@@ -172,7 +187,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         def cm():
             try:
                 yield
-            except BaseException:
+            except BaseException:  # noqa: B036
                 raise ValueError  # noqa: B904
 
         @contextlib.contextmanager
@@ -250,7 +265,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 for x, y in args:
                     try:
                         fn(x, y)
-                    except BaseException:
+                    except BaseException:  # noqa: B036
                         new_exc = sys.exc_info()
                         fix_exc_context(frame_exc[1], new_exc[1], prev_exc[1])
                         prev_exc = new_exc
@@ -258,7 +273,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 try:
                     fixed_ctx = prev_exc[1].__context__
                     raise prev_exc[1]
-                except BaseException:
+                except BaseException:  # noqa: B036
                     prev_exc[1].__context__ = fixed_ctx
                     raise
 
@@ -292,7 +307,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         fn(x)
-        # Cant use fullgraph=True because RERAISE is not supported
+        # Can't use fullgraph=True because RERAISE is not supported
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
@@ -358,7 +373,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -375,7 +390,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception_with_args(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -616,7 +631,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ZeroDivisionError
             except ZeroDivisionError:
                 try:
-                    raise ValueError
+                    raise ValueError  # noqa: B904
                 except ValueError:
                     pass
                 raise
@@ -666,7 +681,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 yield 1
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -696,7 +711,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ValueError
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -749,7 +764,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise GeneratorExit
             except Exception:
                 return t.sin()
-            except BaseException:
+            except BaseException:  # noqa: B036
                 return t.cos()
 
         t = torch.randn(2)
@@ -874,20 +889,26 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         assert z == 1
 
     def test_user_defined_exception_variable(self):
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             z = 0
             try:
                 raise CustomException
             except ValueError:
                 z = 1
-            except CustomException:
+            except CustomException as e:
+                # trying to call python_type on the
+                # UserDefinedExceptionClassVariable
+                cls = type(e)
+                if type(cls) is type:
+                    t = t + 1
                 z = 2
             assert z == 2
             return t.sin()
 
         t = torch.randn(2)
         fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(t), opt_fn(t))
 
     def test_user_defined_exception_with_args(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -919,6 +940,73 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             exc2 = e
 
         assert exc2.__context__ is None
+
+    def test_exception_kwargs(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            raise AttributeError(name="a")
+
+        self.assertRaises(Unsupported, fn)
+
+    def test_stack_trace_from_observed_exception(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                # no attribute w on self.linear
+                weight = self.linear.w
+                return torch.nn.functional.linear(x, weight)
+
+        x = (torch.randn(4, 16, requires_grad=True),)
+
+        with self.assertRaisesRegex(Exception, "weight = self.linear.w"):
+            torch._dynamo.functional_export.dynamo_graph_capture_for_export(Model())(x)
+
+    def test_context_manager_preserves_exception_stack(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167900
+        # When an exception is raised inside a context manager and the context manager
+        # doesn't suppress it, the error message should point to the original raise
+        # location, not the context manager cleanup code.
+        def g():
+            assert False  # noqa: B011
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            with torch.no_grad():
+                g()
+            return x
+
+        with self.assertRaises(Unsupported) as ctx:
+            f(torch.randn(1))
+
+        # The error should point to "assert False" in g(), not "return x"
+        self.assertIn("in g", str(ctx.exception))
+        self.assertIn("assert False", str(ctx.exception))
+        self.assertNotIn("return x", str(ctx.exception))
+
+    def test_reraise_preserves_exception_stack(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167900
+        # When an exception is caught and re-raised, the error message should
+        # point to the original raise location, not the reraise location.
+        def g():
+            raise Exception("Invalid")  # noqa: TRY002
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            try:
+                g()
+            except Exception:  # noqa: TRY203
+                raise
+            return x
+
+        with self.assertRaises(Unsupported) as ctx:
+            f(torch.randn(1))
+
+        # The error should point to 'raise Exception("Invalid")' in g()
+        self.assertIn("in g", str(ctx.exception))
+        self.assertIn('raise Exception("Invalid")', str(ctx.exception))
 
 
 instantiate_parametrized_tests(ExceptionTests)

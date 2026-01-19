@@ -1,9 +1,6 @@
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 
-#include <ATen/core/functional.h>
-#include <torch/csrc/distributed/c10d/reducer.hpp>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
 
@@ -28,7 +25,7 @@ c10::intrusive_ptr<c10::ivalue::Future> PythonCommHook::runHook(
   try {
     return py_fut.cast<std::shared_ptr<torch::jit::PythonFutureWrapper>>()->fut;
   } catch (const py::cast_error& e) {
-    auto type = py_fut.get_type();
+    auto type = py::type::handle_of(py_fut);
     auto errMsg = c10::str(
         e.what(),
         ". DDP communication hook's callback must return a "

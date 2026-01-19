@@ -28,7 +28,7 @@ namespace at::native { namespace {
 using namespace vec;
 
 template <typename scalar_t, typename func_t>
-static inline void cpu_cum_base_kernel(const Tensor& result,
+inline void cpu_cum_base_kernel(const Tensor& result,
     const Tensor& self,
     int64_t dim,
     const func_t& f,
@@ -76,7 +76,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
   iter.for_each(loop, grain_size);
 }
 
-static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -95,7 +95,7 @@ static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -114,7 +114,7 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
   });
 }
 
-static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -135,7 +135,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-static void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
+void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "std_cpu", [&] {
     binary_kernel_reduce(
         iter,
@@ -148,7 +148,7 @@ static void std_var_kernel_impl(TensorIterator& iter, double correction, bool ta
   });
 }
 
-static void prod_kernel_impl(TensorIterator& iter) {
+void prod_kernel_impl(TensorIterator& iter) {
   // Workaround for the error: '*' in boolean context, suggest '&&' instead
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
@@ -203,7 +203,7 @@ void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   }
 }
 
-static void norm_kernel_tensor_iterator_impl(
+void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
   double val = 0;
@@ -256,10 +256,10 @@ static void norm_kernel_tensor_iterator_impl(
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      return norm_kernel_cpu_impl<at::Half, float>(iter, val);
+      norm_kernel_cpu_impl<at::Half, float>(iter, val); return;
     } else if (iter.input_dtype() == kBFloat16 && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      return norm_kernel_cpu_impl<at::BFloat16, float>(iter, val);
+      norm_kernel_cpu_impl<at::BFloat16, float>(iter, val); return;
     }
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kComplexHalf, iter.input_dtype(), "norm_cpu", [&] {
@@ -274,7 +274,7 @@ static void norm_kernel_tensor_iterator_impl(
   }
 }
 
-static void and_kernel_impl(TensorIterator& iter) {
+void and_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Byte) {
     // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
@@ -312,7 +312,7 @@ static void and_kernel_impl(TensorIterator& iter) {
   }
 }
 
-static void or_kernel_impl(TensorIterator& iter) {
+void or_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Byte) {
     // Refer [all, any : uint8 compatibility]
     binary_kernel_reduce_vec(
@@ -346,7 +346,7 @@ struct MinValuesOps: public at::native::MinOps<scalar_t> {
   }
 };
 
-static void min_values_kernel_impl(TensorIterator& iter) {
+void min_values_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == kLong) {
     // This case is special because of Vectorized<int64_t> does not
     // handle upper_bound<int64_t>().
@@ -367,7 +367,7 @@ static void min_values_kernel_impl(TensorIterator& iter) {
   });
 }
 
-static void max_values_kernel_impl(TensorIterator& iter) {
+void max_values_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "max_values_cpu", [&iter] {
     binary_kernel_reduce_vec(
       iter,
@@ -377,7 +377,7 @@ static void max_values_kernel_impl(TensorIterator& iter) {
   });
 }
 
-static void argmax_kernel_impl(TensorIterator &iter) {
+void argmax_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmax_cpu", [&] {
     if (is_reduce_lastdim(iter)) {
       using arg_t = std::pair<scalar_t, int64_t>;
@@ -401,7 +401,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
   });
 }
 
-static void argmin_kernel_impl(TensorIterator &iter) {
+void argmin_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmin_cpu", [&] {
     if (is_reduce_lastdim(iter)) {
       using arg_t = std::pair<scalar_t, int64_t>;
@@ -425,6 +425,49 @@ static void argmin_kernel_impl(TensorIterator &iter) {
   });
 }
 
+template <typename scalar_t, typename acc_t = uint64_t, typename out_t = acc_t>
+struct XorSumOps {
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+    if (std::is_same<scalar_t, bool>::value) {
+      return acc ^ (data ? 1 : 0);
+    } else if (
+        std::is_same<scalar_t, float>::value ||
+        std::is_same<scalar_t, double>::value ||
+        std::is_same<scalar_t, at::BFloat16>::value ||
+        std::is_same<scalar_t, at::Half>::value) {
+      union {
+        double d;
+        uint64_t u;
+      } converter;
+      converter.d = static_cast<double>(data);
+      return acc ^ converter.u;
+    } else {
+      return acc ^ static_cast<uint64_t>(data);
+    }
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return a ^ b;
+  }
+
+  inline C10_DEVICE out_t project(acc_t a) const {
+    return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+};
+
+void xor_sum_kernel_impl(TensorIterator& iter) {
+  // Use iter.dtype(1) to dispatch based on the type of the input tensor
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kBFloat16, kHalf, kBool, iter.dtype(1), "xor_sum_cpu", [&] {
+        binary_kernel_reduce(
+            iter, XorSumOps<scalar_t>(), static_cast<uint64_t>(0));
+      });
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl)
@@ -439,6 +482,7 @@ REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl)
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl)
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl)
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl)
+REGISTER_DISPATCH(xor_sum_stub, &xor_sum_kernel_impl)
 
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel)
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel)

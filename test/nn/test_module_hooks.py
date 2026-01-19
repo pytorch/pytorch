@@ -873,7 +873,7 @@ class TestStateDictHooks(TestCase):
         )
 
         def linear_state_dict_post_hook(module, state_dict, prefix, local_metadata):
-            for name, param in module.named_parameters(recurse=False):
+            for name, _param in module.named_parameters(recurse=False):
                 state_dict[prefix + name] = torch.nn.Parameter(
                     state_dict[prefix + name]
                 )
@@ -1445,7 +1445,14 @@ class TestModuleHookNN(NNTestCase):
         mod.register_full_backward_hook(hook)
 
         # This should run and trigger the hook properly
-        mod(inp).sum().backward()
+        with self.assertWarnsRegex(
+            UserWarning,
+            (
+                "Full backward hook is firing when gradients are computed with "
+                "respect to module outputs since no inputs require gradients"
+            ),
+        ):
+            mod(inp).sum().backward()
         self.assertEqual(hook_called[0], 1)
 
         return_val = "grad_input"
@@ -1522,7 +1529,7 @@ class TestModuleHookNN(NNTestCase):
                 ):
                     mod(inp.clone(), True)
 
-                # Input inplace error should throw an error if we try to re-use the view after they have
+                # Input inplace error should throw an error if we try to reuse the view after they have
                 # been modified
                 local_inp = inp.clone()
                 out = mod(local_inp, False)

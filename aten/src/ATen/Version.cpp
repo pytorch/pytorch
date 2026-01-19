@@ -7,7 +7,6 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <dnnl.hpp>
-#include <ideep.hpp>
 #endif
 
 #include <caffe2/core/common.h>
@@ -43,8 +42,8 @@ std::string get_mkldnn_version() {
     // https://github.com/intel/ideep/issues/29
     {
       const dnnl_version_t* ver = dnnl_version();
-      ss << "Intel(R) MKL-DNN v" << ver->major << "." << ver->minor << "." << ver->patch
-         << " (Git Hash " << ver->hash << ")";
+      ss << "Intel(R) MKL-DNN v" << ver->major << '.' << ver->minor << '.' << ver->patch
+         << " (Git Hash " << ver->hash << ')';
     }
   #else
     ss << "MKLDNN not found";
@@ -81,7 +80,7 @@ std::string get_openmp_version() {
           break;
       }
       if (ver_str) {
-        ss << " (a.k.a. OpenMP " << ver_str << ")";
+        ss << " (a.k.a. OpenMP " << ver_str << ')';
       }
     }
   #else
@@ -95,24 +94,18 @@ std::string get_cpu_capability() {
   // environment variable
   auto capability = native::get_cpu_capability();
   switch (capability) {
-#if defined(HAVE_VSX_CPU_DEFINITION)
     case native::CPUCapability::DEFAULT:
       return "DEFAULT";
+#if defined(HAVE_VSX_CPU_DEFINITION)
     case native::CPUCapability::VSX:
       return "VSX";
 #elif defined(HAVE_ZVECTOR_CPU_DEFINITION)
-    case native::CPUCapability::DEFAULT:
-      return "DEFAULT";
     case native::CPUCapability::ZVECTOR:
       return "Z VECTOR";
 #elif defined(HAVE_SVE256_CPU_DEFINITION) && defined(HAVE_ARM_BF16_CPU_DEFINITION)
-    case native::CPUCapability::DEFAULT:
-      return "DEFAULT";
     case native::CPUCapability::SVE256:
       return "SVE256";
 #else
-    case native::CPUCapability::DEFAULT:
-      return "NO AVX";
     case native::CPUCapability::AVX2:
       return "AVX2";
     case native::CPUCapability::AVX512:
@@ -141,38 +134,38 @@ std::string show_config() {
 
 #if defined(__GNUC__)
   {
-    ss << "  - GCC " << __GNUC__ << "." << __GNUC_MINOR__ << "\n";
+    ss << "  - GCC " << __GNUC__ << '.' << __GNUC_MINOR__ << '\n';
   }
 #endif
 
 #if defined(__cplusplus)
   {
-    ss << "  - C++ Version: " << __cplusplus << "\n";
+    ss << "  - C++ Version: " << __cplusplus << '\n';
   }
 #endif
 
 #if defined(__clang_major__)
   {
-    ss << "  - clang " << __clang_major__ << "." << __clang_minor__ << "." << __clang_patchlevel__ << "\n";
+    ss << "  - clang " << __clang_major__ << '.' << __clang_minor__ << '.' << __clang_patchlevel__ << '\n';
   }
 #endif
 
 #if defined(_MSC_VER)
   {
-    ss << "  - MSVC " << _MSC_FULL_VER << "\n";
+    ss << "  - MSVC " << _MSC_FULL_VER << '\n';
   }
 #endif
 
 #if AT_MKL_ENABLED()
-  ss << "  - " << get_mkl_version() << "\n";
+  ss << "  - " << get_mkl_version() << '\n';
 #endif
 
 #if AT_MKLDNN_ENABLED()
-  ss << "  - " << get_mkldnn_version() << "\n";
+  ss << "  - " << get_mkldnn_version() << '\n';
 #endif
 
 #ifdef _OPENMP
-  ss << "  - " << get_openmp_version() << "\n";
+  ss << "  - " << get_openmp_version() << '\n';
 #endif
 
 #if AT_BUILD_WITH_LAPACK()
@@ -189,7 +182,7 @@ std::string show_config() {
   ss << "  - Cross compiling on MacOSX\n";
 #endif
 
-  ss << "  - "<< used_cpu_capability() << "\n";
+  ss << "  - "<< used_cpu_capability() << '\n';
 
   if (hasCUDA()) {
     ss << detail::getCUDAHooks().showConfig();
@@ -206,10 +199,10 @@ std::string show_config() {
   ss << "  - Build settings: ";
   for (const auto& pair : caffe2::GetBuildOptions()) {
     if (!pair.second.empty()) {
-      ss << pair.first << "=" << pair.second << ", ";
+      ss << pair.first << '=' << pair.second << ", ";
     }
   }
-  ss << "\n";
+  ss << '\n';
 
   // TODO: do HIP
   // TODO: do XLA

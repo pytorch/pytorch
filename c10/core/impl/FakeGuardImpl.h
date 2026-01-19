@@ -19,7 +19,7 @@ template <DeviceType T>
 struct FakeGuardImpl final : public DeviceGuardImplInterface {
   static constexpr DeviceType static_type = T;
   // Runtime device type is not used
-  FakeGuardImpl(DeviceType) {}
+  FakeGuardImpl(DeviceType /*unused*/) {}
   FakeGuardImpl() = default;
   DeviceType type() const override {
     return T;

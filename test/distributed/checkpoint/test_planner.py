@@ -18,15 +18,18 @@ from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.default_planner import (
     _create_default_local_metadata,
+    _validate_global_plan,
     create_default_global_save_plan,
     create_default_local_load_plan,
     create_default_local_save_plan,
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
+from torch.distributed.checkpoint.filesystem import CURRENT_DCP_VERSION
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
+    Metadata,
     MetadataIndex,
     TensorProperties,
     TensorStorageMetadata,
@@ -65,7 +68,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
     shards_metadata = []
     local_shards = []
-    for idx in range(0, world_size * shards_per_rank):
+    for idx in range(world_size * shards_per_rank):
         shard_rank = idx // shards_per_rank
         shard_md = ShardMetadata(
             shard_offsets=[idx * shard_size],
@@ -215,7 +218,7 @@ class TestSavePlan(TestCase):
         # Number of plans should remain unchanged
         self.assertEqual(len(all_plans), len(deduped_plans))
 
-        # Numer of items in the deduped plans should be less than the original plans
+        # Number of items in the deduped plans should be less than the original plans
         for new_plan, old_plan in zip(deduped_plans, all_plans):
             self.assertFalse(_compare_save_plans(new_plan, old_plan))
             self.assertTrue(len(new_plan.items) < len(old_plan.items))
@@ -559,6 +562,32 @@ class TestPlannerHelpers(TestCase):
         self.assertTrue(_compare_save_plans(plan2, plan2))
 
 
+class TestValidateGlobalPlan(TestCase):
+    def _make_metadata(self, chunks, size):
+        storage = TensorStorageMetadata(
+            properties=TensorProperties(dtype=torch.float32),
+            size=torch.Size(size),
+            chunks=chunks,
+        )
+        return Metadata(state_dict_metadata={"param": storage})
+
+    def test_non_overlapping_chunks(self):
+        chunks = [
+            ChunkStorageMetadata(offsets=torch.Size([i]), sizes=torch.Size([1]))
+            for i in range(4)
+        ]
+        metadata = self._make_metadata(chunks, [4])
+        self.assertTrue(_validate_global_plan([SavePlan([])], metadata))
+
+    def test_detect_overlapping_chunks(self):
+        chunks = [
+            ChunkStorageMetadata(offsets=torch.Size([0]), sizes=torch.Size([2])),
+            ChunkStorageMetadata(offsets=torch.Size([1]), sizes=torch.Size([2])),
+        ]
+        metadata = self._make_metadata(chunks, [4])
+        self.assertFalse(_validate_global_plan([SavePlan([])], metadata))
+
+
 class TestLoadPlanner(TestCase):
     @with_temp_dir
     def test_strict(self):
@@ -592,6 +621,22 @@ class TestLoadPlanner(TestCase):
                 checkpoint_id=self.temp_dir,
                 planner=DefaultLoadPlanner(),
             )
+
+    @with_temp_dir
+    def test_version_key_in_planner_data(self):
+        original_module = nn.Linear(2, 2)
+
+        dcp.save(state_dict={"module": original_module}, checkpoint_id=self.temp_dir)
+
+        new_module = nn.Linear(2, 2)
+        planner = DefaultLoadPlanner()
+        dcp.load(
+            state_dict={"module": new_module},
+            checkpoint_id=self.temp_dir,
+            planner=planner,
+        )
+
+        self.assertEqual(planner.metadata.version, CURRENT_DCP_VERSION)
 
 
 if __name__ == "__main__":
