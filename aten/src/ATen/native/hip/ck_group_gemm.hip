@@ -380,8 +380,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     size_t arg_buf_size = gemm_instance.GetDeviceKernelArgSize(&argument);
     size_t ws_size = gemm_instance.GetWorkSpaceSize(&argument);
 
-    void* gemm_arg_buf = c10::hip::HIPCachingAllocator::raw_alloc(arg_buf_size);
-    void* ws_buf = c10::hip::HIPCachingAllocator::raw_alloc(ws_size);
+    void* gemm_arg_buf = c10::cuda::CUDACachingAllocator::raw_alloc(arg_buf_size);
+    void* ws_buf = c10::cuda::CUDACachingAllocator::raw_alloc(ws_size);
 
     gemm_instance.SetDeviceKernelArgs(&argument, gemm_arg_buf);
     gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
@@ -389,8 +389,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     auto invoker = gemm_instance.MakeInvoker();
     hipStream_t stream = c10::cuda::getCurrentCUDAStream();
     invoker.Run(argument, {stream});
-    c10::hip::HIPCachingAllocator::raw_delete(gemm_arg_buf);
-    c10::hip::HIPCachingAllocator::raw_delete(ws_buf);
+    c10::cuda::CUDACachingAllocator::raw_delete(gemm_arg_buf);
+    c10::cuda::CUDACachingAllocator::raw_delete(ws_buf);
 }
 
 void group_gemm_ck(

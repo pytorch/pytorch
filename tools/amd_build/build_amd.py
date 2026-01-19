@@ -243,6 +243,16 @@ hipify_v1_to_v2_files = [
     "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fp8_tensorwise_gemm.hip",
     "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/ck_extensions/fused_moe/fused_moe_kernel.hip",
     "third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include/fbgemm_gpu/quantize/tuning_cache.hpp",
+    "third_party/mslk/csrc/moe/ck_extensions/fused_moe_kernel.hip",
+    "third_party/mslk/csrc/gemm/ck/bf16_grouped/bf16_grouped_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/bf16_grouped/kernels/bf16_grouped_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise/kernels/fp8_rowwise_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_batched/kernels/fp8_rowwise_batched_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_rowwise_preshuffle/kernels/fp8_rowwise_preshuffle_common.h",
+    "third_party/mslk/csrc/gemm/ck/fp8_tensorwise_gemm.hip",
+    "third_party/mslk/csrc/gemm/ck/fp8_blockwise_gemm.hip",
 ]
 
 
