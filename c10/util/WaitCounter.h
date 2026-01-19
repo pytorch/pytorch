@@ -96,3 +96,9 @@ class C10_API WaitCounterHandle {
 
 #define STATIC_SCOPED_WAIT_COUNTER(_name) \
   auto C10_ANONYMOUS_VARIABLE(SCOPE_GUARD) = STATIC_WAIT_COUNTER(_name).start();
+
+#define WITH_WAIT_COUNTER(_name, _expr) \
+  [&]() {                               \
+    STATIC_SCOPED_WAIT_COUNTER(_name);  \
+    return _expr;                       \
+  }();
