@@ -59,6 +59,60 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
 
     @with_comms
+    def test_cross(self):
+        """Test torch.cross with DTensor sharding."""
+        mesh = self.build_device_mesh()
+
+        # Test inputs - shape (batch, 3) with cross product on dim=1
+        a = torch.randn(8, 3, device=self.device_type)
+        b = torch.randn(8, 3, device=self.device_type)
+        expected = torch.cross(a, b, dim=1)
+
+        # Test S(0), S(0) -> S(0) strategy (batch dim sharding)
+        # Batch dims are independent - each shard computes cross product of its vectors
+        a_dt = distribute_tensor(a.clone(), mesh, [Shard(0)])
+        b_dt = distribute_tensor(b.clone(), mesh, [Shard(0)])
+
+        with CommDebugMode() as comm_mode:
+            result_dt = torch.cross(a_dt, b_dt, dim=1)
+            # Check no comms required (strategy is truly local)
+            self.assertEqual(
+                comm_mode.get_total_counts(),
+                0,
+                msg=f"Expected no comms for S(0), S(0) -> S(0), got {comm_mode.get_total_counts()}",
+            )
+            # Check output placement matches expected
+            self.assertEqual(result_dt.placements, (Shard(0),))
+
+        # Verify numerical correctness
+        self.assertEqual(result_dt.full_tensor(), expected)
+
+        # Test P(sum), R -> P(sum) strategy (bilinear in first arg)
+        # Create partial input by dividing by world_size on each rank
+        a_local = a.clone().to(self.device_type) / self.world_size
+        a_partial = DTensor.from_local(a_local, mesh, [Partial()])
+        b_replicate = distribute_tensor(b.clone(), mesh, [Replicate()])
+
+        with CommDebugMode() as comm_mode:
+            result_dt = torch.cross(a_partial, b_replicate, dim=1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result_dt.placements, (Partial(),))
+
+        self.assertEqual(result_dt.full_tensor(), expected)
+
+        # Test R, P(sum) -> P(sum) strategy (bilinear in second arg)
+        a_replicate = distribute_tensor(a.clone(), mesh, [Replicate()])
+        b_local = b.clone().to(self.device_type) / self.world_size
+        b_partial = DTensor.from_local(b_local, mesh, [Partial()])
+
+        with CommDebugMode() as comm_mode:
+            result_dt = torch.cross(a_replicate, b_partial, dim=1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result_dt.placements, (Partial(),))
+
+        self.assertEqual(result_dt.full_tensor(), expected)
+
+    @with_comms
     def test_copy_(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 

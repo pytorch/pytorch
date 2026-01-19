@@ -21,7 +21,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -1303,3 +1306,73 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+
+@register_single_dim_strategy(
+    aten.linalg_cross.default,
+    schema_info=RuntimeSchemaInfo(1),  # dim is static arg at index 1
+)
+def cross_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Cross product single-dim sharding strategy.
+
+    Cross product computes the cross product of two tensors of 3D vectors along dim.
+    The dim must have size 3. Cross product is bilinear in both arguments.
+
+    Discovered rules:
+    - R, R -> R (added automatically, not listed)
+    - S(d), S(d) -> S(d) when d != cross_dim (batch dims are independent)
+    - P(sum), R -> P(sum) (bilinear in first arg)
+    - R, P(sum) -> P(sum) (bilinear in second arg)
+    """
+    input_meta = args_schema[0]
+    other_meta = args_schema[1]
+
+    if not isinstance(input_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(input_meta)}")
+
+    ndim = len(input_meta.shape)
+
+    # Get the cross product dim (default -1)
+    cross_dim = args_schema[2] if len(args_schema) > 2 else -1
+    if cross_dim < 0:
+        cross_dim = ndim + cross_dim
+
+    single_dim_strategies: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # Strategy 1: S(d), S(d) -> S(d) for each d != cross_dim
+    # Batch dims are independent - each shard computes cross product of its vectors
+    for d in range(ndim):
+        if d == cross_dim:
+            continue  # Cannot shard along cross product dim
+        single_dim_strategies.append(
+            [
+                _ShardingPlaceholder(d),  # output
+                _ShardingPlaceholder(d),  # input
+                _ShardingPlaceholder(d),  # other
+            ]
+        )
+
+    # Strategy 2: P(sum), R -> P(sum) (bilinear in first arg)
+    # cross(a/n, b) = cross(a, b)/n on each shard, sum gives cross(a, b)
+    single_dim_strategies.append(
+        [
+            Partial(),  # output
+            Partial(),  # input
+            Replicate(),  # other
+        ]
+    )
+
+    # Strategy 3: R, P(sum) -> P(sum) (bilinear in second arg)
+    # cross(a, b/n) = cross(a, b)/n on each shard, sum gives cross(a, b)
+    single_dim_strategies.append(
+        [
+            Partial(),  # output
+            Replicate(),  # input
+            Partial(),  # other
+        ]
+    )
+
+    return single_dim_strategies
