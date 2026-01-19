@@ -527,7 +527,7 @@ class CommonTemplate:
         """
         Tests a reduction kernel.
         """
-        if view_size ==(2, 3 * max_block) and torch.version.hip is not None:
+        if view_size == (2, 3 * max_block) and torch.version.hip is not None:
             view_size = (4, 6 * max_block)
 
         if view_size == (128, 128) and torch.version.hip is not None:
@@ -850,7 +850,7 @@ class CommonTemplate:
         the block pointer analysis, those cases would fall back to 1D.
         """
         if torch.version.hip is not None and expected_num_triton_kernels == 2:
-            size = (256, 256) 
+            size = (256, 256)
         view = self._discontiguous_tensor(size, self.device)
 
         # We expect many block pointers for this one.
