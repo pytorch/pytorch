@@ -1362,6 +1362,24 @@ class LeafModuleState(NamedTuple):
     named_buffers: dict[str, torch.Tensor]
 
 
+# Callback for retrieving modules by index. Set by Dynamo to avoid layering violation.
+# The HOP layer defines the interface; Dynamo provides the implementation.
+_module_retriever: Optional[Callable[[int], Any]] = None
+
+
+def set_module_retriever(fn: Callable[[int], Any]) -> None:
+    """
+    Register the module retrieval function. Called by Dynamo to provide
+    its implementation of get_external_object_by_index.
+
+    This enables dependency inversion: the HOP layer defines the interface,
+    and Dynamo provides the implementation, avoiding a direct import from
+    torch._dynamo in the HOP layer.
+    """
+    global _module_retriever
+    _module_retriever = fn
+
+
 def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
     """
     This is the runtime counterpart to register_user_object(). During tracing,
@@ -1369,10 +1387,16 @@ def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
     function retrieves the original module instance.
 
     Raises TypeError if the object at the index is not an nn.Module.
+    Raises RuntimeError if the module retriever has not been registered.
     """
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+    if _module_retriever is None:
+        raise RuntimeError(
+            "Module retriever not registered. This typically means "
+            "invoke_leaf_function is being called outside of a Dynamo context. "
+            "Ensure torch._dynamo is imported before using leaf functions with nn.Module arguments."
+        )
 
-    mod = get_external_object_by_index(nn_module_index)
+    mod = _module_retriever(nn_module_index)
     if not isinstance(mod, torch.nn.Module):
         raise TypeError(
             f"Expected nn.Module at index {nn_module_index} for leaf function invocation, "
