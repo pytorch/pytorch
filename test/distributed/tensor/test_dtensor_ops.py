@@ -374,6 +374,8 @@ dtensor_fails = {
     xfail("scatter_reduce", "mean"),
     xfail("scatter_reduce", "prod"),
     xfail("scatter_reduce", "sum"),
+    # searchsorted has a strategy but fails on sample inputs with sorter kwarg
+    # (sorter must be sharded same as sorted_sequence, which test framework doesn't handle)
     xfail("searchsorted"),
     xfail("select_scatter"),
     xfail("sparse.sampled_addmm"),
