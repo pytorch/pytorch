@@ -501,9 +501,15 @@ class FSDPParamGroup:
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
                 fsdp_param.accumulate_unsharded_grad_if_needed()
+        skip_reshard_for_higher_order_grads = (
+            not compiled_autograd_enabled() and torch.is_grad_enabled()
+        )
         with record_function(self._with_fqn("FSDP::post_backward_reshard")):
             if not self.reduce_grads:
-                if self.reshard_after_backward:
+                if (
+                    self.reshard_after_backward
+                    and not skip_reshard_for_higher_order_grads
+                ):
                     self.reshard()
                 for fsdp_param in self.fsdp_params:
                     fsdp_param.to_accumulated_grad_if_needed()
@@ -525,7 +531,7 @@ class FSDPParamGroup:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
                     fsdp_param.unsharded_param.grad = None
-            if self.reshard_after_backward:
+            if self.reshard_after_backward and not skip_reshard_for_higher_order_grads:
                 self.reshard()
         if len(fsdp_params_with_grad) == 0:
             return

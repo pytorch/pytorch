@@ -242,6 +242,32 @@ class TestFullyShardAutograd(FSDPTest):
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
 
+class TestFullyShardHigherOrderGrads(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(1)
+    def test_second_order_grad_with_autograd_grad(self):
+        model = nn.Linear(10, 10).to(device_type)
+        fully_shard(model)
+
+        inp = torch.randn(2, 10, requires_grad=True, device=device_type)
+        out = model(inp)
+
+        grad_outputs = torch.ones_like(out, requires_grad=True)
+        (grad_inp,) = torch.autograd.grad(
+            out, inp, grad_outputs=grad_outputs, create_graph=True
+        )
+
+        (grad_grad_out,) = torch.autograd.grad(
+            grad_inp.sum(), grad_outputs, create_graph=True
+        )
+
+        self.assertEqual(grad_grad_out.shape, grad_outputs.shape)
+        self.assertFalse(torch.all(grad_grad_out == 0))
+
+
 class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
