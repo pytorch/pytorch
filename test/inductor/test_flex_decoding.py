@@ -1294,7 +1294,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             KV_H=Hkv,
             KV_S=S,
             V_D=head_dim,
-            device=device
+            device=device,
         )
 
     @supported_platform
