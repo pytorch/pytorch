@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,24
+detectron2_fcos_r_50_fpn,pass,22
 
 
 
@@ -270,7 +270,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_to_run,18
+vision_maskrcnn,fail_to_run,17
 
 
 

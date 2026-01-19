@@ -73,4 +73,12 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
 TORCH_API SymbolizedTracebacks
 symbolize(const std::vector<CapturedTraceback*>& to_symbolize);
 
+inline CapturedTraceback* getCapturedTracebackFromContext(
+    const std::shared_ptr<c10::GatheredContext>& x) {
+  auto* traceback = dynamic_cast<CapturedTraceback*>(x.get());
+  TORCH_CHECK(
+      traceback, "attempting to gather stack context from the wrong type.");
+  return traceback;
+}
+
 } // namespace torch
