@@ -1730,6 +1730,10 @@ def xfailIfWindows(func):
     return unittest.expectedFailure(func) if IS_WINDOWS else func
 
 
+def xfailIfROCm(func):
+    return unittest.expectedFailure(func) if torch.version.hip is not None else func
+
+
 def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
     assert isinstance(msg, str), "Are you using skipIfFreeThreaded correctly?"
     return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
