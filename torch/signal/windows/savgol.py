@@ -8,7 +8,7 @@ from typing import Literal
 import torch
 import torch.nn.functional as F
 
-__all__ = ["savgol_coeffs", "savgol_filter"]
+__all__ = ["savgol_coeffs", "savgol"]
 
 
 def _float_factorial(n: int) -> float:
@@ -169,7 +169,7 @@ def _fit_edges_polyfit(
     )
 
 
-def savgol_filter(
+def savgol(
     x: torch.Tensor,
     window_length: int,
     polyorder: int,
