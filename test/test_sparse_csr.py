@@ -28,6 +28,10 @@ from torch.testing._internal.opinfo.definitions.sparse import validate_sample_in
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED, HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
 import operator
 
+from torch.testing._internal.common_utils import (
+    getRocmVersion,
+)
+
 if TEST_SCIPY:
     import scipy.sparse as sp
 
@@ -38,6 +42,7 @@ if TEST_NUMPY:
 load_tests = load_tests  # noqa: PLW0127
 
 no_mkl_sparse = IS_WINDOWS or not TEST_MKL
+no_rocm_or_rocm_8_plus = not TEST_WITH_ROCM or (TEST_WITH_ROCM and getRocmVersion() >= (8, 0))
 
 
 def _check_cusparse_spgemm_available():
@@ -1467,12 +1472,9 @@ class TestSparseCSR(TestCase):
     @skipCUDAIfNoSparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if not TEST_WITH_ROCM else [],
-                  *[torch.bfloat16] if SM80OrLater else []))
+                  *[torch.half] if no_rocm_or_rocm_8_plus else [],
+                  *[torch.bfloat16] if SM80OrLater and no_rocm_or_rocm_8_plus else []))
     def test_csr_matvec(self, device, dtype):
-
-        if TEST_WITH_ROCM and (dtype == torch.half or dtype == torch.bfloat16):
-            self.skipTest("ROCm doesn't work with half dtypes correctly.")
 
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
