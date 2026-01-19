@@ -131,9 +131,7 @@ jobs:
         with:
           repository: pytorch/pytorch-integration-testing
           path: pytorch/pytorch-integration-testing
-          # ref: main
-          # TESTING, TO BE REMOVED BEFORE LANDING
-          ref: check-vllm-benchmark-result
+          ref: main
 
       - name: Check if the device is supported
         run: |
