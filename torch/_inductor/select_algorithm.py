@@ -739,7 +739,7 @@ class TritonTemplateKernel(TritonKernel):
         if self.output_node is None:
             raise ValueError("No output node available")
         val = self.output_node.get_stride()
-        return val[index]
+        return texpr(self.rename_indexing(val[index]))
 
     def def_kernel(self, *argnames):
         """
