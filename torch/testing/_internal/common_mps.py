@@ -380,7 +380,6 @@ if torch.backends.mps.is_available():
             "special.laguerre_polynomial_l": None,
             "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
-            "special.modified_bessel_i1": [torch.float16, torch.bfloat16],
             "special.ndtri": None,
             "svd_lowrank": None,
             "symeig": None,
@@ -701,7 +700,7 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
-            "cdist": [torch.float32],
+            "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
             "grid_sampler_3d": None,
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.

@@ -14,8 +14,8 @@ from torch._higher_order_ops.utils import (
     redirect_to_mode,
     reenter_make_fx,
     register_fake,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
@@ -765,7 +765,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             )
         # no grads for you sir
         ctx.mark_non_differentiable(max_scores)
-        save_tensors_and_symints_for_backward(
+        save_values_for_backward(
             ctx,
             (
                 query,
@@ -788,7 +788,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         grad_logsumexp: Tensor,
         grad_max_scores: Tensor,
     ) -> tuple[Optional[Tensor], ...]:
-        fw_args = saved_tensors_and_symints(ctx)
+        fw_args = saved_values(ctx)
         (
             query,
             key,
