@@ -845,6 +845,8 @@ op_db: list[OpInfo] = [
         decorators=(
             toleranceOverride(
                 {
+                    torch.float16: tol(atol=1e-02, rtol=1e-02),
+                    torch.bfloat16: tol(atol=1e-02, rtol=1e-02),
                     torch.float32: tol(atol=1e-03, rtol=1e-03),
                     torch.float64: tol(atol=1e-05, rtol=1e-03),
                 }
