@@ -57,12 +57,6 @@ debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", 
 # [@compile_ignored: debug]
 leaf_function_validate_outputs = False
 
-# Allow leaf function's fake_impl to reference real (non-fake) tensors in closures.
-# When True, real tensors are auto-converted to fake tensors. When False, an error
-# is raised if the fake_impl tries to use non-fake tensors.
-# [@compile_ignored: runtime_behaviour]
-leaf_function_allow_non_fake_inputs = False
-
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
