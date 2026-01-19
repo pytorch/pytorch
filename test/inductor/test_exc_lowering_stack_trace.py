@@ -1,3 +1,5 @@
+# Owner(s): ["module: inductor"]
+
 import torch
 from torch._inductor.exc import InductorError, LoweringException
 from torch._inductor.test_case import TestCase as InductorTestCase
