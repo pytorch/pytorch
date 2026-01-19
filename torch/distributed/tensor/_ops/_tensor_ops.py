@@ -21,7 +21,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -1303,3 +1306,40 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+
+@register_single_dim_strategy(aten.kron.default)
+def kron_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Sharding strategy for torch.kron (Kronecker product).
+
+    kron(a, b) produces a tensor where the result has shape that is the
+    element-wise product of a's and b's shapes. The valid strategies are:
+    - S(d), R -> S(d): sharding first input on any dim, second must be replicated
+    - P(sum), R -> P(sum): partial first input, second replicated
+    - R, P(sum) -> P(sum): first replicated, second partial
+
+    Note: kron's internal implementation uses view ops that have trouble with
+    sharded dimensions on the second input, so only first-input sharding works.
+    """
+    a_strategy = args_schema[0]
+    if not isinstance(a_strategy, OpStrategy):
+        raise RuntimeError(f"Expected OpStrategy but got {type(a_strategy)}")
+
+    a_ndim = a_strategy.ndim
+    single_mesh_dim_strategies: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # S(d), R -> S(d) for each dim d of a
+    for d in range(a_ndim):
+        sharding: PlacementList = [_ShardingPlaceholder(d), Replicate(), Shard(d)]
+        single_mesh_dim_strategies.append(sharding)
+
+    # P(sum), R -> P(sum)
+    single_mesh_dim_strategies.append([Partial(), Replicate(), Partial()])
+
+    # R, P(sum) -> P(sum)
+    single_mesh_dim_strategies.append([Replicate(), Partial(), Partial()])
+
+    return single_mesh_dim_strategies
