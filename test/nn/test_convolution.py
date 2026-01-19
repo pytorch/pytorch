@@ -1768,6 +1768,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # ConvB propagation shouldn't return any of gradient
         output_mask = [False, False, False]
         test_conv_backward_output_mask(output_mask)
+
     def test_conv_double_backward_no_bias(self):
         kern = 3
         stride = 2
