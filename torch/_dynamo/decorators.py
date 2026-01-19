@@ -281,7 +281,8 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
         2. **Autograd**: Inputs and outputs are detached at the leaf function boundary.
            The leaf function builds its own local autograd graph internally. Gradients
-           flow through via a custom backward that calls the real function's backward.
+           flow through this local autograd graph to leaf_function's explicit tensor or
+           nn.Module inputs.
 
         3. **Isolation**: The leaf function executes as isolated eager Python. Side effects
            don't cross the boundary between the compiled region and the leaf function
@@ -299,26 +300,18 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         consider using ``allow_in_graph`` or ``nonstrict_trace`` instead - AOT autograd
         can trace through them and potentially optimize the code.
 
-    leaf_function can be applied to:
-    - Standalone functions: pass modules/tensors as explicit arguments, called
-      from within a module's forward method.
-
     Providing fake_impl (required):
         Since the function body is not traced, a "fake implementation" (fake_impl) is
-        needed to tell the compiler about output shapes and dtypes. This is similar to
-        registering a fake implementation for custom ops. The fake_impl runs during
-        compilation with fake tensors (which have shapes/dtypes but no actual values)
-        and must return outputs with the same pytree structure, shapes, and dtypes as
-        the real function. Because fake_impl runs at compile time, the output signature
-        (pytree structure, shapes, and dtypes) must be known at compile time. If the
-        output signature cannot be determined, expand the leaf region until it becomes
-        known. Note: fake_impl may run multiple times during compilation; real_impl runs
-        once per call at runtime.
+        needed to tell the compiler about output shapes and dtypes. Provide it using the
+        ``@<func>.fake_impl`` decorator (e.g., ``@my_leaf_fn.fake_impl``).
 
-        An explicit fake_impl must be provided using the ``@<func>.fake_impl`` decorator,
-        where ``<func>`` is the decorated function name (e.g., ``@my_leaf_fn.fake_impl``).
-        The fake_impl should be a traceable function that returns outputs with the same
-        pytree structure, shapes, and dtypes as the real function.
+        The fake_impl must be traceable and return outputs with the same pytree structure,
+        shapes, and dtypes as the real function. Because it runs at compile time with
+        fake tensors, the output signature must be determinable at compile time. If not,
+        expand the function to include more code until outputs become predictable.
+
+        Note: fake_impl may run multiple times during compilation; real function runs
+        once per call at runtime.
 
         Output validation against the real function is disabled by default; set
         ``torch._dynamo.config.leaf_function_validate_outputs = True`` to enable.
@@ -356,35 +349,47 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
           Logging/printing inside the leaf function is fine since it doesn't affect
           correctness.
 
-        - **In-place mutations on inputs**: Inputs are detached before entering the
-          leaf function. In-place mutations won't be tracked by autograd and may
-          produce incorrect gradients.
+        - **In-place mutations on inputs**: In-place mutations on input tensors are
+          detected and will raise an error. Clone inputs before mutating them.
 
           Bad::
 
               @leaf_function
               def my_leaf_fn(x):
-                  x.add_(1)  # Gradients will be wrong
+                  x.add_(1)  # Will raise: "In-place mutation detected"
                   return (x,)
 
         - **Implicit inputs (closures/globals)**: Tensors or modules captured from
-          enclosing scopes will cause compilation errors by default. Pass them as
-          explicit arguments instead.
+          enclosing scopes in the fake_impl will cause compilation errors. The real
+          function can close over them, but the fake_impl must only use its arguments.
 
           Bad::
 
-              model = MyModel()  # defined at outer scope
+              weight = torch.randn(3, 3)
 
 
               @leaf_function
               def my_leaf_fn(x):
-                  return model(x)  # Fails: model not passed as argument
+                  return (x @ weight,)
+
+
+              @my_leaf_fn.fake_impl
+              def my_leaf_fn_fake(x):
+                  return (x @ weight,)  # Fails: weight used in fake_impl
 
           Good::
 
+              weight = torch.randn(3, 3)
+
+
               @leaf_function
-              def my_leaf_fn(model, x):
-                  return model(x)  # model passed as argument
+              def my_leaf_fn(x):
+                  return (x @ weight,)  # OK: real function can use closure
+
+
+              @my_leaf_fn.fake_impl
+              def my_leaf_fn_fake(x):
+                  return (x @ torch.empty_like(x),)  # OK: fake_impl uses only args
 
     Restrictions:
         - Inputs must use pytree-compatible types. User-defined classes must be
