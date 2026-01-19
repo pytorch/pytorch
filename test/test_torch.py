@@ -5982,7 +5982,7 @@ class TestTorchDeviceType(TestCase):
 
             opt_state = scaler._per_optimizer_states[id(opt)]
             opt_state["found_inf_per_device"] = scaler._unscale_grads_(
-               opt,
+                opt,
                 inv_scale=torch.tensor([1.0], device=device),
                 found_inf=found_inf,
                 allow_fp16=False,

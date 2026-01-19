@@ -625,7 +625,7 @@ class GradScaler:
 
     def stage(self, optimizer: torch.optim.Optimizer) -> OptState:
         r"""Return the current stage for the given optimizer. If the optimizer is not found, returns OptState.READY."""
-        return self._per_optimizer_states.get(id(optimizer), _refresh_per_optimizer_state()).get("stage")
+        return self._per_optimizer_states[id(optimizer)].get("stage")
 
     def state_dict(self) -> dict[str, Any]:
         r"""Return the state of the scaler as a :class:`dict`.
