@@ -185,6 +185,9 @@ void XPUGraph::enable_debug_mode() {
 }
 
 void XPUGraph::debug_dump(const std::string& debug_path) {
+  TORCH_CHECK(debug_path.size() >= 4 && debug_path.substr(debug_path.size() - 4) == ".dot",
+              "debug_path must end with .dot extension, got: ", debug_path);
+
   if (_xpu_graphs_debug || keep_graph_) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
