@@ -1731,6 +1731,7 @@ class TritonTemplate(KernelTemplate):
         assert name not in self.all_templates, "duplicate template name"
         TritonTemplate.all_templates[name] = self
         self.debug = debug
+        self.kernel_name_prefix = "triton_"
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_cache(self._generated_code_cache)
@@ -1828,7 +1829,8 @@ class TritonTemplate(KernelTemplate):
             defines.write(f"{name} : tl.constexpr = {val}\n")
 
         fake_out = ir.Buffer(name="buf_out", layout=layout)
-        kernel_name = f"triton_{self.name}"
+        kernel_name_prefix = getattr(self, "kernel_name_prefix", "triton_")
+        kernel_name = f"{kernel_name_prefix}{self.name}"
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
@@ -2075,7 +2077,8 @@ class TritonTemplate(KernelTemplate):
             hint_override=hint_override,
         )
 
-        kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
+        kernel_name_prefix = getattr(self, "kernel_name_prefix", "triton_")
+        kernel_hash_name = f"{kernel_name_prefix}{self.name}_{next(self.index_counter)}"
 
         workspace_args = []
         if workspace_arg is not None:
@@ -2133,7 +2136,7 @@ class TritonTemplate(KernelTemplate):
         bmreq = bmreq_cls(
             module_path=result.mod.__file__,
             module_cache_key=result.mod.key,
-            kernel_name=f"triton_{self.name}",
+            kernel_name=f"{kernel_name_prefix}{self.name}",
             extra_args=[*extra_args, *workspace_args, *grid],
             num_stages=num_stages,
             num_warps=num_warps,
@@ -4567,6 +4570,12 @@ def _autotune_metadata(input_nodes):
     }
 
 
+def _backend_for_choice(choice: ChoiceCaller) -> str:
+    if isinstance(choice, TritonTemplateCaller):
+        return str(choice.info_dict().get("backend", "Triton"))
+    return "extern"
+
+
 def _log_autotune_choices_stats(
     event_name: str, timings: dict[ChoiceCaller, float]
 ) -> None:
@@ -4574,11 +4583,19 @@ def _log_autotune_choices_stats(
     if not timings:
         return None
 
+    num_triton_choices = 0
+    num_gluon_choices = 0
+    for choice in timings:
+        backend = _backend_for_choice(choice).lower()
+        if backend == "triton":
+            num_triton_choices += 1
+        elif backend == "gluon":
+            num_gluon_choices += 1
+
     metadata: dict[str, Union[int, float, str]] = {
         "num_choices": len(timings),
-        "num_triton_choices": len(
-            [c for c in timings if isinstance(c, TritonTemplateCaller)]
-        ),
+        "num_triton_choices": num_triton_choices,
+        "num_gluon_choices": num_gluon_choices,
     }
 
     sorted_choices = sorted(timings, key=timings.__getitem__)
@@ -4588,14 +4605,14 @@ def _log_autotune_choices_stats(
         metadata["best_kernel_desc"] = best_choice.description
     metadata["best_time"] = timings[best_choice]
 
-    best_triton_pos = next(
-        (
-            i
-            for i, choice in enumerate(sorted_choices)
-            if isinstance(choice, TritonTemplateCaller)
-        ),
-        None,
-    )
+    def _first_backend_pos(backend_name: str) -> int | None:
+        for i, choice in enumerate(sorted_choices):
+            if isinstance(choice, TritonTemplateCaller):
+                if _backend_for_choice(choice).lower() == backend_name:
+                    return i
+        return None
+
+    best_triton_pos = _first_backend_pos("triton")
     if best_triton_pos is not None:
         metadata["best_triton_pos"] = best_triton_pos
         best_triton_kernel = sorted_choices[best_triton_pos]
@@ -4604,6 +4621,16 @@ def _log_autotune_choices_stats(
             metadata["best_triton_kernel"] = best_triton_kernel.name
             if best_triton_kernel.description:
                 metadata["best_triton_kernel_desc"] = best_triton_kernel.description
+
+    best_gluon_pos = _first_backend_pos("gluon")
+    if best_gluon_pos is not None:
+        metadata["best_gluon_pos"] = best_gluon_pos
+        best_gluon_kernel = sorted_choices[best_gluon_pos]
+        if best_gluon_pos != 0:
+            metadata["best_gluon_time"] = timings[best_gluon_kernel]
+            metadata["best_gluon_kernel"] = best_gluon_kernel.name
+            if best_gluon_kernel.description:
+                metadata["best_gluon_kernel_desc"] = best_gluon_kernel.description
 
     payload = json.dumps(metadata)
     get_chromium_event_logger().add_event_data(
@@ -4631,11 +4658,8 @@ def _log_autotune_exceptions(
         exception_details = []
         for choice, exc in exceptions:
             try:
-                choice_type = (
-                    "triton" if isinstance(choice, TritonTemplateCaller) else "other"
-                )
                 data = {
-                    "choice_type": choice_type,
+                    "choice_type": _backend_for_choice(choice).lower(),
                     "choice": choice.description,
                     "exception_message": str(exc),
                 }

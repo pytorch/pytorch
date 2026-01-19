@@ -196,6 +196,7 @@ class GluonTemplate(KernelTemplate):
             source=self.source,
             debug=self.debug,
         )
+        self._triton_template.kernel_name_prefix = ""
         # Override the kernel_type for this specific instance
         self._triton_template.kernel_type = GluonTemplateKernel
 
@@ -267,4 +268,6 @@ class GluonTemplate(KernelTemplate):
             workspace_arg=None,
             **kwargs,
         )
+        if result is not None:
+            result.log_info["backend"] = "Gluon"
         return result
