@@ -1663,6 +1663,8 @@ class GraphLowering(torch.fx.Interpreter):
             maybe_propagate(schema_arg, old_arg, new_arg)
 
     def run_node(self, n: torch.fx.Node) -> object:
+        """Lower and execute a single FX node into Inductor IR."""
+
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
