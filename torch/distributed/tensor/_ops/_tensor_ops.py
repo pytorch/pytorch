@@ -21,6 +21,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
     register_single_dim_strategy,
@@ -1326,6 +1327,7 @@ def cdist_single_dim_strategy(
     - S(1), R -> S(1) (x1 rows sharded, output rows sharded)
     - R, S(1) -> S(2) (x2 rows sharded, output cols sharded)
     - P(sum), P(sum) -> P(sum) (bilinear-like for distance)
+    - S(D), S(D) -> _NormPartial(2) (feature dim sharding with norm reduction)
     """
     x1_meta = args_schema[0]
     x2_meta = args_schema[1]
@@ -1380,6 +1382,19 @@ def cdist_single_dim_strategy(
             Partial(),  # output
             Partial(),  # x1
             Partial(),  # x2
+        ]
+    )
+
+    # Strategy 5: S(D), S(D) -> _NormPartial(2)
+    # Feature dimension sharding: each rank computes partial Euclidean distance
+    # over its subset of features. _NormPartial(2) handles the reduction:
+    # partial_norm^2 -> sum across ranks -> sqrt
+    d_dim = x1_ndim - 1  # Feature dim (last dim)
+    single_dim_strategies.append(
+        [
+            _NormPartial(2),  # output: partial 2-norm needs special reduction
+            Shard(d_dim),  # x1 sharded on feature dim
+            Shard(d_dim),  # x2 sharded on feature dim
         ]
     )
 

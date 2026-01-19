@@ -102,6 +102,19 @@ class DistTensorOpsTest(DTensorTestBase):
 
         self.assertEqual(result_dt.full_tensor(), expected)
 
+        # Test S(2), S(2) -> _NormPartial(2) strategy (feature dim sharding)
+        # Each rank computes partial Euclidean distance over its features
+        from torch.distributed.tensor._ops._math_ops import _NormPartial
+
+        x1_dt = distribute_tensor(x1.clone(), mesh, [Shard(2)])
+        x2_dt = distribute_tensor(x2.clone(), mesh, [Shard(2)])
+
+        result_dt = torch.cdist(x1_dt, x2_dt)
+        self.assertIsInstance(result_dt.placements[0], _NormPartial)
+        self.assertEqual(result_dt.placements[0].norm_type, 2)
+
+        self.assertEqual(result_dt.full_tensor(), expected)
+
     @with_comms
     def test_copy_(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
