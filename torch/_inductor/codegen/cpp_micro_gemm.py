@@ -26,7 +26,7 @@ from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate, BracesBuffer
 from .cpp_template_kernel import CppTemplateKernel
-from .cpp_utils import DTYPE_TO_CPP, GemmBlocking, value_to_cpp
+from .cpp_utils import DTYPE_TO_CPP, GemmBlocking, INDEX_TYPE, value_to_cpp
 
 from ..lowering import view
 
@@ -1643,8 +1643,10 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
         if epilogue_nodes:
             def declare_kernel_hook():
                 res = IndentedBuffer(initial_indent=1)
-                res.writeline("int64_t N_epi,")
+                res.writeline(f"{INDEX_TYPE} N_epi,")
                 for input_name in get_kernel_input_names(epilogue_nodes):
+                    if input_name in V.graph.removed_buffers:
+                        continue
                     arg_name = kernel.args.input(input_name)
                     arg = V.graph.get_buffer(input_name)
                     res.writeline(f"const {DTYPE_TO_CPP[arg.get_dtype()]}* {arg_name},")
@@ -1654,6 +1656,8 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
             def update_pre_ptrs_main_hook():
                 res = IndentedBuffer(initial_indent=4)
                 for input_name in get_kernel_input_names(epilogue_nodes):
+                    if input_name in V.graph.removed_buffers:
+                        continue
                     arg_name = kernel.args.input(input_name)
                     arg = V.graph.get_buffer(input_name)
                     if len(arg.get_size()) == 1:
@@ -1669,6 +1673,8 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
             def update_pre_ptrs_tail_hook():
                 res = IndentedBuffer(initial_indent=4)
                 for input_name in get_kernel_input_names(epilogue_nodes):
+                    if input_name in V.graph.removed_buffers:
+                        continue
                     arg_name = kernel.args.input(input_name)
                     arg = V.graph.get_buffer(input_name)
                     if len(arg.get_size()) == 1:
@@ -1684,6 +1690,8 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
             def pre_args_hook():
                 res = IndentedBuffer(initial_indent=5)
                 for input_name in get_kernel_input_names(epilogue_nodes):
+                    if input_name in V.graph.removed_buffers:
+                        continue
                     arg_name = kernel.args.input(input_name)
                     arg = V.graph.get_buffer(input_name)
                     if len(arg.get_size()) == 1:
@@ -1699,13 +1707,12 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
             def declare_pre_ptrs_hook():
                 assert epilogue_nodes is not None
                 res = IndentedBuffer(initial_indent=1)
-                for node in epilogue_nodes:
-                    rws = node.get_read_writes()
-                    for rd in rws.reads:
-                        if 'GemmOut' not in rd.name:
-                            arg_name = kernel.args.input(rd.name)
-                            arg = V.graph.get_buffer(rd.name)
-                            res.writeline(f"const {DTYPE_TO_CPP[arg.get_dtype()]}* {arg_name}_pre = nullptr;")
+                for input_name in get_kernel_input_names(epilogue_nodes):
+                    if input_name in V.graph.removed_buffers:
+                        continue
+                    arg_name = kernel.args.input(input_name)
+                    arg = V.graph.get_buffer(input_name)
+                    res.writeline(f"const {DTYPE_TO_CPP[arg.get_dtype()]}* {arg_name}_pre = nullptr;")
                 return res.getvalue().rstrip("\n")
 
             def epilogue_store_hook(parallel_amx_avx:bool = False, is_main:bool = False):
@@ -1715,6 +1722,8 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
                 if not parallel_amx_avx:
                     for i, line in enumerate(res._lines):
                         for input_name in get_kernel_input_names(epilogue_nodes):
+                            if input_name in V.graph.removed_buffers:
+                                continue
                             arg_name = kernel.args.input(input_name)
                             if arg_name in line:
                                 res._lines[i] = line.replace(arg_name, f"{arg_name}_pre")
@@ -1843,9 +1852,11 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
         def arg_hook():
             assert offsets is not None
             hook_res = IndentedBuffer()
-            hook_res.writeline("N_epi,")
+            hook_res.writeline(f"static_cast<{INDEX_TYPE}>(N_epi),")
             hook_res.do_indent(8)
             for input_name in get_kernel_input_names(epilogue_nodes):
+                if input_name in V.graph.removed_buffers:
+                    continue
                 if input_name in self.fake_buffers_name:
                     arg = next(
                         (buf for buf in (self.fake_buffers or []) if buf.get_name() == input_name),
