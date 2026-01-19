@@ -444,11 +444,7 @@ class ReduceMod(torch.nn.Module):
         return self._reduce(*operands)
 
 
-if torch.accelerator.is_available():
-    DEVICE_TYPE = torch.accelerator.current_accelerator().type
-else:
-    # use cuda as default device type for testing when accelerator is not available
-    DEVICE_TYPE = "cpu"
+DEVICE_TYPE= acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
