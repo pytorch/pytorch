@@ -640,7 +640,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
       }
     }
   }
-  if ((output_mask[1] || output_mask[2]) && grad_weight.defined()) {
+  if (output_mask[1]) {
     TensorArg grad_output_t{grad_output, "grad_output", 1},
         weight_t{weight, "weight", 2};
     checkAllSameType(c, {grad_output_t, weight_t});
