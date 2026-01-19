@@ -935,14 +935,17 @@ endif()
 
 if(USE_ROCM)
   filter_list(__caffe2_hip_srcs_cpp Caffe2_HIP_SRCS "\\.(cu|hip)$")
-  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  set_source_files_properties(${__caffe2_hip_srcs_cpp} PROPERTIES LANGUAGE HIP)
 endif()
 
 # Compile exposed libraries.
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
-  hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
+  add_library(torch_hip ${Caffe2_HIP_SRCS})
+
+  # Set HIP architectures
+  set_target_properties(torch_hip PROPERTIES HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}")
   if(USE_FLASH_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
   endif()
@@ -1769,9 +1772,6 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS "-fms-extensions")
   endif()
 
-  # Call again since Caffe2_HIP_INCLUDE is extended with ATen include dirs.
-  hip_include_directories(${Caffe2_HIP_INCLUDE})
-
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
 
@@ -1983,25 +1983,26 @@ if(BUILD_TEST)
   endif()
 
   if(USE_ROCM)
-    set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
       get_filename_component(test_name ${test_src} NAME_WE)
+
+      # Mark HIP sources
       if(test_src MATCHES "^.*\.hip$")
-        # Solves bug with hip_add_executable propagating flags from the previous tests
-        set(HIP_HIPCC_FLAGS ${BASE_HIPCC_FLAGS})
-        set_source_files_properties(${test_src} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-        hip_add_executable(${test_name} "${test_src}")
-        list(JOIN PYTORCH_ROCM_ARCH " " ROCM_PROPERTY_ARCH_LIST)
-        set_target_properties(${test_name} PROPERTIES HIP_ARCHITECTURES ${ROCM_PROPERTY_ARCH_LIST})
-      else()
-        add_executable(${test_name} "${test_src}")
+        set_source_files_properties(${test_src} PROPERTIES LANGUAGE HIP)
       endif()
+
+      add_executable(${test_name} "${test_src}")
+
+      # Set HIP architectures for HIP tests
       if(test_src MATCHES "^.*\.hip$")
-        set_target_properties(${test_name} PROPERTIES LINKER_LANGUAGE CXX)
+        set_target_properties(${test_name} PROPERTIES
+          HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}"
+          LINKER_LANGUAGE CXX)
       endif()
+
       target_link_libraries(${test_name} torch_library gtest_main)
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
-      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
+      target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       target_compile_options(${test_name} PRIVATE ${HIP_CXX_FLAGS})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       if(INSTALL_TEST)
