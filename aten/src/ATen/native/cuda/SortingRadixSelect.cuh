@@ -395,7 +395,6 @@ __device__ __forceinline__ scalar_t findPatternLoop(
     bitwise_t desiredMask, // combined with desired to filter relevant elements. An element is relevant if ((val & desiredMask) == desired).
     index_t loopBound, // the upper bound of the loop.
     DataAccessor&& getData){ // a function that returns the input data value at index i.
-  
 
   for (index_t i = threadIdx.x; i < round_up(loopBound, static_cast<index_t>(blockDim.x)); i += blockDim.x) {
     bool inRange = (i < loopBound);
@@ -463,7 +462,7 @@ __device__ scalar_t findPatternDataSmem(
 // if dataSmemSize > 0, the shared memory is already filled, so we return.
 // otherwise we check if the input data is small enough to fit into shared memory.
 // if it is, all the data is put into shared memory. If not, but dataSizeRemaining <= dataSmemCap,
-// it means that the data has been filtered (through having (val & desiredMask) == desired) so much 
+// it means that the data has been filtered (through having (val & desiredMask) == desired) so much
 // that it fits into the shared memory. So we put the filtered data into shared memory.
 template <typename scalar_t, typename bitwise_t, typename index_t>
 __device__ __forceinline__ void fillDataSmem(
@@ -478,11 +477,11 @@ __device__ __forceinline__ void fillDataSmem(
     bitwise_t desiredMask, // combined with desired to filter relevant elements. An element is relevant if ((val & desiredMask) == desired).
     int& DataSmemWriteIndex // index used to write data to dataSmem. Incremented atomically.
     ) {
-  
+
   if (dataSmemSize > 0) return; // already filled
-  
+
   if (sliceSize <= dataSmemCap){ // if the input data is small enough, put all of it into shared memory.
-    
+
     // reading from global memory. Prefetching to improve performance.
     scalar_t v = static_cast<scalar_t>(0);
     if (threadIdx.x < sliceSize) v = doLdg(&data[threadIdx.x * withinSliceStride]);
@@ -504,10 +503,10 @@ __device__ __forceinline__ void fillDataSmem(
     // Then reserves slots in dataSmem for the matching elements by atomically incrementing DataSmemWriteIndex.
     // Finally, each thread within the warp writes its value to the appropriate slot in dataSmem.
     // This is done to minimize the amount of time each warp spends waiting for others.
-    
+
     int lane_id = at::cuda::getLaneId(); // = threadIdx.x % WARP_SIZE
-  
-    for (index_t i = threadIdx.x; i < round_up(static_cast<index_t>(sliceSize), static_cast<index_t>(warpSize)); i += blockDim.x) {        
+
+    for (index_t i = threadIdx.x; i < round_up(static_cast<index_t>(sliceSize), static_cast<index_t>(warpSize)); i += blockDim.x) {
       scalar_t v = static_cast<scalar_t>(0);
       bool match = false;
       if (i < sliceSize) {
@@ -518,7 +517,7 @@ __device__ __forceinline__ void fillDataSmem(
       // Warp-level ballot
       uint64_t ballot = WARP_BALLOT(match); // what threads in this warp match the desired pattern?
       int warp_count = __popcll(ballot); // how many threads in this warp match the desired pattern?
-  
+
       int warp_base = 0;
       if (lane_id == 0 && warp_count > 0) {
         warp_base = atomicAdd(&DataSmemWriteIndex, warp_count); // reserve warp_count slots in dataSmem for this warp, and get the base index.
@@ -563,7 +562,7 @@ __device__ void radixSelect(
   // dataSmem is used to store the relavant data.
   constexpr index_t DATA_SMEM_BYTES = 3 * 1024; // 3KB is a good compromise between memory usage and performance.
   constexpr index_t dataSmemCap = DATA_SMEM_BYTES / sizeof(scalar_t); // max number of elements that can be stored in dataSmem.
-  __shared__ scalar_t dataSmem[dataSmemCap]; 
+  __shared__ scalar_t dataSmem[dataSmemCap];
   __shared__ index_t dataSmemSize;  // actual number of elements in dataSmem.
   __shared__ index_t dataSizeRemaining; // number of relevant elements remaining. We put data on dataSmem once dataSizeRemaining <= dataSmemCap.
   __shared__ int DataSmemWriteIndex; // index used to write data to dataSmem.
