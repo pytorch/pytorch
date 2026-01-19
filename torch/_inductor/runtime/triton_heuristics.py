@@ -35,6 +35,7 @@ from torch._environment import is_fbcode
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
+from ..codecache import LambdaFuture
 from ..triton_bundler import TritonBundler
 from ..utils import prefix_is_reduction, triton_version_uses_attrs_dict
 from . import triton_helpers
@@ -106,8 +107,134 @@ _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
 
+_coordesc_subproc_lock = threading.Lock()
+_coordesc_subproc: Any | None = None
+_coordesc_subproc_uses = 0
+
+
+def _shutdown_coordesc_subproc_locked() -> None:
+    global _coordesc_subproc, _coordesc_subproc_uses
+    if _coordesc_subproc is None:
+        _coordesc_subproc_uses = 0
+        return
+    try:
+        if _coordesc_subproc.alive():
+            _coordesc_subproc.shutdown(wait=False)
+        deadline = time.time() + 5.0
+        while _coordesc_subproc.alive() and time.time() < deadline:
+            time.sleep(0.05)
+        if _coordesc_subproc.alive():
+            _coordesc_subproc.kill()
+    except Exception:
+        _coordesc_subproc.kill()
+    finally:
+        _coordesc_subproc = None
+        _coordesc_subproc_uses = 0
+
+
+def _get_coordesc_subproc_locked() -> Any:
+    global _coordesc_subproc
+    if _coordesc_subproc is None or not _coordesc_subproc.alive():
+        _shutdown_coordesc_subproc_locked()
+        from torch._inductor.autotune_process import TuningProcess
+        _coordesc_subproc = TuningProcess(device=None)
+    return _coordesc_subproc
+
 triton_name_sub = re.compile(r"^def [^(]+\(")
 
+def _pack_coordesc_arg(arg: Any) -> Any:
+    from torch._inductor.autotune_process import TensorMeta
+
+    if isinstance(arg, torch.Tensor):
+        return TensorMeta(
+            device=arg.device,
+            dtype=arg.dtype,
+            sizes=arg.size(),
+            strides=arg.stride(),
+            offset=arg.storage_offset(),
+        )
+    if isinstance(arg, (list, tuple)):
+        packed = [_pack_coordesc_arg(item) for item in arg]
+        return type(arg)(packed)
+    if isinstance(arg, dict):
+        return {key: _pack_coordesc_arg(val) for key, val in arg.items()}
+    if hasattr(torch, "SymInt") and isinstance(arg, torch.SymInt):
+        return int(arg)
+    if type(arg).__module__.startswith("sympy") and hasattr(arg, "__int__"):
+        try:
+            return int(arg)
+        except Exception:
+            pass
+    return arg
+
+
+def _unpack_coordesc_arg(arg: Any) -> Any:
+    from torch._inductor.autotune_process import TensorMeta
+
+    if isinstance(arg, TensorMeta):
+        return arg.to_tensor()
+    if isinstance(arg, (list, tuple)):
+        unpacked = [_unpack_coordesc_arg(item) for item in arg]
+        return type(arg)(unpacked)
+    if isinstance(arg, dict):
+        return {key: _unpack_coordesc_arg(val) for key, val in arg.items()}
+    return arg
+
+
+@dataclasses.dataclass
+class CoordescSubprocessRequest:
+    module_path: str
+    kernel_name: str
+    baseline_config: dict[str, Any]
+    args: list[Any]
+    kwargs: dict[str, Any]
+    device_index: int
+    device_type: str
+
+    def __call__(self) -> tuple[dict[str, Any], int]:
+        import os
+        from torch._inductor.codecache import PyCodeCache
+
+        if self.device_type in ("cuda", "hip"):
+            torch.cuda.set_device(self.device_index)
+
+        module_key = os.path.splitext(os.path.basename(self.module_path))[0]
+        mod = PyCodeCache.load_by_key_path(module_key, self.module_path)
+        kernel = getattr(mod, self.kernel_name, None)
+        if kernel is None:
+            available = [name for name in dir(mod) if callable(getattr(mod, name))]
+            raise RuntimeError(
+                f"Could not find kernel '{self.kernel_name}' in module {self.module_path}. "
+                f"Available callables: {available}"
+            )
+
+        if isinstance(kernel, LambdaFuture):
+            kernel = kernel.result()
+
+        if not isinstance(kernel, CachingAutotuner):
+            raise RuntimeError(
+                f"Expected CachingAutotuner for '{self.kernel_name}', got {type(kernel)}"
+            )
+
+        baseline_config = config_from_dict(self.baseline_config)
+        args = [_unpack_coordesc_arg(arg) for arg in self.args]
+        kwargs = {k: _unpack_coordesc_arg(v) for k, v in self.kwargs.items()}
+
+        bench_count = 0
+
+        def benchmark_one_config(cfg):
+            nonlocal bench_count
+            with kernel.lock:
+                compile_result = kernel._precompile_config(cfg)
+                launcher = compile_result.make_launcher()
+            result = kernel.bench(launcher, *args, **kwargs)
+            bench_count += 1
+            return result
+
+        best_config = kernel.coordesc_tuner.autotune(
+            benchmark_one_config, baseline_config, None
+        )
+        return config_to_dict(best_config), bench_count
 
 def generate_lookup_hash_from_source_code(size_hints_str: str, source_code: str) -> str:
     # Name agnostic + strip white space
@@ -1153,6 +1280,79 @@ class CachingAutotuner(KernelInterface):
         ):
             return self._coordinate_descent_tuning(launcher, *args, **kwargs)
 
+    def _coordinate_descent_tuning_subproc(self, launcher, *args, **kwargs):
+        module_path = self.filename
+        if module_path is None or not os.path.exists(module_path):
+            raise RuntimeError(
+                "Coordinate descent subprocess requires a valid kernel module path."
+            )
+        if self.fn is None:
+            raise RuntimeError("Coordinate descent subprocess missing kernel function.")
+
+        kernel_name = self.fn.__name__
+        packed_args = [_pack_coordesc_arg(arg) for arg in args]
+        packed_kwargs = {k: _pack_coordesc_arg(v) for k, v in kwargs.items()}
+        request = CoordescSubprocessRequest(
+            module_path=module_path,
+            kernel_name=kernel_name,
+            baseline_config=config_to_dict(launcher.config),
+            args=packed_args,
+            kwargs=packed_kwargs,
+            device_index=self.device_props.index,
+            device_type=self.device_props.type,
+        )
+
+        from torch._inductor import config as inductor_config
+
+        start_time = time.time_ns()
+        batch_size = max(1, inductor_config.coordinate_descent_subproc_batch_size)
+        with _coordesc_subproc_lock:
+            process = _get_coordesc_subproc_locked()
+            try:
+                process.put(request)
+                best_config_dict, bench_count = process.get(
+                    inductor_config.coordinate_descent_subproc_timeout_seconds
+                )
+            except Exception as e:
+                _shutdown_coordesc_subproc_locked()
+                raise RuntimeError(
+                    "Coordinate descent subprocess failed; aborting to avoid HIP module "
+                    "exhaustion."
+                ) from e
+            finally:
+                global _coordesc_subproc_uses
+                _coordesc_subproc_uses += 1
+                if _coordesc_subproc_uses >= batch_size:
+                    _shutdown_coordesc_subproc_locked()
+
+        coordesc_time_taken_ns = time.time_ns() - start_time
+        best_config = config_from_dict(best_config_dict)
+        best_config.found_by_coordesc = True
+
+        if bench_count:
+            from torch._dynamo.utils import counters
+            counters["inductor"]["coordesc_tuning_bench"] += bench_count
+
+        if self.save_cache_hook:
+            self.save_cache_hook(
+                best_config,
+                self.autotune_time_taken_ns + coordesc_time_taken_ns,
+                found_by_coordesc=True,
+            )
+
+        if triton_config_to_hashable(best_config) == triton_config_to_hashable(
+            launcher.config
+        ):
+            launcher.config.found_by_coordesc = True
+            return launcher
+
+        launcher = self._precompile_config(best_config).make_launcher()
+        fn_hash = generate_lookup_hash_from_source_code(
+            str(self.size_hints), self.fn.src
+        )
+        log.debug("Function hash %s has best config %s", fn_hash, best_config)
+        return launcher
+
     def _coordinate_descent_tuning(self, launcher, *args, **kwargs):
         config2launcher = {launcher.config: launcher}
 
@@ -1166,6 +1366,12 @@ class CachingAutotuner(KernelInterface):
             assert hasattr(self, "_reload_kernel")
             assert callable(self._reload_kernel)
             self.fn = self._reload_kernel().fn
+        
+        if (
+                torch._inductor.config.coordinate_descent_in_subproc
+                and self.device_props.type == "hip"
+            ):
+            return self._coordinate_descent_tuning_subproc(launcher, *args, **kwargs)
 
         def benchmark_one_config(config):
             with self.lock:

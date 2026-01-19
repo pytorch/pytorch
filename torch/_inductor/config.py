@@ -559,6 +559,22 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
+# Run coordinate descent tuning in a subprocess (ROCm only).
+_coordesc_subproc_env = os.environ.get("TORCHINDUCTOR_COORDESC_IN_SUBPROC")
+coordinate_descent_in_subproc = bool(
+    torch.version.hip
+    and (_coordesc_subproc_env == "1" or _coordesc_subproc_env is None)
+)
+# Timeout for a single coordinate descent tuning subprocess run.
+coordinate_descent_subproc_timeout_seconds = float(
+    os.environ.get("TORCHINDUCTOR_COORDESC_SUBPROC_TIMEOUT_SECONDS", "1200")
+)
+# Number of coordinate-descent runs to reuse a subprocess before recycling it.
+# Set to 1 to disable batching (most conservative for HIP module limits).
+coordinate_descent_subproc_batch_size = int(
+    os.environ.get("TORCHINDUCTOR_COORDESC_SUBPROC_BATCH_SIZE", "1")
+)
+
 # AutoHeuristic is a framework that allows one to collect data from autotuning, use the data to learn a heuristic, and
 # generate the learned heuristic to code which is shipped with the compiler
 # Specify a list of comma separated optimizations to collect data for
