@@ -357,7 +357,16 @@ if torch.backends.mps.is_available():
             "nn.functional.norm": None,
             "ormqr": None,
             "pca_lowrank": None,
+            "pow": [torch.bool],
             "qr": None,
+            "remainder": [torch.bool],
+            "rounddecimals_0": [
+                torch.uint8,
+                torch.int8,
+                torch.int64,
+                torch.int32,
+                torch.int16,
+            ],
             "scatter_reduceamax": [torch.int32, torch.int64]
             if MACOS_VERSION < 15.0
             else [torch.int64],
@@ -381,11 +390,21 @@ if torch.backends.mps.is_available():
             "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
             "special.ndtri": None,
+            "stft": [torch.float16, torch.bfloat16],
             "svd_lowrank": None,
             "symeig": None,
             "take": None,
             "to": None,
+            "trunc": [torch.bool],
             "vdot": None,
+            "var_meanunbiased": [
+                torch.uint8,
+                torch.int8,
+                torch.int32,
+                torch.int16,
+                torch.bool,
+            ],
+            "var_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
