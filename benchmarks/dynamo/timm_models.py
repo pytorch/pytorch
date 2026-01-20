@@ -316,7 +316,7 @@ class TimmRunner(BenchmarkRunner):
         else:
             model.eval()
 
-        self.validate_model(model, example_inputs)
+        self.validate_model(model_name, model, example_inputs)
 
         return device, model_name, model, example_inputs, batch_size
 
