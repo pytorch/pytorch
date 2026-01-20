@@ -815,8 +815,8 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
   iterator insert_one_impl(iterator I, ArgType&& Elt) {
     // Callers ensure that ArgType is derived from T.
     static_assert(
-        std::is_same<std::remove_const_t<std::remove_reference_t<ArgType>>, T>::
-            value,
+        std::
+            is_same_v<std::remove_const_t<std::remove_reference_t<ArgType>>, T>,
         "ArgType must be derived from T!");
 
     if (I == this->end()) { // Important special case for empty vector.
@@ -1412,13 +1412,13 @@ inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
 template <typename T, unsigned N>
 std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   int i = 0;
-  out << "[";
+  out << '[';
   for (auto e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
   }
-  out << "]";
+  out << ']';
   return out;
 }
 

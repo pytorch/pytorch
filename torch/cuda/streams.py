@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
 import ctypes
 
 import torch

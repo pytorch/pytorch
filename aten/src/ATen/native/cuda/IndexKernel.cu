@@ -323,7 +323,7 @@ void cuda_take_put_kernel(
   const auto offset_calc = make_offset_calculator<2>(iter);
   using uindex_t = std::make_unsigned_t<index_t>;
 
-  // OffsetCalculator needs the sizes and strides reveresed
+  // OffsetCalculator needs the sizes and strides reversed
   const auto indexed_sizes = std::vector<int64_t>(indexed.sizes().rbegin(), indexed.sizes().rend());
   const auto indexed_strides = std::vector<int64_t>(indexed.strides().rbegin(), indexed.strides().rend());
   const auto* indexed_strides_data = indexed_strides.data();

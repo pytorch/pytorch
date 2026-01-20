@@ -84,7 +84,7 @@ class TestDecomposeMemMM(TestCase):
         self.setup_tolerance(rtol, atol)
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
-        for key1 in ref_dict.keys():
+        for key1 in ref_dict:
             key2 = "_orig_mod." + key1
             assert key2 in res_dict, f"{key1} does not exist in traced module"
             if not torch.allclose(

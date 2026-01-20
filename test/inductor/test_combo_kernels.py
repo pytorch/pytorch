@@ -7,6 +7,7 @@ import unittest
 import torch
 import torch._inductor
 from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TestCase,
@@ -159,6 +160,74 @@ class ComboKernelTests(TestCase):
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_gpu_and_triton
+    def test_persistent_reduction_size_hint(self):
+        def fn(x, y):
+            return x.max(1), y.min(1)
+
+        inps = (
+            torch.rand(768, 16, device=GPU_TYPE),
+            torch.rand(768, 32, device=GPU_TYPE),
+        )
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        FileCheck().check("triton_heuristics.persistent_reduction").check(
+            "size_hints={'x': 1024, 'r0_': 32}"
+        ).run(code[0])
+        self.assertEqual(out_eager, out_compiled)
+
+    @requires_gpu_and_triton
+    def test_fuse_mix_order_reductions_combo_kernels(self):
+        def fn(x, y, z):
+            # FusedMixOrderReductions produces row_sum (buf0)
+            row_sum = x.sum(dim=1)
+            col_sum = x.sum(dim=0)
+
+            # consumer of row_sum - excluded from combo kernels
+            row_sum_reduced = row_sum.sum()  # reads buf0
+
+            # independent reductions - combo-kerneled
+            y_sum = y.sum()
+            z_sum = z.sum()
+
+            return row_sum_reduced, col_sum, y_sum, z_sum
+
+        inps = [
+            torch.rand(8192, 1024, device=GPU_TYPE),
+            torch.rand(2048, device=GPU_TYPE),
+            torch.rand(2048, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled)
+        # [row_sum, col_sum] will became 1 kernel MixOrderReductionGrid
+        # [row_sum_reduced] will become a separate kernel due to the consumer
+        # [y_sum, z_sum] will become a combo kernel
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+
+    @requires_gpu_and_triton
+    def test_combo_kernel_scalar_store_broadcast(self):
+        def fn(a, b, c, d):
+            scalar_sum = a + b
+            vector_result = c.sum(dim=1)
+            scalar_red = (d * scalar_sum).sum()
+            return scalar_sum, vector_result, scalar_red
+
+        inps = [
+            torch.tensor(1.0, device=GPU_TYPE),
+            torch.tensor(2.0, device=GPU_TYPE),
+            torch.randn(2048, 2048, device=GPU_TYPE),
+            torch.randn(2048, 1, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 @instantiate_parametrized_tests

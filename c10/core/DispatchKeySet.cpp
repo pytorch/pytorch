@@ -176,7 +176,7 @@ std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
     os << k;
     first = false;
   }
-  os << ")";
+  os << ')';
   return os;
 }
 

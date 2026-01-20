@@ -2788,7 +2788,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 )
 
             def forward(self, x):
-                for activation_name in self.activations.keys():
+                for activation_name in self.activations:
                     x = self.activations[activation_name](x)
                 return x
 
@@ -3117,6 +3117,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertFalse(hasattr(compiled_model, "foo"))
 
     def test_globals_change_in_other_file(self):
+        global _variable, _variable1
+
+        prev_variable = _variable
+        prev_variable1 = _variable1
+        prev_test_functions_variable = test_functions._variable
+
+        def restore_globals():
+            global _variable, _variable1
+            _variable = prev_variable
+            _variable1 = prev_variable1
+            test_functions._variable = prev_test_functions_variable
+
+        self.addCleanup(restore_globals)
+
+        _variable = 0
+        _variable1 = 0
+        test_functions._variable = 0
+
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             # Let `update_global` get invoked in a nested frame, to make sure
@@ -3365,7 +3383,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
             def __bool__(self):
                 self.bool_invoked += 1
-                return len(self.key_cache)
+                # __bool__ must return a real bool; use truthiness of cache size
+                return len(self.key_cache) > 0
 
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):

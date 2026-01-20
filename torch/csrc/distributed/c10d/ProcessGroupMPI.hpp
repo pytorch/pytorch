@@ -249,7 +249,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
       const std::optional<std::vector<at::Tensor>>& inputTensors =
           std::nullopt);
 
-  bool stop_;
+  bool stop_{false};
 
   std::mutex pgMutex_;
   std::thread workerThread_;
