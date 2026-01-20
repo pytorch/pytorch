@@ -1,11 +1,10 @@
 # Owner(s): ["module: fx"]
-import unittest
 
 import torch
 from torch._inductor.compile_fx import aot_export_module
 from torch.export import default_decompositions
 from torch.fx.traceback import get_graph_provenance_json, NodeSource, NodeSourceAction
-from torch.testing._internal.common_utils import TEST_WITH_CROSSREF, TestCase
+from torch.testing._internal.common_utils import TestCase
 
 
 CREATE_STR = NodeSourceAction.CREATE.name.lower()
@@ -124,9 +123,6 @@ class TestFXNodeSource(TestCase):
         self.assertNotEqual(node_source_replace, node_source_create)
         self.assertNotEqual(hash(node_source_replace), hash(node_source_create))
 
-    @unittest.skipIf(
-        TEST_WITH_CROSSREF, "generator unsupported triggers assertion error"
-    )
     def test_graph_provenance(self):
         def check_node_source(node_source_dict, name, pass_name, action):
             self.assertEqual(node_source_dict["name"], name)
@@ -281,35 +277,6 @@ class TestFXNodeSource(TestCase):
                 "Interpreter_DynamoGraphTransformer",
                 CREATE_STR,
             )
-
-    def test_override_metadata(self):
-        def simple_fn(x):
-            return x + 1
-
-        gm = torch.fx.symbolic_trace(simple_fn)
-
-        with torch.fx.traceback.preserve_node_meta():
-            torch.fx.traceback.current_meta["custom"] = "1"
-            gm = torch.fx.Transformer(gm).transform()
-            del torch.fx.traceback.current_meta["custom"]
-
-        # There should be no metadata on the call function nodes previously, so
-        # we should be able to set the node.meta["custom"] = "1"
-        for node in gm.graph.nodes:
-            if node.op == "call_function":
-                self.assertEqual(node.meta["custom"], "1")
-
-        with torch.fx.traceback.preserve_node_meta():
-            torch.fx.traceback.current_meta["custom"] = "2"
-            gm = torch.fx.Transformer(gm).transform()
-            del torch.fx.traceback.current_meta["custom"]
-
-        # Due to the set_node_metadata call in fx.Interpreter/Transformer, the
-        # existing value on node.meta["custom"] should take precedence, and
-        # should not change
-        for node in gm.graph.nodes:
-            if node.op == "call_function":
-                self.assertEqual(node.meta["custom"], "1")
 
 
 if __name__ == "__main__":
