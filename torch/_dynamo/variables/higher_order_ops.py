@@ -5281,6 +5281,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             in_grad_placements,
             device_mesh,
             redistribute_inputs,
+            track_variant_dims,
             *user_args,
         ) = args
 

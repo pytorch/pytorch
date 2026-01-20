@@ -14,6 +14,7 @@ from torch.distributed.tensor._api import (
     randn,
     zeros,
 )
+from torch.distributed.tensor._ltensor import LTensor
 from torch.distributed.tensor.placement_types import (
     Partial,
     Placement,
@@ -33,6 +34,7 @@ __all__ = [
     "DTensor",
     "distribute_tensor",
     "distribute_module",
+    "LTensor",
     "Shard",
     "Replicate",
     "Partial",
@@ -78,6 +80,7 @@ if DTensor not in _util_foreach_supported_types:
 
 # Set namespace for exposed private names
 DTensor.__module__ = "torch.distributed.tensor"
+LTensor.__module__ = "torch.distributed.tensor"
 distribute_tensor.__module__ = "torch.distributed.tensor"
 distribute_module.__module__ = "torch.distributed.tensor"
 ones.__module__ = "torch.distributed.tensor"

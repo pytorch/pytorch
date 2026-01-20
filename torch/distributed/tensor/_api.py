@@ -33,6 +33,8 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 
+from ._ltensor import LTensor
+
 
 __all__ = [
     "DTensor",
@@ -241,6 +243,7 @@ class _FromTorchTensor(torch.autograd.Function):
 
         # TODO: backward is also differentiable now, add a test
         # to test higher level gradients.
+
         return grad_output.to_local(), None, None, None, None, None
 
 
@@ -429,6 +432,10 @@ class DTensor(torch.Tensor):
                 f"the local_tensor argument only accepts torch.Tensor but got {type(local_tensor)} value."
             )
 
+        # Unwrap LTensor(s) created by local_map/to_local
+        if isinstance(local_tensor, LTensor):
+            local_tensor = local_tensor._local_tensor
+
         # if same shape/dtype, no need to run_check, if not, must allgather
         # the metadatas to check the size/dtype across ranks
         # There should be no data communication unless there's replication
@@ -471,7 +478,10 @@ class DTensor(torch.Tensor):
         )
 
     def to_local(
-        self, *, grad_placements: Sequence[Placement] | None = None
+        self,
+        *,
+        grad_placements: Sequence[Placement] | None = None,
+        track_variant_dims: bool = False,
     ) -> torch.Tensor:
         """
         Get the local tensor of this DTensor on its current rank. For sharding it returns
@@ -488,6 +498,11 @@ class DTensor(torch.Tensor):
                 layout of the returned tensor does not match the original DTensor layout.
                 If not specified, we will assume the gradient layout remains the same
                 as the original DTensor and use that for gradient computation.
+            track_variant_dims (bool, optional): If True, wraps the returned local tensor
+                in an :class:`LTensor` that tracks variance metadata (which mesh dims the
+                tensor varies along). This enables automatic gradient aggregation when
+                invariant inputs are combined with variant tensors during computation.
+                Default: False.
 
         Returns:
             A :class:`torch.Tensor` or ``AsyncCollectiveTensor`` object. it represents the
@@ -503,9 +518,16 @@ class DTensor(torch.Tensor):
 
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
-        return _ToTorchTensor.apply(
+        local_tensor = _ToTorchTensor.apply(
             self, grad_placements
         )  # pyre-ignore[16]: autograd func
+
+        if track_variant_dims:
+            # wrap output of to_local in LTensor to track variant dims
+            local_tensor = LTensor(
+                local_tensor, **LTensor.compute_metadata_from_dtensor(self)
+            )
+        return local_tensor
 
     def redistribute(
         self,
