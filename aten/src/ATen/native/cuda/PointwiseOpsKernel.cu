@@ -11,6 +11,33 @@
 
 namespace at::native {
 
+namespace {
+
+// Computes input + alpha * op(tensor1, tensor2).
+// Special-cases alpha=1 and uses explicit std::fma for multiplies
+// to ensure consistent FMA behavior across all code paths.
+template <typename opmath_t, typename Op>
+C10_HOST_DEVICE __forceinline__ opmath_t pointwise_op_impl(
+    opmath_t input,
+    opmath_t tensor1,
+    opmath_t tensor2,
+    opmath_t alpha,
+    Op op) {
+  if (alpha == opmath_t(1)) {
+    // Use explicit fma for std::multiplies on real floating-point types
+    // to guarantee FMA instruction (std::fma doesn't support complex)
+    if constexpr (std::is_same_v<Op, std::multiplies<opmath_t>> &&
+                  std::is_floating_point_v<opmath_t>) {
+      return std::fma(tensor1, tensor2, input);
+    } else {
+      return input + op(tensor1, tensor2);
+    }
+  }
+  return input + alpha * op(tensor1, tensor2);
+}
+
+} // namespace
+
 void addcmul_cuda_scalar_tensor2_kernel(
   TensorIteratorBase& iter,
   const Scalar& scalar_tensor2,
@@ -84,7 +111,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto alpha = value.to<accscalar_t>();
       gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-        return a + alpha * (static_cast<accscalar_t>(b) * static_cast<accscalar_t>(c));
+        return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::multiplies<accscalar_t>());
       });
     });
   }
@@ -133,7 +160,7 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
       auto c = scalar_tensor2.to<accscalar_t>();
       auto alpha = value.to<accscalar_t>();
       gpu_kernel(iter, [alpha, c]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return a + alpha * (static_cast<accscalar_t>(b) * c);
+        return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::multiplies<accscalar_t>());
       });
     });
   }
@@ -178,7 +205,7 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto alpha = value.to<accscalar_t>();
       gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-        return a + alpha * (b / static_cast<accscalar_t>(c));
+        return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::divides<accscalar_t>());
       });
     });
   }
