@@ -463,7 +463,7 @@ class <lambda>(torch.nn.Module):
         # Annotation: {'stream': 0}
         add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(add_1, 2);  add_1 = None
 
-        #
+        # Annotation: {'stream': 0}
         copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = copy_ = None
         return (add_2, add_3)
 """,
@@ -876,6 +876,54 @@ tangents_2: "f32[2, 2]", tangents_3: "f32[2, 2]"):
         )
 
     @requires_cuda
+    def test_epilogue_copy_streams_inference(self):
+        def fn(x):
+            with torch.Stream(device="cuda:0"):
+                with torch.no_grad():
+                    x.add_(2)
+
+            return x
+
+        x = torch.ones(2, 2, requires_grad=True, device="cuda:0")
+
+        inp = (x,)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+
+        actual.sum().backward()
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        # Annotation: {'stream': 0}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 2)
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
+        return (copy_,)
+""",
+        )
+
+    @requires_cuda
+    def test_epilogue_copy_streams_external(self):
+        @torch.compile
+        def fn(x):
+            with torch.Stream(device="cuda:0"):
+                x.mul_(3)
+            return x.sin()
+
+        x = torch.ones(2, 2, requires_grad=True, device="cuda:0")
+        inp = (x.clone(),)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on inputs with user-specified streams are not yet supported",
+        ):
+            extract_graph(fn, *inp)
+
+    @requires_cuda
     def test_epilogue_copy_stream_tracking(self):
         """
         Test that epilogue copies for mutated inputs use the correct stream.
@@ -950,7 +998,7 @@ class GraphModule(torch.nn.Module):
         # Annotation: {'stream': 1}
         clone: "f32[2, 2]" = torch.ops.aten.clone.default(tangents_1);  tangents_1 = None
 
-        # No stacktrace found for following nodes
+        # Annotation: {'stream': 0} No stacktrace found for following nodes
         copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = copy_ = None
         return (mul_2, clone)
 """,
