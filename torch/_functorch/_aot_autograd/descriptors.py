@@ -566,17 +566,6 @@ class BackwardTokenAOTInput(AOTInput):
         return f"__backward_token{self.idx}"
 
 
-@dataclasses.dataclass(frozen=True)
-class OpaqueRefAOTInput(AOTInput):
-    """An opaque reference that was discovered during backward tracing, and lifted"""
-
-    idx: int
-    ref: object = dataclasses.field(compare=False, hash=False)
-
-    def expr(self) -> str:
-        return f"__opaque_ref{self.idx}"
-
-
 # Technically the "output" here is redundant, tangents always correspond to
 # outputs
 # NB: this is marked differentiable as it /would/ be differentiable if we
