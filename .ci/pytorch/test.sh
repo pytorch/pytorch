@@ -178,6 +178,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
+  # disable timeout due to shard not balance for xpu
+  export NO_TEST_TIMEOUT=True
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -215,8 +217,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
-  # JIT C++ extensions require ninja.
-  pip_install "ninja==1.10.2"
+  # JIT C++ extensions require ninja (installed from requirements-ci.txt).
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -1957,6 +1958,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     # Skip torchrec/fbgemm for cuda13 as they're not compatible yet
     if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* && "${BUILD_ENVIRONMENT}" != *cuda13* ]]; then
       install_torchrec_and_fbgemm
+      # TODO (huydhn): Newer FBGEMM has a bug in detecting libtbb when building from source
+      LIBTBB_PATH="$(find "$(dirname "$(which python)")/../lib/" -name libtbb.so.12)"
+      export LD_PRELOAD="$LIBTBB_PATH":"$LD_PRELOAD"
     fi
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
   fi

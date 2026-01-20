@@ -201,6 +201,9 @@ print(normalize_gm(graph.print_readable(print_output=False)))
         name_fn=lambda f: f,
     )
     @parametrize("flag", [True, False], name_fn=lambda f: f)
+    @unittest.skipIf(
+        einops_version_sanitized != "0.6.1", "Skipping for einops != 0.6.1"
+    )
     def test_einops_method(self, flag, method):
         if not hasattr(einops, method):
             self.skipTest(f"Needs einops.{method}")
@@ -228,6 +231,9 @@ print(normalize_gm(graph.print_readable(print_output=False)))
         self._run_in_subprocess(flag, method, einops_method, snippet)
 
     @torch._dynamo.config.patch(enable_einops_tracing=True)
+    @unittest.skipIf(
+        einops_version_sanitized != "0.6.1", "Skipping for einops != 0.6.1"
+    )
     def test_graph_break_message(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):

@@ -7,7 +7,7 @@ import inspect
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
-from types import TracebackType
+from types import ModuleType, TracebackType
 from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -157,9 +157,9 @@ class set_stance(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
         _set_stance(self.prev)
 
@@ -500,10 +500,12 @@ def substitute_in_graph(
                 guard_type = GuardBuilder.MODULE_MATCH
             else:
                 guard_type = GuardBuilder.ID_MATCH
+            guards = self.install_guards(guard_type)
+            assert guards is not None
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
-                **self.install_guards(guard_type),
+                **guards,
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
@@ -537,7 +539,7 @@ def _apply_func_to_inner_tensors_of_same_dim(
             func(inner, *args, **kwargs)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DimRange:
     """
     This represents an dimension of a tensor and the corresponding
@@ -588,36 +590,29 @@ def mark_unbacked(
     if isinstance(index, int):
         if strict:
             if not hasattr(t, "_dynamo_strict_unbacked_indices"):
-                # pyrefly: ignore [missing-attribute]
                 t._dynamo_strict_unbacked_indices = set()
-            # pyrefly: ignore [missing-attribute]
+
             t._dynamo_strict_unbacked_indices.add(index)
             return
 
         if not hasattr(t, "_specialized_on"):
-            # pyrefly: ignore [missing-attribute]
             t._specialize_on = {}
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
-            # pyrefly: ignore [missing-attribute]
             t._dynamo_unbacked_indices = set()
 
         if not hasattr(t, "_dynamo_hint_overrides"):
-            # pyrefly: ignore [missing-attribute]
             t._dynamo_hint_overrides = {}
 
         if hint_override:
-            # pyrefly: ignore [missing-attribute]
             t._dynamo_hint_overrides[index] = hint_override
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
-        # pyrefly: ignore [missing-attribute]
+
         if isinstance(t._specialize_on, dict):
-            # pyrefly: ignore [missing-attribute]
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
-        # pyrefly: ignore [missing-attribute]
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -686,28 +681,25 @@ def mark_dynamic(
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
-            # pyrefly: ignore [missing-attribute]
             t._dynamo_dynamic_indices = set()
-            # pyrefly: ignore [missing-attribute]
+
             t._dynamo_dynamic_range = set()
-            # pyrefly: ignore [missing-attribute]
+
             t._dynamo_hint_overrides = {}
 
         if not hasattr(t, "_specialize_on"):
-            # pyrefly: ignore [missing-attribute]
             t._specialize_on = {}
 
         if hint_override:
-            # pyrefly: ignore [missing-attribute]
             t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
-        # pyrefly: ignore [missing-attribute]
+
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
-        # pyrefly: ignore [missing-attribute]
+
         if isinstance(t._specialize_on, dict):
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
@@ -732,10 +724,9 @@ def maybe_mark_dynamic(t: Any, index: Union[int, list[Any], tuple[Any]]) -> None
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
-            # pyrefly: ignore [missing-attribute]
             t._dynamo_weak_dynamic_indices = set()
         # TODO(voz): Should we bounds check?
-        # pyrefly: ignore [missing-attribute]
+
         t._dynamo_weak_dynamic_indices.add(index)
         return
 
@@ -787,9 +778,7 @@ def mark_static(
         # TODO: Make this configurable via a supported public API
         _apply_func_to_inner_tensors_of_same_dim(mark_static, t, index)
 
-    # pyrefly: ignore [bad-argument-type]
     if not isinstance(t, torch.Tensor) and issubclass(t, torch.nn.Module):
-        # pyrefly: ignore [missing-attribute]
         t._dynamo_marked_static = True
         # pyrefly: ignore [bad-return]
         return t
@@ -837,7 +826,7 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
 def _allow_in_graph_einops() -> None:
     import einops
 
-    if torch._dynamo.config.enable_einops_tracing:
+    if torch._dynamo.config.enable_einops_tracing and einops.__version__ == "0.6.1":
         _force_trace_einops(einops)
 
     try:
@@ -861,7 +850,7 @@ def _allow_in_graph_einops() -> None:
             allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
-def _force_trace_einops(einops):
+def _force_trace_einops(einops: ModuleType) -> None:
     # einops register some of its methods using "allow_in_graph". Remove them
     # so Dynamo can trace it.
 

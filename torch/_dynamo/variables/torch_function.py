@@ -160,7 +160,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         value: Optional[TorchFunctionMode],
         source: Optional[Source] = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         if value is not None:
             super().__init__(value, **kwargs)
         self.value = value
