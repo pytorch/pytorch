@@ -16609,7 +16609,7 @@ if RUN_GPU:
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
-            hidden_size = 512
+            hidden_size = 512 if torch.version.hip is not None else 256
 
             inp = torch.randn(
                 batch_size,

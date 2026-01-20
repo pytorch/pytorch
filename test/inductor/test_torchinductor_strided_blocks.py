@@ -510,7 +510,7 @@ class CommonTemplate:
                 ],
             ),
             (
-                (4, 6 * max_block),
+                (2, 3 * max_block),
                 2,
                 2,
             ),  # Multiple of max block. Uses loops.
@@ -532,6 +532,7 @@ class CommonTemplate:
 
         if view_size == (128, 128) and torch.version.hip is not None:
             view_size = (256, 256)
+        
         if self.device == "cpu" and all(
             # Multiple of max block. Uses loops.
             [
