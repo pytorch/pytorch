@@ -2524,17 +2524,16 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.utils import first_slice_copy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
-        def arg_extractor(combine_fn, xs, reverse, additional_inputs):
-            return combine_fn, xs, reverse, additional_inputs
 
         def arg_extractor(
             combine_fn: VariableTracker,
             xs: VariableTracker,
+            reverse: VariableTracker,
             additional_inputs: VariableTracker,
         ) -> tuple[VariableTracker, VariableTracker, VariableTracker]:
-            return combine_fn, xs, additional_inputs
+            return combine_fn, xs, reverse, additional_inputs
 
-        combine_fn, xs, additional_inputs = arg_extractor(*args, **kwargs)
+        combine_fn, xs, reverse, additional_inputs = arg_extractor(*args, **kwargs)
 
         if args[0].python_type() is functools.partial:
             # This is the standard case when the user calls the frontend
@@ -2543,8 +2542,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 unimplemented(
                     gb_type="torch.associative_scan: improper args",
                     context=f"args: {args}",
-                    explanation=f"torch.associative_scan expects 2 positional arguments (got {len(args)}) "
-                    "Usage: associative_scan(combine_fn, xs)",
+                    explanation=f"torch.associative_scan expects 3 positional arguments (got {len(args)}) "
+                    "Usage: associative_scan(combine_fn, xs, reverse)",
                     hints=[
                         *graph_break_hints.USER_ERROR,
                     ],

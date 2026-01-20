@@ -4175,23 +4175,12 @@ class GraphModule(torch.nn.Module):
         stacked_2: "f32[2, 2, 10, 2]" = torch.stack([cat_2, b_4], dim = 1);  cat_2 = b_4 = None
         interleaved_4: "f32[4, 10, 2]" = torch.flatten(stacked_2, start_dim = 0, end_dim = 1);  stacked_2 = None
         interleaved_5: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_4, 0, 0, 3);  interleaved_4 = None
-<<<<<<< HEAD
-
-        child_17: "f32[3, 10, 2]" = torch.flip(interleaved_1, [0]);  interleaved_1 = None
-        child_18: "f32[3, 10, 2]" = torch.flip(interleaved_3, [0]);  interleaved_3 = None
-        child_19: "f32[3, 10, 2]" = torch.flip(interleaved_5, [0]);  interleaved_5 = None
-
-        movedim_3: "f32[3, 10, 2]" = torch.movedim(child_17, 0, 0);  child_17 = None
-        movedim_4: "f32[3, 10, 2]" = torch.movedim(child_18, 0, 0);  child_18 = None
-        movedim_5: "f32[3, 10, 2]" = torch.movedim(child_19, 0, 0);  child_19 = None
-=======
-        flip_3: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
-        flip_4: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
-        flip_5: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
+        flip_3: "f32[3, 10, 2]" = torch.flip(interleaved_1, [0]);  interleaved_1 = None
+        flip_4: "f32[3, 10, 2]" = torch.flip(interleaved_3, [0]);  interleaved_3 = None
+        flip_5: "f32[3, 10, 2]" = torch.flip(interleaved_5, [0]);  interleaved_5 = None
         movedim_3: "f32[3, 10, 2]" = torch.movedim(flip_3, 0, 0);  flip_3 = None
         movedim_4: "f32[3, 10, 2]" = torch.movedim(flip_4, 0, 0);  flip_4 = None
         movedim_5: "f32[3, 10, 2]" = torch.movedim(flip_5, 0, 0);  flip_5 = None
->>>>>>> 1f838e03d4323ae22c3bb8897136c6463bc44c37
         return (movedim_3, movedim_4, movedim_5)
 """,  # noqa: B950
         )
