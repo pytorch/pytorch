@@ -115,7 +115,10 @@ class DecompShardingStrategy:
             op_schema.args_schema + tuple(op_schema.kwargs_schema.values()),
         )
 
-        fake_mesh = DeviceMesh(mesh.device_type, [0])
+        # Create a fake mesh where all ranks pretend to be rank 0.
+        # This ensures identical cost computation across all ranks during
+        # decomposition tracing, avoiding potential SPMD divergence.
+        fake_mesh = DeviceMesh(mesh.device_type, [0], _init_backend=False, _rank=0)
         single_dim_strategies = []
         output_placements: list[Placement | tuple[Placement, ...]] = []
         for placement in placements:

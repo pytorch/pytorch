@@ -470,11 +470,6 @@ def redistribute_cost(
         _gen_transform_infos_non_cached,
     )
 
-    # For sub-meshes, ranks not participating in the mesh should not compute
-    # redistribution costs. Return 0 since they won't actually participate.
-    if not current_spec.mesh._is_current_rank_part_of_mesh():
-        return 0.0
-
     # TODO(zpcore): Support _StridedShard redistribution. Remove the temporary
     # fix, which is to prevent StridedShard erroring out.
     if current_spec.shard_order is None or target_spec.shard_order is None:

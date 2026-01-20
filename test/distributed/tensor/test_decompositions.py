@@ -177,15 +177,6 @@ class TestDecompSharding(TestCase):
         out = aten.expand_copy.default(input, [-1, 16])
         self.assertEqual(out.placements, (Partial("min"),))
 
-        # # index_add
-        # # index_put decomp errors; https://github.com/pytorch/pytorch/issues/170934
-        # check_no_strategy(aten.index_add.default)
-        # input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        # index = d_ones(16, device_mesh=mesh, placements=[Shard(0)]).int()
-        # source = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
-        # out = aten.index_add.default(input, 0, index, source)
-        # self.assertEqual(out.placements, (Replicate(),))
-
         # glu: force replicate
         check_no_strategy(aten.glu.default)
         x = d_empty(16, device_mesh=mesh, placements=[Partial()])
@@ -198,16 +189,6 @@ class TestDecompSharding(TestCase):
         y = d_empty(16, device_mesh=mesh, placements=[Partial()])
         out = aten.polar.default(x, y)
         self.assertEqual(out.placements, (Replicate(),))
-
-        # # pixel_shuffle
-        # # the Shard(0) case fails (forced Replicate()),
-        # # because .needs_redistribute semantics are stricter than input placements != starting placements?
-        # check_no_strategy(aten.pixel_shuffle.default)
-        # x = d_empty(32, 3, 3, device_mesh=mesh, placements=[Shard(0)])
-        # out = aten.pixel_shuffle.default(x, 2)
-        # self.assertEqual(out.placements, (Shard(0),))
-        # out = aten.pixel_shuffle.default(x.redistribute(placements=[Shard(1)]), 2)
-        # self.assertEqual(out.placements, (Replicate(),))
 
 
 if __name__ == "__main__":
