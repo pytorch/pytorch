@@ -2,10 +2,10 @@
 
 #include <ATen/Tensor.h>
 #include <c10/core/Device.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUGraphsC10Utils.h>
 #include <c10/xpu/XPUStream.h>
-#include <c10/util/flat_hash_map.h>
 
 namespace at {
 
@@ -23,10 +23,11 @@ using xpuGraphExec_t = sycl::ext::oneapi::experimental::command_graph<
     sycl::ext::oneapi::experimental::graph_state::executable>;
 
 struct TORCH_XPU_API XPUGraph {
-  XPUGraph(bool keep_graph=false);
+  XPUGraph(bool keep_graph = false);
   ~XPUGraph();
 
-  void register_generator_state(c10::intrusive_ptr<at::XPUGeneratorState> state);
+  void register_generator_state(
+      c10::intrusive_ptr<at::XPUGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
   void capture_begin(MempoolId_t pool = {0, 0});
   void capture_end();

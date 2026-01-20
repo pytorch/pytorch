@@ -247,7 +247,9 @@ void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
 
 void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
-  if (C10_LIKELY(at::xpu::currentStreamCaptureStatus() == at::xpu::CaptureStatus::Executing)) {
+  if (C10_LIKELY(
+          at::xpu::currentStreamCaptureStatus() ==
+          at::xpu::CaptureStatus::Executing)) {
     state_->philox_offset_per_thread_ = offset;
   } else {
     state_->offset_intragraph_ = offset;
@@ -255,7 +257,9 @@ void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
 }
 
 uint64_t XPUGeneratorImpl::philox_offset_per_thread() const {
-  if (C10_LIKELY(at::xpu::currentStreamCaptureStatus() == at::xpu::CaptureStatus::Executing)) {
+  if (C10_LIKELY(
+          at::xpu::currentStreamCaptureStatus() ==
+          at::xpu::CaptureStatus::Executing)) {
     return state_->philox_offset_per_thread_;
   } else {
     return state_->offset_intragraph_;
@@ -275,7 +279,8 @@ void XPUGeneratorImpl::unregister_graph(xpu::XPUGraph* graph) {
 //    [extragraph seed ptr, extragraph offset ptr, intragraph offset] on host
 // 2, Before each replay, the extragraph seed and offset tensors will be updated
 //    extragraph offset = philox_offset_per_thread_ + intragraph offset
-// 3, During replay, kernel will compute final offset = *extragraph offset ptr + intragraph offset
+// 3, During replay, kernel will compute final offset = *extragraph offset ptr +
+// intragraph offset
 PhiloxXpuState XPUGeneratorImpl::philox_xpu_state(uint64_t increment) {
   if (at::xpu::currentStreamCaptureStatus() !=
       at::xpu::CaptureStatus::Executing) {
