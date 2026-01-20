@@ -283,7 +283,7 @@ struct NormOps {
 };
 
 // Like NormOps but skips the final root - returns sum(|x|^p) instead of (sum(|x|^p))^(1/p)
-// Used for skip_root=True in linalg_vector_norm
+// Used by linalg_powsum for distributed norm computation
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct NormNoRootOps {
   acc_t norm_;
@@ -297,7 +297,7 @@ struct NormNoRootOps {
   }
 
   inline C10_DEVICE out_t project(acc_t a) const {
-    return a;  // skip the root
+    return a;  // No root applied
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
@@ -423,7 +423,7 @@ struct NormTwoOps {
 };
 
 // Like NormTwoOps but skips the final sqrt - returns sum(|x|^2) instead of sqrt(sum(|x|^2))
-// Used for skip_root=True in linalg_vector_norm
+// Used by linalg_powsum for distributed L2 norm computation
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct NormTwoNoRootOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
@@ -436,7 +436,7 @@ struct NormTwoNoRootOps {
   }
 
   inline C10_DEVICE out_t project(acc_t a) const {
-    return a;  // skip the sqrt
+    return a;  // No sqrt applied
   }
 
   static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
