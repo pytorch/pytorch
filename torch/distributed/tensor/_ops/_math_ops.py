@@ -48,7 +48,7 @@ class Reduction(Enum):
 
 @dataclass(frozen=True)
 class NormReduction:
-    norm_type: int | float | str
+    norm_type: int | float
 
 
 ReductionOpType = Union[NormReduction, str]
