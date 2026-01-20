@@ -5789,26 +5789,10 @@ def win_safe_rmtree(path):
         except Exception:
             # If chmod doesn't solve it, move to lock detection
             pass
-
-        # 2. Identify Windows System Error Codes
-        # WinError 32: The file is being used by another process (Sharing Violation)
-        # WinError 5: Access is denied (Common when a DLL/.pyd is loaded in memory)
-        winerror = getattr(exc_value, 'winerror', None)
-
-        if winerror in (5, 32):
-            log.warning(
-                "Cleanup skipped: Build artifact is locked. "
-                "Path: %s. "
-                "Reason: Windows Error %s. A process (e.g., Python, Ninja, or Linker) "
-                "is still holding a handle to this file.",
-                path, winerror
-            )
-        else:
-            # Log unexpected errors that might indicate disk or OS issues
-            log.error(
-                "Unexpected cleanup error at %s: %s (WinError: %s)",
-                path, str(exc_value), winerror
-            )
+            
+        # 2. If it's a lock (5/32) or any other failure, raise it!
+        # This is CRITICAL for the outer retry loop to catch it.
+        raise exc_value
 
     # Execute rmtree using the logic above
     max_retries = 3
