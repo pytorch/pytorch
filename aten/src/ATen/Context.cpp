@@ -410,7 +410,19 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   it->second = p;
 }
 
+void _warn_once_magma_deprecation() {
+  TORCH_WARN_ONCE(
+    "The usage of MAGMA backend for linear algebra operations is deprecated "
+    "and will be removed in future releases. cuSOLVER stays as the default backend."
+    "If you see any error messages with cuSOLVER but not MAGMA, please, "
+    "file an issue on GitHub."
+  );
+}
+
 at::LinalgBackend Context::linalgPreferredBackend() const {
+  if (linalg_preferred_backend == at::LinalgBackend::Magma) {
+    _warn_once_magma_deprecation();
+  }
   return linalg_preferred_backend;
 }
 
@@ -426,6 +438,9 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
       "If you see any error or unexpected behavior when this flag is set "
       "please file an issue on GitHub."
     );
+  }
+  if (b == at::LinalgBackend::Magma) {
+    _warn_once_magma_deprecation();
   }
 }
 
