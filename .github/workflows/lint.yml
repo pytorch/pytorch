@@ -119,6 +119,7 @@ jobs:
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running all other linters"
         if [ "$CHANGED_FILES" = '*' ]; then
+          sleep 7200
           ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
         else
           ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
