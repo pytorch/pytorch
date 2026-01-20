@@ -351,6 +351,7 @@ def vector_norm_handler(
         )
         replicated_result = partial_result.redistribute(placements=new_placements)
         # Step 3: Apply root locally
+        # pyrefly: ignore[bad-argument-type]
         return replicated_result ** (1.0 / float(norm_type))
 
     # For inf/-inf/0/1 norms or Partial inputs, use normal dispatch

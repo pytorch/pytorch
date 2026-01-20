@@ -2879,7 +2879,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   }
 
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
-  norm_stub(iter.device_type(), iter, ord, /*skip_root=*/false);
+  norm_stub(iter.device_type(), iter, ord);
 }
 
 // linalg_powsum: computes sum(|x|^ord) - the "power sum" without the final root
@@ -2892,12 +2892,6 @@ Tensor linalg_powsum(
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
   auto ord = scalar_ord.toDouble();
-
-  // Validate ord: powsum only makes sense for p-norms where p > 0 and p != inf
-  TORCH_CHECK(
-      ord > 0 && ord != INFINITY,
-      "linalg.powsum only supports finite positive ord values, got: ", ord);
-
   auto dim = opt_dim.value_or(IntArrayRef{});
 
   // Compute output dtype (same logic as vector_norm)
@@ -2915,13 +2909,12 @@ Tensor linalg_powsum(
   auto result = create_reduction_result(self_, opt_dim, keepdim, toRealValueType(compute_dtype));
 
   if (result.numel() == 0) {
-    // For empty reductions, powsum returns 0
     result.zero_();
     return result;
   }
 
   auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());
-  norm_stub(iter.device_type(), iter, ord, /*skip_root=*/true);
+  powsum_stub(iter.device_type(), iter, ord);
   return result;
 }
 
@@ -2934,11 +2927,6 @@ Tensor linalg_powsum_slow(
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
   auto ord = scalar_ord.toDouble();
-
-  // Validate ord: powsum only makes sense for p-norms where p > 0 and p != inf
-  TORCH_CHECK(
-      ord > 0 && ord != INFINITY,
-      "linalg.powsum only supports finite positive ord values, got: ", ord);
 
   // Handle dtype conversion
   Tensor self_;

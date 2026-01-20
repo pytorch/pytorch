@@ -306,6 +306,7 @@ aten::_foreach_pow_.List
 aten::_foreach_pow_.Scalar
 aten::_foreach_pow_.ScalarList
 aten::_foreach_powsum.Scalar
+aten::_foreach_powsum.Scalar_out
 aten::_foreach_reciprocal
 aten::_foreach_reciprocal.out
 aten::_foreach_reciprocal_
