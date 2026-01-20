@@ -8972,14 +8972,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cdist_dynamic_axes_script(self):
-        def wrap_cdist(a, b):
-            return torch.cdist(a, b)
+        class CdistModule(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.cdist(a, b)
 
-        script_cdist = torch.jit.script(wrap_cdist)
+        model = torch.jit.script(CdistModule())
         a = torch.randn(10, 3)
         b = torch.randn(10, 3)
         self.run_test(
-            script_cdist,
+            model,
             input_args=(a, b),
             input_names=["a", "b"],
             output_names=["out"],
