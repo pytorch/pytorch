@@ -144,89 +144,15 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   return false;
 }
 
-/*
- * Check whether for the given input we want to enable the Lt interface
- */
-static bool isInputCompliesAddmmCudaLt(
-    Tensor& result,
-    const Tensor& self,
-    const Tensor& mat1,
-    const Tensor& mat2,
-    const Scalar& beta,
-    const Scalar& alpha,
-    Activation activation
-) {
-  #ifdef USE_ROCM
-  // Implies 2D bias which we currently not send through Lt.
-  // TODO: this check is done pre col-major input preparation,
-  // so, this condition can be ralexed in cases when a col-major
-  // copy of result is needed.
-  if (self.is_same(result) || self.dim() == 2) {
-    return false;
-  }
-  #endif
-
-  #if defined(USE_ROCM) && ROCM_VERSION == 60400
-  // hipblaslt TT fp32 regression on ROCm 6.4, cannot use
-  const auto args = cublasCommonArgs(mat1, mat2, result);
-  if (args.transa == 't' && args.transb == 't') {
-    return false;
-  }
-  #endif
-
-  const auto mat1_sizes = mat1.sizes();
-  const auto mat2_sizes = mat2.sizes();
-  const auto scalar_type = mat1.scalar_type();
-  return (beta.toComplexDouble() == 1.0
-    // NOTE: row-major result is important when bias is 1D.
-    // This is because Lt broadcasts 1D bias over the columns
-    // while the aten::addmm API broadcasts it over the rows,
-    // and this is in conjunction with the data preparation
-    // procedure that does not transpose arguments with
-    // col-major result. For col-major result we need
-    // to explicitly transpose the problem so that bias is
-    // correctly applied.
-    // TODO: enable col-major result if needed.
-    // TODO: no need to check result's layout when
-    // !result.is_same(self) and self.dim() == 2, because
-    // self needs to be copied into result and the bias ptr
-    // will be ignored.
-    && result.dim() == 2 && result.is_contiguous()
-    && (
-      ( // Conditions for bias to be fusable -- implies direct Lt path without copies.
-        self.is_contiguous() &&
-        // NOTE: fine to have 1-len dims to the left from the right-most one
-        (self.dim() == 1 || self.squeeze().dim() == 1) &&
-        self.sizes().back() == mat2_sizes[1]
-      )
-      || ( // 2D bias restrictions. self.is_contiguous() is implicit when result.is_same(self),
-        // and we need to copy self into result otherwise, so the self's layout becomes irrelevant.
-        // See also TODO from above.
-        activation != Activation::None && // Lt is faster when activation is fused
-        (self.dim() == 2 && at::is_expandable_to(self.sizes(), {mat1_sizes[0], mat2_sizes[1]}))
-      )
-    )
-    && ( // some dtype restrictions
-      #ifndef USE_ROCM
-      scalar_type == at::ScalarType::Double ||
-      #endif
-      scalar_type == at::ScalarType::Float ||
-      scalar_type == at::ScalarType::Half ||
-      scalar_type == at::ScalarType::BFloat16
-    )
-    && ( // some shape/stride restrictions
-      // Strangely, if mat2 has only 1 row or column, we get
-      // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
-      mat2_sizes[0] > 1 && mat2_sizes[1] > 1
-    )
-  );
-
-  // no compliance by default
-  return false;
-}
-
 template <typename scalar_t>
-void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+void launchTunableGemmAndBias(
+    cublasCommonArgs &args,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const scalar_t* bias,
+    std::optional<int64_t> bias_ld,
+    cuda::blas::GEMMAndBiasActivationEpilogue activation
+) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -240,9 +166,11 @@ void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
   params.lda = args.lda;
   params.b = args.matb->const_data_ptr<scalar_t>();
   params.ldb = args.ldb;
+  params.beta = beta.to<at::opmath_type<scalar_t>>();
   params.c = args.result->data_ptr<scalar_t>();
   params.ldc = args.result_ld;
   params.bias = bias;
+  params.ldbias = bias_ld;
   params.activation = activation;
   if (transa_ && transb_) {
     static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
@@ -269,22 +197,20 @@ template <typename scalar_t, typename res_scalar_t = scalar_t>
 bool launchGemmAndBiasCublasLt(
     // args contains result which is modified
     cublasCommonArgs& args,
-    const std::optional<Tensor>& self,
     const Scalar& alpha,
+    const Scalar& beta,
     Activation activation = Activation::None
 ) {
-  // We apply bias in the epilogue only when it is 1D,
-  // or when it can be squeezed to 1D.
-  // self_ptr == nullptr implies ignore bias epilogue
-  // and use standard gemm-like API.
-  const auto* self_ptr = self.has_value() ? self.value().const_data_ptr<scalar_t>() : static_cast<const scalar_t*>(nullptr);
-
+  const auto* self_ptr = args.bias.has_value()
+    ? (*args.bias)->const_data_ptr<scalar_t>()
+    : static_cast<const scalar_t*>(nullptr);
+  const std::optional<int64_t> self_ld = args.bias_ld;
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     // TODO: maybe also return some success state?
     launchTunableGemmAndBias<scalar_t>(
-      args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation)
+      args, alpha, beta, self_ptr, self_ld, activation_to_gemm_and_blas_arg(activation)
     );
     return true;
   }
@@ -300,9 +226,11 @@ bool launchGemmAndBiasCublasLt(
     args.lda,
     args.matb->const_data_ptr<scalar_t>(),
     args.ldb,
-    self_ptr,
+    beta.to<at::opmath_type<scalar_t>>(),
     args.result->data_ptr<res_scalar_t>(),
     args.result_ld,
+    self_ptr,
+    self_ld,
     activation_to_gemm_and_blas_arg(activation)
   );
 }
@@ -369,8 +297,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
   #endif
-  // Condition on the input
-  disable_addmm_cuda_lt = disable_addmm_cuda_lt || !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, activation);
+  // Restrict complex inputs in the Lt path for now
+  disable_addmm_cuda_lt = disable_addmm_cuda_lt || result.is_complex();
 
   at::ScalarType scalar_type = mat1.scalar_type();
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
@@ -379,19 +307,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || is_float_output_with_half_input;
   #endif
 
-  bool use_bias_ptr_lt = (self.dim() == 1) && !disable_addmm_cuda_lt;
-  // for float output with half input cublasLT with bias produces wrong results
-  use_bias_ptr_lt &= !is_float_output_with_half_input;
-
   // Handle result/self shapes
   if (!result.is_same(self)) {
     at::native::resize_output(result, {mat1.sizes()[0], mat2.sizes()[1]});
-
-      // We do not copy bias only when we need the bias ptr
-    if (beta.toComplexDouble() != 0.0 && !use_bias_ptr_lt) {
-      // NOTE: self should broadcast over result
-      at::native::copy_(result, *expand_size(self, result.sizes(), "addmm"));
-    }
   }
 
   // Short circuit on empty result
@@ -421,8 +339,42 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     );
   }
 
-  cublasCommonArgs args(mat1, mat2, result);
+  cublasCommonArgs args(mat1, mat2, result, self, beta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
+
+  // Handle copying bias (self) into result {
+  const bool can_avoid_bias_copy = (
+    // BLAS path without out-of-place/epilogue bias
+    (disable_addmm_cuda_lt && !args.bias.has_value() && result.is_same(self))
+    // Lt path with a no-copy out-of-place/epilogue bias
+    || (!disable_addmm_cuda_lt && !args.must_copy_bias_into_result())
+  );
+
+  // Copy bias into result and set args' bias vars to default
+  const auto copy_bias_into_result = [](cublasCommonArgs& args, const Tensor& bias) -> void {
+    if (args.result->is_same(bias)) {
+      return;
+    }
+    // NOTE: self should broadcast over result
+    (*args.result).copy_(*expand_size(bias, args.result->sizes(), "addmm"));
+    args.set_default_bias_vars();
+  };
+
+  if (can_avoid_bias_copy) { // Unfortunately, there are exceptions when bias is copied anyway.
+    #ifdef USE_ROCM
+    // Disabling out-of-place bias descriptor for ROCM
+    if (!disable_addmm_cuda_lt && args.bias.has_value() && args.bias_ld.has_value()) {
+      copy_bias_into_result(args, **args.bias);
+    }
+    #endif
+    // result.is_complex implies BLAS path, so we need to copy bias (self) into result
+    if (result.is_complex() && args.bias.has_value()) {
+      copy_bias_into_result(args, **args.bias);
+    }
+  } else {
+    copy_bias_into_result(args, args.bias.has_value() ? **args.bias : self);
+  }
+  // }
 
   // The Lt path
   if (!disable_addmm_cuda_lt) {
@@ -434,11 +386,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       if (at::cuda::tunable::getTuningContext()->IsTunableOpEnabled()) {
        TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
       }
+
       AT_DISPATCH_REDUCED_FLOATING_TYPES(
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-          lt_success = launchGemmAndBiasCublasLt<scalar_t, float>(args, use_bias_ptr_lt ? std::make_optional(self) : std::nullopt, alpha, activation);
+          lt_success = launchGemmAndBiasCublasLt<scalar_t, float>(args, alpha, beta, activation);
         }
       );
       #endif
@@ -450,7 +403,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-          lt_success = launchGemmAndBiasCublasLt<scalar_t>(args, use_bias_ptr_lt ? std::make_optional(self) : std::nullopt, alpha, activation);
+          lt_success = launchGemmAndBiasCublasLt<scalar_t>(args, alpha, beta, activation);
         }
       );
     } // end is_float_output_with_half_input
