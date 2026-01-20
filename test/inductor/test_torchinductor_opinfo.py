@@ -1018,7 +1018,6 @@ inductor_skip_exact_stride = {
     "nn.functional.linear",
     "nn.functional.max_pool2d",
     "nn.functional.unfold",
-    "ormqr",
     "polar",
     "prod",
     "qr",
