@@ -740,7 +740,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     def test_powsum_sharded(self):
-        """Test that linalg_powsum produces Partial(sum) placement for sharded input."""
+        """Test that linalg__powsum produces Partial(sum) placement for sharded input."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
@@ -748,7 +748,7 @@ class DistMathOpsTest(DTensorTestBase):
         sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
 
         # powsum computes sum(|x|^p) without the root
-        sharded_out = torch.ops.aten.linalg_powsum(sharded_grad, 2)
+        sharded_out = torch.ops.aten.linalg__powsum(sharded_grad, 2)
 
         # Expected: sum(|x|^2) over all elements
         expected = (grad.abs() ** 2).sum()
