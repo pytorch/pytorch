@@ -2297,6 +2297,46 @@ class TestReductions(TestCase):
             ):
                 torch.nanmean(t)
 
+    @onlyCPU
+    @dtypes(torch.int64, torch.bool)
+    def test_nanmean_out_dtype_validation(self, device, dtype):
+        """Test that nanmean rejects non-floating-point output dtypes consistently.
+
+        This tests the fix for issue #131043 where nanmean() with invalid output
+        dtype (int64, bool) behaved inconsistently:
+        - Non-empty tensor: RuntimeError with unclear message
+        - Empty tensor: Incorrectly returned tensor(nan) without error
+
+        After the fix, both cases should raise a clear error matching mean()'s behavior.
+        """
+        # Test with various tensor shapes including empty tensors
+        shapes = [
+            (3, 4, 5),      # Non-empty tensor
+            (0,),           # Empty 1D tensor
+            (2, 0, 3),      # Empty with non-zero dims
+            (),             # Scalar (non-empty)
+        ]
+
+        for shape in shapes:
+            # Create a float tensor (valid input for nanmean)
+            t = make_tensor(shape, dtype=torch.float32, device=device)
+
+            # nanmean should reject invalid output dtype
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"nanmean\(\): could not infer output dtype.*floating point or complex"
+            ):
+                torch.nanmean(t, dtype=dtype)
+
+        # Verify that valid output dtypes still work
+        t = torch.tensor([1.0, 2.0, 3.0], device=device)
+        # float32 output dtype should work
+        result = torch.nanmean(t, dtype=torch.float32)
+        self.assertEqual(result.dtype, torch.float32)
+        # No dtype (default) should work
+        result = torch.nanmean(t)
+        self.assertTrue(result.dtype.is_floating_point)
+
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
     @parametrize("fn_name", [
