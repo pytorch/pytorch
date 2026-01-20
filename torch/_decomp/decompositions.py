@@ -4391,7 +4391,7 @@ def _affine_grid_generator_4d(theta: Tensor, size: list[int], align_corners: boo
     # base_grid shape is (h, w, 3) and theta shape is (n, 2, 3)
     # Use bmm to match eager kernel numerics: (n, h*w, 3) @ (n, 3, 2) -> (n, h*w, 2)
     base_grid = base_grid.unsqueeze(0).expand(n, h, w, 3)
-    grid = base_grid.view(n, h * w, 3).bmm(theta.transpose(1, 2))
+    grid = base_grid.reshape(n, h * w, 3).bmm(theta.transpose(1, 2))
     return grid.view(n, h, w, 2)
 
 
@@ -4401,7 +4401,7 @@ def _affine_grid_generator_5d(theta: Tensor, size: list[int], align_corners: boo
     # base_grid shape is (d, h, w, 4) and theta shape is (n, 3, 4)
     # Use bmm to match eager kernel numerics: (n, d*h*w, 4) @ (n, 4, 3) -> (n, d*h*w, 3)
     base_grid = base_grid.unsqueeze(0).expand(n, d, h, w, 4)
-    grid = base_grid.view(n, d * h * w, 4).bmm(theta.transpose(1, 2))
+    grid = base_grid.reshape(n, d * h * w, 4).bmm(theta.transpose(1, 2))
     return grid.view(n, d, h, w, 3)
 
 
