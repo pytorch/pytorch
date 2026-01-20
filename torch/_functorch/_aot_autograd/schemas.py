@@ -11,6 +11,7 @@ import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,11 +35,13 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+    from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput
     from .graph_capture_wrappers import JointFnHandle
 
-
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 zip = strict_zip
 
 
@@ -242,9 +245,9 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, Union[SubclassCreationMeta, PlainTensorMeta]]
-    outer_size: Iterable[Union[None, int, torch.SymInt]]
-    outer_stride: Iterable[Union[None, int, torch.SymInt]]
+    attrs: dict[str, SubclassCreationMeta | PlainTensorMeta]
+    outer_size: Iterable[IntLikeType | None]
+    outer_stride: Iterable[IntLikeType | None]
     meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
@@ -259,17 +262,17 @@ class SubclassCreationMeta:
 
     def compute_outer_size_and_stride(
         self,
-        all_args: Sequence[Union[torch.Tensor, int, torch.SymInt]],
+        all_args: Sequence[torch.Tensor | IntLikeType],
         *,
         curr_start_idx: int,
     ) -> tuple[
-        Iterable[Union[None, int, torch.SymInt]],
-        Iterable[Union[None, int, torch.SymInt]],
+        Iterable[IntLikeType | None],
+        Iterable[IntLikeType | None],
     ]:
         from .subclass_utils import compute_symint_placeholders
 
         def compute(
-            outer: Iterable[Union[None, int, torch.SymInt]], start_idx: int
+            outer: Iterable[IntLikeType | None], start_idx: int
         ) -> tuple[Any, int | Any]:
             placeholders = compute_symint_placeholders(outer)
             has_symbolic = any(placeholders)
@@ -291,7 +294,7 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args: Sequence[Union[torch.Tensor, int, torch.SymInt]],
+        all_args: Sequence[torch.Tensor | IntLikeType],
         *,
         is_runtime: bool,
     ) -> torch.Tensor:
@@ -658,7 +661,7 @@ class ViewAndMutationMeta:
         # SubclassCreationMeta is cache safe.
         assert self.traced_tangent_metas is None
 
-        def extract_metadata(t: Any) -> Optional[tuple[list[Any], Optional[Any]]]:
+        def extract_metadata(t: object) -> tuple[list[object], object | None] | None:
             if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
                 (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
                 # Technically, we only need the flatten_spec, not the inner tensors.
@@ -1171,13 +1174,13 @@ class CompilerWrapper:
 
     def pre_compile(
         self,
-        flat_fn: Callable[..., Any],
+        flat_fn: TraceFn,
         flat_args: list[FxValue],
         flat_args_descs: list[AOTInput],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[Callable[..., Any], list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+    ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -1190,11 +1193,11 @@ class CompilerWrapper:
 
     def post_compile(
         self,
-        compiled_fn: Callable[..., Any],
+        compiled_fn: Callable[_P, _R],
         aot_config: AOTConfig,
         *,
         runtime_metadata: ViewAndMutationMeta,
-    ) -> Callable[..., Any]:
+    ) -> Callable[_P, _R]:
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
@@ -1251,11 +1254,11 @@ class InductorWrapper:
 
     def post_compile(
         self,
-        compiled_fn: Callable[..., Any],
+        compiled_fn: Callable[_P, _R],
         aot_config: AOTConfig,
         *,
         runtime_metadata: ViewAndMutationMeta,
-    ) -> Callable[..., Any]:
+    ) -> Callable[_P, _R]:
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
