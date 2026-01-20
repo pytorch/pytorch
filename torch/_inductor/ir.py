@@ -9003,6 +9003,9 @@ class Conditional(ExternKernel):
     true_subgraph: Optional[Subgraph] = None
     false_subgraph: Optional[Subgraph] = None
     outputs: Optional[Sequence[MultiOutput]] = None
+    # Maps output index to operand index when output aliases a mutated operand
+    # in both branches. Used by codegen to return the original operand.
+    output_to_operand_alias: Optional[dict[int, int]] = None
 
     def __init__(
         self,
@@ -9112,6 +9115,50 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
+        # Analyze input-output aliasing and mutations in both branches.
+        # If an output aliases a mutated input in both branches, we can return
+        # the original operand instead of the subgraph output at codegen time.
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_outputs,
+        )
+
+        (
+            _,
+            true_inp_out_alias,
+            _,
+            true_mutated_inputs,
+            _,
+        ) = check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
+        (
+            _,
+            false_inp_out_alias,
+            _,
+            false_mutated_inputs,
+            _,
+        ) = check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
+
+        true_out_inp_alias = {v: k for k, v in true_inp_out_alias.items()}
+        false_out_inp_alias = {v: k for k, v in false_inp_out_alias.items()}
+
+        # An output can reuse the operand if:
+        # 1. Both branches alias the output to the same input, OR
+        # 2. One branch aliases to an input, and that input is mutated by either branch.
+        mutated_operand_indices = set(true_mutated_inputs) | set(false_mutated_inputs)
+        output_to_operand_alias: dict[int, int] = {}
+        for out_idx in range(len(true_outputs)):
+            true_alias = true_out_inp_alias.get(out_idx)
+            false_alias = false_out_inp_alias.get(out_idx)
+
+            # Both branches alias to the same operand
+            if true_alias is not None and true_alias == false_alias:
+                if true_alias in mutated_operand_indices:
+                    output_to_operand_alias[out_idx] = true_alias
+            # One branch aliases, the other mutates that operand
+            elif true_alias is not None and true_alias in mutated_operand_indices:
+                output_to_operand_alias[out_idx] = true_alias
+            elif false_alias is not None and false_alias in mutated_operand_indices:
+                output_to_operand_alias[out_idx] = false_alias
+
         # Determine device from operands and predicate
         # The predicate can be on a different device (e.g., CPU for control flow)
         # while the data operands and outputs should be on the compute device, so
@@ -9161,6 +9208,7 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
+        conditional.output_to_operand_alias = output_to_operand_alias
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
