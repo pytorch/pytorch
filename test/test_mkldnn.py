@@ -544,6 +544,31 @@ class TestMkldnn(TestCase):
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
+    @skipIfTorchDynamo("Test requires dynamo")
+    def test_conv_transpose_shape_compile(self):
+        """Regression test for shape inference bug in mkldnn._convolution_transpose.
+
+        Bug: torch.compile was incorrectly transposing weight dimensions for regular PyTorch
+        tensors, causing wrong output channel prediction (e.g., 3 instead of 8 channels).
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_transpose = torch.nn.ConvTranspose2d(3, 8, 3, stride=2, padding=1)
+
+            def forward(self, x):
+                return self.conv_transpose(x)
+
+        mod = M().eval()
+        x = torch.randn(4, 3, 16, 16)
+
+        with torch.no_grad():
+            eager_out = mod(x)
+            compiled_out = torch.compile(mod)(x)
+
+            self.assertEqual(eager_out.shape, compiled_out.shape)
+            self.assertEqual(eager_out.shape[1], 8)
+
     def test_conv2d_legacy_jit_model(self):
         """
         MKLDNN integration used to serialize models with 5d weight for grouped

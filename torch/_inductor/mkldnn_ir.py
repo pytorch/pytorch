@@ -133,10 +133,12 @@ def _prepare_convolution_fusion_create(
             output_padding = pad_listlike(output_padding, dims)
         assert isinstance(groups, (int, sympy.core.numbers.Integer))
         if transposed:
-            # When transposed, the size of the prepacked oneDNN weight is different
-            # from the PyTorch weight. We're not able to run aten conv with such
-            # size. We infer the output size from the input params here:
-            weight_size = _original_deconv_weight_size(weight_fake, groups)
+            # Only use _original_deconv_weight_size if weight is mkldnn.
+            # For regular PyTorch tensors, the weight is already in [I, O, ...] format.
+            if weight_fake.is_mkldnn:
+                weight_size = _original_deconv_weight_size(weight_fake, groups)
+            else:
+                weight_size = weight_fake.size()
             input_size = x_fake.size()
             output_size = _conv_input_size(
                 input_size,
