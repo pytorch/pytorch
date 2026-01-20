@@ -848,7 +848,7 @@ def _dynamo_graph_capture_for_export(
             graph_input_order: dict[int, int] = {}
             for inp in graph_inputs:
                 source = graph_inputs[inp]
-                assert isinstance(source, torch._dynamo.source.GetItemSource)
+                assert isinstance(source, torch._dynamo.source.GetItemSource), source
                 graph_input_order[source.index] = len(graph_input_order)
 
             for real_idx, graph_idx in graph_input_order.items():

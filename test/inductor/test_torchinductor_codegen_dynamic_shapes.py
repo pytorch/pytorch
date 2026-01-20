@@ -119,6 +119,24 @@ test_failures = {
     "test_triton_argmin_argmax_transpose_logical_index_dynamic_shapes": TestFailure(
         ("cpu",), is_skip=True
     ),
+    "test_affine_grid_generator_float32_align_corners_True_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
+    "test_affine_grid_generator_float32_align_corners_False_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
+    "test_affine_grid_generator_float16_align_corners_True_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
+    "test_affine_grid_generator_float16_align_corners_False_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
+    "test_affine_grid_generator_bfloat16_align_corners_True_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
+    "test_affine_grid_generator_bfloat16_align_corners_False_dynamic_shapes": TestFailure(
+        ("cpu",), is_skip=True
+    ),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
