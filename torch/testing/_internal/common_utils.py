@@ -5789,7 +5789,7 @@ def win_safe_rmtree(path):
         except Exception:
             # If chmod doesn't solve it, move to lock detection
             pass
-            
+
         # 2. If it's a lock (5/32) or any other failure, raise it!
         # This is CRITICAL for the outer retry loop to catch it.
         raise exc_value
