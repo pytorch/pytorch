@@ -187,8 +187,8 @@ def get_complete_tensor(
     ).set_(
         storage,
         0,
-        (total_size,),
-        None,
+        torch.Size([total_size]),
+        (),
     )
 
 
