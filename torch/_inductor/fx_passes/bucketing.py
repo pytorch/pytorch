@@ -227,6 +227,24 @@ def is_all_to_all_tensor(node: torch.fx.Node) -> bool:
     )
 
 
+def get_collective_type(node: torch.fx.Node) -> str:
+    """Get the collective type name for a node."""
+    if is_all_gather_into_tensor(node):
+        return "all_gather"
+    elif is_reduce_scatter_tensor(node):
+        return "reduce_scatter"
+    elif is_all_reduce_tensor(node):
+        return "all_reduce"
+    return ""
+
+
+def get_full_bucket_key(
+    node: torch.fx.Node, bucket_mode: BucketMode
+) -> tuple[str, Any]:
+    """Get the full bucket key including collective type and bucket key."""
+    return (get_collective_type(node), bucket_key(node, mode=bucket_mode))
+
+
 def is_wait_tensor_from_all_gather_into_tensor(node: torch.fx.Node) -> bool:
     return is_wait_tensor(node) and is_all_gather_into_tensor(node.args[0])  # type: ignore[arg-type]
 
