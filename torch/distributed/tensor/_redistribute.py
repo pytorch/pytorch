@@ -21,6 +21,7 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
+from torch.distributed.tensor._utils import assert_no_mixed_partial_types
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -825,27 +826,6 @@ def _gen_transform_infos(
     )
 
 
-def _assert_no_mixed_partial_types(placements: tuple[Placement, ...]) -> None:
-    """
-    Assert that a placement list doesn't contain mixed Partial reduce types.
-
-    Mixed Partial types (e.g., Partial("sum") and Partial("max") together) create
-    ordering constraints during redistribution that complicate optimization.
-    We ban them to enable simpler and more aggressive collective merging.
-    """
-    partial_reduce_ops: set[str] = set()
-    for p in placements:
-        if p.is_partial():
-            partial_reduce_ops.add(p.reduce_op)  # type: ignore[union-attr]
-
-    if len(partial_reduce_ops) > 1:
-        raise ValueError(
-            f"Mixed Partial reduce types are not supported in the same placement list. "
-            f"Found reduce ops: {partial_reduce_ops}. "
-            f"Please ensure all Partial placements use the same reduce operation."
-        )
-
-
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
@@ -867,8 +847,8 @@ def redistribute_local_tensor(
     # We do not see a valid use case for mixing different partial types in the same DTensor.
     # in principle it could be supported, but since nonlinear reductions (e.g. max) exist, relative ordering
     # of different partials would become semantically critical.  Without a motivating use case, we prohibit this.
-    _assert_no_mixed_partial_types(current_spec.placements)
-    _assert_no_mixed_partial_types(target_spec.placements)
+    assert_no_mixed_partial_types(current_spec.placements)
+    assert_no_mixed_partial_types(target_spec.placements)
 
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh

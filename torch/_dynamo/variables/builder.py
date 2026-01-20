@@ -646,9 +646,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -821,7 +819,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1628,7 +1626,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -2367,7 +2365,7 @@ class VariableBuilder:
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
                 explanation="torch.compile does not support sparse Tensors",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
 
         if (
@@ -3228,7 +3226,7 @@ def handle_traced_output(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
                 context=str(example_value),
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
@@ -3439,6 +3437,17 @@ def handle_traced_output(
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif is_opaque_type(type(example_value)):
+        # This is for handling opaque objects in custom ops
+        if is_opaque_value_type(type(example_value)):
+            proxy = example_value  # pyrefly: ignore[bad-assignment]
+        fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+            tx.output.fake_mode, example_value
+        )
+        return TorchScriptObjectVariable.create(
+            proxy,
+            fake_script_obj,
+        )
     else:
         unimplemented(
             gb_type="torch.* op returned non-Tensor",
@@ -4061,6 +4070,15 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
+        elif is_opaque_value_type(type(value)):
+            # This is for handling opaque objects in custom ops
+            fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                tx.output.fake_mode, value
+            )
+            return TorchScriptObjectVariable.create(
+                value,
+                fake_script_obj,
+            )
         # type: ignore[attr-defined]
         elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return UserDefinedObjectVariable(value)
