@@ -61,7 +61,7 @@ from ._aot_autograd.descriptors import (
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.logging_utils import get_aot_graph_name
-from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
+from ._aot_autograd.utils import get_cuda_generator_meta_val
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
@@ -333,7 +333,8 @@ def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
 def _must_be_in_forward(node: fx.Node) -> bool:
     if _has_tag_must_be_in_forward(node):
         return True
-    is_mutable = is_with_effects(node) or (
+
+    is_mutable = (
         isinstance(node.target, torch._ops.OpOverload)
         and node.target._schema.is_mutable
     )
@@ -347,7 +348,7 @@ def _must_be_in_forward(node: fx.Node) -> bool:
 def _must_be_in_backward(node: fx.Node) -> bool:
     if _has_tag_must_be_in_backward(node):
         return True
-    is_mutable = is_with_effects(node) or (
+    is_mutable = (
         isinstance(node.target, torch._ops.OpOverload)
         and node.target._schema.is_mutable
     )
@@ -2229,7 +2230,15 @@ def solve_min_cut(
 
 def visualize_min_cut_graph(nx_graph):
     import networkx as nx
-    import pydot
+
+    try:
+        import pydot
+    except ImportError:
+        log.info(
+            "Install pydot to visualize the min-cut graph for debugging: pip install pydot",
+            exc_info=True,
+        )
+        return
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
     dot_graph = pydot.graph_from_dot_data(dot_format)[0]  # type: ignore[index]
