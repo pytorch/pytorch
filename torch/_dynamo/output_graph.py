@@ -56,6 +56,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
@@ -3614,9 +3615,12 @@ class SubgraphTracer(fx.Tracer):
             self.parent.lift_tracked_freevar_to_input(proxy)
 
         example_value = proxy.node.meta["example_value"]
-        new_proxy = self.create_graph_input(
-            proxy.node.name, type(example_value), example_value
+        type_expr = (
+            type(example_value.real_obj)
+            if isinstance(example_value, FakeScriptObject)
+            else type(example_value)
         )
+        new_proxy = self.create_graph_input(proxy.node.name, type_expr, example_value)
         self.lifted_freevars[proxy] = new_proxy
         return new_proxy
 
