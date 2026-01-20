@@ -128,8 +128,8 @@ def supports_tensorlist(cls: Any) -> Any:
 
     @dataclass
     class Metadata:
-        input_spec: spec_t
-        output_spec: Optional[spec_t] = None
+        input_spec: _pytree.TreeSpec
+        output_spec: Optional[_pytree.TreeSpec] = None
         result_is_tuple: Optional[bool] = None
 
     def new_forward(ctx, *args):
@@ -141,12 +141,12 @@ def supports_tensorlist(cls: Any) -> Any:
                 "You should probably be calling .apply instead. "
                 "Please file an issue if not."
             )
-        args = unflatten(list(args), metadata.input_spec)
+        args = _pytree.tree_unflatten(list(args), metadata.input_spec)
         result = orig_forward(ctx, *args)
         metadata.result_is_tuple = isinstance(result, tuple)
         if not metadata.result_is_tuple:
             result = (result,)
-        flat_result, output_spec = flatten(result, not_list_of_tensor)
+        flat_result, output_spec = _pytree.tree_flatten(result, not_list_of_tensor)
         metadata.output_spec = output_spec
 
         if hasattr(ctx, "_pt_metadata"):
@@ -166,17 +166,17 @@ def supports_tensorlist(cls: Any) -> Any:
             )
 
         metadata = ctx._pt_metadata
-        grads = unflatten(list(grads), metadata.output_spec)
+        grads = _pytree.tree_unflatten(list(grads), metadata.output_spec)
 
         # If the user's input is ([x, y, z], w),
         # then needs_input_grad is (bool, bool, bool, bool, bool).
         # We need to
         # 1. get rid of the additional bool (which comes from the extra
         # `metadata input`)
-        # 2. unflatten to get the right structure.
+        # 2. _pytree.tree_unflatten to get the right structure.
         prev_needs_input_grad = ctx.needs_input_grad
         try:
-            ctx.needs_input_grad = unflatten(
+            ctx.needs_input_grad = _pytree.tree_unflatten(
                 list(ctx.needs_input_grad[:-1]), metadata.input_spec
             )
             grad_inputs = orig_backward(ctx, *grads)
@@ -190,7 +190,7 @@ def supports_tensorlist(cls: Any) -> Any:
         # return None as the grad.
         # If the forward has an arg that is [tensor, tensor], the backward
         # may return [None, None], [grad, None], [None, grad], or [grad, grad].
-        flat_grad_inputs, grad_inputs_spec = flatten(
+        flat_grad_inputs, grad_inputs_spec = _pytree.tree_flatten(
             grad_inputs, not_list_of_optional_tensor
         )
         if grad_inputs_spec != metadata.input_spec:
@@ -202,14 +202,19 @@ def supports_tensorlist(cls: Any) -> Any:
         return tuple(flat_grad_inputs + [None])
 
     def new_apply(*args):
-        flat_args, input_spec = flatten(args, is_leaf=not_list_of_tensor)
+        flat_args, input_spec = _pytree.tree_flatten(args, is_leaf=not_list_of_tensor)
         metadata = Metadata(input_spec)
         result = orig_apply(*flat_args, metadata)  # type: ignore[misc]
-        assert metadata.output_spec is not None
-        result = unflatten(list(result), metadata.output_spec)
+        if metadata.output_spec is None:
+            raise AssertionError("metadata.output_spec must not be None")
+        result = _pytree.tree_unflatten(list(result), metadata.output_spec)
         if not metadata.result_is_tuple:
-            assert isinstance(result, tuple)
-            assert len(result) == 1
+            if not isinstance(result, tuple):
+                raise AssertionError(f"result must be tuple, got {type(result)}")
+            if len(result) != 1:
+                raise AssertionError(
+                    f"result tuple must have length 1, got {len(result)}"
+                )
             return result[0]
         return result
 
@@ -233,8 +238,3 @@ def not_list_of_optional_tensor(tree):
     if isinstance(tree, list):
         return any(l is not None and not isinstance(l, Tensor) for l in tree)
     return True
-
-
-flatten = _pytree.tree_flatten
-unflatten = _pytree.tree_unflatten
-spec_t = _pytree.TreeSpec

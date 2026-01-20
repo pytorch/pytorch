@@ -24,6 +24,7 @@ class TestCudaPrimaryCtx(TestCase):
     )
 
     def setUp(self):
+        super().setUp()
         for device in range(torch.cuda.device_count()):
             # Ensure context has not been created beforehand
             self.assertFalse(

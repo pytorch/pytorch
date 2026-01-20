@@ -362,11 +362,15 @@ class PerChannelDetector(DetectorBase):
 
                 # assert statement for MyPy
                 q_config_file = module.qconfig
-                assert isinstance(q_config_file, QConfig)
+                if not isinstance(q_config_file, QConfig):
+                    raise AssertionError("module.qconfig must be a QConfig")
 
                 # this object should either be fake quant or observer
                 q_or_s_obj = module.qconfig.weight.p.func()
-                assert isinstance(q_or_s_obj, (FakeQuantize, ObserverBase))
+                if not isinstance(q_or_s_obj, (FakeQuantize, ObserverBase)):
+                    raise AssertionError(
+                        "module.qconfig.weight must be a FakeQuantize or ObserverBase"
+                    )
 
                 per_channel_used = False  # will be true if found in qconfig
 
@@ -739,7 +743,7 @@ class DynamicStaticDetector(DetectorBase):
         #   Populates the string based report with the information from module_dynamic_static_info
         #   Compiles the complete report by appending relevant formatted strings
 
-        for module_fqn in module_dynamic_static_info.keys():
+        for module_fqn in module_dynamic_static_info:
             # there is at least 1 module for suggestion
             modules_added = True
             module_info = module_dynamic_static_info[module_fqn]
@@ -1160,9 +1164,10 @@ class InputWeightEqualizationDetector(DetectorBase):
             input_channels = len(input_ratio)
             if weight_channels != input_channels:
                 # we try to replicate
-                assert input_channels % weight_channels == 0, (
-                    "input channels should be divisible by weight channels."
-                )
+                if input_channels % weight_channels != 0:
+                    raise AssertionError(
+                        "input channels should be divisible by weight channels."
+                    )
                 # get replication factor
                 rep_factor: int = input_channels // weight_channels
 
@@ -1418,11 +1423,15 @@ class OutlierDetector(DetectorBase):
         self.ratio_threshold = ratio_threshold
 
         # make sure passed in percentile is valid
-        assert reference_percentile >= 0 and reference_percentile <= 1
-        assert (
+        if reference_percentile < 0 or reference_percentile > 1:
+            raise AssertionError("reference_percentile must be between 0 and 1")
+        if not (
             fraction_batches_used_threshold >= 0
             and fraction_batches_used_threshold <= 1
-        )
+        ):
+            raise AssertionError(
+                "fraction_batches_used_threshold must be between 0 and 1"
+            )
         self.reference_percentile = reference_percentile
         self.fraction_batches_used_threshold = fraction_batches_used_threshold
         self.ch_axis = ch_axis

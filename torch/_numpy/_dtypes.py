@@ -248,7 +248,7 @@ def sctype_from_string(s):
     """Normalize a string value: a type 'name' or a typecode or a width alias."""
     if s in _names:
         return _names[s]
-    if s in _name_aliases.keys():
+    if s in _name_aliases:
         return _name_aliases[s]
     if s in _typecodes:
         return _typecodes[s]

@@ -21,9 +21,7 @@
 namespace at::native {
 
 template <typename scalar_t, typename IndexType>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void kernel_pointwise_flip_apply2(
     const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
     cuda::detail::TensorInfo<scalar_t, IndexType> out_tensor_info,
@@ -79,6 +77,37 @@ __global__ void flip_cuda_kernel(
   out_tensor[linear_index] = in_tensor[dst_offset];
 }
 
+#if defined(USE_ROCM)
+
+template <typename scalar_t>
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
+__global__ void roll_cuda_kernel(
+    const scalar_t* in_tensor,
+    scalar_t* out_tensor,
+    int64_t N,
+    int64_t roll_dim,
+    int64_t start,
+    int64_t size,
+    int64_t stride,
+    int64_t total_dims) {
+  for (int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+       linear_index < N; linear_index += blockDim.x*gridDim.x)
+  {
+    // roll dim idx is the index of linear_index along the rolling dimension.
+    int64_t roll_dim_idx = linear_index % (stride * size) / stride;
+    // index into the source data to find appropriate value.
+    int64_t source_idx = 0;
+    if( roll_dim_idx >= (size - start) ) {
+      source_idx = linear_index - ((size - start) * stride);
+    } else {
+      source_idx = linear_index + (start * stride);
+    }
+    out_tensor[linear_index] = in_tensor[source_idx];
+  }
+}
+
+#else
+
 template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void roll_cuda_kernel(
@@ -106,6 +135,8 @@ __global__ void roll_cuda_kernel(
   out_tensor[linear_index] = in_tensor[source_idx];
 }
 
+#endif
+
 // Roll a tensor along a dimension
 Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   if (dims.size() != 1 || shifts.size() != 1) {
@@ -129,8 +160,14 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   if( start < 0 ) start = start + size;
 
   dim3 dim_block = cuda::getApplyBlock();
+#if defined(USE_ROCM)
+  const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  // Given a thread block size of 512, we launch with 4 blocks per SM/CU
+  dim3 dim_grid(num_mp * 4);
+#else
   dim3 dim_grid;
   TORCH_CHECK(cuda::getApplyGrid(N, dim_grid, in_tensor.get_device()), "unable to get dim grid");
+#endif
 
   auto total_dims = in_tensor.dim();
 

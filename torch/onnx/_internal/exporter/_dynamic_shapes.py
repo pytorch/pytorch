@@ -9,7 +9,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.export.dynamic_shapes import _DimHint, Dim
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.utils import _pytree
 
 
@@ -67,7 +67,7 @@ def from_dynamic_axes_to_dynamic_shapes(
             # output names are not needed for dynamic_shapes
             continue
         if isinstance(axes, dict):
-            if any(not isinstance(k, int) for k in axes.keys()):
+            if any(not isinstance(k, int) for k in axes):
                 raise ValueError(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )
@@ -271,7 +271,8 @@ def create_rename_mapping(
                 if input.shape[dim].value in rename_mapping:
                     warnings.warn(
                         f"# The axis name: {custom_name} will not be used, since it shares "
-                        f"the same shape constraints with another axis: {rename_mapping[input.shape[dim].value]}."
+                        f"the same shape constraints with another axis: {rename_mapping[input.shape[dim].value]}.",
+                        stacklevel=2,
                     )
                     continue
                 rename_mapping[input.shape[dim].value] = custom_name

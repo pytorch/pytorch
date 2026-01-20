@@ -158,7 +158,7 @@ from .api import (  # noqa: F401
 )
 
 
-def initialize_metrics(cfg: Optional[MetricsConfig] = None):
+def initialize_metrics(cfg: MetricsConfig | None = None):
     pass
 
 

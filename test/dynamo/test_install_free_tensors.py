@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import unittest
-from collections.abc import Sequence
-from typing import Any, Callable, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Union
 
 import torch
 import torch._dynamo

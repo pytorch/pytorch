@@ -192,7 +192,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -209,7 +209,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_resuming_with_arg(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -226,7 +226,7 @@ class TestLRScheduler(TestCase):
 
     def test_old_pattern_warning_with_overridden_optim_step(self):
         epochs = 35
-        for i, group in enumerate(self.opt.param_groups):
+        for group in self.opt.param_groups:
             group["initial_lr"] = 0.01
 
         with warnings.catch_warnings(record=True) as ws:
@@ -299,7 +299,7 @@ class TestLRScheduler(TestCase):
         self.opt.step = types.MethodType(new_step, self.opt)
 
         def new_pattern():
-            for e in range(epochs):
+            for _ in range(epochs):
                 self.opt.step()
                 scheduler.step()
 
@@ -2129,7 +2129,7 @@ class TestLRScheduler(TestCase):
             self.opt, mode="max", factor=0.5, patience=10
         )
         scheduler_copy.load_state_dict(scheduler.state_dict())
-        for key in scheduler.__dict__.keys():
+        for key in scheduler.__dict__:
             if key not in {"optimizer", "is_better"}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
@@ -2140,7 +2140,7 @@ class TestLRScheduler(TestCase):
 
         scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x)
         scheduler_copy.load_state_dict(state)
-        for key in scheduler.__dict__.keys():
+        for key in scheduler.__dict__:
             if key not in {"optimizer", "lr_lambdas"}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
@@ -2151,8 +2151,8 @@ class TestLRScheduler(TestCase):
 
         scheduler_copy = LambdaLR(self.opt, lr_lambda=self.LambdaLRTestObject(-1))
         scheduler_copy.load_state_dict(state)
-        for key in scheduler.__dict__.keys():
-            if key not in {"optimizer"}:
+        for key in scheduler.__dict__:
+            if key != "optimizer":
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
     def test_CosineAnnealingWarmRestarts_lr_state_dict(self):
@@ -2176,7 +2176,7 @@ class TestLRScheduler(TestCase):
             scheduler.step()
         scheduler_copy = constr2()
         scheduler_copy.load_state_dict(scheduler.state_dict())
-        for key in scheduler.__dict__.keys():
+        for key in scheduler.__dict__:
             if key != "optimizer":
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
         self.assertEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
@@ -2328,7 +2328,7 @@ class TestLRScheduler(TestCase):
     ):
         for batch_num in range(batch_iterations):
             if verbose:
-                if "momentum" in self.opt.param_groups[0].keys():
+                if "momentum" in self.opt.param_groups[0]:
                     print(
                         "batch{}:\tlr={},momentum={}".format(
                             batch_num,
@@ -2336,7 +2336,7 @@ class TestLRScheduler(TestCase):
                             self.opt.param_groups[0]["momentum"],
                         )
                     )
-                elif use_beta1 and "betas" in self.opt.param_groups[0].keys():
+                elif use_beta1 and "betas" in self.opt.param_groups[0]:
                     print(
                         "batch{}:\tlr={},beta1={}".format(
                             batch_num,
@@ -2364,7 +2364,7 @@ class TestLRScheduler(TestCase):
                     rtol=0,
                 )
 
-                if use_beta1 and "betas" in param_group.keys():
+                if use_beta1 and "betas" in param_group:
                     self.assertEqual(
                         momentum_target[batch_num],
                         param_group["betas"][0],
@@ -2376,7 +2376,7 @@ class TestLRScheduler(TestCase):
                         atol=1e-5,
                         rtol=0,
                     )
-                elif "momentum" in param_group.keys():
+                elif "momentum" in param_group:
                     self.assertEqual(
                         momentum_target[batch_num],
                         param_group["momentum"],
@@ -2617,7 +2617,7 @@ class TestLRScheduler(TestCase):
         sch = SWALR(opt, swa_lr=swa_lr)
         ori_param_groups = copy.deepcopy(opt.param_groups)
 
-        for i in range(2):
+        for _ in range(2):
             lr.multiply_(0.5)
             swa_lr.multiply_(0.5)
             opt.step()

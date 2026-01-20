@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    patch_custom_fallback_pass,
     requires_gpu,
     TRITON_HAS_CPU,
 )
@@ -147,6 +148,24 @@ class FxirTestCase(InductorTestCase):
     def test_basic(self):
         args = [torch.randn(8, device=self.device) for _ in range(2)]
         self._compile_and_check(torch.add, args)
+
+    def test_device_type(self):
+        """
+        Test that we allocate on a device type instead of a specific index.
+        """
+        # Pass in a tensor on an indexed device.
+        device_runtime = getattr(torch, self.device)
+        indexed_device = torch.device(self.device, device_runtime.current_device())
+        args = [torch.randn(8, device=indexed_device) for _ in range(2)]
+        (gm,) = self._compile_and_check(torch.add, args)
+        (empty_strided,) = gm.graph.find_nodes(
+            op="call_function", target=torch.empty_strided
+        )
+
+        # Check that the device of the output allocation is not indexed.
+        output_device = torch.device(empty_strided.kwargs["device"])
+        self.assertIs(output_device.index, None)
+        self.assertEqual(output_device.type, indexed_device.type)
 
     def test_multiple_kernels(self):
         def foo(x, y):
@@ -304,6 +323,26 @@ class FxirTestCase(InductorTestCase):
         # Check for as_strided. We map ReinterpretView to this.
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 1)
+
+    def test_reshape_fallback(self):
+        """
+        Test falling back to aten.reshape. This uses a custom pass to enable more fallbacks.
+        """
+
+        def always_fallback(node: torch.fx.Node) -> bool:
+            return True
+
+        def foo(x):
+            return x.reshape((2, 5))
+
+        args = (torch.randn(10, device=self.device),)
+        with patch_custom_fallback_pass(always_fallback):
+            (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+        # Check for the reshape.
+        (reshape_node,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.reshape.default
+        )
 
     def test_extern_multi_output(self):
         """
@@ -498,7 +537,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_dynamic_launch_grid_calc(self):
         """
-        Test the dyanmic launch grid calculation.
+        Test the dynamic launch grid calculation.
         """
 
         func = torch.add
@@ -582,6 +621,7 @@ class FxirTestCase(InductorTestCase):
         num_fallback = self._count_ops(gm, torch.ops.aten.scatter_.value)
         self.assertEqual(num_fallback, 1)
 
+    @config.patch("partitioned_scatter_enabled", False)
     def test_index_put_fallback(self):
         """
         Test the deterministic fallback for index_put.
@@ -761,6 +801,43 @@ class FxirTestCase(InductorTestCase):
         args = [torch.rand([4, 4, 4, 4], device=self.device)]
         self._compile_and_check(foo, args, expected_num_triton_kernels=0)
 
+    def test_fallback_tuple_constant_arg(self):
+        """
+        Test a fallback op with tuple constant argument.
+        Check that tuple arguments are not flattened during codegen.
+        """
+
+        def foo(x):
+            # permute with a tuple argument
+            return torch.permute(x, (0, 2, 1))
+
+        # Use complex64 to force permute to become a fallback op
+        args = [torch.randn(2, 3, 4, dtype=torch.complex64, device=self.device)]
+
+        (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+        # Check for the fallback kernel with permute
+        num_fallback = self._count_ops(gm, torch.ops.aten.permute.default)
+        self.assertEqual(num_fallback, 1)
+
+        # Verify the permute node has the correct tuple argument
+        permute_node = next(
+            iter(
+                gm.graph.find_nodes(
+                    op="call_function", target=torch.ops.aten.permute.default
+                )
+            )
+        )
+
+        # The second argument should be the permutation (0, 2, 1)
+        # Check that it's not flattened
+        perm_arg = permute_node.args[1]
+        self.assertIsInstance(
+            perm_arg, list, "Permutation argument should not be flattened"
+        )
+        self.assertEqual(len(perm_arg), 3)
+        self.assertEqual(tuple(perm_arg), (0, 2, 1))
+
 
 @instantiate_parametrized_tests
 class AOTFxirTestCase(InductorTestCase):
@@ -769,8 +846,6 @@ class AOTFxirTestCase(InductorTestCase):
     def check(
         self, model, inp, dynamic_shapes=None, strict=False
     ) -> torch.fx.GraphModule:
-        if self.device == "xpu":
-            raise unittest.SkipTest("The feature AOTFxir not currently ready for XPU")
         with torch.no_grad():
             ep = torch.export.export(
                 model, inp, dynamic_shapes=dynamic_shapes, strict=strict
@@ -778,7 +853,9 @@ class AOTFxirTestCase(InductorTestCase):
             gm = torch._inductor.aot_compile(
                 ep.module(), inp, options={"fx_wrapper": True, **test_config}
             )
-            self.assertTrue(same(model(*inp), gm(*inp)))
+            # Flatten args for fx_wrapper gm
+            flat_args, _ = pytree.tree_flatten(inp)
+            self.assertTrue(same(model(*inp), gm(*flat_args)))
 
             for node in gm.graph.nodes:
                 if (
@@ -1077,6 +1154,90 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_const_folded_subgraph(self):
+        """
+        If a graph only contains a call_module node to a subgraph,
+        where the subgraph can be const-folded away,
+        validate the fake mode used in FXConverter generation is not None.
+        """
+        device = self.device
+        shape = (5, 10)
+
+        class Submodule(torch.nn.Module):
+            def forward(self):
+                return torch.randn(*shape, device=device) + 1
+
+        # Create a parent graph with this module as a subgraph and output
+        ep = torch.export.export(Submodule(), ())
+        parent_graph = torch.fx.Graph()
+        call_mod = parent_graph.call_module("sub", args=())
+        get_item = parent_graph.call_function(
+            operator.getitem, args=(call_mod, slice(None))
+        )
+        parent_graph.output((get_item,))
+        parent = torch.fx.GraphModule({"sub": ep.module()}, parent_graph)
+
+        # Verify FXConverter.generate uses non-null fake mode
+        # Intercept _set_node_metadata_hook to ensure fake_mode is not None
+        orig_set_hook = torch._inductor.codegen.wrapper_fxir._set_node_metadata_hook
+        called = False
+
+        def mock_set_hook(gm: torch.fx.GraphModule, fn):
+            nonlocal called
+            called = True
+            # Please update this check if `fake_mode` is
+            # no longer used in FXConverter call to _node_metadata_hook
+            self.assertTrue("fake_mode" in fn.keywords)
+            self.assertIsNotNone(fn.keywords["fake_mode"])
+            return orig_set_hook(gm, fn)
+
+        self.assertFalse(called)
+        with unittest.mock.patch.object(
+            torch._inductor.codegen.wrapper_fxir,
+            "_set_node_metadata_hook",
+            mock_set_hook,
+        ):
+            args = ()
+            compiled = torch._inductor.aot_compile(
+                parent, args, options={"fx_wrapper": True}
+            )
+            self.assertTrue(called)
+
+            compiled_out = compiled(*args)
+            self.assertEqual(compiled_out.shape, shape)
+
+    def test_reshape_dynamic_ph(self):
+        """
+        Test dynamic scalars using SymInts placeholder
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x, shape):
+                return torch.reshape(x, shape) + 2
+
+        ds = {
+            "x": (torch.export.Dim.AUTO, torch.export.Dim.AUTO),
+            "shape": [torch.export.Dim.AUTO, torch.export.Dim.AUTO],
+        }
+        args = (torch.randn((12, 14), device=self.device), [6, 28])
+        self.check(TestModule(), args, ds)
+
+    def test_reshape_dynamic_tmd(self):
+        """
+        Test dynamic reshape using shape dependent information
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                new_shape = [x.shape[0] // 2, x.shape[1] * 2]
+                return torch.reshape(x, new_shape) + 2
+
+        ds = {
+            "x": (torch.export.Dim.AUTO, torch.export.Dim.AUTO),
+        }
+        args = (torch.randn((12, 14), device=self.device),)
+        self.check(TestModule(), args, ds)
+
 
 class TestReplaceFloorDiv(InductorTestCase):
     """
@@ -1091,7 +1252,7 @@ class TestReplaceFloorDiv(InductorTestCase):
         replaced = replace_floor_div(expr)
 
         # Check that all floor's were replaced.
-        # We shoud have no more new FloorDiv's than floor's in the original expression,
+        # We should have no more new FloorDiv's than floor's in the original expression,
         # although we can have less due to simplification.
         self.assertEqual(replaced.count(sympy.floor), 0)
         self.assertLessEqual(

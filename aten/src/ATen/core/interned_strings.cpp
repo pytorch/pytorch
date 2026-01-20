@@ -2,12 +2,9 @@
 #undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/interned_strings.h>
-#include <cstdint>
 #include <cstring>
 #include <mutex>
-#include <sstream>
 #include <string>
-#include <c10/util/Exception.h>
 #include <ATen/core/interned_strings_class.h>
 
 namespace c10 {

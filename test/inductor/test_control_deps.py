@@ -23,10 +23,7 @@ class TestControlDeps(InductorTestCase):
             e = c * 2
             return d, e
 
-        # Custom pass to add control dependency from d -> c
         def add_control_deps(graph):
-            nodes = list(graph.nodes)
-
             nodes = [n for n in graph.nodes if n.op == "call_function"]
             assert len(nodes) == 3
             c_node = nodes[0]
@@ -71,6 +68,52 @@ class TestControlDeps(InductorTestCase):
 
             expected = fn(a, b)
             torch.testing.assert_close(result, expected)
+
+    @config.patch(allow_buffer_reuse=False)
+    @requires_gpu()
+    def test_control_deps_do_not_extend_buffer_lifetime(self):
+        """
+        Control deps should not extend buffer lifetimes - buf0/buf1 should be
+        deleted before the 4th matmul, not kept alive by the control dependency.
+        """
+
+        def fn(a, b):
+            # Chain of 4 matmuls: mm0 -> mm1 -> mm2 -> mm3
+            mm0 = a @ b
+            mm1 = mm0 @ b
+            mm2 = mm1 @ b
+            mm3 = mm2 @ b
+            return mm3
+
+        def add_control_deps(graph):
+            from torch.utils._ordered_set import OrderedSet
+
+            mm_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )
+            assert len(mm_nodes) == 4, f"Expected 4 mm nodes, got {len(mm_nodes)}"
+
+            # Add control dep: mm3 depends on mm0's output
+            # This should NOT extend mm0's buffer lifetime
+            deps_map = {mm_nodes[3]: OrderedSet([mm_nodes[0]])}
+            torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                graph, deps_map
+            )
+            return graph
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=add_control_deps,
+        ):
+            a = torch.rand([256, 256], device=GPU_TYPE)
+            b = torch.rand([256, 256], device=GPU_TYPE)
+
+            result, code = run_and_get_code(torch.compile(fn), a, b)
+            torch.testing.assert_close(result, fn(a, b))
+
+            # buf0 should be allocated, passed in out=, used once, then del
+            FileCheck().check("buf0 = ").check_count(
+                "extern_kernels.mm", 2, exactly=True
+            ).check("del buf0").run(code[0])
 
 
 if __name__ == "__main__":

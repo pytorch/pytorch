@@ -3,7 +3,8 @@
 import functools
 import weakref
 from collections import Counter
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 from torch._inductor.fx_passes.memory_estimator import (
@@ -28,7 +29,7 @@ def device_filter(device):
 
 
 class FakeTensorMemoryProfilerMode(TorchDispatchMode):
-    def __init__(self, device_filter: Optional[Callable[torch.device, bool]] = None):
+    def __init__(self, device_filter: Optional[Callable[[torch.device], bool]] = None):
         # counter of storage ids to live references
         self.storage_count: dict[int, int] = Counter()
         # live fake tensors

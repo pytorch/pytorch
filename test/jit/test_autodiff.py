@@ -68,7 +68,7 @@ class TestAutodiffJit(JitTestCase):
 
         fn_s = torch.jit.script(fn)
 
-        for i in range(4):
+        for _ in range(4):
             x, y = fn_s(a, b, c)
             self.assertFalse(x.requires_grad)
             self.assertTrue(y.requires_grad)
@@ -90,7 +90,7 @@ class TestAutodiffJit(JitTestCase):
         b = torch.rand((10, 10), requires_grad=False)
         c = torch.rand((10, 10), requires_grad=True)
 
-        for i in range(4):
+        for _ in range(4):
             x_s, y_s, z_s = fn_s(a, b, c)
             x, y, z = fn(a, b, c)
 
@@ -115,7 +115,7 @@ class TestAutodiffJit(JitTestCase):
         b = torch.rand((10, 10), requires_grad=False)
         c = torch.rand((10, 10), requires_grad=True)
 
-        for i in range(4):
+        for _ in range(4):
             x_s, y_s, z_s = fn_s(a, b, c)
             x, y, z = fn(a, b, c)
 
@@ -141,7 +141,7 @@ class TestAutodiffJit(JitTestCase):
         b = torch.rand((10, 10), requires_grad=True)
         c = torch.rand((10, 10), requires_grad=True)
 
-        for i in range(4):
+        for _ in range(4):
             x_s, y_s, z_s = fn_s(a, b, c)
             x, y, z = fn(a, b, c)
 

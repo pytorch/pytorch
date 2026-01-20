@@ -1,7 +1,7 @@
 import abc
 import os
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any
 
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
 from torch.distributed.checkpoint.planner import (
@@ -43,7 +43,7 @@ class StorageWriter(abc.ABC):
     """
 
     @abc.abstractmethod
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         """
         Calls to indicates a brand new checkpoint write is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for
@@ -147,14 +147,14 @@ class StorageWriter(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         """
         Check if the given checkpoint_id is supported by the storage. This allow
         us to enable automatic storage selection.
         """
         ...
 
-    def storage_meta(self) -> Optional[StorageMeta]:
+    def storage_meta(self) -> StorageMeta | None:
         """
         Return the storage-specific metadata. This is used to store additional information
         in a checkpoint that can be useful for providing request-level observability. StorageMeta
@@ -184,7 +184,7 @@ class StorageReader(abc.ABC):
     """
 
     @abc.abstractmethod
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         """
         Calls to indicates a brand new checkpoint read is going to happen.
         A checkpoint_id may be present if users set the checkpoint_id for
@@ -280,7 +280,7 @@ class StorageReader(abc.ABC):
 
     @classmethod
     @abc.abstractmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         """
         Check if the given checkpoint_id is supported by the storage. This allow
         us to enable automatic storage selection.

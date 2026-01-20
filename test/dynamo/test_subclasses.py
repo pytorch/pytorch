@@ -877,6 +877,26 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         out = compiled_fn(x)
         self.assertEqual(out, torch.ones(4, 4) * 2)
 
+    def test_tensor_subclass_unpack(self):
+        class Foo(torch.Tensor):
+            pass
+
+        torch._dynamo.config.traceable_tensor_subclasses.add(Foo)
+        try:
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn_list(x):
+                return list(x)
+
+            x = torch.ones(3).as_subclass(Foo)
+            res_list = fn_list(x)
+
+            for elem in res_list:
+                self.assertIsInstance(elem, Foo)
+            self.assertEqual(len(res_list), 3)
+        finally:
+            torch._dynamo.config.traceable_tensor_subclasses.discard(Foo)
+
     def test_torch_function_wrapper_class_with_kwargs(self):
         x = torch.ones(2, 2)
         wrapped = WrapperSubclass(x)
@@ -1176,6 +1196,23 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
+
+    def test_subclass_method_override(self):
+        class MyTensor(torch.Tensor):
+            def sum(self, dim=None, keepdim=False):
+                return super().sum(dim=dim, keepdim=keepdim).as_subclass(MyTensor)
+
+        def fn(x):
+            y = x.as_subclass(MyTensor)
+            return y.sum(dim=1)
+
+        x = torch.randn(4, 10)
+        fn_opt = torch.compile(fn, backend="eager", fullgraph=False)
+
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
+        self.assertIsInstance(res_act, MyTensor)
 
     def test_tensor_subclass_attr_codegen_tos(self):
         # This repros a very subtle interaction between
@@ -1624,7 +1661,7 @@ class GraphModule(torch.nn.Module):
                 str(k): v for k, v in context.fake_mode.shape_env.var_to_val.items()
             }
             curr_var_to_sources = {
-                str(k): v[0].name()
+                str(k): v[0].name
                 for k, v in context.fake_mode.shape_env.var_to_sources.items()
             }
             return gm
@@ -2168,6 +2205,46 @@ class GraphModule(torch.nn.Module):
             return t0 + t1 + t2 + 2
 
         fn(torch.ones(4), x, torch.ones(4))
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_subclass_parameters_are_static_under_training(self):
+        from collections.abc import Callable
+        from typing import Any, Optional
+
+        from torch._inductor.compile_fx import compile_fx
+        from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+        from torch._inductor.utils import BoxedBool
+
+        def inner_compile(
+            gm: torch.fx.GraphModule,
+            example_inputs: list[torch.Tensor],
+            cudagraphs: Optional[BoxedBool] = None,
+            static_input_idxs: Optional[list[int]] = None,
+            is_backward: bool = False,
+            graph_id: Optional[int] = None,
+            cpp_wrapper: bool = False,
+            aot_mode: bool = False,
+            is_inference: bool = False,
+            boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
+            layout_opt: Optional[bool] = None,
+            extern_node_serializer: Optional[Callable[[list[Any]], Any]] = None,
+        ):
+            # Important bit: there are 3 params: linear.weight.a, linear.weight.b, linear.bias,
+            # which are the first 3 args of the graph.
+            self.assertEqual(static_input_idxs, [0, 1, 2])
+            return gm
+
+        compiler = functools.partial(compile_fx, inner_compile=inner_compile)
+
+        mod = torch.nn.Linear(4, 4)
+        w_a = torch.randn(4, 4)
+        w_b = torch.randn(4, 4)
+        w = torch.nn.Parameter(TwoTensor(w_a, w_b).requires_grad_())
+        mod.weight = w
+
+        mod = torch.compile(mod, backend=compiler)
+
+        mod(torch.randn(4))
 
     # copied from common_utils.py::NestedTensorTestCase
     def assertEqualIgnoringNestedInts(self, a, b):
@@ -3166,7 +3243,6 @@ class GraphModule(torch.nn.Module):
     ):
         slice_1: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_10)
         slice_2: "f64[s64, s55]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_10, add_2);  tangents_1 = add_2 = None
-
         add_4: "f64[s64, s55]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
         return (
             None,  # None
@@ -3890,6 +3966,44 @@ class GraphModule(torch.nn.Module):
         out_test = torch.compile(fn, backend="aot_eager")()
         self.assertEqual(out_ref, out_test)
 
+    def test_buffer_subclass_isinstance_input(self):
+        from torch.nn.parameter import Buffer
+
+        buf = Buffer(torch.ones(5))
+
+        def fn(b):
+            if isinstance(b, torch.nn.Buffer):
+                return b + 1
+            else:
+                return b + 2
+
+        out_ref = fn(buf)
+        out_test = torch.compile(fn, backend="aot_eager", fullgraph=True)(buf)
+        self.assertEqual(out_ref, out_test)
+
+        torch._dynamo.reset()
+
+        tensor = torch.ones(5)
+        out_ref_tensor = fn(tensor)
+        out_test_tensor = torch.compile(fn, backend="aot_eager", fullgraph=True)(tensor)
+        self.assertEqual(out_ref_tensor, out_test_tensor)
+
+    def test_buffer_subclass_check(self):
+        from torch.nn.parameter import Buffer
+
+        def check_buffer(x):
+            return isinstance(x, torch.nn.Buffer)
+
+        buf = Buffer(torch.ones(5))
+        compiled_fn = torch.compile(check_buffer, fullgraph=True, backend="inductor")
+        self.assertTrue(compiled_fn(buf))
+
+        torch._dynamo.reset()
+
+        tensor = torch.ones(5)
+        compiled_fn = torch.compile(check_buffer, fullgraph=True, backend="inductor")
+        self.assertFalse(compiled_fn(tensor))
+
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
 
@@ -4037,7 +4151,7 @@ Eq(s20, s77)""",
 
     @parametrize(
         "nt_view_name",
-        [k for k in VIEW_TEST_CASES.keys() if k != "subclass_dense_subclass_dense"],
+        [k for k in VIEW_TEST_CASES if k != "subclass_dense_subclass_dense"],
     )
     def test_inputs_to_compiled_fn_are_views(self, nt_view_name):
         self._input_view_test(nt_view_name)

@@ -88,8 +88,7 @@ def scan(
     Performs an inclusive scan with a combine function.
 
     .. warning::
-        `torch.scan` is a prototype feature in PyTorch. It currently
-        does not support autograd and you may run into miscompiles.
+        `torch.scan` is a prototype feature in PyTorch. You may run into miscompiles.
         Read more about feature classification at:
         https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
@@ -239,9 +238,10 @@ class ScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(combine_fn, init, xs, additional_inputs)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, init, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -312,7 +312,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         out_tensor_mask = get_tensor_mask(dummy_out)
         dummy_out_masked = mask_list(out_tensor_mask, dummy_out)
 
-        # Pre-alocate
+        # Pre-allocate
         # outs -> Output matrix
         # idxs -> Index matrix for scatter_
         # out: (num_elems, M, N, ...)
@@ -449,7 +449,7 @@ class ScanAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         hop_partitioned_graph,

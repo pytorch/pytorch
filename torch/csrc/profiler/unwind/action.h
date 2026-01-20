@@ -40,16 +40,16 @@ struct Action {
   friend std::ostream& operator<<(std::ostream& out, const Action& self) {
     switch (self.kind) {
       case A_UNDEFINED:
-        out << "u";
+        out << 'u';
         break;
       case A_REG_PLUS_DATA:
-        out << "r" << (int)self.reg << " + " << self.data;
+        out << 'r' << (int)self.reg << " + " << self.data;
         break;
       case A_REG_PLUS_DATA_DEREF:
-        out << "*(r" << (int)self.reg << " + " << self.data << ")";
+        out << "*(r" << (int)self.reg << " + " << self.data << ')';
         break;
       case A_LOAD_CFA_OFFSET:
-        out << "*(cfa + " << self.data << ")";
+        out << "*(cfa + " << self.data << ')';
         break;
     }
     return out;
