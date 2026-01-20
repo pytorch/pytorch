@@ -306,7 +306,7 @@ def vector_norm_handler(
     Custom handler for linalg_vector_norm that decomposes p-norms.
 
     For p-norms (p not in {inf, -inf, 0, 1}) on Shard inputs:
-    - Computes linalg_powsum to get sum(|x|^p) as Partial("sum")
+    - Computes linalg._powsum to get sum(|x|^p) as Partial("sum")
     - Redistributes Partial to Replicate (allreduce), preserving Shard on non-reduced dims
     - Applies root locally: result ** (1/p)
 

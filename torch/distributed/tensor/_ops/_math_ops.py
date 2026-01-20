@@ -403,10 +403,10 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     return TupleStrategy(output_tuple_strategy_children)
 
 
-@register_op_strategy([aten.linalg_powsum.default], schema_info=RuntimeSchemaInfo(1))
+@register_op_strategy([aten.linalg__powsum.default], schema_info=RuntimeSchemaInfo(1))
 def powsum_strategy(op_schema: OpSchema) -> OpStrategy:
     """
-    Strategy for linalg_powsum: computes sum(|x|^ord) without the final root.
+    Strategy for linalg__powsum: computes sum(|x|^ord) without the final root.
     Output is always reducible with Partial("sum").
     """
     args_schema = op_schema.args_schema

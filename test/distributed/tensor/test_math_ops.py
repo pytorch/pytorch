@@ -27,7 +27,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import assertExpectedInline, run_tests
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -741,7 +741,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     def test_powsum_sharded(self):
-        """Test that linalg_powsum produces Partial(sum) placement for sharded input."""
+        """Test that linalg__powsum produces Partial(sum) placement for sharded input."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
@@ -749,7 +749,7 @@ class DistMathOpsTest(DTensorTestBase):
         sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
 
         # powsum computes sum(|x|^p) without the root
-        sharded_out = torch.ops.aten.linalg_powsum(sharded_grad, 2)
+        sharded_out = torch.ops.aten.linalg__powsum(sharded_grad, 2)
 
         # Expected: sum(|x|^2) over all elements
         expected = (grad.abs() ** 2).sum()
@@ -827,12 +827,12 @@ class DistMathOpsTest(DTensorTestBase):
             result = torch.linalg.vector_norm(sharded_grad, 2)
 
         # Verify decomposition: powsum -> redistribute -> pow
-        assertExpectedInline(
+        self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
   torch.linalg.vector_norm(dt$0: f32[12, 8]| S(0), 2)  ->  dt$4: f32[]| R
     aten::linalg_vector_norm.default(dt$0: f32[12, 8]| S(0), 2)
-      aten::linalg_powsum(t$1: f32[3, 8], 2, None, False, None)  ->  t$2: f32[]
+      aten::linalg__powsum(t$1: f32[3, 8], 2, None, False, None)  ->  t$2: f32[]
       _c10d_functional::all_reduce(t$2: f32[], 'sum', '0')  ->  t$3: f32[]
       _c10d_functional::wait_tensor(t$3: f32[])  ->  t$3: f32[]
       aten::pow.Tensor_Scalar(t$3: f32[], 0.5)  ->  t$4: f32[]""",
