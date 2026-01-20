@@ -43,7 +43,6 @@ __all__ = [
     "Node",
     "GradientEdge",
     "get_gradient_edge",
-    "make_gradient_edge",
     "increment_version",
     "set_warn_on_accumulate_grad_stream_mismatch",
 ]
@@ -234,40 +233,6 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     # for the AccumulateGrad node.
     # pyrefly: ignore [bad-argument-type]
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
-
-
-def make_gradient_edge(node: Node, output_nr: Optional[int] = None) -> GradientEdge:
-    """Create a GradientEdge from a Node, with an ownership token if needed.
-
-    For Python-based autograd functions (torch._C._FunctionBase), the Python
-    grad_fn object does not keep the underlying C++ node alive. This function
-    creates an ownership token that prevents the C++ node from being deallocated
-    while the GradientEdge is in use.
-
-    Args:
-        node: The autograd Node (grad_fn) to create an edge for.
-        output_nr: The output index of the node. If not specified, defaults to 0
-                   but asserts that the node has exactly one output.
-
-    Returns:
-        A GradientEdge with an ownership token if the node is a Python-based
-        autograd function, otherwise a GradientEdge without a token.
-    """
-    if output_nr is None:
-        num_outputs = len(node._input_metadata)
-        if num_outputs != 1:
-            raise ValueError(
-                f"Node {node.name()} has {num_outputs} outputs, but output_nr was not "
-                f"specified. Please pass an explicit output_nr argument."
-            )
-        output_nr = 0
-
-    token = None
-    if isinstance(node, torch._C._FunctionBase):
-        import torch._C._autograd as _autograd_cpp
-
-        token = _autograd_cpp._create_ownership_token(node)
-    return GradientEdge(node, output_nr, ownership_token=token)
 
 
 def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
