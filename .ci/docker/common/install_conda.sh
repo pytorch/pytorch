@@ -83,12 +83,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install_through_forge libstdcxx-ng=14
   fi
 
-  # NS: Workaround for https://github.com/pytorch/pytorch/issues/169586
-  # Downgrade cpython to 3.14.0
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.14" ]; then
-    conda_install python==3.14.0
-  fi
-
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
