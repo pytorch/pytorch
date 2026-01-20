@@ -27,7 +27,7 @@
 namespace at::native {
 namespace {
 
-void norm_kernel_cuda(TensorIterator& iter, const Scalar& val, bool skip_root) {
+void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
   double p = 0;
   if (val.isIntegral(false)) {
     p = static_cast<double>(val.to<int64_t>());
@@ -41,14 +41,33 @@ void norm_kernel_cuda(TensorIterator& iter, const Scalar& val, bool skip_root) {
     return;
   }
 
-  // skip_root only applies for p-norms where p != inf, -inf, 0, 1
-  bool should_skip_root = skip_root && std::abs(p) != INFINITY && p != 0.0 && p != 1.0;
-  norm_launch_kernel(iter, p, should_skip_root);
+  norm_launch_kernel(iter, p);
 
   if (isComplexType(iter.output().scalar_type())) {
     at::imag(iter.output()).zero_();
   }
 
+}
+
+void powsum_kernel_cuda(TensorIterator& iter, const Scalar& val) {
+  double p = 0;
+  if (val.isIntegral(false)) {
+    p = static_cast<double>(val.to<int64_t>());
+  } else if (val.isFloatingPoint()) {
+    p = val.to<double>();
+  } else {
+    TORCH_CHECK(false, "powsum_kernel_cuda expects ord to be integer or float");
+  }
+  if (iter.numel() == 0) {
+    iter.output().fill_(0);
+    return;
+  }
+
+  powsum_launch_kernel(iter, p);
+
+  if (isComplexType(iter.output().scalar_type())) {
+    at::imag(iter.output()).zero_();
+  }
 }
 
 void min_kernel_impl(const Tensor& result, const Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
@@ -100,5 +119,6 @@ REGISTER_CUDA_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel_impl)
 REGISTER_CUDA_DISPATCH(aminmax_stub, &aminmax_kernel_impl)
 
 REGISTER_CUDA_DISPATCH(norm_stub, &norm_kernel_cuda)
+REGISTER_CUDA_DISPATCH(powsum_stub, &powsum_kernel_cuda)
 
 } // namespace at::native
