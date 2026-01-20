@@ -81,6 +81,7 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     skipIfXpu,
     slowTest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 from torch.utils._mode_utils import no_dispatch
@@ -9028,6 +9029,9 @@ for shape in [(1,), ()]:
         expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
         self.assertEqual(z.grad, torch.view_as_real(expected))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
+    )
     def test_custom_function_saving_mutated_view_no_leak(self):
         class Test(torch.autograd.Function):
             @staticmethod
@@ -9643,6 +9647,9 @@ for shape in [(1,), ()]:
                     )
                     assert_only_first_requires_grad(res)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
+    )
     def test_custom_function_cycle(self):
         class MyFn(Function):
             @staticmethod
