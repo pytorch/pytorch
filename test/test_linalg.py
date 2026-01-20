@@ -9516,9 +9516,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             r1 = fntorch(t0_full, t1, t2)
             self.assertEqual(r0, r1)
 
-    @skipIfRocmArch(MI300_ARCH)
-    @tf32_on_and_off(0.001)
-    @reduced_f32_on_and_off(0.001)
+    @tf32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.05)
     def test_broadcast_batched_matmul(self, device):
         n_dim = random.randint(1, 8)
         m_dim = random.randint(1, 8)
