@@ -1753,6 +1753,14 @@ op_db: list[OpInfo] = [
                 device_type="cpu",
                 dtypes=(torch.long,),
             ),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+            ),
         ),
     ),
     # NB: linalg.norm has two variants so that different skips can be used for different sample inputs

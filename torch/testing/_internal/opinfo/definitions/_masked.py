@@ -485,6 +485,13 @@ op_db: list[OpInfo] = [
                 device_type="xpu",
                 dtypes=[torch.complex128],
             ),
+            # AssertionError: Scalars are not equal!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_non_standard_bool_values",
+                device_type="mps",
+            ),
         ),
         decorators=[
             DecorateInfo(
