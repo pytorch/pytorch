@@ -632,7 +632,6 @@ static void initXpuMethodBindings(PyObject* module) {
         c10::xpu::XPUCachingAllocator::releasePool(device, mempool_id);
       });
 }
-}
 
 // Callback for python part. Used for additional initialization of python
 // classes
