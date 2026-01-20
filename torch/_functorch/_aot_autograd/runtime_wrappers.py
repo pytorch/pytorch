@@ -1910,7 +1910,6 @@ def _backward_prologue_functional(
         rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
     bw_tokens = [None] * metadata.num_backward_tokens
-    bw_opaque_refs = metadata.bw_opaque_refs
 
     # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
     #   in the bw output order.
@@ -1925,7 +1924,6 @@ def _backward_prologue_functional(
         *flat_bw_args_with_grads,
         *bw_tokens,
         *rng_args,
-        *bw_opaque_refs,
     ]
     del ctx_saved_tensors
 
@@ -1954,18 +1952,12 @@ def _backward_prologue_functional(
     del flat_bw_args_with_grads
 
     tangents_start_idx = (
-        len(all_args)
-        - num_flat_bw_args_with_grads
-        - len(rng_args)
-        - len(bw_tokens)
-        - len(bw_opaque_refs)
+        len(all_args) - num_flat_bw_args_with_grads - len(rng_args) - len(bw_tokens)
     )
     assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors + len(
         ctx_opaque_objects
     )
-    tangents_end_idx = (
-        len(all_args) - len(rng_args) - len(bw_tokens) - len(bw_opaque_refs)
-    )
+    tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
     # TODO: figure out how to refactor the backward properly
     # so I can use aot_dispatch_subclass_wrapper() here.
@@ -2346,14 +2338,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             # pyrefly: ignore [bad-override]
             def forward(ctx, *deduped_flat_tensor_args):
                 args = deduped_flat_tensor_args
-
-                # add forward opaque refs after primals but before RNG states
-                # (before fwd_seed_offset) so they don't get shifted by inner AOT
-                # autograd RNG states
-                fw_opaque_refs = CompiledFunction.metadata.fw_opaque_refs
-                if fw_opaque_refs:
-                    args = (*args, *fw_opaque_refs)
-
                 if backward_state_indices:
                     bw_state = args[backward_state_indices[0]]
                     assert isinstance(bw_state, BackwardState)
