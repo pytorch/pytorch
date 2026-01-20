@@ -1146,6 +1146,7 @@ class InstructionTranslatorBase(
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
+    current_comprehension_speculation: Optional[SpeculationEntry]
     dispatch_table: list[Any]
     exn_vt_stack: ExceptionStack
     exec_recorder: Optional[ExecutionRecorder]
@@ -1358,6 +1359,22 @@ class InstructionTranslatorBase(
         except (ReturnValueOp, YieldValueOp):
             return False
         except (Unsupported, StepUnsupported) as e:
+            # Check if we're in a comprehension - if so, fail the comprehension speculation
+            has_comp_speculation = (
+                hasattr(self, "current_comprehension_speculation")
+                and self.current_comprehension_speculation is not None
+            )
+            log.debug(
+                "step() caught exception, has_comprehension_speculation=%s, exception=%s",
+                has_comp_speculation,
+                type(e).__name__,
+            )
+            if has_comp_speculation:
+                speculation = self.current_comprehension_speculation
+                self.current_comprehension_speculation = None
+                log.debug("Failing comprehension speculation and restarting analysis")
+                speculation.fail_and_restart_analysis(self.error_on_graph_break)
+
             # More restrictive condition than should_compile_partial_graph:
             # if this condition is true, then we SHOULD NOT attempt to find
             # a previous checkpoint to resume from and try to resume - we should
@@ -1414,7 +1431,6 @@ class InstructionTranslatorBase(
                 reason=reason,
                 exc=e,
             )
-
         self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
         return False
 
@@ -3326,6 +3342,41 @@ class InstructionTranslatorBase(
         self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
     def BUILD_LIST(self, inst: Instruction) -> None:
+        # Check for list comprehension in Python 3.12+
+        if sys.version_info >= (3, 12) and inst.argval == 0:
+            is_comp_start = self._is_comprehension_start()
+            log.debug("BUILD_LIST: argval=0, is_comprehension_start=%s", is_comp_start)
+            if is_comp_start:
+                # For comprehensions, we use more permissive conditions:
+                # - We don't require > 1 calls in graph (even 0 is okay)
+                # - We skip the exception table check since comprehension exception
+                #   entries are just for cleanup, not real blocks
+                can_speculate = (
+                    all(b.can_restore() for b in self.block_stack)
+                    and not self.one_graph
+                    and not self.error_on_graph_break
+                    and not self.is_tracing_resume_prologue
+                    and not self.active_generic_context_managers
+                    and self.output.current_tracer.parent is None
+                )
+                log.debug(
+                    "BUILD_LIST comprehension: can_speculate=%s",
+                    can_speculate,
+                )
+                # Create speculation checkpoint for comprehension
+                if can_speculate:
+                    speculation = self.speculate_comprehension()
+                    if speculation.failed(self):
+                        log.debug(
+                            "BUILD_LIST: speculation failed, handling comprehension graph break"
+                        )
+                        # Graph break occurred in comprehension on previous attempt
+                        self._handle_comprehension_graph_break(inst, is_dict=False)
+                        return
+                    # Store speculation for later graph break handling
+                    log.debug("BUILD_LIST: storing comprehension speculation")
+                    self.current_comprehension_speculation = speculation
+        # Normal BUILD_LIST handling
         items = self.popn(inst.argval)
         self.push(ListVariable(items, mutation_type=ValueMutationNew()))
 
@@ -3363,6 +3414,41 @@ class InstructionTranslatorBase(
     BUILD_TUPLE_UNPACK_WITH_CALL = BUILD_TUPLE_UNPACK
 
     def BUILD_MAP(self, inst: Instruction) -> None:
+        # Check for dict comprehension in Python 3.12+
+        if sys.version_info >= (3, 12) and inst.argval == 0:
+            is_comp_start = self._is_comprehension_start()
+            log.debug("BUILD_MAP: argval=0, is_comprehension_start=%s", is_comp_start)
+            if is_comp_start:
+                # For comprehensions, we use more permissive conditions:
+                # - We don't require > 1 calls in graph (even 0 is okay)
+                # - We skip the exception table check since comprehension exception
+                #   entries are just for cleanup, not real blocks
+                can_speculate = (
+                    all(b.can_restore() for b in self.block_stack)
+                    and not self.one_graph
+                    and not self.error_on_graph_break
+                    and not self.is_tracing_resume_prologue
+                    and not self.active_generic_context_managers
+                    and self.output.current_tracer.parent is None
+                )
+                log.debug(
+                    "BUILD_MAP comprehension: can_speculate=%s",
+                    can_speculate,
+                )
+                # Create speculation checkpoint for comprehension
+                if can_speculate:
+                    speculation = self.speculate_comprehension()
+                    if speculation.failed(self):
+                        log.debug(
+                            "BUILD_MAP: speculation failed, handling comprehension graph break"
+                        )
+                        # Graph break occurred in comprehension on previous attempt
+                        self._handle_comprehension_graph_break(inst, is_dict=True)
+                        return
+                    # Store speculation for later graph break handling
+                    log.debug("BUILD_MAP: storing comprehension speculation")
+                    self.current_comprehension_speculation = speculation
+        # Normal BUILD_MAP handling
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
         self.push(ConstDictVariable(d, mutation_type=ValueMutationNew()))
@@ -4273,6 +4359,212 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _is_comprehension_start(self) -> bool:
+        """Detect if we're at the start of a list/dict comprehension in 3.12+."""
+        if sys.version_info < (3, 12):
+            return False
+        # Check for LOAD_FAST_AND_CLEAR in preceding instructions
+        # This is the marker for comprehension variable saving in 3.12+
+        ip = self.instruction_pointer - 2  # -1 is current, check before that
+        while ip >= 0 and (self.instruction_pointer - 1 - ip) < 5:
+            if self.instructions[ip].opname == "LOAD_FAST_AND_CLEAR":
+                return True
+            ip -= 1
+        return False
+
+    def _find_comprehension_end(self) -> int:
+        """Find instruction position after END_FOR + cleanup STORE_FASTs for a comprehension."""
+        assert self.instruction_pointer is not None
+        ip = self.instruction_pointer
+        found_end_for = False
+        store_fast_count = 0
+        while ip < len(self.instructions):
+            inst = self.instructions[ip]
+            if inst.opname == "END_FOR":
+                found_end_for = True
+                ip += 1
+                continue
+            if found_end_for:
+                if inst.opname == "STORE_FAST":
+                    store_fast_count += 1
+                    ip += 1
+                    if store_fast_count >= 2:
+                        # Result STORE_FAST + iterator restoration STORE_FAST
+                        return ip
+                else:
+                    # No more STORE_FASTs
+                    return ip
+            else:
+                ip += 1
+        return -1
+
+    def speculate_comprehension(self) -> SpeculationEntry:
+        """Create a speculation entry for comprehension graph break."""
+        return self.speculation_log.next(
+            self.f_code.co_filename,
+            self.lineno,
+            self.instruction_pointer - 1,
+            self.current_instruction,
+        )
+
+    def _handle_comprehension_graph_break(
+        self, inst: Instruction, is_dict: bool
+    ) -> None:
+        """Handle graph break for a comprehension by skipping the comprehension bytecode.
+
+        This is a complex operation that:
+        1. Compiles the graph up to the comprehension
+        2. Adds the comprehension bytecode (runs eagerly at runtime)
+        3. Generates code to load comprehension-created locals
+        4. Creates a resume function for code after the comprehension
+        """
+        end_ip = self._find_comprehension_end()
+        assert end_ip > 0, "Could not find END_FOR for comprehension"
+
+        assert self.instruction_pointer is not None
+        start_ip = (
+            self.instruction_pointer - 1
+        )  # Current instruction (BUILD_LIST/BUILD_MAP)
+
+        # Parse the comprehension bytecode to find the result STORE_FAST after END_FOR
+        # In Python 3.12+, the pattern after END_FOR is:
+        #   STORE_FAST result_var   # The comprehension result (list/dict)
+        #   STORE_FAST iter_var     # Restoration of the iterator variable (original value)
+        # We only want the FIRST STORE_FAST (the result), not subsequent ones
+        # which are iterator restorations (might be NULL/unbound)
+        comprehension_stored_vars: list[str] = []
+        ip = start_ip
+        found_end_for = False
+        while ip < end_ip:
+            inst_at_ip = self.instructions[ip]
+            if inst_at_ip.opname == "END_FOR":
+                found_end_for = True
+            elif found_end_for and inst_at_ip.opname == "STORE_FAST":
+                # Only take the first STORE_FAST (the result)
+                comprehension_stored_vars.append(inst_at_ip.argval)
+                break  # Stop after the result variable
+            ip += 1
+
+        log.debug(
+            "Handling comprehension graph break from ip %s to %s, created vars: %s",
+            start_ip,
+            end_ip,
+            comprehension_stored_vars,
+        )
+
+        reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
+        log.debug("comprehension triggered compile")
+
+        # At BUILD_LIST/BUILD_MAP, the stack has [saved_i, iterator] on top
+        # These 2 values need to remain on the runtime stack for the comprehension bytecode
+        all_stack_locals_metadata = self.output.compile_subgraph(
+            self,
+            reason=reason,
+            stack_pops=2,  # Comprehension will consume these 2 values
+        )
+
+        # Now pop from symbolic stack (matching stack_pops)
+        self.popn(2)
+
+        # Copy comprehension bytecode to output (runs eagerly)
+        inst_map: dict[Instruction, Instruction] = {}
+        copied_insts: list[Instruction] = []
+
+        for ip in range(start_ip, end_ip):
+            original_inst = self.instructions[ip]
+            copied_inst = copy.copy(original_inst)
+            copied_inst.exn_tab_entry = None  # Clear exception table
+            inst_map[original_inst] = copied_inst
+            copied_insts.append(copied_inst)
+
+        # Fix up jump targets to point to copied instructions
+        for copied_inst in copied_insts:
+            if copied_inst.target is not None and copied_inst.target in inst_map:
+                copied_inst.target = inst_map[copied_inst.target]
+
+        self.output.add_output_instructions(copied_insts)
+
+        # After the comprehension bytecode runs, the stack has the frame values list.
+        # We need to extend it with the comprehension-created locals.
+        # The frame values list structure is: [[frame N stack+locals], [frame N-1 ...], ...]
+        # For single frame case, we access element 0 and append our new locals.
+
+        # Get the metadata for the current frame (first in list for single frame)
+        meta = all_stack_locals_metadata[0]
+
+        # Determine which comprehension-created locals are actually read after the comprehension
+        from .bytecode_analysis import livevars_analysis
+
+        resume_inst = self.instructions[end_ip]
+        reads = livevars_analysis(self.instructions, resume_inst)
+
+        # Filter to only variables that are actually read
+        needed_vars = [var for var in comprehension_stored_vars if var in reads]
+
+        log.debug(
+            "Comprehension graph break: comprehension_stored_vars=%s, reads=%s, needed_vars=%s",
+            comprehension_stored_vars,
+            reads,
+            needed_vars,
+        )
+
+        # For each needed comprehension-created local, we need to:
+        # 1. Add it to meta.locals_names so create_call_resume_at knows about it
+        # 2. Add it to symbolic_locals so it's included in argnames
+        # 3. Generate bytecode to load the local and append it to the frame values list
+
+        from .source import LocalSource
+        from .variables.misc import UnknownVariable
+
+        for var_name in needed_vars:
+            if var_name not in meta.locals_names:
+                # Assign the next index in locals_names
+                # meta.locals_names stores local indices (0, 1, 2, ...)
+                # The actual index in frame values is meta.num_stack + this index
+                meta.locals_names[var_name] = len(meta.locals_names)
+            # Also add to symbolic_locals so create_call_resume_at includes it in argnames
+            self.symbolic_locals[var_name] = UnknownVariable()
+
+        # Generate bytecode to extend the frame values list
+        # Stack state: [cells_list, frame_values_list]
+        # We need to:
+        # 1. Access frame_values_list[0] (our frame's values)
+        # 2. Append each comprehension local to it
+
+        from .codegen import PyCodegen
+        from .bytecode_transformation import create_dup_top, create_instruction
+
+        cg = PyCodegen(self)
+
+        # Generate bytecode to extend frame_values_list[0] with comprehension locals
+        for var_name in needed_vars:
+            # Stack: [..., frame_values_list]
+            cg.append_output(create_dup_top())
+            # Stack: [..., frame_values_list, frame_values_list]
+            cg.append_output(cg.create_load_const(0))
+            # Stack: [..., frame_values_list, frame_values_list, 0]
+            cg.append_output(cg.create_binary_subscr())
+            # Stack: [..., frame_values_list, frame_values_list[0]]
+            cg.append_output(create_instruction("LOAD_FAST", argval=var_name))
+            # Stack: [..., frame_values_list, frame_values_list[0], value]
+            # LIST_APPEND: append TOS to TOS[-2], pops TOS
+            cg.append_output(create_instruction("LIST_APPEND", arg=1))
+            # Stack: [..., frame_values_list, frame_values_list[0]]
+            # Pop the frame_values_list[0] reference
+            cg.append_output(create_instruction("POP_TOP"))
+            # Stack: [..., frame_values_list]
+
+        self.output.add_output_instructions(cg.get_instructions())
+
+        resume_inst = self.instructions[end_ip]
+        self.output.add_output_instructions(
+            self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
+        )
+
+        # Set output to exit after this
+        self.output.should_exit = True
+        self.instruction_pointer = None
+
     def _make_frame_loc(
         self, filename: str, lineno: Optional[int], fallback_lineno: int
     ) -> tuple[str, int]:
@@ -4510,6 +4802,7 @@ class InstructionTranslatorBase(
         self.is_tracing_resume_prologue = False
 
         self.current_speculation = None
+        self.current_comprehension_speculation = None
 
         self.strict_checks_fn = None
 
