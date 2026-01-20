@@ -6368,6 +6368,38 @@ def forward(self, primals_1, tangents_1):
                     f"Quantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_getitem_of_banned_multi_output(self):
+        """Test that getitem from a banned multi-output node doesn't cause NetworkXUnbounded.
+
+        Uses selective checkpoint to mark var_mean as MUST_SAVE (banning recomputation),
+        with a custom autograd.Function that returns the mean (getitem from var_mean)
+        directly as the gradient output.
+        """
+        import functools
+        from torch.autograd import Function
+        from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+
+        class GetitemAsGradOutput(Function):
+            @staticmethod
+            def forward(ctx, x):
+                var, mean = torch.var_mean(torch.stack([x, x]), dim=0)
+                ctx.save_for_backward(mean)
+                return var
+
+            @staticmethod
+            def backward(ctx, grad_var):
+                return ctx.saved_tensors[0]
+
+        context_fn = functools.partial(create_selective_checkpoint_contexts, [torch.ops.aten.var_mean.correction])
+
+        @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
+        def fn(x):
+            return checkpoint(GetitemAsGradOutput.apply, x, use_reentrant=False, context_fn=context_fn)
+
+        x = torch.randn(4, requires_grad=True)
+        fn(x).sum().backward()
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
