@@ -2029,13 +2029,19 @@ def select(x, dim, idx):
         # would lose stride information because squeeze calls view, which
         # creates contiguous strides.
         x.realize()
-        new_size = list(x.get_size())
-        new_stride = list(x.get_stride())
-        new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
+        strides = x.maybe_get_stride()
+        if strides is not None:
+            new_size = list(x.get_size())
+            new_stride = list(strides)
+            new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
 
-        del new_size[dim]
-        del new_stride[dim]
-        return as_strided(x, new_size, new_stride, new_storage_offset)
+            del new_size[dim]
+            del new_stride[dim]
+            return as_strided(x, new_size, new_stride, new_storage_offset)
+        else:
+            # no need to clamp, this function handles negative indexing itself
+            slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
+            return squeeze(slice_result, dim)
 
     # Unbacked Semantics:
     # When the index idx is unbacked (e.g., u0), we compute the index dynamically
