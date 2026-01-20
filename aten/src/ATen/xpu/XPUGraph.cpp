@@ -1,7 +1,7 @@
+#include <ATen/Functions.h>
 #include <ATen/core/CachingHostAllocator.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/XPUGraph.h>
-#include <ATen/Functions.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <cstddef>
@@ -17,9 +17,8 @@ MempoolId_t graph_pool_handle() {
 }
 
 XPUGraph::XPUGraph(bool keep_graph)
-  : capture_stream_(at::xpu::getCurrentXPUStream()),
-    keep_graph_(keep_graph) {
-}
+    : capture_stream_(at::xpu::getCurrentXPUStream()),
+      keep_graph_(keep_graph) {}
 
 void XPUGraph::register_generator_state(
     c10::intrusive_ptr<at::XPUGeneratorState> state) {
@@ -34,9 +33,10 @@ void XPUGraph::register_generator_state(const at::Generator& generator) {
 }
 
 void XPUGraph::capture_begin(MempoolId_t pool) {
-  TORCH_CHECK(!has_graph_exec_,
-              "This XPUGraph instance already owns a captured graph. "
-              "To capture a new graph, create a new instance.");
+  TORCH_CHECK(
+      !has_graph_exec_,
+      "This XPUGraph instance already owns a captured graph. "
+      "To capture a new graph, create a new instance.");
 
   // default generator is always registered
   auto* gen = get_generator_or_default<XPUGeneratorImpl>(
@@ -54,40 +54,48 @@ void XPUGraph::capture_begin(MempoolId_t pool) {
   if (pool.first != 0 || pool.second != 0) {
     // Either value being nonzero means the user supplied a pool to share.
     // But only one should be nonzero.
-    // If pool was created by another graph's capture_begin, first should be nonzero.
-    // If pool was created by graph_pool_handle, second should be nonzero.
+    // If pool was created by another graph's capture_begin, first should be
+    // nonzero. If pool was created by graph_pool_handle, second should be
+    // nonzero.
     TORCH_INTERNAL_ASSERT(!(pool.first && pool.second));
     mempool_id_ = pool;
   } else {
-    // User did not ask us to share a mempool. Create graph pool handle using is_user_created=false.
-    // Sets just the first value, to distinguish it from MempoolId_ts created by graph_pool_handle().
+    // User did not ask us to share a mempool. Create graph pool handle using
+    // is_user_created=false. Sets just the first value, to distinguish it from
+    // MempoolId_ts created by graph_pool_handle().
     mempool_id_ = c10::xpu::MemPool::graph_pool_handle(false);
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
   auto filter = [this](sycl::queue* queue) {
-    // Compare queue pointers rather than queue objects to avoid expensive queue comparison operations.
-    return queue->ext_oneapi_get_state() == queue_state::recording && queue == &capture_stream_.queue();
+    // Compare queue pointers rather than queue objects to avoid expensive queue
+    // comparison operations.
+    return queue->ext_oneapi_get_state() == queue_state::recording &&
+        queue == &capture_stream_.queue();
   };
 
-  c10::xpu::XPUCachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, filter);
+  c10::xpu::XPUCachingAllocator::beginAllocateToPool(
+      capture_dev_, mempool_id_, filter);
 
-  at::getHostAllocator(at::kXPU)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
-    return filter(XPUStream(XPUStream::UNCHECKED, stream));
-  });
+  at::getHostAllocator(at::kXPU)->begin_allocate_to_pool(
+      mempool_id_, [filter](c10::Stream stream) {
+        return filter(XPUStream(XPUStream::UNCHECKED, stream));
+      });
 
   auto graph_impl = xpuGraph_t(capture_stream_.queue());
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
   graph_->begin_recording(capture_stream_.queue());
 
-  TORCH_INTERNAL_ASSERT(capture_stream_.queue().ext_oneapi_get_state() == queue_state::recording);
+  TORCH_INTERNAL_ASSERT(
+      capture_stream_.queue().ext_oneapi_get_state() == queue_state::recording);
 }
 
 void XPUGraph::capture_end() {
   auto stream = at::xpu::getCurrentXPUStream();
 
-  TORCH_CHECK(stream == capture_stream_,
-              "Capture must end on the same stream it began on.");
+  TORCH_CHECK(
+      stream == capture_stream_,
+      "Capture must end on the same stream it began on.");
 
   graph_->end_recording();
 
@@ -103,8 +111,9 @@ void XPUGraph::capture_end() {
 
   size_t numXPUGraphNodes = graph_->get_nodes().size();
   if (numXPUGraphNodes == 0) {
-      TORCH_WARN("The XPU Graph is empty. This usually means that the graph was ",
-                 "attempted to be captured on wrong device or stream.");
+    TORCH_WARN(
+        "The XPU Graph is empty. This usually means that the graph was ",
+        "attempted to be captured on wrong device or stream.");
   }
 
   capture_ended_ = true;
@@ -119,10 +128,14 @@ void XPUGraph::capture_end() {
 }
 
 void XPUGraph::instantiate() {
-  TORCH_CHECK(capture_ended_, "capture_end() must have been called before calling instantiate");
+  TORCH_CHECK(
+      capture_ended_,
+      "capture_end() must have been called before calling instantiate");
 
   if (has_graph_exec_) {
-    TORCH_CHECK(keep_graph_, "instantiate() is intended to be called by the user only when keep_graph=true");
+    TORCH_CHECK(
+        keep_graph_,
+        "instantiate() is intended to be called by the user only when keep_graph=true");
     graph_exec_.reset();
   }
   auto graph_exec_impl = graph_->finalize();
@@ -131,15 +144,17 @@ void XPUGraph::instantiate() {
 }
 
 void XPUGraph::replay() {
-  TORCH_CHECK(capture_ended_,
-              "Called XPUGraph::replay without a preceding successful capture.");
+  TORCH_CHECK(
+      capture_ended_,
+      "Called XPUGraph::replay without a preceding successful capture.");
 
   if (!has_graph_exec_) {
     TORCH_INTERNAL_ASSERT(keep_graph_);
     instantiate();
   }
 
-  // Make sure graph replay happens on the same device allocator of graph capture
+  // Make sure graph replay happens on the same device allocator of graph
+  // capture
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
   for (auto& [generator_state, wholegraph_increments] :

@@ -8,7 +8,6 @@
 #include <ATen/xpu/XPUGraph.h>
 #include <c10/xpu/XPUGraphsC10Utils.h>
 
-
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
