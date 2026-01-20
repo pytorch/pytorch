@@ -134,7 +134,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 2
         x, y = map(self.doprint, expr.args)
-        return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
+        return f"metal::precise::pow(static_cast<float>({x}), static_cast<float>({y}))"
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -165,7 +165,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
-        return f"metal::log2({x})"
+        return f"metal::precise::log2({x})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (
@@ -212,13 +212,32 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        with V.kernel.mask_loads(mask, other) as new_mask:
-            result = body()
+        # TODO: Should it be converted to lambda on MacOS-15+?
 
-        if result.bounds.is_bool:
-            other = bool(other)  # type: ignore[assignment]
+        other_str = value_to_metal(other)
+        scoped_body = IndentedBuffer()
+        with V.kernel.swap_buffers(scoped_body), scoped_body.indent():
+            # Reset the scoped variable counter so that each invocation of the same body
+            # generates identical variable names. Without this reset, repeated calls to
+            # body() would keep incrementing the counter, resulting in different cache key.
+            V.kernel.cse.iter_buffer_ids = itertools.count()
+            V.kernel.cse.name_prefix = "tmp_scoped_"
+            rc = body()
 
-        return ops.where(new_mask, result, other)
+        # Compute cache key manually as variable name is needed to actually generate the code
+        cache_key = f"{mask}:{scoped_body.getvalue()}:{other_str}"
+        var = V.kernel.cse.try_get(cache_key)
+        if not var:
+            var = V.kernel.cse.newvar(dtype=rc.dtype)
+            V.kernel.cse.put(cache_key, var)
+            V.kernel.compute.writelines(
+                [f"{DTYPE_TO_METAL[rc.dtype]} {var};", f"if ({mask}) {{"]
+            )
+            with V.kernel.compute.indent():
+                V.kernel.compute.splice(scoped_body)
+                V.kernel.compute.writeline(f"{var} = {rc};")
+            V.kernel.compute.writeline(f"}} else {var} = {other_str};")
+        return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
@@ -258,11 +277,11 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def log(x: CSEVariable) -> str:
-        return f"metal::log({x})"
+        return f"metal::precise::log({x})"
 
     @staticmethod
     def exp(x: CSEVariable) -> str:
-        return f"metal::exp({x})"
+        return f"metal::precise::exp({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
@@ -286,27 +305,27 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def tan(x: CSEVariable) -> str:
-        return f"metal::tan({x})"
+        return f"metal::precise::tan({x})"
 
     @staticmethod
     def asin(x: CSEVariable) -> str:
-        return f"metal::asin({x})"
+        return f"metal::precise::asin({x})"
 
     @staticmethod
     def acos(x: CSEVariable) -> str:
-        return f"metal::acos({x})"
+        return f"metal::precise::acos({x})"
 
     @staticmethod
     def atan(x: CSEVariable) -> str:
-        return f"metal::atan({x})"
+        return f"metal::precise::atan({x})"
 
     @staticmethod
     def atan2(x: CSEVariable, y: CSEVariable) -> str:
-        return f"::metal::atan2({x}, {y})"
+        return f"::metal::precise::atan2({x}, {y})"
 
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
-        return f"metal::sqrt({x})"
+        return f"metal::precise::sqrt({x})"
 
     @staticmethod
     def neg(x: CSEVariable) -> str:
@@ -316,15 +335,15 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def rsqrt(x: CSEVariable) -> str:
-        return f"metal::rsqrt({x})"
+        return f"metal::precise::rsqrt({x})"
 
     @staticmethod
     def tanh(x: CSEVariable) -> str:
-        return f"metal::tanh({x})"
+        return f"metal::precise::tanh({x})"
 
     @staticmethod
     def atanh(x: CSEVariable) -> str:
-        return f"metal::atanh({x})"
+        return f"metal::precise::atanh({x})"
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
@@ -776,36 +795,60 @@ class MetalKernel(SIMDKernel):
             else sympy.Symbol(f"{entry.root.prefix}numel", integer=True, positive=True)
         )
 
-        self.multistage_reduction_entry.append(entry)
-        # When reducing the tensor whose size exceeds max threadgroup size
-        # loop over extra indices per reduction thread and perform part of the operation
-        # using values in the shared memory
-
-        # Use floats so that it doesn't do integer division
-        loop_size = (acc_size + float(self.max_threadgroup_size - 1)) // float(
-            self.max_threadgroup_size
+        # Check if we've already generated a loop for this reduction root
+        root_already_processed = any(
+            e.root is entry.root for e in self.multistage_reduction_entry
         )
-        loop_size_str = self.sexpr(loop_size)
 
-        self.body.writeline(
-            f"for(auto {entry.name}_cnt = 0; {entry.name}_cnt < {loop_size_str}; ++{entry.name}_cnt) {{"
-        )
-        with self.body.indent():
-            if isinstance(acc_size, sympy.Symbol):
-                self.body.writeline(
-                    f"{self.index_dtype} {entry.name} = {self.max_threadgroup_size} * {entry.name}_cnt + {index_str};"
-                )
-            else:
-                self.body.writeline(
-                    f"{self.index_dtype} {entry.name} = {loop_size_str} * {index_str} + {entry.name}_cnt;"
-                )
+        linear_idx_name = f"{entry.root.prefix}_linear_idx"
 
-            # Check that reduction is performed only within tensor boundary
-            if (
-                isinstance(acc_size, sympy.Symbol)
-                or loop_size * self.max_threadgroup_size != acc_size
-            ):
-                self.body.writeline(f"if ({entry.name} >= {acc_size}) break;")
+        if not root_already_processed:
+            self.multistage_reduction_entry.append(entry)
+            # When reducing the tensor whose size exceeds max threadgroup size
+            # loop over extra indices per reduction thread and perform part of the operation
+            # using values in the shared memory
+
+            # Use floats so that it doesn't do integer division
+            loop_size = (acc_size + float(self.max_threadgroup_size - 1)) // float(
+                self.max_threadgroup_size
+            )
+            loop_size_str = self.sexpr(loop_size)
+
+            root_name = entry.root.name
+
+            self.body.writeline(
+                f"for(auto {entry.root.prefix}_cnt = 0; {entry.root.prefix}_cnt < {loop_size_str}; ++{entry.root.prefix}_cnt) {{"
+            )
+            with self.body.indent():
+                if isinstance(acc_size, sympy.Symbol):
+                    self.body.writeline(
+                        f"{self.index_dtype} {linear_idx_name} = "
+                        f"{self.max_threadgroup_size} * {entry.root.prefix}_cnt + {root_name};"
+                    )
+                else:
+                    self.body.writeline(
+                        f"{self.index_dtype} {linear_idx_name} = {loop_size_str} * {root_name} + {entry.root.prefix}_cnt;"
+                    )
+
+                # Check that reduction is performed only within tensor boundary
+                if (
+                    isinstance(acc_size, sympy.Symbol)
+                    or loop_size * self.max_threadgroup_size != acc_size
+                ):
+                    self.body.writeline(f"if ({linear_idx_name} >= {acc_size}) break;")
+
+                # Compute entry value from linear index by substituting root name
+                sub_index_str = index_str.replace(entry.root.name, linear_idx_name)
+                self.body.writeline(
+                    f"{self.index_dtype} {entry.name} = {sub_index_str};"
+                )
+        else:
+            # root is already processed so just need to compute this entry's value inside the existing loop
+            with self.body.indent():
+                sub_index_str = index_str.replace(entry.root.name, linear_idx_name)
+                self.body.writeline(
+                    f"{self.index_dtype} {entry.name} = {sub_index_str};"
+                )
 
     def codegen_body(self) -> None:
         """
@@ -1039,14 +1082,18 @@ class MetalKernel(SIMDKernel):
         # TODO(malfet): support asserts
         # See https://github.com/pytorch/pytorch/issues/144634
         expr_str = self.index_to_str(expr)
-        lower_expr = f"{expr_str} < 0" if lower else ""
+        size_str = self.index_to_str(size)
+
         # TODO(malfet): Is upper bound inclusive or exclusive?
-        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
-            line = f"if (({lower_expr}) && ({upper_expr})) return"
+            # Check both lower and upper bounds
+            condition = f"({expr_str} < 0 || {expr_str} >= {size_str})"
+        elif lower:
+            condition = f"{expr_str} < 0"
         else:
-            line = f"if ({lower_expr}{upper_expr}) return"
-        self.cse.generate(self.compute, line, assignment=False)
+            condition = f"{expr_str} >= {size_str}"
+
+        self.cse.generate(self.compute, f"if ({condition}) return", assignment=False)
 
 
 class MetalScheduling(SIMDScheduling):
