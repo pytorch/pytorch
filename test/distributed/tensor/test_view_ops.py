@@ -657,6 +657,26 @@ class TestViewOps(DTensorTestBase):
 
     @with_comms
     def test_dtensor_flatten_1d(self):
+        """
+        Test view ops that flatten multiple dimensions on a 1D mesh.
+
+        Coverage:
+        - Tensor ranks: 2D, 3D, and 4D tensors
+        - Flatten ranges: All valid (flatten_start, flatten_end) pairs where
+          at least 2 dimensions are flattened
+        - Placements:
+          - Shard(dim) for each dim within the flattened range
+          - Replicate()
+        - Tensor dimension sizes: Even (divisible by mesh size), uneven-smaller,
+          and uneven-larger relative to mesh size, in all combinations
+        - Error cases: Verifies RuntimeError for uneven sharding on non-last
+          flattened dimensions
+
+        Expected output placements:
+        - Shard on flatten_start -> remains Shard(flatten_start)
+        - Shard on other dims in range -> becomes _StridedShard(flatten_start, split_factor)
+        - Replicate -> remains Replicate
+        """
         mesh: DeviceMesh = init_device_mesh(self.device_type, (self.world_size,))
         for tensor_ndim in [2, 3, 4]:
             for flatten_start in range(tensor_ndim):
@@ -677,7 +697,10 @@ class TestViewOps(DTensorTestBase):
                             if tensor_dims[shard_dim] % mesh.size(
                                 0
                             ) != 0 and shard_dim != (flatten_end - 1):
-                                ctx = self.assertRaises(RuntimeError)
+                                ctx = self.assertRaisesRegex(
+                                    RuntimeError,
+                                    "Attempted to flatten a dimension that is unevenly sharded",
+                                )
                             with ctx:
                                 self._test_dtensor_flatten_1d_shard(
                                     tensor_dims,

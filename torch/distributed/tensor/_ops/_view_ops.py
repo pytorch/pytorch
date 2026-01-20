@@ -628,6 +628,7 @@ def propagate_shape_and_sharding(
             return cmd
         elif isinstance(cmd, Flatten):
             sharded_dims = []
+            num_input_dims = len(cmd.input_dims)
             for i, dim in enumerate(cmd.input_dims):
                 # so far all Flatten is always composed of InputDims; revisit this if needed
                 if not isinstance(dim, InputDim):
@@ -637,8 +638,21 @@ def propagate_shape_and_sharding(
                     maybe_get_shard_mesh_dim_and_placement(dim)
                 )
                 input_sharded = shard_mesh_dim is not None
+                is_last_input_dim = i == num_input_dims - 1
                 if i > 0:
                     if strict_view and input_sharded:
+                        # Check for uneven sharding on non-last dimensions
+                        if not is_last_input_dim:
+                            tensor_dim_size = global_input_shape[shard_placement.dim]
+                            mesh_dim_size = mesh_sizes[shard_mesh_dim]
+                            if tensor_dim_size % mesh_dim_size != 0:
+                                raise RuntimeError(
+                                    f"Attempted to flatten a dimension that is unevenly sharded: "
+                                    f"tensor dimension {dim.input_dim} has size {tensor_dim_size} "
+                                    f"which is not divisible by mesh dimension size {mesh_dim_size}. "
+                                    f"This would require resharding the input. "
+                                    f"Please explicitly redistribute the tensor instead."
+                                )
                         for x in range(dim.input_dim + 1):
                             shardable_dims[x] = [True] * mesh_ndim
                         sharded_dims.append(dim)
@@ -654,9 +668,11 @@ def propagate_shape_and_sharding(
                         can_shard_dim = False
                         if strict_view:
                             raise RuntimeError(
-                                f"Attempted to flatten unevenly sharded dimension {i}, "
-                                "which would require resharding the input. "
-                                "Please explicitly redistribute the tensor instead."
+                                f"Attempted to flatten a dimension that is unevenly sharded: "
+                                f"tensor dimension {dim.input_dim} has size {tensor_dim_size} "
+                                f"which is not divisible by mesh dimension size {mesh_dim_size}. "
+                                f"This would require resharding the input. "
+                                f"Please explicitly redistribute the tensor instead."
                             )
                 shardable_dims[dim.input_dim] = [can_shard_dim] * mesh_ndim
 
