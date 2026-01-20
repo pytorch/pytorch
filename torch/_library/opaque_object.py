@@ -42,7 +42,7 @@ from typing import Any, Literal, NewType, Optional
 from weakref import WeakKeyDictionary
 
 import torch
-from torch._opaque_base import OpaqueBase
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
 
 from .fake_class_registry import register_fake_class
 
@@ -159,13 +159,13 @@ def register_opaque_type(
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
-    if not isinstance(cls, OpaqueBase):
+    if not isinstance(cls, OpaqueBaseMeta):
         raise TypeError(
-            f"Opaque type {cls} must use torch._opaque_base.OpaqueBase as its metaclass. "
+            f"Opaque type {cls} must subclass torch._opaque_base.OpaqueBase "
+            "or 'metaclass=torch._opaque_base.OpaqueBaseMeta'. "
             "This is required so that FakeScriptObject can be registered "
             "as a virtual subclass, allowing isinstance() checks to work "
-            "during torch.compile tracing. You can add 'metaclass=ABCMeta' or "
-            "inherit from ABC."
+            "during torch.compile tracing. "
         )
 
     if typ not in ["reference", "value"]:
