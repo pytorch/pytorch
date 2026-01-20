@@ -121,7 +121,7 @@ template <typename RNG,
           typename = decltype(&RNG::next_double_normal_sample),
           typename = decltype(&RNG::set_next_double_normal_sample)>
 C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, double* ret) {
-  std::optional<double> sample = generator->next_double_normal_sample();
+  const auto sample = generator->next_double_normal_sample();
   if (!sample.has_value())
     return false;
   *ret = sample.value();
@@ -133,7 +133,7 @@ template <typename RNG,
           typename = decltype(&RNG::next_float_normal_sample),
           typename = decltype(&RNG::set_next_float_normal_sample)>
 C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, float* ret) {
-  std::optional<float> sample = generator->next_float_normal_sample();
+  const auto sample = generator->next_float_normal_sample();
   if (!sample.has_value())
     return false;
   *ret = sample.value();
