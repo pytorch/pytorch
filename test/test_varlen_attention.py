@@ -163,32 +163,33 @@ def create_variable_length_batch(
         length = torch.randint(1, shape.max_seq_len // 64 + 1, (1,)).item() * 64
         seq_lengths.append(min(length, shape.max_seq_len))
 
-    seq_lengths = torch.tensor(seq_lengths, device=device)
-
-    sequences = [
-        torch.randn(
-            seq_len, shape.embed_dim, device=device, dtype=dtype, requires_grad=True
-        )
+    sequences_fp32 = [
+        torch.randn(seq_len, shape.embed_dim, device=device, dtype=torch.float32)
         for seq_len in seq_lengths
     ]
 
-    x_packed, cu_seq, max_len = pack_sequences(sequences, device)
-    x_padded = torch.zeros(
-        shape.batch_size, max_len, shape.embed_dim, device=device, dtype=dtype
-    )
+    x_packed_fp32, cu_seq, max_len = pack_sequences(sequences_fp32, device)
+    seq_lengths = torch.tensor(seq_lengths, device=device)
 
+    x_padded_fp32 = torch.zeros(
+        shape.batch_size, max_len, shape.embed_dim, device=device, dtype=torch.float32
+    )
     start_idx = 0
     for i, seq_len in enumerate(seq_lengths):
         end_idx = start_idx + seq_len
-        x_padded[i, :seq_len] = x_packed[start_idx:end_idx]
+        x_padded_fp32[i, :seq_len] = x_packed_fp32[start_idx:end_idx]
         start_idx = end_idx
-    x_padded = x_padded.clone().detach().requires_grad_()
+
+    x_packed = x_packed_fp32.detach().clone().to(dtype).requires_grad_(True)
+    x_padded = x_padded_fp32.detach().clone().to(dtype).requires_grad_(True)
+    x_padded_ref = x_padded_fp32.detach().clone().requires_grad_(True)
 
     return {
         "seq_lengths": seq_lengths,
         "cu_seq": cu_seq,
         "x_packed": x_packed,
         "x_padded": x_padded,
+        "x_padded_ref": x_padded_ref,
         "max_len": max_len,
     }
 
@@ -375,120 +376,125 @@ class TestVarlenAttention(NNTestCase):
             batch_size=4, max_seq_len=1024, embed_dim=1024, num_heads=16
         )
 
-        attention_block = AttentionBlock(
-            shape.embed_dim, shape.num_heads, device, dtype
-        )
+        batch_data = create_variable_length_batch(shape, device, dtype)
+        seq_lengths = batch_data["seq_lengths"]
+        cu_seq = batch_data["cu_seq"]
+        max_len = batch_data["max_len"]
+        x_packed = batch_data["x_packed"]
+        x_padded = batch_data["x_padded"]
+        x_padded_ref = batch_data["x_padded_ref"]
 
         golden_attention_block = AttentionBlock(
             shape.embed_dim, shape.num_heads, device, torch.float32
         )
-
-        variable_length_batch_data = create_variable_length_batch(shape, device, dtype)
-        golden_variable_length_batch_data = create_variable_length_batch(
-            shape, device, torch.float32
+        attention_block = AttentionBlock(
+            shape.embed_dim, shape.num_heads, device, dtype
         )
+        with torch.no_grad():
+            attention_block.qkv_proj.weight.copy_(
+                golden_attention_block.qkv_proj.weight.to(dtype)
+            )
+            attention_block.out_proj.weight.copy_(
+                golden_attention_block.out_proj.weight.to(dtype)
+            )
 
         varlen_output = attention_block.forward_varlen(
-            variable_length_batch_data["x_packed"],
-            variable_length_batch_data["cu_seq"],
-            variable_length_batch_data["max_len"],
-            is_causal=is_causal,
+            x_packed,
+            cu_seq,
+            max_len,
             scale=scale,
             window_size=window_size,
         )
         sdpa_output = attention_block.forward_sdpa(
-            variable_length_batch_data["x_padded"],
-            variable_length_batch_data["seq_lengths"],
-            is_causal=is_causal,
+            x_padded,
+            seq_lengths,
             scale=scale,
             window_size=window_size,
         )
-
         golden_sdpa_output = golden_attention_block.forward_sdpa(
-            golden_variable_length_batch_data["x_padded"],
-            golden_variable_length_batch_data["seq_lengths"],
-            is_causal=is_causal,
+            x_padded_ref,
+            seq_lengths,
             scale=scale,
             window_size=window_size,
         )
 
         start_idx = 0
-        for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
+        for i, seq_len in enumerate(seq_lengths):
             end_idx = start_idx + seq_len
 
             varlen_seq = varlen_output[start_idx:end_idx]
             sdpa_seq = sdpa_output[i, :seq_len]
-            golden_sdpa_seq = golden_sdpa_output[i, :seq_len]
+            golden_seq = golden_sdpa_output[i, :seq_len]
 
-            fwd_atol = (
-                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            fwd_atol = 2 * (golden_seq + 0.3 - 0.3 - golden_seq).abs().max().item()
+
+            varlen_error = (varlen_seq - golden_seq.to(dtype)).abs().max().item()
+            sdpa_error = (sdpa_seq - golden_seq.to(dtype)).abs().max().item()
+
+            self.assertLessEqual(
+                varlen_error,
+                2 * sdpa_error + fwd_atol,
             )
-
-            varlen_error = (varlen_seq - fwd_atol).abs().max().item()
-            sdpa_error = (sdpa_seq - fwd_atol).abs().max().item()
-
-            self.assertLessEqual(varlen_error, 2 * sdpa_error + fwd_atol)
 
             start_idx = end_idx
 
-        varlen_grad_out = torch.ones_like(varlen_output)
-        sdpa_grad_out = torch.ones_like(sdpa_output)
-        golden_sdpa_grad_out = torch.ones_like(golden_sdpa_output)
-
+        grad_out = torch.randn_like(varlen_output)
+        sdpa_grad_out = torch.zeros_like(sdpa_output)
+        golden_sdpa_grad_out = torch.zeros(
+            shape.batch_size,
+            max_len,
+            shape.embed_dim,
+            device=device,
+            dtype=torch.float32,
+        )
         start_idx = 0
-        for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
+        for i, seq_len in enumerate(seq_lengths):
             end_idx = start_idx + seq_len
-            sdpa_grad_out[i, :seq_len] = varlen_grad_out[start_idx:end_idx]
+            sdpa_grad_out[i, :seq_len] = grad_out[start_idx:end_idx]
+            golden_sdpa_grad_out[i, :seq_len] = grad_out[start_idx:end_idx].to(
+                torch.float32
+            )
             start_idx = end_idx
 
         varlen_grad = torch.autograd.grad(
             outputs=varlen_output,
-            inputs=variable_length_batch_data["x_packed"],
-            grad_outputs=varlen_grad_out,
-            retain_graph=True,
-            create_graph=False,
-            allow_unused=False,
+            inputs=x_packed,
+            grad_outputs=grad_out,
         )[0]
 
         sdpa_grad = torch.autograd.grad(
             outputs=sdpa_output,
-            inputs=variable_length_batch_data["x_padded"],
+            inputs=x_padded,
             grad_outputs=sdpa_grad_out,
-            retain_graph=True,
-            create_graph=False,
-            allow_unused=False,
         )[0]
 
         golden_sdpa_grad = torch.autograd.grad(
             outputs=golden_sdpa_output,
-            inputs=golden_variable_length_batch_data["x_padded"],
+            inputs=x_padded_ref,
             grad_outputs=golden_sdpa_grad_out,
-            retain_graph=True,
-            create_graph=False,
-            allow_unused=False,
         )[0]
 
         start_idx = 0
-        for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
+        for i, seq_len in enumerate(seq_lengths):
             end_idx = start_idx + seq_len
 
             varlen_grad_seq = varlen_grad[start_idx:end_idx]
             sdpa_grad_seq = sdpa_grad[i, :seq_len]
-            golden_sdpa_seq = golden_sdpa_grad[i, :seq_len]
+            golden_grad_seq = golden_sdpa_grad[i, :seq_len]
 
-            print(varlen_grad_seq, sdpa_grad_seq, golden_sdpa_seq)
-            fwd_atol = (
-                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+            bwd_atol = (
+                2 * (golden_grad_seq + 0.3 - 0.3 - golden_grad_seq).abs().max().item()
             )
 
-            varlen_error = (varlen_grad_seq - fwd_atol).abs().max().item()
-            sdpa_error = (sdpa_grad_seq - fwd_atol).abs().max().item()
+            varlen_error = (
+                (varlen_grad_seq - golden_grad_seq.to(dtype)).abs().max().item()
+            )
+            sdpa_error = (sdpa_grad_seq - golden_grad_seq.to(dtype)).abs().max().item()
 
-            print("errors")
-            print(varlen_error, sdpa_error)
-            print(abs(varlen_error - sdpa_error))
-
-            self.assertLessEqual(varlen_error, sdpa_error + fwd_atol)
+            self.assertLessEqual(
+                varlen_error,
+                2 * sdpa_error + bwd_atol,
+            )
 
             start_idx = end_idx
 
