@@ -11,7 +11,7 @@ import os
 import os.path
 import re
 import warnings
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, Optional, TYPE_CHECKING, Union
@@ -28,7 +28,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
 from torch._inductor import config as inductor_config
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import is_builtin
-from torch._logging import trace_structured
+from torch._logging import LazyString, trace_structured
 from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.fx.experimental._backward_state import BackwardState
@@ -2253,7 +2253,7 @@ def solve_min_cut(
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
-    except nx.NetworkXUnbounded:
+    except nx.NetworkXUnbounded as unbounded_exc:
         # Check if structured tracing is enabled (for production job debugging via tlparse)
         structured_tracing_enabled = bool(trace_log.handlers)
 
@@ -2314,10 +2314,9 @@ def solve_min_cut(
             raw_path_nodes = ["source"]
 
             def get_base_name(node_name: str) -> str:
-                if node_name.endswith("_in"):
-                    return node_name[:-3]
-                elif node_name.endswith("_out"):
-                    return node_name[:-4]
+                for suffix in ("_in", "_out"):
+                    if node_name.endswith(suffix):
+                        return node_name[: -len(suffix)]
                 return node_name
 
             for from_node, to_node, reason in inf_path:
@@ -2343,7 +2342,7 @@ def solve_min_cut(
                     )
 
             # Format the constraints nicely
-            constraint_lines = []
+            constraint_lines: list[str] = []
             for node_name, constraints in node_constraints.items():
                 constraint_lines.append(f"  {node_name}:")
                 for c in constraints:
@@ -2393,16 +2392,26 @@ def solve_min_cut(
                 f"[Debug: min-cut path] {raw_path_str}\n"
                 f"{local_files_msg}"
                 f"{tlparse_msg}"
-            ) from None
+            ) from unbounded_exc
 
         # Fallback if we couldn't find the path
         log.info("Failed to compute min-cut on following graph:")
-        log.info("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+        log.info(
+            "%s",
+            LazyString(
+                lambda: "\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph))
+            ),
+        )
         visualize_min_cut_graph(nx_graph)
         raise
     except Exception:
         log.info("Failed to compute min-cut on following graph:")
-        log.info("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+        log.info(
+            "%s",
+            LazyString(
+                lambda: "\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph))
+            ),
+        )
         visualize_min_cut_graph(nx_graph)
         raise
 
@@ -2434,7 +2443,6 @@ def _find_infinite_capacity_path(
     Returns a list of (from_node, to_node, reason) tuples representing the path,
     or None if no such path exists.
     """
-    from collections import deque
 
     visited = OrderedSet(["source"])
     # Each queue item: (current_node, path_of_edges)
@@ -2465,8 +2473,6 @@ def _get_unique_path(base_name: str, extension: str) -> str:
 
     For example, if "min_cut_failed.svg" exists, returns "min_cut_failed_1.svg".
     """
-    import os
-
     path = f"{base_name}{extension}"
     if not os.path.exists(path):
         return path
@@ -2487,6 +2493,10 @@ def visualize_min_cut_graph(nx_graph) -> tuple[Optional[str], Optional[str]]:
     try:
         import pydot
     except ImportError:
+        log.info(
+            "Install pydot to visualize the min-cut graph for debugging: pip install pydot",
+            exc_info=True
+        )
         return None, None
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
