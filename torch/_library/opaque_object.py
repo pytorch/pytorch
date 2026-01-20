@@ -202,6 +202,19 @@ def register_opaque_type(
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
+    # ref types should maintain identity across deepcopy.
+    # some types (like built-in C types) can't be modified, so we skip those.
+    if typ == "reference" and not hasattr(cls, "__deepcopy__"):
+
+        def __deepcopy__(self, memo):
+            return self
+
+        try:
+            cls.__deepcopy__ = __deepcopy__
+        except TypeError:
+            # immutable types
+            pass
+
     type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {})
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
