@@ -1392,11 +1392,11 @@ class TransformInfoTest(TestCase):
 
     def test_comm_type_key(self):
         """Test _comm_type_key returns correct keys for different placement transforms."""
-        # Comm ops: return string key
+        # Comm ops: return comm type string
         test_cases = [
-            ((Partial("sum"), Replicate()), "allreduce_sum"),
-            ((Partial("max"), Replicate()), "allreduce_max"),
-            ((Partial("sum"), Shard(0)), "reduce_scatter_sum"),
+            ((Partial("sum"), Replicate()), "all_reduce"),
+            ((Partial("max"), Replicate()), "all_reduce"),
+            ((Partial("sum"), Shard(0)), "reduce_scatter"),
             ((Shard(0), Replicate()), "all_gather"),
             ((Shard(0), Shard(1)), "all_to_all"),
         ]
@@ -1471,7 +1471,7 @@ class OptimizeFlattenedReductionsTest(TestCase):
             self.assertIn("Partial(sum)", warning_msg)  # src placement
             self.assertIn("Replicate()", warning_msg)  # dst placement
             self.assertIn("2 sequential", warning_msg)  # number of ops
-            self.assertIn("allreduce_sum", warning_msg)  # comm type
+            self.assertIn("all_reduce", warning_msg)  # comm type
             self.assertIn('"A"', warning_msg)  # mesh dim name
             self.assertIn('"C"', warning_msg)  # mesh dim name
             self.assertIn("suboptimal", warning_msg)

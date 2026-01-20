@@ -120,15 +120,12 @@ class _TransformInfo(NamedTuple):
         """
         src, dst = self.src_dst_placements
         if src.is_partial() and dst.is_replicate():
-            # allreduce - include reduce_op so different reduce ops don't merge
-            return f"allreduce_{cast(Partial, src).reduce_op}"
+            return "all_reduce"
         elif src.is_partial() and dst.is_shard():
-            # reduce-scatter
-            return f"reduce_scatter_{cast(Partial, src).reduce_op}"
+            return "reduce_scatter"
         elif src.is_shard() and dst.is_replicate():
             return "all_gather"
         elif src.is_shard() and dst.is_shard():
-            # all_to_all (shard on different dims)
             return "all_to_all"
         else:
             # Local ops (Replicate->Shard, Replicate->Partial, noop, etc.)
@@ -226,18 +223,11 @@ def _optimize_transform_infos(
         return []
 
     # Comm types that are safe to merge (all_to_all excluded for now)
-    MERGEABLE_COMM_TYPES = frozenset({"all_gather", "allreduce", "reduce_scatter"})
+    MERGEABLE_COMM_TYPES = frozenset({"all_gather", "all_reduce", "reduce_scatter"})
 
     def is_mergeable(key: str | None) -> bool:
         """Check if a comm type key represents a mergeable operation."""
-        if key is None:
-            return False
-        # Check if key starts with any mergeable comm type
-        # (key format is like "allreduce_sum" or "reduce_scatter_sum")
-        for comm_type in MERGEABLE_COMM_TYPES:
-            if key.startswith(comm_type):
-                return True
-        return False
+        return key in MERGEABLE_COMM_TYPES
 
     def try_create_flattened(
         infos: list[_TransformInfo],
