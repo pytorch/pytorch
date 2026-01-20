@@ -18,19 +18,31 @@ class ComplexTensor(Tensor):
     """A class that decomposes all ops on complex Tensors into their real and imaginary parts."""
 
     _data: Tensor
+    _neg_flag: bool
+    _conj_flag: bool
 
-    def __new__(cls, real: Tensor, imag: Tensor | None = None) -> Self:
+    def __new__(
+        cls,
+        real: Tensor,
+        imag: Tensor | None = None,
+        /,
+        *,
+        neg_flag: bool = False,
+        conj_flag: bool = False,
+    ) -> Self:
         """Initialize a ComplexTensor from its real and imaginary parts."""
         from ._ops.common import REAL_TO_COMPLEX
 
-        shape = real.shape
-        device = real.device
-
         # TODO (hameerabbasi): `torch.compile` sometimes fails here without making these
         # contiguous. Why?
-        real = real
         if imag is None:
+            if real.is_neg():
+                neg_flag = not neg_flag
+                real = torch._neg_view(real)
             if real.dtype.is_complex:
+                if real.is_conj():
+                    conj_flag = not conj_flag
+                    real = torch._conj(real)
                 data = torch.view_as_real(real)
             else:
                 assert real.shape[-1] == 2
@@ -41,6 +53,8 @@ class ComplexTensor(Tensor):
 
         real = data[..., 0]
         imag = data[..., 1]
+        shape = real.shape
+        device = real.device
 
         # TODO (hameerabbasi):
         # What should we do with dtype?
@@ -91,18 +105,29 @@ class ComplexTensor(Tensor):
             requires_grad=False,
         )
         res._data = data.detach()
-        # res._re = real.detach()
-        # res._im = imag.detach()
+        res._neg_flag = neg_flag
+        res._conj_flag = conj_flag
 
         return res
 
+    def __init__(self, *a, **kw) -> None:
+        super().__init__(*a, **kw)
+
     @property
     def re(self) -> Tensor:
-        return self._data[..., 0]
+        negate = self.is_neg()
+        real = self._data[..., 0]
+        if negate:
+            real = torch._neg_view(real)
+        return real
 
     @property
     def im(self) -> Tensor:
-        return self._data[..., 1]
+        negate = self.is_neg() != self.is_conj()
+        imag = self._data[..., 1]
+        if negate:
+            imag = torch._neg_view(imag)
+        return imag
 
     @classmethod
     def __torch_dispatch__(  # type: ignore[bad-override]
@@ -127,7 +152,12 @@ class ComplexTensor(Tensor):
         return Complex.apply(t)
 
     def as_interleaved(self) -> Tensor:
-        return torch.view_as_complex(torch.view_as_real(self))
+        out = torch.view_as_complex(self._data)
+        if self._conj_flag:
+            out = torch._conj(out)
+        if self._neg_flag:
+            out = torch._neg_view(out)
+        return out
 
     @staticmethod
     def __tensor_unflatten__(
@@ -136,23 +166,26 @@ class ComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
-        assert meta is None
         data = inner_tensors["_data"]
-        return ComplexTensor(data[..., 0], data[..., 1])
+        return ComplexTensor(
+            data, neg_flag=meta["neg_flag"], conj_flag=meta["conj_flag"]
+        )
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["_data"], None
+        return ["_data"], {"neg_flag": self._neg_flag, "conj_flag": self._conj_flag}
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"ComplexTensor(real={self.re!r}, imag={self.im!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
-        return self.re.is_pinned(device)
+        return self._data.is_pinned(device)
 
 
 class Complex(Function):
     @staticmethod
-    def forward(ctx: FunctionCtx, real: Tensor, imag: Tensor|None = None) -> ComplexTensor:  # type: ignore[bad-override]
+    def forward(  # type: ignore[bad-override]
+        ctx: FunctionCtx, real: Tensor, imag: Tensor | None = None
+    ) -> ComplexTensor:
         return ComplexTensor(real, imag)
 
     @staticmethod
