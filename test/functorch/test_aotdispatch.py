@@ -6375,12 +6375,15 @@ def forward(self, primals_1, tangents_1):
         Uses selective checkpoint to mark var_mean as MUST_SAVE (banning recomputation),
         with a custom autograd.Function that returns the mean (getitem from var_mean)
         directly as the gradient output.
+
+        This test is doing weird things, because ordinarily the returned grad_output will
+        always be a function of the input tangent, preventing it from being returned directly
+        as a forward output. It is still important to test this case because it can actually
+        happen if you use subclasses.
         """
-        import functools
-        from torch.autograd import Function
         from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
-        class GetitemAsGradOutput(Function):
+        class GetitemAsGradOutput(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
                 var, mean = torch.var_mean(torch.stack([x, x]), dim=0)
@@ -6391,7 +6394,7 @@ def forward(self, primals_1, tangents_1):
             def backward(ctx, grad_var):
                 return ctx.saved_tensors[0]
 
-        context_fn = functools.partial(create_selective_checkpoint_contexts, [torch.ops.aten.var_mean.correction])
+        context_fn = partial(create_selective_checkpoint_contexts, [torch.ops.aten.var_mean.correction])
 
         @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
         def fn(x):
