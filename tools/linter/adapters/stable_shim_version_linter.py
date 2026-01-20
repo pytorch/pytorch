@@ -248,12 +248,11 @@ def get_added_lines(filename: str) -> set[int]:
             ["git", "fetch", "origin", "main"],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=300,
         )
         if result.returncode != 0:
             raise RuntimeError(
-                f"Failed to fetch origin. "
-                f"Error: {result.stderr.strip()}"
+                f"Failed to fetch origin. Error: {result.stderr.strip()}"
             )
 
         result = subprocess.run(
