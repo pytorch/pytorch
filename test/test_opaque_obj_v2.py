@@ -2049,6 +2049,32 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(ref.grad, res.grad)
 
+    def test_opaque_object_with_inductor_backend(self):
+        """Test that opaque objects work correctly with inductor's get_attr handling."""
+        from torch._inductor.compile_fx import compile_fx
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.color = Color.RED
+
+            def forward(self, x):
+                return torch.ops._TestOpaqueObject.apply_color_scale(self.color, x)
+
+        mod = TestModule()
+        x = torch.randn(3, 3)
+
+        gm = torch.fx.symbolic_trace(mod)
+
+        has_get_attr = any(node.op == "get_attr" for node in gm.graph.nodes)
+        self.assertTrue(has_get_attr, "expected get_attr node for opaque object")
+
+        compiled_fn = compile_fx(gm, [x])
+        result = compiled_fn(x)
+
+        expected = x * float(Color.RED.value)
+        self.assertTrue(torch.allclose(result, expected))
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
