@@ -1013,7 +1013,7 @@ class aten_distributed_optimizations:
     log_final_collectives_estimations: bool = False
 
     # Bucket exposed collectives first
-    bucket_exposed_first: bool = True
+    bucket_exposed_first: Literal["True", "False", "auto"] = "auto"
 
     # Enable fusion region detection for overlap scheduling cost estimation.
     # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
