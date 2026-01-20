@@ -368,10 +368,15 @@ class _LSTMLayer(torch.nn.Module):
         split_gates = kwargs.get("split_gates", False)
 
         layer = cls(
+            # pyrefly: ignore [bad-argument-type]
             input_size,
+            # pyrefly: ignore [bad-argument-type]
             hidden_size,
+            # pyrefly: ignore [bad-argument-type]
             bias,
+            # pyrefly: ignore [bad-argument-type]
             batch_first,
+            # pyrefly: ignore [bad-argument-type]
             bidirectional,
             split_gates=split_gates,
         )
@@ -454,7 +459,6 @@ class LSTM(torch.nn.Module):
 
         if (
             not isinstance(dropout, numbers.Number)
-            # pyrefly: ignore [unsupported-operation]
             or not 0 <= dropout <= 1
             or isinstance(dropout, bool)
         ):
@@ -463,7 +467,7 @@ class LSTM(torch.nn.Module):
                 "representing the probability of an element being "
                 "zeroed"
             )
-        # pyrefly: ignore [unsupported-operation]
+
         if dropout > 0:
             warnings.warn(
                 "dropout option for quantizable LSTM is ignored. "

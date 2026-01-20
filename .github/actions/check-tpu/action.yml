@@ -1,0 +1,56 @@
+name: Check TPU Availability
+
+description: Checks if the current runner has a TPU connected. Requires setup-linux to have been run first.
+
+outputs:
+  has_tpu:
+    description: Whether the runner has a TPU connected (true/false)
+    value: ${{ steps.check-tpu.outputs.has_tpu }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check for TPU
+      id: check-tpu
+      shell: bash
+      run: |
+        set +e  # Don't exit on error - TPU detection may fail on non-TPU runners
+        set -x  # Debug: print commands
+
+        # Create a temporary venv to avoid uv run's overhead
+        tmp_venv=$(mktemp -d)/venv
+        echo "Creating venv at: $tmp_venv"
+        uv venv "$tmp_venv"
+
+        echo "Installing tpu-info..."
+        uv pip install --python "$tmp_venv/bin/python" tpu-info
+
+        echo "Checking for TPU chips..."
+        # get_local_chips() returns Tuple[Optional[TpuChip], int] where:
+        #   - First element is the chip type (None if no TPU)
+        #   - Second element is the count of chips
+        # We check if count > 0 to determine TPU presence
+        result=$("$tmp_venv/bin/python" -c "from tpu_info import device; chip, count = device.get_local_chips(); print(f'chip={chip}, count={count}'); print('true' if count > 0 else 'false')")
+        exit_code=$?
+
+        echo "Python exit code: $exit_code"
+        echo "Python output: $result"
+
+        # Cleanup
+        rm -rf "$(dirname "$tmp_venv")"
+
+        set -e
+
+        # Get the last line which should be true/false
+        has_tpu=$(echo "$result" | tail -1)
+
+        if [[ $exit_code -ne 0 ]]; then
+          echo "TPU detection command failed (exit code: $exit_code) - assuming no TPU"
+          echo "has_tpu=false" >> "$GITHUB_OUTPUT"
+        elif [[ "$has_tpu" == "true" ]]; then
+          echo "TPU detected"
+          echo "has_tpu=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "No TPU detected"
+          echo "has_tpu=false" >> "$GITHUB_OUTPUT"
+        fi

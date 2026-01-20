@@ -68,6 +68,11 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/jit/serialization/import.h \
                          ../../../torch/csrc/jit/api/module.h \
                          ../../../torch/csrc/stable/library.h \
+                         ../../../torch/csrc/stable/ops.h \
+                         ../../../torch/csrc/stable/tensor_struct.h \
+                         ../../../torch/csrc/stable/device_struct.h \
+                         ../../../torch/csrc/stable/accelerator.h \
+                         ../../../torch/csrc/stable/macros.h \
                          ../../../torch/library.h \
                          ../../../torch/custom_class.h
 # Don't include .cpp files!

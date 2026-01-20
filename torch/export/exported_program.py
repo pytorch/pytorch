@@ -10,7 +10,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, final, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, final, NamedTuple, TYPE_CHECKING
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -91,7 +91,7 @@ __all__ = [
 ]
 
 
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+PassType = Callable[[torch.fx.GraphModule], PassResult | None]
 
 
 @dataclasses.dataclass
@@ -100,7 +100,7 @@ class ModuleCallSignature:
     outputs: list[ArgumentSpec]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
-    forward_arg_names: Optional[list[str]] = None
+    forward_arg_names: list[str] | None = None
 
     def replace_all_uses_with(self, original_node, new_node):
         for i in self.inputs:
@@ -114,7 +114,7 @@ class ModuleCallSignature:
 @dataclasses.dataclass
 class ModuleCallEntry:
     fqn: str
-    signature: Optional[ModuleCallSignature] = None
+    signature: ModuleCallSignature | None = None
 
 
 def _disable_prexisiting_fake_mode(fn):
@@ -127,9 +127,9 @@ def _disable_prexisiting_fake_mode(fn):
 
 
 def _fx_collection_equivalence_fn(
-    spec1_type: Optional[type],
+    spec1_type: type | None,
     spec1_context: pytree.Context,
-    spec2_type: Optional[type],
+    spec2_type: type | None,
     spec2_context: pytree.Context,
 ) -> bool:
     """Treat containers and their immutable variants as the same type. Otherwise
@@ -330,7 +330,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
-    joint_loss_index: Optional[int],
+    joint_loss_index: int | None,
     decompose_custom_triton_ops,
 ):
     from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
@@ -957,7 +957,7 @@ def _decompose_exported_program(
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
-    joint_loss_index: Optional[int],
+    joint_loss_index: int | None,
     decompose_custom_triton_ops: bool,
 ):
     (
@@ -1038,7 +1038,7 @@ class ExportedProgram:
     _module_call_graph: list[ModuleCallEntry]
     """Call graph information tracking module hierarchy and signatures."""
 
-    _example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]]
+    _example_inputs: tuple[tuple[Any, ...], dict[str, Any]] | None
     """Example inputs used during export, stored as (args, kwargs) tuple."""
 
     _constants: dict[str, _ConstantAttributeType]
@@ -1051,16 +1051,16 @@ class ExportedProgram:
 
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
-        state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]],
+        state_dict: dict[str, torch.Tensor | torch.nn.Parameter],
         range_constraints: "dict[sympy.Symbol, Any]",
         module_call_graph: list[ModuleCallEntry],
-        example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]] = None,
-        constants: Optional[dict[str, _ConstantAttributeType]] = None,
+        example_inputs: tuple[tuple[Any, ...], dict[str, Any]] | None = None,
+        constants: dict[str, _ConstantAttributeType] | None = None,
         *,
-        verifiers: Optional[list[type[Verifier]]] = None,
+        verifiers: list[type[Verifier]] | None = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -1226,8 +1226,8 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
         class CallSpec(NamedTuple):
-            in_spec: Optional[pytree.TreeSpec]
-            out_spec: Optional[pytree.TreeSpec]
+            in_spec: pytree.TreeSpec | None
+            out_spec: pytree.TreeSpec | None
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
@@ -1421,7 +1421,7 @@ class ExportedProgram:
     @_disable_prexisiting_fake_mode
     def run_decompositions(
         self,
-        decomp_table: Optional[dict[torch._ops.OperatorBase, Callable]] = None,
+        decomp_table: dict[torch._ops.OperatorBase, Callable] | None = None,
         decompose_custom_triton_ops: bool = False,
     ) -> "ExportedProgram":
         """
@@ -1650,7 +1650,7 @@ def _get_shape_env(gm):
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
-    old_range_constraints: "Optional[dict[sympy.Symbol, Any]]" = None,
+    old_range_constraints: "dict[sympy.Symbol, Any] | None" = None,
 ) -> "dict[sympy.Symbol, Any]":
     assert old_range_constraints is not None
 
@@ -1707,7 +1707,7 @@ def _convert_guards_to_code(graph_module):
         )
     }
     py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
-        shape_env.var_to_sources, lambda s: s.name(), shape_env.var_to_sources
+        shape_env.var_to_sources, lambda s: s.name, shape_env.var_to_sources
     )
     ret = [
         py_printer.doprint(guard.expr)

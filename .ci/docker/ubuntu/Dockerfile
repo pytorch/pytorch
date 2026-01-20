@@ -52,9 +52,9 @@ RUN  bash ./install_lcov.sh && rm install_lcov.sh
 ARG CUDA_VERSION
 COPY ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
-COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl-cu* install_cusparselt.sh
+RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh install_nccl.sh /ci_commit_pins/nccl* install_cusparselt.sh
 ENV DESIRED_CUDA ${CUDA_VERSION}
 ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 # No effect if cuda not installed
@@ -144,12 +144,17 @@ RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
 RUN rm install_halide.sh common_utils.sh halide.txt
 
 ARG PALLAS
+ARG TPU
 ARG CUDA_VERSION
-# Install JAX with CUDA support (for Pallas)
+# Install JAX (for Pallas) - with TPU/CUDA support based on args
+# TPU=yes -> install JAX with TPU support
+# PALLAS=yes + CUDA_VERSION -> install JAX with CUDA support
+# PALLAS=yes (no CUDA) -> install JAX CPU-only
 COPY ./common/install_jax.sh install_jax.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
-RUN if [ -n "${PALLAS}" ]; then bash ./install_jax.sh ${CUDA_VERSION}; fi
+RUN if [ -n "${TPU}" ]; then bash ./install_jax.sh tpu; \
+    elif [ -n "${PALLAS}" ]; then bash ./install_jax.sh ${CUDA_VERSION:-cpu}; fi
 RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
 
 ARG ONNX

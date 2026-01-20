@@ -14,7 +14,7 @@ class UnsafeAutoFunctionalizeKernel : public OpKernel {
   UnsafeAutoFunctionalizeKernel() = delete; // deleted default constructor
   UnsafeAutoFunctionalizeKernel(const Node* node);
 
-  void computeInternal(ExecutionFrame& executionFrame) const override final;
+  void computeInternal(ExecutionFrame& executionFrame) const final;
 
  private:
   c10::OperatorHandle op_;

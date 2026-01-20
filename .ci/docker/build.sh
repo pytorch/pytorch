@@ -89,6 +89,10 @@ if [[ "$image" == *rocm* ]]; then
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
+# If no tag (no colon in image name), use the image name itself
+if [[ -z "$tag" ]]; then
+  tag="$image"
+fi
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -116,7 +120,7 @@ case "$tag" in
     INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11)
-    CUDA_VERSION=13.0.0
+    CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
@@ -136,8 +140,19 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
-    CUDA_VERSION=12.8.1
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
+    CUDA_VERSION=13.0.2
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=12.9.1
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     VISION=yes
@@ -189,11 +204,23 @@ case "$tag" in
       INDUCTOR_BENCHMARKS=yes
     fi
     ;;
+  pytorch-linux-noble-rocm-nightly-py3)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    VISION=yes
+    ROCM_VERSION=nightly
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    PYTORCH_ROCM_ARCH="gfx942"
+    ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
     VISION=yes
-    XPU_VERSION=2025.1
+    XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
@@ -201,7 +228,7 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     VISION=yes
-    XPU_VERSION=2025.2
+    XPU_VERSION=2025.3
     NINJA_VERSION=1.9.0
     TRITON=yes
     if [[ $tag =~ "benchmarks" ]]; then
@@ -250,11 +277,23 @@ case "$tag" in
     HALIDE=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-py3.12-pallas)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    PALLAS=yes
+    ;;
   pytorch-linux-jammy-cuda12.8-py3.12-pallas)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     PALLAS=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-jammy-tpu-py3.12-pallas)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    PALLAS=yes
+    TPU=yes
     ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
     CUDA_VERSION=12.6
@@ -314,7 +353,9 @@ case "$tag" in
       extract_version_from_image_name cuda CUDA_VERSION
     fi
     if [[ "$image" == *rocm* ]]; then
-      extract_version_from_image_name rocm ROCM_VERSION
+      if [[ -z "$ROCM_VERSION" ]]; then
+        extract_version_from_image_name rocm ROCM_VERSION
+      fi
       NINJA_VERSION=1.9.0
       TRITON=yes
       # To ensure that any ROCm config will build using conda cmake
@@ -378,6 +419,7 @@ docker build \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "PALLAS=${PALLAS}" \
+       --build-arg "TPU=${TPU}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \

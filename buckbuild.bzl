@@ -979,6 +979,7 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":generated-version-header",
+            third_party("libkineto_headers"),
         ],
     )
 
@@ -1060,17 +1061,17 @@ def define_buck_targets(
         ],
         cmd = "mkdir -p $OUT/torch/headeronly && $(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
             "--template-path",
-            "torch/headeronly/version.h.in",
+            "$SRCDIR/torch/headeronly/version.h.in",
             "--version-path",
-            "version.txt",
+            "$SRCDIR/version.txt",
             "--output-path",
             "$OUT/torch/headeronly/version.h",
         ]),
         cmd_exe = "md $OUT\\torch\\headeronly 2>nul & $(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
             "--template-path",
-            "torch/headeronly/version.h.in",
+            "$SRCDIR/torch/headeronly/version.h.in",
             "--version-path",
-            "version.txt",
+            "$SRCDIR/version.txt",
             "--output-path",
             "$OUT\\torch\\headeronly\\version.h",
         ]),
@@ -1121,7 +1122,7 @@ def define_buck_targets(
             "--install_dir",
             "$OUT",
             "--input-file",
-            "aten/src/ATen/Config.h.in",
+            "$SRCDIR/aten/src/ATen/Config.h.in",
             "--output-file",
             "Config.h",
             "--replace",
@@ -1381,7 +1382,7 @@ def define_buck_targets(
             ":torch_mobile_deserialize",
             ":torch_mobile_headers",
             ":torch_mobile_observer",
-        ] + ([] if IS_OSS else ["//xplat/folly:molly"]),
+        ],
         exported_deps = [
             ":aten_cpu",
             ":torch_common",
@@ -1696,7 +1697,7 @@ def define_buck_targets(
             ":torch_mobile_headers",
             ":torch_mobile_observer",
             ":torch_mobile_core",
-        ] + ([] if IS_OSS else ["//xplat/folly:molly"]),
+        ],
         exported_deps = [
             ":aten_cpu",
             ":torch_common",

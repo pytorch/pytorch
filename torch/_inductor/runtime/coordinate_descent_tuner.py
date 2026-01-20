@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
+from ..utils import get_max_numwarps
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
 
@@ -81,9 +82,13 @@ class CoordescTuner:
         return min(max_block, size_hint) if size_hint is not None else max_block
 
     def get_warpsmax(self):
-        # Currently, CUDA has a maximum of 1024 threads, so 32 is the max
-        # number of warps.
-        return 1024 // 32
+        # Avoid querying device directly if device properties are populated in inductor_meta
+        warp_size = self.inductor_meta.get("warp_size")
+        max_threads_per_block = self.inductor_meta.get("max_threads_per_block")
+        if warp_size and max_threads_per_block:
+            return max_threads_per_block // warp_size
+        else:
+            return get_max_numwarps()
 
     def cache_benchmark_result(self, config, timing):
         self.cached_benchmark_results[triton_config_to_hashable(config)] = timing

@@ -615,6 +615,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             weight_,
             stride_,
             padding_,
+            output_padding_,
             dilation_,
             groups_,
             output_mask[2]);
@@ -646,6 +647,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             input_,
             stride_,
             padding_,
+            output_padding_,
             dilation_,
             groups_);
       } else {

@@ -19,6 +19,7 @@ from torch.distributed.tensor.parallel.style import (
 from torch.distributed.tensor.placement_types import _Partial
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     NUM_DEVICES,
     RMSNormPython,
@@ -433,6 +434,10 @@ class TensorParallelStyleTest(DTensorTestBase):
             # communication happens in both fwd/bwd to redistribute input
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
+
+TensorParallelStyleTestWithLocalTensor = create_local_tensor_test_class(
+    TensorParallelStyleTest,
+)
 
 if __name__ == "__main__":
     run_tests()

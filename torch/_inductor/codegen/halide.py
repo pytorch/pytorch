@@ -829,6 +829,7 @@ class HalideKernel(SIMDKernel):
                         if lt(divisor, n.divisor) and lt(n.divisor, end)
                     ]
                 )
+                # pyrefly: ignore [bad-assignment]
                 while sizes_to_add:
                     next_size = functools.reduce(sympy.gcd, sizes_to_add)
                     if eq(next_size, 1):

@@ -61,7 +61,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' | "
         "nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' | "
@@ -79,7 +79,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.3.90; platform_system == 'Linux' | "
         "nvidia-cusparse-cu12==12.5.8.93; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.8.90; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.8.93; platform_system == 'Linux' | "
@@ -97,7 +97,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver-cu12==11.7.5.82; platform_system == 'Linux' | "
         "nvidia-cusparse-cu12==12.5.10.65; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu12==0.7.1; platform_system == 'Linux' | "
-        "nvidia-nccl-cu12==2.27.5; platform_system == 'Linux' | "
+        "nvidia-nccl-cu12==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu12==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx-cu12==12.9.79; platform_system == 'Linux' | "
         "nvidia-nvjitlink-cu12==12.9.86; platform_system == 'Linux' | "
@@ -106,42 +106,43 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.0": (
         "cuda-bindings==13.0.3; platform_system == 'Linux' | "
         "nvidia-cuda-nvrtc==13.0.88; platform_system == 'Linux' | "
-        "nvidia-cuda-runtime==13.0.96; platform_system == 'Linux' | "
+        "nvidia-cuda-runtime~=13.0.48; platform_system == 'Linux' | "
         "nvidia-cuda-cupti==13.0.85; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu13==9.13.0.50; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu13==9.15.1.9; platform_system == 'Linux' | "
         "nvidia-cublas==13.1.0.3; platform_system == 'Linux' | "
         "nvidia-cufft==12.0.0.61; platform_system == 'Linux' | "
         "nvidia-curand==10.4.0.35; platform_system == 'Linux' | "
         "nvidia-cusolver==12.0.4.66; platform_system == 'Linux' | "
         "nvidia-cusparse==12.6.3.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx==13.0.85; platform_system == 'Linux' | "
         "nvidia-nvjitlink==13.0.88; platform_system == 'Linux' | "
         "nvidia-cufile==1.15.1.6; platform_system == 'Linux'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.2.1 | "
-        "intel-cmplr-lib-ur==2025.2.1 | "
-        "intel-cmplr-lic-rt==2025.2.1 | "
-        "intel-sycl-rt==2025.2.1 | "
-        "oneccl-devel==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.16.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-sycl-blas==2025.2.0 | "
-        "onemkl-sycl-dft==2025.2.0 | "
-        "onemkl-sycl-lapack==2025.2.0 | "
-        "onemkl-sycl-rng==2025.2.0 | "
-        "onemkl-sycl-sparse==2025.2.0 | "
-        "dpcpp-cpp-rt==2025.2.1 | "
-        "intel-opencl-rt==2025.2.1 | "
-        "mkl==2025.2.0 | "
-        "intel-openmp==2025.2.1 | "
-        "tbb==2022.2.0 | "
-        "tcmlib==1.4.0 | "
-        "umf==0.11.0 | "
-        "intel-pti==0.13.1"
+        "intel-cmplr-lib-rt==2025.3.1 | "
+        "intel-cmplr-lib-ur==2025.3.1 | "
+        "intel-cmplr-lic-rt==2025.3.1 | "
+        "intel-sycl-rt==2025.3.1 | "
+        "oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "onemkl-license==2025.3.0 | "
+        "onemkl-sycl-blas==2025.3.0 | "
+        "onemkl-sycl-dft==2025.3.0 | "
+        "onemkl-sycl-lapack==2025.3.0 | "
+        "onemkl-sycl-rng==2025.3.0 | "
+        "onemkl-sycl-sparse==2025.3.0 | "
+        "dpcpp-cpp-rt==2025.3.1 | "
+        "intel-opencl-rt==2025.3.1 | "
+        "mkl==2025.3.0 | "
+        "intel-openmp==2025.3.1 | "
+        "tbb==2022.3.0 | "
+        "tcmlib==1.4.1 | "
+        "umf==1.0.2 | "
+        "intel-pti==0.15.0"
     ),
 }
 
@@ -195,14 +196,13 @@ def get_nccl_wheel_version(arch_version: str) -> str:
 
 
 def read_nccl_pin(arch_version: str) -> str:
-    nccl_pin_path = (
-        REPO_ROOT
-        / ".ci"
-        / "docker"
-        / "ci_commit_pins"
-        / f"nccl-cu{arch_version[:2]}.txt"
-    )
-    return nccl_pin_path.read_text().strip()
+    import sys
+
+    sys.path.append(str(REPO_ROOT / "tools"))
+    # Single source of truth for NCCL version
+    from optional_submodules import read_nccl_pin
+
+    return read_nccl_pin()
 
 
 def validate_nccl_dep_consistency(arch_version: str) -> None:

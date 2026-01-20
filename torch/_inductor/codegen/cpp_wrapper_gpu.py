@@ -707,12 +707,6 @@ class CppWrapperGpu(CppWrapperCpu):
                     )
                 )
                 new_args.append(f"&{var_name}")
-            elif arg_type in (sympy.Integer, int):
-                code.writeline(f"int {var_name} = {cexpr(arg)};")
-                new_args.append(f"&{var_name}")
-            elif arg_type in (sympy.Float, float):
-                code.writeline(f"float {var_name} = {cexpr(arg)};")
-                new_args.append(f"&{var_name}")
             # For symbolic call arguments, examine the arg signatures from triton meta
             # to explicitly cast to the right type
             # Reason: `auto` can infer unexpected type against kernel input signature.
@@ -724,6 +718,12 @@ class CppWrapperGpu(CppWrapperCpu):
                 code.writeline(
                     f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"
                 )
+                new_args.append(f"&{var_name}")
+            elif arg_type in (sympy.Integer, int):
+                code.writeline(f"int {var_name} = {cexpr(arg)};")
+                new_args.append(f"&{var_name}")
+            elif arg_type in (sympy.Float, float):
+                code.writeline(f"float {var_name} = {cexpr(arg)};")
                 new_args.append(f"&{var_name}")
             elif arg_signature and arg_signature.startswith("tensordesc<"):
                 new_args.extend(

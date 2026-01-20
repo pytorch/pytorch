@@ -50,6 +50,7 @@ class CondOp(HigherOrderOperator):
 
     def __call__(self, pred, true_fn, false_fn, operands):
         validate_subgraph_args_types(operands)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(pred, true_fn, false_fn, operands)
 
     # pyrefly: ignore [bad-override]
