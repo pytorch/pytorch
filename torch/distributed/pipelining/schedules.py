@@ -1321,6 +1321,56 @@ def _add_send_recv(
     return comm_actions
 
 
+
+def _move_recv_before_compute(
+    pipeline_order_with_comms: dict[int, list[_Action]],
+) -> dict[int, list[_Action]]:
+    """
+    Rearrange RECV operations to be immediately before their dependent compute operations.
+
+    Example:
+    - {stage}RECV_F{i} is needed before {stage}F{i}
+    - {stage}RECV_B{i} is needed before {stage}B{i} or {stage}I{i}
+    """
+    result: dict[int, list[_Action]] = {}
+
+    for rank, actions in pipeline_order_with_comms.items():
+        reordered: list[_Action] = []
+        # Maps (stage_index, recv_type, microbatch_index) -> recv_action
+        pending_recvs: dict[tuple[int, _ComputationType, int | None], _Action] = {}
+
+        for action in actions:
+            # Check if this is a RECV operation
+            if action.computation_type in (RECV_F, RECV_B):
+                key = (action.stage_index, action.computation_type, action.microbatch_index)
+                pending_recvs[key] = action
+                continue
+
+            # Check if this is a compute operation that needs a RECV
+            if action.computation_type == F:
+                # Forward needs RECV_F
+                key = (action.stage_index, RECV_F, action.microbatch_index)
+                if key in pending_recvs:
+                    reordered.append(pending_recvs.pop(key))
+            elif action.computation_type in (FULL_BACKWARD, BACKWARD_INPUT):
+                # Backward needs RECV_B
+                key = (action.stage_index, RECV_B, action.microbatch_index)
+                if key in pending_recvs:
+                    reordered.append(pending_recvs.pop(key))
+
+            reordered.append(action)
+
+        # Check remaining RECVs (shouldn't happen in a valid schedule)
+        if pending_recvs.values():
+            raise AssertionError(
+                f"Rank {rank} has pending RECVs: {pending_recvs.values()}"
+            )
+
+        result[rank] = reordered
+
+    return result
+
+
 def _validate_schedule(
     actions: dict[int, list[_Action | None]],
     pp_group_size: int,
@@ -1964,6 +2014,11 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 self.pipeline_order_with_comms,
                 stage_to_rank=lambda s: self.stage_index_to_group_rank[s],
                 num_stages=self._num_stages,
+            )
+
+            # do another pass to move RECV right before it is needed for compute
+            self.pipeline_order_with_comms = _move_recv_before_compute(
+                self.pipeline_order_with_comms
             )
         else:
             raise NotImplementedError(f"{format=} is not implemented")
