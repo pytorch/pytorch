@@ -23,9 +23,7 @@ fi
 
 PYTHON="${PYTHON_EXECUTABLE:-python}"
 
-if [[ ! -d "/usr/local/cuda" ]]; then
-    echo "CUDA not found, installing CUDA toolkit for Flash Attention build"
-
+if [[ "$(uname -m)" == "aarch64" ]]; then
     if command -v dnf &> /dev/null; then
         dnf install -y \
             wget \
@@ -42,45 +40,20 @@ if [[ ! -d "/usr/local/cuda" ]]; then
         fi
     fi
 
-    if [[ "$(uname -m)" == "aarch64" && "${CUDA_VERSION:-12.6}" == "13.0" ]]; then
+    source "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh"
+    if [[ "${CUDA_VERSION:-12.6}" == "13.0" ]]; then
         echo "installing CUDA 13.0.0 for ARM"
-        source "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh"
-        install_cuda 13.0.0 cuda_13.0.0_580.65.06_linux
+        # install_cuda 13.0.0 cuda_13.0.0_580.65.06_linux
+        install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
     else
-        CUDA_INSTALL_DIR=$(mktemp -d)
-        cp "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh" "${CUDA_INSTALL_DIR}/"
-        cp "${PYTORCH_ROOT}/.ci/docker/common/install_nccl.sh" "${CUDA_INSTALL_DIR}/"
-        cp "${PYTORCH_ROOT}/.ci/docker/common/install_cusparselt.sh" "${CUDA_INSTALL_DIR}/"
-        mkdir -p "${CUDA_INSTALL_DIR}/ci_commit_pins"
-        cp "${PYTORCH_ROOT}/.ci/docker/ci_commit_pins"/nccl* "${CUDA_INSTALL_DIR}/ci_commit_pins/" 2>/dev/null || true
-
-        pushd "${CUDA_INSTALL_DIR}"
-        bash ./install_cuda.sh "${CUDA_VERSION:-12.6}"
-        popd
-        rm -rf "${CUDA_INSTALL_DIR}"
+        echo "installing CUDA 12.6.3 for ARM"
+        install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
     fi
 
     export CUDA_HOME=/usr/local/cuda
     export PATH=/usr/local/cuda/bin:$PATH
 
-    echo "=== CUDA installation check ==="
-    ls -la /usr/local/cuda/include/cuda_runtime.h || echo "WARNING: cuda_runtime.h not found"
-
-    CCCL_PATH_NEW="/usr/local/cuda/include/cccl/cuda/std/utility"
-    CCCL_PATH_OLD="/usr/local/cuda/include/cuda/std/utility"
-
-    if [[ -f "${CCCL_PATH_NEW}" ]]; then
-        echo "libcu++ headers found at new CUDA 13.0+ location: ${CCCL_PATH_NEW}"
-        ls -la "${CCCL_PATH_NEW}"
-    elif [[ -f "${CCCL_PATH_OLD}" ]]; then
-        echo "libcu++ headers found at standard location: ${CCCL_PATH_OLD}"
-        ls -la "${CCCL_PATH_OLD}"
-    else
-        echo "WARNING: libcu++ headers not found at either location"
-        echo "Checked: ${CCCL_PATH_NEW} and ${CCCL_PATH_OLD}"
-    fi
-
-    echo "Installed CUDA version:"
+    echo "installed CUDA version:"
     nvcc --version
 fi
 
