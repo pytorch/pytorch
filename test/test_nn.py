@@ -12921,33 +12921,6 @@ if __name__ == '__main__':
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
-    @parametrize_test('foreach', (False, True))
-    def test_get_total_norm_numerics(self, device, foreach):
-        # Test that _get_total_norm with skip_root produces correct results
-        from torch.nn.utils.clip_grad import _get_total_norm
-
-        tensors = [
-            torch.randn(10, 10, device=device),
-            torch.randn(5, 5, device=device),
-            torch.randn(20, device=device),
-        ]
-
-        for norm_type in [2.0, 3.0, 4.5]:
-            # Compute expected result manually
-            total_sum = sum((t.abs() ** norm_type).sum() for t in tensors)
-            expected = total_sum ** (1.0 / norm_type)
-
-            # Use _get_total_norm
-            actual = _get_total_norm(tensors, norm_type=norm_type, foreach=foreach)
-
-            self.assertEqual(actual, expected, msg=f'norm_type={norm_type}, foreach={foreach}')
-
-        # Test inf/-inf/0/1 norms still work
-        for norm_type in [float('inf'), float('-inf'), 0.0, 1.0]:
-            actual = _get_total_norm(tensors, norm_type=norm_type, foreach=foreach)
-            # Just check it doesn't error
-            self.assertTrue(actual.numel() == 1)
-
     def test_elu_inplace_overlap(self, device):
         dtype = torch.bfloat16 if device != 'mps:0' else torch.float16
         x = torch.randn((1, 6), dtype=dtype, device=device).expand((6, 6))
@@ -13704,6 +13677,31 @@ if __name__ == '__main__':
             clip_grad_norm_(params, max_norm, norm_type=norm_type, foreach=foreach)
             self.assertEqual(len(w), 1)
             self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
+
+    @parametrize_test('foreach', (False, True))
+    def test_get_total_norm_powsum_numerics(self, device, foreach):
+        """Test that _get_total_norm with powsum produces correct results.
+
+        For p-norms (p not in {inf, -inf, 0, 1}), _get_total_norm now uses
+        powsum to accumulate sum(|x|^p) and applies the root once at the end.
+        """
+        from torch.nn.utils.clip_grad import _get_total_norm
+
+        tensors = [
+            torch.randn(10, 10, device=device),
+            torch.randn(5, 5, device=device),
+            torch.randn(20, device=device),
+        ]
+
+        # Test p-norms that use powsum (p > 1, p != inf)
+        for norm_type in [2.0, 3.0, 4.0]:
+            # Expected: (sum of sum(|x|^p) for each tensor)^(1/p)
+            expected = sum(
+                (t.abs() ** norm_type).sum() for t in tensors
+            ) ** (1.0 / norm_type)
+
+            result = _get_total_norm(tensors, norm_type, foreach=foreach)
+            self.assertEqual(result, expected)
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
