@@ -1775,6 +1775,22 @@ def _aot_stage2a_partition(
                 )
                 inner_meta.bw_donated_idxs = fw_metadata.bw_donated_idxs
 
+            bw_opaque_refs = []
+            for n in bw_module.graph.find_nodes(op="placeholder"):
+                if n.meta.get("is_opaque_ref", False):
+                    opaque_obj = n.meta.get("opaque_ref_obj")
+                    if opaque_obj is not None:
+                        bw_opaque_refs.append(opaque_obj)
+            fw_metadata.bw_opaque_refs = bw_opaque_refs
+
+            fw_opaque_refs = []
+            for n in fw_module.graph.find_nodes(op="placeholder"):
+                if n.meta.get("is_opaque_ref", False):
+                    opaque_obj = n.meta.get("opaque_ref_obj")
+                    if opaque_obj is not None:
+                        fw_opaque_refs.append(opaque_obj)
+            fw_metadata.fw_opaque_refs = fw_opaque_refs
+
         # Note [Detaching inputs that never need gradients]
         # See https://github.com/pytorch/pytorch/issues/97745
         # Suppose we have a function like this that we want to compile:
