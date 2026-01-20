@@ -1705,9 +1705,7 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
         - expected_comm_counts: dict of {collective_op: count} for verification
         """
         # Pre-create meshes to avoid repeated init_device_mesh overhead
-        mesh_2d = init_device_mesh(
-            self.device_type, (4, 2), mesh_dim_names=("A", "B")
-        )
+        mesh_2d = init_device_mesh(self.device_type, (4, 2), mesh_dim_names=("A", "B"))
         mesh_2d["A", "B"]._flatten("A_B")
 
         mesh_3d = init_device_mesh(
@@ -1955,6 +1953,92 @@ class FlattenedReductionIntegrationTest(DTensorTestBase):
         # Verify correctness: sum across A (2) and C (2) = 4x, gather on B
         expected = torch.ones(8 * 2, 8, device=self.device_type) * 4
         self.assertEqual(result.to_local(), expected)
+
+
+class UnevenFlattenedReduceScatterTest(DTensorTestBase):
+    """Test for correctness of flattened reduce_scatter with uneven tensor dimensions.
+
+    When redistributing Partial,Partial → Shard(dim),Shard(dim) on a 2D mesh,
+    uneven tensor dimensions can cause incorrect results if the flattened
+    optimization doesn't properly handle padding/unpadding.
+    """
+
+    @property
+    def world_size(self) -> int:
+        return 6  # 2 x 3 mesh
+
+    @with_comms
+    def test_partial_partial_to_shard_shard_uneven(self):
+        """Test that Partial,Partial -> Shard(0),Shard(0) produces correct results with uneven dims.
+
+        With mesh [2, 3] and tensor dim 0 size = 4:
+        - Two-step approach: elements end up on ranks [0,1,_,3,4,_] (2 and 5 empty)
+        - Flattened approach: elements end up on ranks [0,1,2,3,_,_] (4 and 5 empty)
+
+        The flattened optimization should NOT be applied when it would change
+        which elements go to which ranks.
+        """
+        mesh = init_device_mesh(self.device_type, (2, 3), mesh_dim_names=("A", "B"))
+        # Create flattened mesh for the optimization
+        mesh["A", "B"]._flatten("A_B")
+
+        # Tensor size 4 on dim 0, mesh total size 6
+        # This creates an uneven sharding scenario
+        tensor_size = 4
+        local_tensor = torch.arange(
+            tensor_size, dtype=torch.float32, device=self.device_type
+        ).unsqueeze(1)  # Shape: [4, 1]
+
+        # Create a Partial,Partial DTensor (each rank has the same values)
+        dt = DTensor.from_local(
+            local_tensor.clone(),
+            mesh,
+            (Partial("sum"), Partial("sum")),
+            run_check=False,
+        )
+
+        # Redistribute to Shard(0),Shard(0)
+        result = dt.redistribute(mesh, (Shard(0), Shard(0)))
+
+        # Compute what the two-step approach should produce
+        # Step 1: reduce_scatter on mesh dim 0 (size 2)
+        #   Tensor size 4, 2 chunks -> [2, 2], no padding
+        #   Row 0 (ranks 0,1,2): elements [0,1]
+        #   Row 1 (ranks 3,4,5): elements [2,3]
+        # Step 2: reduce_scatter on mesh dim 1 (size 3)
+        #   Row 0: size 2, 3 chunks -> [1,1,0], padded to [1,1,1]
+        #     Rank 0: element 0, Rank 1: element 1, Rank 2: empty
+        #   Row 1: size 2, 3 chunks -> [1,1,0], padded to [1,1,1]
+        #     Rank 3: element 2, Rank 4: element 3, Rank 5: empty
+
+        # Expected local tensor sizes per rank (two-step):
+        # Ranks 0,1,3,4: size 1
+        # Ranks 2,5: size 0 (empty)
+        expected_sizes = {0: 1, 1: 1, 2: 0, 3: 1, 4: 1, 5: 0}
+
+        # Expected values per rank (after reduction = 6x original since 6 ranks)
+        # Two-step: rank 0 -> 0*6, rank 1 -> 1*6, rank 3 -> 2*6, rank 4 -> 3*6
+        expected_values = {0: 0.0, 1: 1.0, 3: 2.0, 4: 3.0}
+
+        rank = dist.get_rank()
+        local_result = result.to_local()
+
+        # Check size
+        expected_size = expected_sizes[rank]
+        self.assertEqual(
+            local_result.size(0),
+            expected_size,
+            f"Rank {rank}: expected size {expected_size}, got {local_result.size(0)}",
+        )
+
+        # Check value for non-empty ranks
+        if expected_size > 0:
+            expected_val = expected_values[rank] * 6  # 6 ranks contributing
+            self.assertEqual(
+                local_result[0, 0].item(),
+                expected_val,
+                f"Rank {rank}: expected value {expected_val}, got {local_result[0, 0].item()}",
+            )
 
 
 RedistributeTestWithLocalTensor = create_local_tensor_test_class(

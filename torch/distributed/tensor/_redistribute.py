@@ -211,6 +211,7 @@ def _optimize_transform_infos(
     - Operations must have identical src_dst_placements (e.g., can't merge
       Partial->Shard(0) with Partial->Shard(1))
     - A flattened mesh covering the relevant dimensions must exist
+    - For reduce_scatter, tensor dim must be evenly divisible by flattened mesh size
 
     For nested sharding, the merged operation uses the logical_shape from the
     outermost mesh dimension (smallest mesh_dim index) which represents the
@@ -239,6 +240,7 @@ def _optimize_transform_infos(
         - Less than 2 transforms provided
         - Transforms have different src_dst_placements
         - No flattened mesh exists for the required dimensions
+        - For reduce_scatter: tensor dim is not evenly divisible by flattened mesh size
         """
         if len(infos) < 2:
             return None
@@ -258,6 +260,18 @@ def _optimize_transform_infos(
         # We need to use the logical_shape from the outermost mesh dimension
         # (the one with the smallest mesh_dim), which represents the global shape.
         outermost_info = min(infos, key=lambda x: x.mesh_dim)
+
+        # For reduce_scatter (Partial -> Shard), we cannot flatten if the tensor
+        # dimension is not evenly divisible by the flattened mesh size.
+        # This is because the two-step approach and the flattened approach produce
+        # different element-to-rank mappings when padding is involved.
+        src, dst = first_placements
+        if src.is_partial() and dst.is_shard():
+            shard_dim = cast(Shard, dst).dim
+            tensor_dim_size = outermost_info.logical_shape[shard_dim]
+            flattened_mesh_size = flattened_mesh.size()
+            if tensor_dim_size % flattened_mesh_size != 0:
+                return None
 
         return _FlattenedTransformInfo(
             mesh_dim=0,
@@ -302,29 +316,34 @@ def _optimize_transform_infos(
             result.extend(group)
             if len(group) >= 2:
                 mesh_dims = tuple(sorted(g.mesh_dim for g in group))
-                cache_key = (hash(device_mesh), mesh_dims)
-                if cache_key not in _warned_missing_flattened_meshes:
-                    _warned_missing_flattened_meshes.add(cache_key)
-                    mesh_dim_names = device_mesh.mesh_dim_names
-                    if mesh_dim_names is not None:
-                        dim_names = [mesh_dim_names[d] for d in mesh_dims]
-                        dims_str = ", ".join(f'"{name}"' for name in dim_names)
-                    else:
-                        dims_str = f"dims {', '.join(str(d) for d in mesh_dims)} of {device_mesh}"
-                    logger.warning(
-                        "While redistributing from %s to %s, %d sequential %s "
-                        "operations will be performed. This is suboptimal: "
-                        "multiple collective operations have higher latency "
-                        "(separate kernel launches and synchronization points) "
-                        "and may give inconsistent results between ranks due to different reduction orders. "
-                        "To optimize, flatten mesh dimensions [%s] so DTensor "
-                        "can use a single operation instead.",
-                        src_placements,
-                        dst_placements,
-                        len(group),
-                        current_key,
-                        dims_str,
-                    )
+                # Only warn if the flattened mesh doesn't exist. If it exists but
+                # we can't use it (e.g., due to uneven tensor dimensions for
+                # reduce_scatter), don't emit a misleading warning.
+                flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
+                if flattened_mesh is None:
+                    cache_key = (hash(device_mesh), mesh_dims)
+                    if cache_key not in _warned_missing_flattened_meshes:
+                        _warned_missing_flattened_meshes.add(cache_key)
+                        mesh_dim_names = device_mesh.mesh_dim_names
+                        if mesh_dim_names is not None:
+                            dim_names = [mesh_dim_names[d] for d in mesh_dims]
+                            dims_str = ", ".join(f'"{name}"' for name in dim_names)
+                        else:
+                            dims_str = f"dims {', '.join(str(d) for d in mesh_dims)} of {device_mesh}"
+                        logger.warning(
+                            "While redistributing from %s to %s, %d sequential %s "
+                            "operations will be performed. This is suboptimal: "
+                            "multiple collective operations have higher latency "
+                            "(separate kernel launches and synchronization points) "
+                            "and may give inconsistent results between ranks due to different reduction orders. "
+                            "To optimize, flatten mesh dimensions [%s] so DTensor "
+                            "can use a single operation instead.",
+                            src_placements,
+                            dst_placements,
+                            len(group),
+                            current_key,
+                            dims_str,
+                        )
 
         i = j
 
