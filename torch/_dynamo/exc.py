@@ -34,7 +34,7 @@ import typing
 from enum import auto, Enum
 from functools import lru_cache
 from pathlib import Path
-from traceback import extract_stack, format_exc, format_list, StackSummary
+from traceback import extract_stack, format_exc, format_list, FrameSummary, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import torch._guards
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
     from .output_graph import DynamoTracerOutput
     from .symbolic_convert import InstructionTranslatorBase
-    from .types import DynamoFrameType
+    from .types import DynamoFrameType, FrameExecStrategy
 
 
 def exportdb_error_message(case_name: str) -> str:
@@ -67,9 +67,21 @@ graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 class TorchDynamoException(RuntimeError):
+    """Base exception class for all TorchDynamo-specific exceptions.
+
+    Attributes:
+        _torch_dynamo_tracer_output: Optional tracer output attached to the exception
+        frame_exec_strategy: Optional frame execution strategy to control how convert_frame
+            should handle this exception. When set, convert_frame will use this strategy
+            instead of the default behavior. This allows exceptions to signal specific
+            execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
+            exception types for control flow.
+    """
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: Optional[DynamoTracerOutput] = None
+        self.frame_exec_strategy: FrameExecStrategy | None = None
 
 
 class InternalTorchDynamoError(TorchDynamoException):
@@ -90,6 +102,13 @@ class RestartAnalysis(TorchDynamoException):
 
 class SpeculationRestartAnalysis(RestartAnalysis):
     pass
+
+
+class AutogradGradRestartAnalysis(RestartAnalysis):
+    """Raised when autograd.grad consumed grad_fns that are returned.
+
+    On restart, autograd.grad will graph break instead of being traced.
+    """
 
 
 class UnspecializeRestartAnalysis(RestartAnalysis):
@@ -203,7 +222,7 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
-class UnknownPropertiesDuringBackwardTrace(Unsupported):
+class UnknownPropertiesDuringBackwardTrace(TorchDynamoException):
     pass
 
 
@@ -211,24 +230,12 @@ class RecompileError(TorchDynamoException):
     pass
 
 
-class ArgsMismatchError(Unsupported):
-    pass
-
-
-class AttributeMutationError(Unsupported):
-    pass
-
-
-class InfiniteGeneratorError(Unsupported):
+class InfiniteGeneratorError(TorchDynamoException):
     # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
     pass
 
 
-class SideEffectsError(Unsupported):
-    pass
-
-
-class CondOpArgsMismatchError(ArgsMismatchError):
+class CondOpArgsMismatchError(TorchDynamoException):
     """
     Internal error from cond() due to arguments mismatch.
     """
@@ -267,14 +274,6 @@ class UserError(Unsupported):
         super().__init__(msg, case_name if case_name else "UserError")
         self.error_type = error_type
         self.message = msg
-
-
-class SkipCodeRecursiveException(TorchDynamoException):
-    pass
-
-
-class RecompileLimitExceeded(Unsupported):
-    pass
 
 
 # debug exception thrown when tracing torch._dynamo.step_unsupported()
@@ -416,11 +415,23 @@ def raise_observed_exception(
     kwargs: Optional[dict[str, Any]] = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
-    from .variables import BuiltinVariable
+    from .variables import BuiltinVariable, ConstantVariable, VariableTracker
+
+    # Wrap any non-VariableTracker args in ConstantVariable
+    def wrap_arg(arg: Any) -> VariableTracker:
+        if isinstance(arg, VariableTracker):
+            return arg
+        return ConstantVariable.create(arg)
+
+    wrapped_args = [wrap_arg(a) for a in args] if args else []
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
+    exception_vt = BuiltinVariable(exc_type).call_function(
+        tx,  # pyrefly: ignore[bad-argument-type]
+        wrapped_args,
+        kwargs or {},
+    )
     assert isinstance(exception_vt, ExceptionVals)
     tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
@@ -594,7 +605,7 @@ def unimplemented(
     hints: list[str],
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
-    skip_frame=False,
+    skip_frame: bool = False,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -771,7 +782,7 @@ def remove_resume_prefix(name: str) -> Optional[str]:
     return None
 
 
-def collapse_resume_frames(stack: StackSummary) -> StackSummary:
+def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSummary:
     """
     When we graph break, we create a resume function and make a regular Python call
     to it, which gets intercepted by Dynamo. This behavior is normally shown in the

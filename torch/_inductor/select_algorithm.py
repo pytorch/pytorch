@@ -437,7 +437,7 @@ class TritonTemplateKernel(TritonKernel):
             reduction_idx = None
             for i, prefix in enumerate(tiling):
                 rt = prefix_to_range_tree[prefix]
-                # pyrefly: ignore  # missing-argument
+
                 if rt.is_reduction:
                     reduction_idx = i
                     break
@@ -631,6 +631,8 @@ class TritonTemplateKernel(TritonKernel):
             for fx_node in node._current_origins:
                 f = count_flops_fx(fx_node)
                 if f is not None:
+                    if isinstance(f, torch.SymInt):
+                        f = f.node.expr
                     return V.graph.sizevars.size_hint(f, fallback=0)
         return 0
 
@@ -1233,7 +1235,6 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(val_shape),
-                                # pyrefly: ignore [missing-argument]
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1247,7 +1248,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
-                        # pyrefly: ignore [missing-argument]
+
                         val_shape_copy[i] = range_tree.symt.name
                     # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
@@ -1322,7 +1323,6 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
-            # pyrefly: ignore [bad-assignment]
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -2317,15 +2317,17 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
 
     def output_node(self):
-        return ir.TensorBox.create(
-            ir.TritonTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                mutated_inputs=self.mutated_inputs,
-                allowed_prologue_inps=self.allowed_prologue_inps,
-            )
+        buffer = ir.TritonTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            mutated_inputs=self.mutated_inputs,
+            allowed_prologue_inps=self.allowed_prologue_inps,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return ir.TensorBox.create(buffer)
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
@@ -2473,6 +2475,9 @@ class ExternKernelCaller(ChoiceCaller):
                 kwargs=self.kwargs,
             )
 
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            inner.annotations["ktc"] = self.annotations["ktc"]
         return ir.TensorBox.create(inner)
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
@@ -2584,7 +2589,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
-        # pyrefly: ignore [not-callable]
+
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2775,7 +2780,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
-            # pyrefly: ignore [bad-return]
             return externs[0]
         else:
             return choices[0]
@@ -4307,7 +4311,6 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device(),
             node.get_dtype(),
             V.graph.sizevars.atomically_apply_size_hint(
-                # pyrefly: ignore [missing-attribute]
                 node.layout.offset,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
@@ -4318,7 +4321,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     fallback=config.unbacked_symint_fallback,
                     hint_override=hint_override,
                 )
-                # pyrefly: ignore [bad-argument-type]
                 for size in V.graph.get_allocation_size(node)
             ),
         )
