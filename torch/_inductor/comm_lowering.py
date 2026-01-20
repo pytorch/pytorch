@@ -64,8 +64,16 @@ def can_realize_as_comm_buffer(
     if isinstance(data, ir.Loops):
         return True
 
+    # We cannot realize buffers as comm buffers if we don't control their
+    # allocation.
+    if isinstance(data, ir.Buffer) and not data.should_allocate():
+        return False
+
     layout = data.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
+        return True
+
+    if isinstance(layout, ir.FixedLayout):
         return True
 
     if isinstance(layout, ir.FlexibleLayout) and not is_symbolic(data.get_numel()):
@@ -93,10 +101,12 @@ def realize_as_comm_buffer(
     if isinstance(layout, ir.CommBufferLayout):
         return
 
-    if not isinstance(layout, ir.FlexibleLayout):
+    # The buffer may have already been frozen to FixedLayout if it was used
+    # by another operation before the comm operation.
+    if not isinstance(layout, (ir.FlexibleLayout, ir.FixedLayout)):
         raise AssertionError(
             "A buffer can only be realized as a comm buffer if it "
-            f"has `FlexibleLayout` (got {layout})."
+            f"has `FlexibleLayout` or `FixedLayout` (got {layout})."
         )
 
     if is_symbolic(buffer.get_numel()):
@@ -391,3 +401,357 @@ def register_comm_lowerings():
 
         ir._WaitKernel.create_wait(c10d.wait_tensor.default, inp)
         return inp
+
+
+def register_symm_mem_lowerings():
+    """
+    Register lowerings for symmetric memory (symm_mem) operations.
+    """
+    try:
+        symm_mem = torch.ops.symm_mem
+        # Check for an actual operation, not just the namespace.
+        # torch.ops.symm_mem is a lazy namespace that always exists,
+        # but the operations may not exist on non-CUDA platforms or
+        # when USE_DISTRIBUTED is disabled.
+        symm_mem.one_shot_all_reduce
+    except AttributeError:
+        log.info("symm_mem ops not available, skipping symm_mem lowerings")
+        return
+
+    from .lowering import register_lowering
+
+    def _maybe_realize_symm_mem(
+        inp: ir.TensorBox,
+        group_name: str,  # type: ignore[arg-type]
+    ) -> None:
+        """
+        Helper to realize an input as symmetric memory buffer if possible.
+        """
+        if can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM):
+            realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
+        else:
+            log.warning(
+                "Failed to realize the input as a symmetric memory buffer for symm_mem operation; "
+                "ensure the input is allocated as a symmetric memory buffer."
+            )
+
+    @register_lowering(symm_mem.one_shot_all_reduce)
+    def _symm_mem_one_shot_all_reduce(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.one_shot_all_reduce.default,
+                inp,
+                reduce_op,
+                group_name,
+            ),
+        )
+
+    @register_lowering(symm_mem.one_shot_all_reduce_out)
+    def _symm_mem_one_shot_all_reduce_out(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+        out: ir.TensorBox,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.one_shot_all_reduce_out.default,
+                inp,
+                reduce_op,
+                group_name,
+                out,
+            ),
+        )
+
+    @register_lowering(symm_mem.one_shot_all_reduce_copy)
+    def _symm_mem_one_shot_all_reduce_copy(
+        symm_buffer: ir.TensorBox,
+        local_input: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+    ):
+        _maybe_realize_symm_mem(symm_buffer, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.one_shot_all_reduce_copy.default,
+                symm_buffer,
+                local_input,
+                reduce_op,
+                group_name,
+            ),
+        )
+
+    @register_lowering(symm_mem.one_shot_all_reduce_copy_out)
+    def _symm_mem_one_shot_all_reduce_copy_out(
+        symm_buffer: ir.TensorBox,
+        local_input: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+        out: ir.TensorBox,
+    ):
+        _maybe_realize_symm_mem(symm_buffer, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.one_shot_all_reduce_copy_out.default,
+                symm_buffer,
+                local_input,
+                reduce_op,
+                group_name,
+                out,
+            ),
+        )
+
+    @register_lowering(symm_mem.two_shot_all_reduce_)
+    def _symm_mem_two_shot_all_reduce_(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        ir.FallbackKernel.create(
+            symm_mem.two_shot_all_reduce_.default,
+            inp,
+            reduce_op,
+            group_name,
+        )
+        return inp
+
+    @register_lowering(symm_mem.two_shot_all_reduce_out)
+    def _symm_mem_two_shot_all_reduce_out(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+        output: ir.TensorBox,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.two_shot_all_reduce_out.default,
+                inp,
+                reduce_op,
+                group_name,
+                output,
+            ),
+        )
+
+    @register_lowering(symm_mem.multimem_all_reduce_)
+    def _symm_mem_multimem_all_reduce_(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        ir.FallbackKernel.create(
+            symm_mem.multimem_all_reduce_.default,
+            inp,
+            reduce_op,
+            group_name,
+        )
+        return inp
+
+    @register_lowering(symm_mem.multimem_one_shot_all_reduce)
+    def _symm_mem_multimem_one_shot_all_reduce(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.multimem_one_shot_all_reduce.default,
+                inp,
+                reduce_op,
+                group_name,
+            ),
+        )
+
+    @register_lowering(symm_mem.multimem_one_shot_all_reduce_out)
+    def _symm_mem_multimem_one_shot_all_reduce_out(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: str,
+        out: ir.TensorBox,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.multimem_one_shot_all_reduce_out.default,
+                inp,
+                reduce_op,
+                group_name,
+                out,
+            ),
+        )
+
+    @register_lowering(symm_mem.multimem_one_shot_reduce_out)
+    def _symm_mem_multimem_one_shot_reduce_out(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        root: int,
+        group_name: str,
+        out: ir.TensorBox,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.multimem_one_shot_reduce_out.default,
+                inp,
+                reduce_op,
+                root,
+                group_name,
+                out,
+            ),
+        )
+
+    @register_lowering(symm_mem.multimem_all_gather_out)
+    def _symm_mem_multimem_all_gather_out(
+        inp: ir.TensorBox,
+        group_name: str,
+        out: ir.TensorBox,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.multimem_all_gather_out.default,
+                inp,
+                group_name,
+                out,
+            ),
+        )
+
+    @register_lowering(symm_mem.reduce_scatter_out)
+    def _symm_mem_reduce_scatter_out(
+        inp: ir.TensorBox,
+        group_name: str,
+        split_last_dim: bool,
+        output: ir.TensorBox,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        return pytree.tree_map(
+            ir.TensorBox.create,
+            ir.FallbackKernel.create(
+                symm_mem.reduce_scatter_out.default,
+                inp,
+                group_name,
+                split_last_dim,
+                output,
+            ),
+        )
+
+    @register_lowering(symm_mem.all_to_all_vdev)
+    def _symm_mem_all_to_all_vdev(
+        inp: ir.TensorBox,
+        out: ir.TensorBox,
+        in_splits: ir.TensorBox,
+        out_splits_offsets: ir.TensorBox,
+        group_name: str,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        _maybe_realize_symm_mem(out, group_name)
+        ir.FallbackKernel.create(
+            symm_mem.all_to_all_vdev.default,
+            inp,
+            out,
+            in_splits,
+            out_splits_offsets,
+            group_name,
+        )
+        return None
+
+    @register_lowering(symm_mem.all_to_all_vdev_2d)
+    def _symm_mem_all_to_all_vdev_2d(
+        inp: ir.TensorBox,
+        out: ir.TensorBox,
+        in_splits: ir.TensorBox,
+        out_splits_offsets: ir.TensorBox,
+        group_name: str,
+        major_align=None,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        _maybe_realize_symm_mem(out, group_name)
+        ir.FallbackKernel.create(
+            symm_mem.all_to_all_vdev_2d.default,
+            inp,
+            out,
+            in_splits,
+            out_splits_offsets,
+            group_name,
+            major_align,
+        )
+        return None
+
+    @register_lowering(symm_mem.all_to_all_vdev_2d_offset)
+    def _symm_mem_all_to_all_vdev_2d_offset(
+        inp: ir.TensorBox,
+        out: ir.TensorBox,
+        in_splits_offsets: ir.TensorBox,
+        out_splits_offsets: ir.TensorBox,
+        group_name: str,
+    ):
+        _maybe_realize_symm_mem(inp, group_name)
+        _maybe_realize_symm_mem(out, group_name)
+        ir.FallbackKernel.create(
+            symm_mem.all_to_all_vdev_2d_offset.default,
+            inp,
+            out,
+            in_splits_offsets,
+            out_splits_offsets,
+            group_name,
+        )
+        return None
+
+    @register_lowering(symm_mem.tile_reduce)
+    def _symm_mem_tile_reduce(
+        in_tile: ir.TensorBox,
+        out_tile: ir.TensorBox,
+        root: int,
+        group_name: str,
+        reduce_op: str = "sum",
+    ):
+        _maybe_realize_symm_mem(in_tile, group_name)
+        _maybe_realize_symm_mem(out_tile, group_name)
+        ir.FallbackKernel.create(
+            symm_mem.tile_reduce.default,
+            in_tile,
+            out_tile,
+            root,
+            group_name,
+            reduce_op,
+        )
+        return None
+
+    @register_lowering(symm_mem.multi_root_tile_reduce)
+    def _symm_mem_multi_root_tile_reduce(
+        in_tiles,  # list of TensorBox
+        out_tile: ir.TensorBox,
+        roots,  # list of int
+        group_name: str,
+        reduce_op: str = "sum",
+    ):
+        for in_tile in in_tiles:
+            _maybe_realize_symm_mem(in_tile, group_name)
+        _maybe_realize_symm_mem(out_tile, group_name)
+        ir.FallbackKernel.create(
+            symm_mem.multi_root_tile_reduce.default,
+            in_tiles,
+            out_tile,
+            roots,
+            group_name,
+            reduce_op,
+        )
+        return None
