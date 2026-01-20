@@ -54,7 +54,7 @@ def evaluate_gfx_arch_within(arch_list):
     return any(arch in effective_arch for arch in arch_list)
 
 def CDNA3OrLater():
-    return evaluate_gfx_arch_within(["gfx940", "gfx941", "gfx942", "gfx950"])
+    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
@@ -102,7 +102,32 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
-PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
+
+def evaluate_platform_supports_bf16():
+    if torch.version.cuda:
+        return SM80OrLater
+    elif torch.version.hip:
+        return True
+    return False
+
+
+def evaluate_platform_supports_bf16_atomics():
+    if torch.version.cuda:
+        return SM80OrLater
+    elif torch.version.hip:
+        return ROCM_VERSION >= (8, 0)
+    return False
+
+
+def evaluate_platform_supports_half_atomics():
+    if torch.version.hip:
+        return ROCM_VERSION >= (8, 0)
+    return True
+
+
+PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
+PLATFORM_SUPPORTS_BF16_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_bf16_atomics())
+PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_half_atomics())
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
@@ -124,7 +149,7 @@ def evaluate_platform_supports_fp8():
 def evaluate_platform_supports_fp8_grouped_gemm():
     if torch.cuda.is_available():
         if torch.version.hip:
-            if "USE_FBGEMM_GENAI" not in torch.__config__.show():
+            if "USE_MSLK" not in torch.__config__.show():
                 return False
             archs = ['gfx942']
             for arch in archs:
@@ -145,8 +170,8 @@ def evaluate_platform_supports_mx_gemm():
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
-        built_with_fbgemm_genai = "USE_FBGEMM_GENAI" in torch.__config__.show()
-        return built_with_fbgemm_genai and IS_SM100
+        built_with_mslk = "USE_MSLK" in torch.__config__.show()
+        return built_with_mslk and IS_SM100
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
