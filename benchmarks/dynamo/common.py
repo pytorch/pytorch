@@ -2003,17 +2003,18 @@ class BenchmarkRunner:
 
         return model, example_inputs
 
-    def validate_model(self, model, example_inputs):
+    def validate_model(self, name, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
-        try:
-            self.model_iter_fn(model, example_inputs)
-        except Exception as e:
-            raise RuntimeError("Eager run failed") from e
+        with self.pick_grad(name, self.args.training):
+            try:
+                self.model_iter_fn(model, example_inputs)
+            except Exception as e:
+                raise RuntimeError("Eager run failed") from e
 
     def maybe_cast(self, model, example_inputs):
         model, example_inputs = self.cast_based_on_args(model, example_inputs)

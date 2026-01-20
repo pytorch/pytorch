@@ -486,7 +486,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             model.eval()
 
-        self.validate_model(model, example_inputs)
+        self.validate_model(model_name, model, example_inputs)
         return device, model_name, model, example_inputs, batch_size
 
     def iter_model_names(self, args):
@@ -549,7 +549,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         return pred[0]
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast(**self.autocast_arg):
+        with torch.no_grad(), self.autocast(**self.autocast_arg):
             res = mod(**inputs)
         return res.logits if self.hf_llm else res
 
