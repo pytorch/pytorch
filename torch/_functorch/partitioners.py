@@ -1717,14 +1717,70 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     By default, the partitioner is not allowed to recompute collectives
     unless they come from a user-annotated AC region.
     See Note [Recomputing collectives in the partitioner]
+
+    This handles two cases:
+    1. Direct _c10d_functional ops - mark the op node itself as MUST_SAVE
+    2. with_effects wrapping torchcomms ops - mark tensor output getitems as MUST_SAVE
+
+    For with_effects nodes wrapping torchcomms collectives, the partitioner needs to
+    save their tensor outputs for backward. Without this, backward ops that depend on
+    forward with_effects outputs would have invalid dependencies because with_effects
+    is marked must_be_in_forward.
     """
+
+    def is_tensor_node(node: fx.Node) -> bool:
+        """Check if a node produces a tensor (not a list/tuple)."""
+        val = node.meta.get("val")
+        if val is None:
+            return "tensor_meta" in node.meta
+        return isinstance(val, (torch.Tensor, torch._subclasses.FakeTensor))
+
+    def mark_tensor_leafs(node: fx.Node, depth: int = 0) -> None:
+        """Recursively find and mark tensor leaf getitems as MUST_SAVE."""
+        # If this getitem produces a tensor, mark it as MUST_SAVE
+        if is_tensor_node(node):
+            # Force MUST_SAVE unconditionally - override any existing recompute policy
+            # This is critical for torchcomms outputs that backward depends on
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+        else:
+            # Otherwise, recurse on getitem users to find tensor leafs
+            for user in node.users:
+                if user.target == operator.getitem:
+                    mark_tensor_leafs(user, depth + 1)
+
     for node in joint_module.graph.nodes:
+        # Case 1: Direct _c10d_functional ops
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
             node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+            continue
+
+        # Case 2: with_effects wrapping torchcomms ops
+        if not is_with_effects(node):
+            continue
+
+        # Check if the wrapped op is a torchcomms op
+        # with_effects args are: (effect_token, op, *op_args)
+        wrapped_op = node.args[1] if len(node.args) >= 2 else None
+        if not (
+            isinstance(wrapped_op, torch._ops.OpOverload)
+            and wrapped_op.namespace == "torchcomms"
+        ):
+            continue
+
+        # Only force save forward with_effects outputs
+        if _has_tag_is_backward(node) or _has_tag_must_be_in_backward(node):
+            continue
+
+        # Force save ALL outputs (both tokens and tensors)
+        # Token (index 0) is needed for effect ordering in backward
+        # Tensors (index >= 1) are the actual data outputs
+        for user in node.users:
+            if user.target == operator.getitem:
+                mark_tensor_leafs(user)
 
 
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
