@@ -409,7 +409,21 @@ def set_current_meta(node, pass_name=""):
     if should_preserve_node_meta and node.meta:
         saved_meta = current_meta
         try:
-            current_meta = node.meta.copy()
+            # Start with saved_meta (outer context), then update with node.meta.
+            # This preserves outer context values for keys not present in node.meta.
+            # node.meta values take precedence for duplicate keys.
+            current_meta = saved_meta.copy()
+
+            # TODO there is something broken with invoke subgraph + seq_nr, so
+            # we need to remove this here
+            for k in list(current_meta.keys()):
+                if node.meta.get(k, None) is None and k in (
+                    "grad_fn_seq_nr",
+                    "in_grad_fn",
+                ):
+                    del current_meta[k]
+
+            current_meta.update(node.meta.copy())
 
             # Update the "from_node" field in current_meta for provenance tracking.
             # Instead of appending, overwrite the "from_node" field because current_meta
