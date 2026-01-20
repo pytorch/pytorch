@@ -3343,11 +3343,12 @@ class InstructionTranslatorBase(
                     and self.output.current_tracer.parent is None
                 )
                 log.debug(
-                    "BUILD_LIST comprehension: can_speculate=%s",
+                    "BUILD_LIST comprehension: can_speculate=%s, depth=%s",
                     can_speculate,
+                    self._comprehension_depth,
                 )
-                # Create speculation checkpoint for comprehension
-                if can_speculate:
+                # Only set up speculation at depth 0 (outermost comprehension)
+                if can_speculate and self._comprehension_depth == 0:
                     speculation = self.speculate()
                     if speculation.failed(self):
                         log.debug(
@@ -3359,6 +3360,8 @@ class InstructionTranslatorBase(
                     # Store speculation for later graph break handling
                     log.debug("BUILD_LIST: storing comprehension speculation")
                     self.current_speculation = speculation
+                # Track nesting depth for nested comprehensions
+                self._comprehension_depth += 1
         # Normal BUILD_LIST handling
         items = self.popn(inst.argval)
         self.push(ListVariable(items, mutation_type=ValueMutationNew()))
@@ -3415,11 +3418,12 @@ class InstructionTranslatorBase(
                     and self.output.current_tracer.parent is None
                 )
                 log.debug(
-                    "BUILD_MAP comprehension: can_speculate=%s",
+                    "BUILD_MAP comprehension: can_speculate=%s, depth=%s",
                     can_speculate,
+                    self._comprehension_depth,
                 )
-                # Create speculation checkpoint for comprehension
-                if can_speculate:
+                # Only set up speculation at depth 0 (outermost comprehension)
+                if can_speculate and self._comprehension_depth == 0:
                     speculation = self.speculate()
                     if speculation.failed(self):
                         log.debug(
@@ -3431,6 +3435,8 @@ class InstructionTranslatorBase(
                     # Store speculation for later graph break handling
                     log.debug("BUILD_MAP: storing comprehension speculation")
                     self.current_speculation = speculation
+                # Track nesting depth for nested comprehensions
+                self._comprehension_depth += 1
         # Normal BUILD_MAP handling
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
@@ -4364,29 +4370,31 @@ class InstructionTranslatorBase(
         return False
 
     def _find_comprehension_end(self) -> int:
-        """Find instruction position after END_FOR + cleanup STORE_FASTs for a comprehension."""
+        """Find instruction position after the comprehension ends.
+
+        Tracks FOR_ITER/END_FOR nesting depth to find the outermost END_FOR,
+        then consumes all following STORE_FASTs.
+        """
         assert self.instruction_pointer is not None
         ip = self.instruction_pointer
-        found_end_for = False
-        store_fast_count = 0
+        depth = 0
+
         while ip < len(self.instructions):
             inst = self.instructions[ip]
-            if inst.opname == "END_FOR":
-                found_end_for = True
-                ip += 1
-                continue
-            if found_end_for:
-                if inst.opname == "STORE_FAST":
-                    store_fast_count += 1
+            if inst.opname == "FOR_ITER":
+                depth += 1
+            elif inst.opname == "END_FOR":
+                depth -= 1
+                if depth == 0:
+                    # Found the outermost END_FOR, consume all STORE_FASTs
                     ip += 1
-                    if store_fast_count >= 2:
-                        # Result STORE_FAST + iterator restoration STORE_FAST
-                        return ip
-                else:
-                    # No more STORE_FASTs
+                    while ip < len(self.instructions):
+                        if self.instructions[ip].opname == "STORE_FAST":
+                            ip += 1
+                        else:
+                            break
                     return ip
-            else:
-                ip += 1
+            ip += 1
         return -1
 
     def _handle_comprehension_graph_break(
@@ -4408,20 +4416,25 @@ class InstructionTranslatorBase(
             self.instruction_pointer - 1
         )  # Current instruction (BUILD_LIST/BUILD_MAP)
 
-        # Parse the comprehension bytecode to find the result STORE_FAST after END_FOR
+        # Parse the comprehension bytecode to find the result STORE_FAST after outermost END_FOR
         # In Python 3.12+, the pattern after END_FOR is:
         #   STORE_FAST result_var   # The comprehension result (list/dict)
         #   STORE_FAST iter_var     # Restoration of the iterator variable (original value)
-        # We only want the FIRST STORE_FAST (the result), not subsequent ones
-        # which are iterator restorations (might be NULL/unbound)
+        # We only want the FIRST STORE_FAST after the OUTERMOST END_FOR
+        # Use depth tracking for nested comprehensions
         comprehension_result_var: Optional[str] = None
         ip = start_ip
-        found_end_for = False
+        depth = 0
+        found_outermost_end_for = False
         while ip < end_ip:
             inst_at_ip = self.instructions[ip]
-            if inst_at_ip.opname == "END_FOR":
-                found_end_for = True
-            elif found_end_for and inst_at_ip.opname == "STORE_FAST":
+            if inst_at_ip.opname == "FOR_ITER":
+                depth += 1
+            elif inst_at_ip.opname == "END_FOR":
+                depth -= 1
+                if depth == 0:
+                    found_outermost_end_for = True
+            elif found_outermost_end_for and inst_at_ip.opname == "STORE_FAST":
                 comprehension_result_var = inst_at_ip.argval
                 break
             ip += 1
@@ -4436,16 +4449,31 @@ class InstructionTranslatorBase(
         reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
         log.debug("comprehension triggered compile")
 
-        # At BUILD_LIST/BUILD_MAP, the stack has [saved_i, iterator] on top
-        # These 2 values need to remain on the runtime stack for the comprehension bytecode
+        # Calculate stack_pops by counting LOAD_FAST_AND_CLEAR instructions before BUILD_LIST/BUILD_MAP
+        # Simple comprehension: [saved_i, iterator] → 2 values
+        # Multi-iterator: [saved_j, saved_i, iterator] → 3 values
+        stack_pops = 1  # Start with 1 for the iterator
+        scan_ip = start_ip - 1
+        while scan_ip >= 0:
+            scan_inst = self.instructions[scan_ip]
+            if scan_inst.opname == "LOAD_FAST_AND_CLEAR":
+                stack_pops += 1
+                scan_ip -= 1
+            elif scan_inst.opname in ("SWAP", "GET_ITER"):
+                scan_ip -= 1
+            else:
+                break
+
+        log.debug("comprehension stack_pops=%s", stack_pops)
+
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
             reason=reason,
-            stack_pops=2,  # Comprehension will consume these 2 values
+            stack_pops=stack_pops,
         )
 
         # Now pop from symbolic stack (matching stack_pops)
-        self.popn(2)
+        self.popn(stack_pops)
 
         # Copy comprehension bytecode to output (runs eagerly)
         inst_map: dict[Instruction, Instruction] = {}
@@ -4882,6 +4910,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
         self._throw_if_in_functorch()
+        self._comprehension_depth = 0  # Track nesting level for comprehension speculation
 
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
