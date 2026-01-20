@@ -1495,6 +1495,8 @@ if(USE_DISTRIBUTED)
         PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
+    find_package(httplib REQUIRED)
+    target_link_libraries(torch_cpu PRIVATE httplib::httplib)
   endif()
   # Pass USE_RPC in order to reduce use of
   # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
