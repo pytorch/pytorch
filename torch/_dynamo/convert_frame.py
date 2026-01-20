@@ -1598,6 +1598,18 @@ def _compile(
             # they are benign and do not generate any new graphs.
             hooks.guard_export_fn(output.guards)
 
+        from torch._dynamo.pythonify import (
+            add_compilation_artifacts,
+            CompilationArtifacts,
+            is_pythonify_active,
+        )
+
+        if is_pythonify_active() and not output.is_empty_graph():
+            artifacts = _build_pythonify_artifacts(
+                output, tracer_output, code, check_fn
+            )
+            add_compilation_artifacts(artifacts)
+
         return wrap_guarded_code(guarded_code), tracer_output
 
     metrics_context = get_metrics_context()
@@ -2078,6 +2090,875 @@ def convert_frame(
 ) -> ConvertFrame:
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     return ConvertFrame(compiler_fn, hooks, package=package)
+
+
+def _extract_guards_from_guard_manager(
+    guard_manager: Any,
+    output: Any,
+) -> list[dict[str, Any]]:
+    """
+    Extract guard information from a compiled GuardManagerWrapper.
+
+    This function parses the real guard code expressions from the guard manager's
+    code_parts, which contain the actual Python expressions used for runtime guard
+    checking. This provides more accurate and useful guard information than
+    extracting from the abstract Guard objects.
+
+    The extracted guards are structured with proper type classification based on
+    the guard code patterns:
+    - Shape guards: code contains ".shape[" patterns
+    - Dtype guards: code contains ".dtype ==" patterns
+    - Device guards: code contains ".device" patterns
+    - Type guards: code contains "___check_type_id" or "type(" patterns
+    - Identity guards: code contains "___check_obj_id" or " is " patterns
+    - Value guards: all other guards
+
+    Args:
+        guard_manager: The GuardManagerWrapper from CheckFunctionManager
+        output: The OutputGraph containing guard metadata
+
+    Returns:
+        List of guard dictionaries with structured guard information including:
+        - type: Guard type classification
+        - target: Variable name being guarded
+        - condition: The actual guard code expression
+        - error_message: Human-readable error message
+        - code_parts: Original guard code for reference
+    """
+    import re
+
+    guards_list: list[dict[str, Any]] = []
+
+    code_parts = getattr(guard_manager, "code_parts", [])
+    verbose_code_parts = getattr(guard_manager, "verbose_code_parts", None) or []
+
+    for i, code in enumerate(code_parts):
+        guard_dict = _parse_guard_code_part(code, i, verbose_code_parts)
+        guards_list.append(guard_dict)
+
+    return guards_list
+
+
+def _parse_guard_code_part(
+    code: str,
+    index: int,
+    verbose_code_parts: list[str],
+) -> dict[str, Any]:
+    """
+    Parse a single guard code expression into a structured guard dictionary.
+
+    This function analyzes the guard code string to determine its type and
+    extract relevant information like the target variable name and expected values.
+
+    For complex internal guards that cannot be directly evaluated as Python
+    assertions, the guard is marked as "internal" type and the raw condition
+    is preserved for display purposes.
+
+    Args:
+        code: The guard code expression
+        index: Index of this code part for accessing verbose version
+        verbose_code_parts: List of verbose code parts with context
+
+    Returns:
+        Dictionary with guard information
+    """
+    import re
+
+    verbose_code = verbose_code_parts[index] if index < len(verbose_code_parts) else code
+
+    guard_type = "value"
+    target = ""
+    dimension = None
+    expected_value = None
+    is_internal = False
+    shape_info = None
+    dtype_info = None
+    device_info = None
+
+    if "check_tensor(" in code:
+        guard_type = "tensor_match"
+        match = re.search(r"check_tensor\(([\w\[\]'\".]+)", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+        size_match = re.search(r"size=\[([^\]]+)\]", code)
+        if size_match:
+            shape_str = size_match.group(1)
+            try:
+                shape_info = [int(x.strip()) for x in shape_str.split(",")]
+            except ValueError:
+                shape_info = None
+        dtype_match = re.search(r"torch\.(float16|float32|float64|int8|int16|int32|int64|bfloat16)", code)
+        if dtype_match:
+            dtype_info = f"torch.{dtype_match.group(1)}"
+        device_match = re.search(r"device=(\w+)", code)
+        if device_match and device_match.group(1) != "None":
+            device_info = device_match.group(1)
+
+    elif ".shape[" in code:
+        guard_type = "shape"
+        match = re.search(r"([\w\[\]'\".]+)\.shape\[(\d+)\]\s*(==|<=|>=|<|>)\s*(\d+)", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+            dimension = int(match.group(2))
+            expected_value = int(match.group(4))
+
+    elif ".dtype ==" in code or ".dtype is" in code:
+        guard_type = "dtype"
+        match = re.search(r"([\w\[\]'\".]+)\.dtype\s*(==|is)\s*(\S+)", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+            expected_value = match.group(3)
+
+    elif ".device" in code and "==" in code:
+        guard_type = "device"
+        match = re.search(r"([\w\[\]'\".]+)\.device", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+
+    elif "___check_type_id" in code:
+        guard_type = "type"
+        match = re.search(r"___check_type_id\(([\w\[\]'\".]+)", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+        type_match = re.search(r"type=<class '([^']+)'", code)
+        if type_match:
+            expected_value = type_match.group(1)
+
+    elif "type(" in code:
+        guard_type = "type"
+        match = re.search(r"type\(([\w\[\]'\".]+)\)", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+
+    elif "___check_obj_id" in code:
+        guard_type = "identity"
+        match = re.search(r"___check_obj_id\(([\w\[\]'\".]+)", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+
+    elif " is " in code:
+        guard_type = "identity"
+        match = re.search(r"([\w\[\]'\".]+)\s+is\s+", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+
+    elif "___check_global_state" in code or "___check_torch_function_mode_stack" in code:
+        guard_type = "internal"
+        target = "global_state"
+        is_internal = True
+
+    elif "utils_device.CURRENT_DEVICE" in code:
+        guard_type = "internal"
+        target = "current_device"
+        is_internal = True
+
+    elif "top_saved_tensors_hooks" in code or "hasattr" in code:
+        guard_type = "internal"
+        target = "internal_state"
+        is_internal = True
+
+    else:
+        match = re.search(r"([\w\[\]'\"]+)", code)
+        if match:
+            target = _simplify_source_name(match.group(1))
+
+    error_message = _generate_guard_error_message(guard_type, target, code, expected_value, dimension)
+
+    result = {
+        "type": guard_type,
+        "target": target,
+        "condition": code,
+        "expected_value": expected_value,
+        "dimension": dimension,
+        "error_message": error_message,
+        "verbose_code": verbose_code,
+        "code_parts": [code],
+        "is_internal": is_internal,
+    }
+
+    if shape_info is not None:
+        result["shape_info"] = shape_info
+    if dtype_info is not None:
+        result["dtype_info"] = dtype_info
+    if device_info is not None:
+        result["device_info"] = device_info
+
+    return result
+
+
+def _simplify_source_name(source_name: str) -> str:
+    """
+    Simplify a Dynamo source name to a meaningful variable name.
+
+    Dynamo source names can be complex expressions like "L['x']" or
+    "L['self']._modules['layer1']._parameters['weight']". For nested module
+    parameters, this extracts the full path like "layer1.weight" to avoid
+    name collisions between parameters in different modules.
+
+    For simple local/global variables, returns just the name (e.g., "x").
+    For nested module parameters/buffers, returns the full path (e.g., "layer1.weight").
+
+    Args:
+        source_name: The complex source name expression
+
+    Returns:
+        Simplified variable name, with full path for nested parameters/buffers
+    """
+    import re
+
+    if "_modules[" in source_name and ("_parameters[" in source_name or "_buffers[" in source_name):
+        modules = re.findall(r"_modules\['([^']+)'\]", source_name)
+        param_match = re.search(r"_parameters\['([^']+)'\]", source_name)
+        buffer_match = re.search(r"_buffers\['([^']+)'\]", source_name)
+
+        path_parts = list(modules)
+        if param_match:
+            path_parts.append(param_match.group(1))
+        elif buffer_match:
+            path_parts.append(buffer_match.group(1))
+
+        if path_parts:
+            return ".".join(path_parts)
+
+    match = re.search(r"\['(\w+)'\]", source_name)
+    if match:
+        return match.group(1)
+
+    match = re.search(r'L\["(\w+)"\]', source_name)
+    if match:
+        return match.group(1)
+
+    match = re.search(r"\.(\w+)$", source_name)
+    if match:
+        return match.group(1)
+
+    return source_name
+
+
+def _generate_guard_error_message(
+    guard_type: str,
+    target: str,
+    code: str,
+    expected_value: Any,
+    dimension: Optional[int],
+) -> str:
+    """
+    Generate a human-readable error message for a guard failure.
+
+    Args:
+        guard_type: The type of guard
+        target: The target variable name
+        code: The original guard code
+        expected_value: The expected value (if known)
+        dimension: The dimension index for shape guards
+
+    Returns:
+        Human-readable error message
+    """
+    if guard_type == "shape":
+        if dimension is not None and expected_value is not None:
+            return f"Expected {target}.shape[{dimension}] to be {expected_value}"
+        return f"Shape guard failed for {target}: {code}"
+    elif guard_type == "dtype":
+        if expected_value:
+            return f"Expected {target}.dtype to be {expected_value}"
+        return f"Dtype guard failed for {target}: {code}"
+    elif guard_type == "device":
+        return f"Device guard failed for {target}: {code}"
+    elif guard_type == "type":
+        if expected_value:
+            return f"Expected type({target}) to be {expected_value}"
+        return f"Type guard failed for {target}: {code}"
+    elif guard_type == "identity":
+        return f"Identity guard failed for {target}: {code}"
+    elif guard_type == "tensor_match":
+        return f"Tensor match guard failed for {target}: {code}"
+    elif guard_type == "internal":
+        return f"Internal guard (not user-visible): {code[:100]}..."
+    else:
+        return f"Guard failed: {code}"
+
+
+def _build_pythonify_artifacts(
+    output: Any,
+    tracer_output: Any,
+    code: CodeType,
+    check_fn: Optional[Any] = None,
+) -> Any:
+    """
+    Build CompilationArtifacts from Dynamo compilation output for pythonify.
+
+    Extracts comprehensive information from the compilation output including:
+    - FX graph from the tracer
+    - Guards from CheckFunctionManager's guard_manager.code_parts
+    - Input sources from input_source_to_sizes_strides (primary source)
+    - Parameter and buffer names extracted from source type analysis
+    - Dynamic dimension information from Source.dynamism
+    - Number of outputs from the FX graph
+
+    When check_fn (CheckFunctionManager) is provided, real guard code is extracted
+    from the guard manager's code_parts, which contain the actual guard expressions
+    that were compiled for runtime checking.
+
+    Args:
+        output: The OutputGraph from Dynamo compilation
+        tracer_output: The DynamoTracerOutput with additional compilation info
+        code: The original code object being compiled
+        check_fn: Optional CheckFunctionManager with compiled guard code
+
+    Returns:
+        CompilationArtifacts ready for the pythonify pipeline
+    """
+    from torch._dynamo.pythonify import CompilationArtifacts
+    from torch._dynamo.source import (
+        AttrSource,
+        DictGetItemSource,
+        GlobalSource,
+        LocalSource,
+        ParamBufferSource,
+    )
+
+    guards_list: list[dict[str, Any]] = []
+
+    if check_fn is not None and hasattr(check_fn, "guard_manager"):
+        guard_manager = check_fn.guard_manager
+        guards_list = _extract_guards_from_guard_manager(guard_manager, output)
+    elif output.guards is not None:
+        for guard in output.guards:
+            guard_dict = {
+                "type": getattr(guard, "guard_type_name", "value"),
+                "target": getattr(guard, "name", ""),
+                "condition": str(guard),
+                "error_message": f"Guard failed: {guard}",
+            }
+            guards_list.append(guard_dict)
+
+    fx_graph = output.current_tracer.graph if output.current_tracer else None
+
+    input_names: list[str] = []
+    parameter_names: list[str] = []
+    buffer_names: list[str] = []
+    input_sources_info: list[dict[str, Any]] = []
+    dynamic_dims: dict[str, list[int]] = {}
+    model_name = "model"
+
+    def _extract_source_info(source: Any) -> dict[str, Any]:
+        """
+        Extract source information from various Source types.
+
+        Analyzes the source chain to determine the source type (local, parameter,
+        buffer, etc.) and extracts the access path and nested path for code
+        generation.
+
+        For nested module parameters like self._modules['layer1']._parameters['weight'],
+        this extracts the full path ['self', 'layer1', 'weight'] by traversing
+        DictGetItemSource nodes for _modules and extracting their index values.
+        """
+        source_type = "unknown"
+        simple_name = ""
+        nested_path: list[str] = []
+        is_parameter = False
+        is_buffer = False
+        is_input = False
+
+        def _collect_module_path(base: Any) -> list[str]:
+            """
+            Recursively collect module names from a source chain.
+
+            This traverses the source base chain looking for DictGetItemSource
+            nodes whose base member is '_modules', extracting the module names
+            like 'layer1', 'layer2', etc.
+            """
+            path_parts: list[str] = []
+            current = base
+            while current is not None:
+                if hasattr(current, "index") and hasattr(current, "base"):
+                    if hasattr(current.base, "member") and current.base.member == "_modules":
+                        path_parts.insert(0, str(current.index))
+                    current = getattr(current, "base", None)
+                elif hasattr(current, "base"):
+                    current = getattr(current, "base", None)
+                elif hasattr(current, "local_name"):
+                    path_parts.insert(0, current.local_name)
+                    break
+                else:
+                    break
+            return path_parts
+
+        if isinstance(source, LocalSource):
+            source_type = "local"
+            simple_name = source.local_name
+            is_input = source.local_name not in ("self", "model", "module", "mod", "net")
+            if source.dynamism:
+                dynamic_dims[simple_name] = list(
+                    int(d) for d in str(source.dynamism) if d.isdigit()
+                )
+        elif isinstance(source, GlobalSource):
+            source_type = "global"
+            simple_name = source.global_name
+        elif hasattr(source, "index") and hasattr(source, "base"):
+            if hasattr(source.base, "member") and source.base.member == "_parameters":
+                source_type = "parameter"
+                simple_name = source.index
+                is_parameter = True
+                base = source.base.base if hasattr(source.base, "base") else None
+                nested_path = _collect_module_path(base)
+                nested_path.append(simple_name)
+            elif hasattr(source.base, "member") and source.base.member == "_buffers":
+                source_type = "buffer"
+                simple_name = source.index
+                is_buffer = True
+                base = source.base.base if hasattr(source.base, "base") else None
+                nested_path = _collect_module_path(base)
+                nested_path.append(simple_name)
+            else:
+                source_type = "dict_get_item"
+                simple_name = str(source.index)
+        elif isinstance(source, (ParamBufferSource,)) or (
+            hasattr(source, "member") and hasattr(source, "base")
+        ):
+            source_type = "parameter"
+            simple_name = getattr(source, "member", str(source))
+            is_parameter = True
+            base = source.base if hasattr(source, "base") else None
+            while base is not None:
+                if hasattr(base, "member"):
+                    nested_path.insert(0, base.member)
+                    base = getattr(base, "base", None)
+                elif hasattr(base, "local_name"):
+                    nested_path.insert(0, base.local_name)
+                    break
+                else:
+                    break
+            nested_path.append(simple_name)
+        elif isinstance(source, AttrSource):
+            source_type = "attribute"
+            simple_name = source.member
+            base = source.base
+            while hasattr(base, "member"):
+                nested_path.insert(0, base.member)
+                base = getattr(base, "base", None)
+                if base is None:
+                    break
+            if hasattr(base, "local_name"):
+                nested_path.insert(0, base.local_name)
+            nested_path.append(simple_name)
+        else:
+            source_type = type(source).__name__
+            simple_name = str(source)
+
+        return {
+            "simple_name": simple_name,
+            "source_type": source_type,
+            "nested_path": nested_path,
+            "is_parameter": is_parameter,
+            "is_buffer": is_buffer,
+            "is_input": is_input,
+        }
+
+    sources_found = False
+    if hasattr(output, "input_source_to_sizes_strides") and output.input_source_to_sizes_strides:
+        sources_found = True
+        for source, info in output.input_source_to_sizes_strides.items():
+            extracted = _extract_source_info(source)
+            simple_name = extracted["simple_name"]
+            nested_path = extracted["nested_path"]
+
+            effective_name = simple_name
+            if (extracted["is_parameter"] or extracted["is_buffer"]) and nested_path:
+                model_prefixes = ("self", "model", "module", "mod", "net")
+                path_without_model = [
+                    p for p in nested_path if p not in model_prefixes
+                ]
+                if path_without_model:
+                    effective_name = ".".join(path_without_model)
+
+            if extracted["is_parameter"]:
+                parameter_names.append(effective_name)
+            elif extracted["is_buffer"]:
+                buffer_names.append(effective_name)
+            elif extracted["is_input"]:
+                input_names.append(simple_name)
+
+            if nested_path and nested_path[0] in (
+                "self", "model", "module", "mod", "net"
+            ):
+                model_name = nested_path[0]
+
+            input_sources_info.append({
+                "name": effective_name,
+                "source_name": str(source),
+                "source_type": extracted["source_type"],
+                "nested_path": nested_path,
+                "is_tensor": True,
+                "is_parameter": extracted["is_parameter"],
+                "is_buffer": extracted["is_buffer"],
+            })
+
+    if not sources_found:
+        placeholders = None
+        try:
+            if hasattr(output, "placeholders"):
+                placeholders = output.placeholders
+        except Exception:
+            pass
+
+        if placeholders is not None:
+            for node in placeholders:
+                grapharg = node.meta.get("grapharg")
+                if grapharg is None:
+                    continue
+
+                source = grapharg.source
+                if source is None:
+                    continue
+
+                source_name = getattr(source, "name", str(source))
+                source_type = "unknown"
+                simple_name = source_name
+                nested_path: list[str] = []
+
+                if isinstance(source, LocalSource):
+                    source_type = "local"
+                    simple_name = source.local_name
+                    if source.dynamism:
+                        dynamic_dims[simple_name] = list(
+                            int(d) for d in source.dynamism if d.isdigit()
+                        )
+                    if simple_name not in ("self", "model", "module", "mod", "net"):
+                        input_names.append(simple_name)
+                elif isinstance(source, GlobalSource):
+                    source_type = "global"
+                    simple_name = source.global_name
+                elif isinstance(source, ParamBufferSource):
+                    source_type = "parameter"
+                    simple_name = source.member
+                    base = source.base
+                    while hasattr(base, "member"):
+                        nested_path.insert(0, base.member)
+                        base = getattr(base, "base", None)
+                        if base is None:
+                            break
+                    if hasattr(base, "local_name"):
+                        nested_path.insert(0, base.local_name)
+                    elif hasattr(base, "global_name"):
+                        nested_path.insert(0, base.global_name)
+                    nested_path.append(simple_name)
+                    model_prefixes = ("self", "model", "module", "mod", "net")
+                    path_without_model = [
+                        p for p in nested_path if p not in model_prefixes
+                    ]
+                    effective_name = ".".join(path_without_model) if path_without_model else simple_name
+                    parameter_names.append(effective_name)
+                    simple_name = effective_name
+                elif isinstance(source, AttrSource):
+                    source_type = "attribute"
+                    simple_name = source.member
+                    base = source.base
+                    while hasattr(base, "member"):
+                        nested_path.insert(0, base.member)
+                        base = getattr(base, "base", None)
+                        if base is None:
+                            break
+                    if hasattr(base, "local_name"):
+                        nested_path.insert(0, base.local_name)
+                    nested_path.append(simple_name)
+
+                input_sources_info.append({
+                    "name": simple_name,
+                    "source_name": source_name,
+                    "source_type": source_type,
+                    "nested_path": nested_path,
+                    "is_tensor": grapharg.is_tensor,
+                    "pass_as_tensor": grapharg.pass_arg_as_tensor,
+                })
+
+    if not sources_found and not input_sources_info:
+        if hasattr(output, "input_source_to_var") and output.input_source_to_var:
+            for source in output.input_source_to_var.keys():
+                source_name = getattr(source, "name", str(source))
+                if isinstance(source, LocalSource):
+                    if source.local_name not in ("self", "model", "module", "mod", "net"):
+                        input_names.append(source.local_name)
+                    if source.dynamism:
+                        dynamic_dims[source.local_name] = list(
+                            int(d) for d in source.dynamism if d.isdigit()
+                        )
+                else:
+                    input_names.append(_simplify_source_name(source_name))
+
+    if not input_names and not parameter_names and code.co_varnames:
+        for varname in code.co_varnames[: code.co_argcount]:
+            if varname not in ("self", "model", "module", "mod", "net"):
+                input_names.append(varname)
+
+    param_name_to_source = getattr(output, "param_name_to_source", None)
+    parameter_tensors: dict[str, Any] = {}
+    buffer_tensors: dict[str, Any] = {}
+    if param_name_to_source and not parameter_names:
+        for full_name, source in param_name_to_source.items():
+            parts = full_name.split(".")
+            if len(parts) >= 2:
+                leaf_name = parts[-1]
+                if leaf_name in ("weight", "bias") or leaf_name.startswith("weight"):
+                    parameter_names.append(full_name)
+                elif leaf_name.startswith("running_") or leaf_name.startswith("num_"):
+                    buffer_names.append(full_name)
+                else:
+                    parameter_names.append(full_name)
+            else:
+                parameter_names.append(full_name)
+    elif not parameter_names and hasattr(output, "nn_modules"):
+        for name, module in output.nn_modules.items():
+            if hasattr(module, "_parameters"):
+                for param_name, param in module._parameters.items():
+                    if param is not None:
+                        full_name = f"{name}.{param_name}" if name else param_name
+                        parameter_names.append(full_name)
+                        parameter_tensors[full_name] = param
+            if hasattr(module, "_buffers"):
+                for buf_name, buf in module._buffers.items():
+                    if buf is not None:
+                        full_name = f"{name}.{buf_name}" if name else buf_name
+                        buffer_names.append(full_name)
+                        buffer_tensors[full_name] = buf
+
+    if hasattr(output, "nn_modules") and (not parameter_tensors or not buffer_tensors):
+        for name, module in output.nn_modules.items():
+            if hasattr(module, "_parameters"):
+                for param_name, param in module._parameters.items():
+                    if param is not None:
+                        full_name = f"{name}.{param_name}" if name else param_name
+                        if full_name in parameter_names and full_name not in parameter_tensors:
+                            parameter_tensors[full_name] = param
+            if hasattr(module, "_buffers"):
+                for buf_name, buf in module._buffers.items():
+                    if buf is not None:
+                        full_name = f"{name}.{buf_name}" if name else buf_name
+                        if full_name in buffer_names and full_name not in buffer_tensors:
+                            buffer_tensors[full_name] = buf
+
+    # If parameter_tensors is still empty, try to get tensors from the pythonify
+    # context's model reference. This is needed because output.nn_modules may be
+    # empty for simple models where the model itself (not submodules) has parameters.
+    if not parameter_tensors and parameter_names:
+        from torch._dynamo.pythonify import get_model_reference
+        model_ref = get_model_reference()
+        if model_ref is not None:
+            # Build a mapping from leaf name to (full_path, tensor) for all parameters.
+            # This handles the case where Dynamo gives us just "weight" but the actual
+            # path is "linear.weight". We search named_parameters() to find matches.
+            leaf_to_params: dict[str, list[tuple[str, Any]]] = {}
+            if hasattr(model_ref, "named_parameters"):
+                for full_name, param in model_ref.named_parameters():
+                    leaf_name = full_name.split(".")[-1]
+                    if leaf_name not in leaf_to_params:
+                        leaf_to_params[leaf_name] = []
+                    leaf_to_params[leaf_name].append((full_name, param))
+
+            for param_name in parameter_names:
+                parts = param_name.split(".")
+                if len(parts) == 1:
+                    # Simple parameter name - first try direct lookup
+                    if hasattr(model_ref, "_parameters"):
+                        param = model_ref._parameters.get(param_name)
+                        if param is not None:
+                            parameter_tensors[param_name] = param
+                            continue
+                    # If direct lookup failed, try to find by leaf name in nested modules.
+                    # This handles the case where Dynamo gives us "weight" but the actual
+                    # parameter is at "linear.weight".
+                    if param_name in leaf_to_params:
+                        matches = leaf_to_params[param_name]
+                        if len(matches) == 1:
+                            # Unique match - use it
+                            full_name, param = matches[0]
+                            parameter_tensors[param_name] = param
+                        elif len(matches) > 1:
+                            # Multiple matches - take first one (heuristic)
+                            full_name, param = matches[0]
+                            parameter_tensors[param_name] = param
+                else:
+                    # Nested parameter - traverse the path
+                    try:
+                        current = model_ref
+                        for part in parts[:-1]:
+                            current = getattr(current, part, None)
+                            if current is None:
+                                break
+                        if current is not None and hasattr(current, "_parameters"):
+                            param = current._parameters.get(parts[-1])
+                            if param is not None:
+                                parameter_tensors[param_name] = param
+                    except Exception:
+                        pass
+
+    # Similarly for buffers
+    if not buffer_tensors and buffer_names:
+        from torch._dynamo.pythonify import get_model_reference
+        model_ref = get_model_reference()
+        if model_ref is not None:
+            # Build a mapping from leaf name to (full_path, tensor) for all buffers.
+            leaf_to_bufs: dict[str, list[tuple[str, Any]]] = {}
+            if hasattr(model_ref, "named_buffers"):
+                for full_name, buf in model_ref.named_buffers():
+                    leaf_name = full_name.split(".")[-1]
+                    if leaf_name not in leaf_to_bufs:
+                        leaf_to_bufs[leaf_name] = []
+                    leaf_to_bufs[leaf_name].append((full_name, buf))
+
+            for buffer_name in buffer_names:
+                parts = buffer_name.split(".")
+                if len(parts) == 1:
+                    # Simple buffer name - first try direct lookup
+                    if hasattr(model_ref, "_buffers"):
+                        buf = model_ref._buffers.get(buffer_name)
+                        if buf is not None:
+                            buffer_tensors[buffer_name] = buf
+                            continue
+                    # If direct lookup failed, try to find by leaf name
+                    if buffer_name in leaf_to_bufs:
+                        matches = leaf_to_bufs[buffer_name]
+                        if len(matches) >= 1:
+                            full_name, buf = matches[0]
+                            buffer_tensors[buffer_name] = buf
+                else:
+                    try:
+                        current = model_ref
+                        for part in parts[:-1]:
+                            current = getattr(current, part, None)
+                            if current is None:
+                                break
+                        if current is not None and hasattr(current, "_buffers"):
+                            buf = current._buffers.get(parts[-1])
+                            if buf is not None:
+                                buffer_tensors[buffer_name] = buf
+                    except Exception:
+                        pass
+
+    if model_name == "model" and hasattr(output, "root_tx") and output.root_tx:
+        if hasattr(output.root_tx, "f_code"):
+            for varname in output.root_tx.f_code.co_varnames:
+                if varname in ("self", "model", "module", "mod", "net"):
+                    model_name = varname
+                    break
+
+    num_outputs = 1
+    if fx_graph is not None:
+        try:
+            output_nodes = fx_graph.find_nodes(op="output")
+            if output_nodes:
+                output_node = output_nodes[0]
+                output_args = output_node.args[0]
+                if isinstance(output_args, (list, tuple)):
+                    num_outputs = len(output_args)
+                elif output_args is not None:
+                    num_outputs = 1
+        except Exception:
+            pass
+
+    from torch._dynamo.pythonify import (
+        get_backward_inductor_output,
+        get_forward_inductor_output,
+        get_latest_inductor_output,
+        get_model_source,
+    )
+
+    inductor_output = get_latest_inductor_output()
+    model_source = get_model_source()
+    inductor_source_code = None
+    inductor_graph_str = None
+    backward_inductor_source_code = None
+    backward_inductor_graph_str = None
+
+    forward_output = get_forward_inductor_output()
+    backward_output = get_backward_inductor_output()
+
+    if forward_output is not None:
+        inductor_source_code = forward_output.get("source_code")
+        inductor_graph_str = forward_output.get("graph_str")
+    elif inductor_output is not None:
+        inductor_source_code = inductor_output.get("source_code")
+        inductor_graph_str = inductor_output.get("graph_str")
+
+    if backward_output is not None:
+        backward_inductor_source_code = backward_output.get("source_code")
+        backward_inductor_graph_str = backward_output.get("graph_str")
+
+    metadata = {
+        "code_name": code.co_name,
+        "filename": code.co_filename,
+        "firstlineno": code.co_firstlineno,
+    }
+
+    if input_sources_info:
+        metadata["input_sources_info"] = input_sources_info
+
+    # Extract CUDA graph configuration from inductor output.
+    # The inductor output contains cuda_graphs_enabled and cuda_graph_config
+    # when pythonify is active and mode='reduce-overhead' is used.
+    cuda_graphs_enabled = False
+    cuda_graph_config: dict[str, Any] = {}
+    wrapper_stack_order: dict[str, list[str]] = {}
+    wrapper_stack_metadata: dict[str, dict[str, Any]] = {}
+    if inductor_output is not None:
+        metadata["inductor_cache_key"] = inductor_output.get("cache_key")
+        metadata["inductor_device_types"] = inductor_output.get("device_types")
+        metadata["inductor_mutated_inputs"] = inductor_output.get("mutated_inputs")
+        metadata["inductor_constants"] = inductor_output.get("constants")
+        cuda_graphs_enabled = inductor_output.get("cuda_graphs_enabled", False)
+        cuda_graph_config = inductor_output.get("cuda_graph_config", {})
+
+        # Extract AOTAutograd wrapper metadata for pythonify. This metadata
+        # is captured in compile_fx.py when fw_metadata is available and describes
+        # the wrapper stack applied during compilation (tokens, subclass, RNG,
+        # fakified out, runtime detach, dedupe, synthetic bases).
+        wrapper_stack_order = inductor_output.get("wrapper_stack_order", {})
+        wrapper_stack_metadata = inductor_output.get("wrapper_stack_metadata", {})
+
+    # Build ordered_arg_info from input_sources_info, preserving the exact order
+    # that the Inductor kernel expects. This is crucial for correct argument
+    # passing - the order from input_source_to_sizes_strides iteration matches
+    # the order expected by the compiled kernel (typically: params, then inputs).
+    ordered_arg_info: list[dict[str, Any]] = []
+    for info in input_sources_info:
+        source_type = "input"
+        if info.get("is_parameter"):
+            source_type = "parameter"
+        elif info.get("is_buffer"):
+            source_type = "buffer"
+
+        arg_info: dict[str, Any] = {
+            "name": info.get("name", ""),
+            "source_type": source_type,
+            "nested_path": info.get("nested_path", []),
+        }
+        ordered_arg_info.append(arg_info)
+
+    return CompilationArtifacts(
+        fx_graph=fx_graph,
+        guards=guards_list,
+        input_names=input_names,
+        parameter_names=parameter_names,
+        buffer_names=buffer_names,
+        model_name=model_name,
+        model_source=model_source,
+        num_inputs=len(input_names),
+        num_outputs=num_outputs,
+        metadata=metadata,
+        dynamic_dims=dynamic_dims,
+        inductor_source_code=inductor_source_code,
+        backward_inductor_source_code=backward_inductor_source_code,
+        inductor_graph_str=inductor_graph_str,
+        backward_inductor_graph_str=backward_inductor_graph_str,
+        parameter_tensors=parameter_tensors,
+        buffer_tensors=buffer_tensors,
+        cuda_graphs_enabled=cuda_graphs_enabled,
+        cuda_graph_config=cuda_graph_config,
+        wrapper_stack_order=wrapper_stack_order,
+        wrapper_stack_metadata=wrapper_stack_metadata,
+        ordered_arg_info=ordered_arg_info,
+    )
 
 
 # TODO mlazos: add support for same args, or record them

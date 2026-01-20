@@ -872,6 +872,13 @@ class _TorchDynamoContext:
             assert not hasattr(new_mod, "get_compiler_config")
             new_mod.get_compiler_config = get_compiler_config
 
+            # If this is an OptimizeContext with pythonify enabled, store
+            # the model reference so the pythonify context can access it
+            # when it becomes active (after the hooks are entered).
+            # We store it on the context so the hook can access it later.
+            if hasattr(self, "_pythonify") and self._pythonify is not None:
+                self._pythonify_model = mod
+
             return new_mod
 
         if inspect.isclass(fn):
@@ -1093,6 +1100,7 @@ class OptimizeContext(_TorchDynamoContext):
         ] = None,
         package: Optional[CompilePackage] = None,
         hooks: Optional[Hooks] = None,
+        pythonify: Optional[str] = None,
     ) -> None:
         def on_enter() -> None:
             install_generation_tagging_init()
@@ -1111,6 +1119,46 @@ class OptimizeContext(_TorchDynamoContext):
             package=package,
             hooks=hooks,
         )
+        self._pythonify = pythonify
+
+        if pythonify is not None:
+            from torch._dynamo.pythonify import (
+                generate_pythonify_output,
+                pythonify_context,
+                set_model_reference,
+            )
+
+            _pythonify_ctx = None
+            _functorch_config_ctx = None
+
+            def call_pythonify_context():
+                nonlocal _pythonify_ctx, _functorch_config_ctx
+                _pythonify_ctx = pythonify_context(pythonify)
+                _pythonify_ctx.__enter__()
+
+                # Set the model reference in the pythonify context if available.
+                # This is used to extract parameter tensors for object ID capture.
+                # The model was stored in _pythonify_model when __call__ was invoked.
+                if hasattr(self, "_pythonify_model"):
+                    set_model_reference(self._pythonify_model)
+
+                # Force eager backward compilation so the backward kernel
+                # is captured before the pythonify output is generated.
+                # Without this, backward is compiled lazily during loss.backward()
+                # which happens after the pythonify context is cleared.
+                _functorch_config_ctx = torch._functorch.config.patch(
+                    {"force_non_lazy_backward_lowering": True}
+                )
+                _functorch_config_ctx.__enter__()
+
+                def cleanup_pythonify():
+                    generate_pythonify_output()
+                    _functorch_config_ctx.__exit__(None, None, None)
+                    _pythonify_ctx.__exit__(None, None, None)
+
+                return cleanup_pythonify
+
+            self.enter_exit_hooks.append(call_pythonify_context)
 
         if config.compiled_autograd:
             _dynamic = self._dynamic
@@ -1141,6 +1189,7 @@ class OptimizeContext(_TorchDynamoContext):
                 "export": self.export,
                 "dynamic": self._dynamic,
                 "compiler_config": self.compiler_config,
+                "pythonify": self._pythonify,
             },
         )
 
@@ -1260,6 +1309,7 @@ def _optimize_catch_errors(
     compiler_config: Optional[Any] = None,
     rebuild_ctx: Optional[Callable[[], Union[OptimizeContext, _NullDecorator]]] = None,
     package: Optional[CompilePackage] = None,
+    pythonify: Optional[str] = None,
 ) -> OptimizeContext:
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -1273,6 +1323,7 @@ def _optimize_catch_errors(
         rebuild_ctx=rebuild_ctx,
         package=package,
         hooks=hooks,
+        pythonify=pythonify,
     )
 
 
@@ -1457,6 +1508,7 @@ def _optimize(
     disable: bool = False,
     dynamic: Optional[bool] = None,
     package: Optional[CompilePackage] = None,
+    pythonify: Optional[str] = None,
 ) -> Union[OptimizeContext, _NullDecorator]:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
@@ -1482,6 +1534,8 @@ def _optimize(
         dynamic: If True, upfront compile as dynamic a kernel as possible.  If False,
             disable all dynamic shapes support (always specialize).  If None, automatically
             detect when sizes vary and generate dynamic kernels upon recompile.
+        pythonify: If provided (a file path), generates explicit Python code representing
+            all runtime machinery to the specified file instead of executing directly.
 
     Example Usage::
 
@@ -1515,6 +1569,7 @@ def _optimize(
             hooks=hooks,
             rebuild_ctx=rebuild_ctx,
             package=package,
+            pythonify=pythonify,
         )
 
     backend = get_compiler_fn(backend)
@@ -1553,6 +1608,7 @@ def _optimize(
         ),
         rebuild_ctx=rebuild_ctx,
         package=package,
+        pythonify=pythonify,
     )
 
 
@@ -2391,6 +2447,7 @@ def _optimize_assert(
     export_constraints: Optional[Any] = None,
     dynamic: Optional[bool] = None,
     package: Optional[CompilePackage] = None,
+    pythonify: Optional[str] = None,
 ) -> OptimizeContext:
     """
     Guarantees single-graph capture.
@@ -2430,6 +2487,7 @@ def _optimize_assert(
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
         package=package,
+        pythonify=pythonify,
     )
 
 

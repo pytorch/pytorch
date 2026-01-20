@@ -92,6 +92,10 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
 
     result: TOutputCode
 
+    def _is_backward(self) -> bool:
+        """Return True if this is a backward pass compilation."""
+        return False
+
     def pre_save(self) -> None:
         disk_result = copy(self.result)
         disk_result.prepare_for_serialization()
@@ -126,6 +130,27 @@ class BundledOutputCodeLoadable(InductorOutput[TOutputCode], Generic[TOutputCode
 
         # Run normal post compile
         result.post_compile(self.example_inputs, constants, fx_config)
+
+        # Capture Inductor output for pythonify on cache hit.
+        # When there's an AOTAutograd cache hit with bundled output, the normal
+        # Inductor compilation path is bypassed. We capture the output here to
+        # ensure pythonify works correctly with cached compilations.
+        if isinstance(result, CompiledFxGraph):
+            try:
+                from torch._inductor.compile_fx import (
+                    _maybe_capture_inductor_output_for_pythonify,
+                )
+
+                _maybe_capture_inductor_output_for_pythonify(
+                    result, is_backward=self._is_backward()
+                )
+            except ImportError:
+                pass
+            except Exception:
+                # Silently ignore errors in pythonify capture, as it's
+                # an optional feature and should not affect normal operation
+                pass
+
         return result
 
 
@@ -215,9 +240,35 @@ class FxGraphCacheLoadable(InductorOutput[CompiledFxGraph]):
         self, result: CompiledFxGraph, fx_config: _CompileFxKwargs
     ) -> CompiledFxGraph:
         """
-        Called after FXGraphCacheLoadable.load, mutates fx_config
+        Called after FXGraphCacheLoadable.load, mutates fx_config.
+
+        This method also captures Inductor output for pythonify when there's
+        an AOTAutograd cache hit. Since the normal Inductor compilation path
+        is bypassed on cache hit, we need to explicitly capture the source
+        code here for inclusion in the generated pythonify output.
         """
         result.post_compile(self.example_inputs, self.constants, fx_config)
+
+        # Capture Inductor output for pythonify on cache hit.
+        # When there's an AOTAutograd cache hit, the normal Inductor compilation
+        # path (_maybe_capture_inductor_output_for_pythonify in compile_fx.py)
+        # is bypassed. We capture the output here to ensure pythonify works
+        # correctly with cached compilations.
+        try:
+            from torch._inductor.compile_fx import (
+                _maybe_capture_inductor_output_for_pythonify,
+            )
+
+            _maybe_capture_inductor_output_for_pythonify(
+                result, is_backward=self._is_backward()
+            )
+        except ImportError:
+            pass
+        except Exception:
+            # Silently ignore errors in pythonify capture, as it's
+            # an optional feature and should not affect normal operation
+            pass
+
         return result
 
 
@@ -280,6 +331,10 @@ class BundledCompiledBackward(
     Generic backward function for bundled compilation.
     Works with any OutputCode type (CompiledFxGraph, RegionalOutputCode, etc.)
     """
+
+    def _is_backward(self) -> bool:
+        """Return True since this is a backward pass compilation."""
+        return True
 
     def post_compile(
         self, result: TOutputCode, fx_config: _CompileFxKwargs

@@ -946,6 +946,12 @@ class TracingContext:
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
 
+        # Dispatch wrapper metadata for pythonify. Populated by AOTDedupeWrapper
+        # and AOTSyntheticBaseWrapper during pre_compile. Used by
+        # _extract_wrapper_metadata_for_pythonify to capture actual wrapper
+        # metadata instead of empty placeholders.
+        self.dispatch_wrappers_metadata: dict[str, dict[str, Any]] | None = None
+
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
         # for the context on clearing global context.

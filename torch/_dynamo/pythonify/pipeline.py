@@ -1,0 +1,1205 @@
+"""
+RuntimeWrapperPipeline for orchestrating IR node construction.
+
+This module provides the RuntimeWrapperPipeline class that takes compilation
+artifacts from Dynamo and AOT Autograd and constructs an ordered list of IR
+nodes that represent the runtime machinery of torch.compile.
+
+The pipeline is designed to be backend-agnostic: it produces an IR that can be
+consumed by different code generation backends (gen_binary, gen_python).
+
+Object ID Approach for Parameter/Buffer Access
+==============================================
+When `parameter_tensors` and/or `buffer_tensors` are provided in the
+CompilationArtifacts, the pipeline captures the Python object IDs of these
+tensors and sets `source=ArgumentSource.OBJECT_ID` on the corresponding
+ArgumentExtractionNode. This allows the generated code to retrieve tensors
+via ctypes without requiring the model object to be in scope:
+
+    # Instead of: arg2 = model.W
+    # Generates:  arg2 = obj_from_id(140234567890)
+
+The object ID is captured as `id(tensor)` at compile time. At runtime, the
+generated code uses `ctypes.cast(obj_id, ctypes.py_object).value` to
+retrieve the original tensor.
+
+CRITICAL LIMITATIONS:
+--------------------
+1. PROCESS-LOCAL ONLY: Object IDs are valid only within the same Python
+   process. The generated code cannot be used in a different process.
+
+2. LIFETIME DEPENDENCY: Original tensors must remain alive. If the model
+   is garbage collected, object IDs become dangling references.
+
+3. NOT PERSISTABLE: Generated files using object IDs should not be saved
+   for use in later Python sessions - they are for immediate execution only.
+
+4. SAFETY: Invalid object IDs will crash the interpreter. The pipeline
+   only sets object_id when it has access to the actual tensor object.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, TYPE_CHECKING
+
+from .errors import (
+    create_pythonify_error,
+    format_ir_construction_error,
+    PythonifyError,
+    PythonifyStage,
+)
+from .ir import (
+    AOTDedupeWrapperNode,
+    AOTDispatchSubclassWrapperNode,
+    AOTSyntheticBaseWrapperNode,
+    ArgumentExtractionNode,
+    ArgumentSource,
+    AOTAutogradWrapperNode,
+    CallableInvocationNode,
+    CodeGenVisitor,
+    CUDAGraphSetupNode,
+    DebugAssertWrapperNode,
+    EffectTokensWrapperNode,
+    FakifiedOutWrapperNode,
+    FunctionalizedRngRuntimeWrapperNode,
+    GuardCheckNode,
+    GuardType,
+    KernelLoadNode,
+    KernelType,
+    ModelSource,
+    ReturnResultNode,
+    RuntimeWrapperIR,
+    RuntimeWrapperNode,
+    WrapperStackSegment,
+)
+
+
+if TYPE_CHECKING:
+    from torch.fx import GraphModule
+
+
+@dataclass
+class CompilationArtifacts:
+    """
+    Container for all compilation artifacts needed to build the IR.
+
+    This dataclass aggregates the outputs from various compilation stages
+    (Dynamo, AOT Autograd, Inductor) into a single structured object that
+    the RuntimeWrapperPipeline can process.
+
+    Attributes:
+        fx_graph: The FX GraphModule from Dynamo tracing
+        guards: List of guard conditions that must hold for compiled code
+        forward_graph: Compiled forward FX graph from AOT Autograd
+        backward_graph: Compiled backward FX graph from AOT Autograd (may be None)
+        input_names: Names of input arguments to the original function
+        parameter_names: Names of model parameters accessed during tracing
+        buffer_names: Names of model buffers accessed during tracing
+        model_name: Variable name of the model object in the original scope
+        model_source: Specifies where the model comes from for exec() compatibility.
+            This drives how generated code accesses the model:
+            - CLOSURE: Model is directly accessible as a variable (default for exec()).
+                The generated code will reference the model by model_name directly.
+            - F_LOCALS: Model is in frame locals (f_locals[model_name]).
+            - F_GLOBALS: Model is in frame globals (f_globals[model_name]).
+            When None, defaults to CLOSURE which is appropriate for typical exec()
+            usage where the model is passed in the namespace dict.
+        compiled_callable: The compiled callable from Inductor
+        cuda_graphs_enabled: Whether CUDA graphs are enabled
+        cuda_graph_config: Configuration for CUDA graphs (if enabled)
+        saved_tensors_indices: Indices of tensors saved for backward pass
+        num_inputs: Number of input tensors
+        num_outputs: Number of output tensors
+        metadata: Additional metadata from compilation
+        dynamic_dims: Dictionary mapping input names to lists of dynamic dimension
+            indices. For example, {"x": [0]} means dimension 0 of input "x" is
+            dynamic and should not have shape guards asserted on it.
+        inductor_source_code: The Python/Triton source code generated by Inductor
+            for the forward pass. This contains the compiled kernel code that
+            can be embedded in or loaded by the generated Python file.
+        backward_inductor_source_code: The Python/Triton source code generated
+            by Inductor for the backward pass. Used to generate a complete
+            torch.autograd.Function with both forward() and backward() methods.
+        inductor_graph_str: Human-readable string representation of the Inductor
+            graph, useful for debugging and documentation in generated output.
+        backward_inductor_graph_str: Human-readable backward graph representation.
+        kernel_references: List of kernel reference dictionaries containing info
+            about serialized kernels (type, path, entry point, metadata).
+        kernel_output_dir: Directory where serialized kernel files are stored.
+            Used when kernels are written to separate files rather than inlined.
+        parameter_tensors: Dictionary mapping parameter names to the actual tensor
+            objects. The tensor object IDs can be used to retrieve the tensors at
+            runtime via ctypes, avoiding the need to pass the model object through
+            the exec() scope. Keys should match entries in parameter_names.
+        buffer_tensors: Dictionary mapping buffer names to the actual tensor
+            objects. Similar to parameter_tensors but for registered buffers.
+    """
+
+    fx_graph: Optional["GraphModule"] = None
+    guards: list[dict[str, Any]] = field(default_factory=list)
+    forward_graph: Optional["GraphModule"] = None
+    backward_graph: Optional["GraphModule"] = None
+    input_names: list[str] = field(default_factory=list)
+    parameter_names: list[str] = field(default_factory=list)
+    buffer_names: list[str] = field(default_factory=list)
+    model_name: str = "model"
+    model_source: Optional[ModelSource] = None
+    compiled_callable: Optional[Callable[..., Any]] = None
+    cuda_graphs_enabled: bool = False
+    cuda_graph_config: dict[str, Any] = field(default_factory=dict)
+    saved_tensors_indices: list[int] = field(default_factory=list)
+    num_inputs: int = 0
+    num_outputs: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+    # Wrapper ordering/metadata (optional, additive)
+    wrapper_stack_order: dict[str, list[str]] = field(default_factory=dict)
+    # Per-wrapper metadata keyed by wrapper name. Values are wrapper-specific
+    # dicts and are left opaque to keep this container backward compatible.
+    wrapper_stack_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
+    dynamic_dims: dict[str, list[int]] = field(default_factory=dict)
+    inductor_source_code: Optional[str] = None
+    backward_inductor_source_code: Optional[str] = None
+    inductor_graph_str: Optional[str] = None
+    backward_inductor_graph_str: Optional[str] = None
+    kernel_references: list[dict[str, Any]] = field(default_factory=list)
+    kernel_output_dir: Optional[str] = None
+    parameter_tensors: dict[str, Any] = field(default_factory=dict)
+    buffer_tensors: dict[str, Any] = field(default_factory=dict)
+    # Ordered list of argument info dicts that preserves the exact order
+    # arguments are expected by the Inductor kernel. Each dict has:
+    # - name: simple argument name (e.g., "x", "weight")
+    # - source_type: "input", "parameter", or "buffer"
+    # - nested_path: list of path components for model attribute access
+    # - object_id: optional int, the id() of the tensor object
+    # When populated, this overrides the default (inputs, params, buffers) order.
+    ordered_arg_info: list[dict[str, Any]] = field(default_factory=list)
+
+
+class RuntimeWrapperPipeline:
+    """
+    Orchestrates construction of RuntimeWrapper IR from compilation artifacts.
+
+    The pipeline takes artifacts from various compilation stages and produces
+    a structured IR that represents all runtime machinery. This IR can then
+    be processed by code generation backends to produce either:
+    - gen_binary: Compiled artifacts (current behavior)
+    - gen_python: Explicit Python source code
+
+    The pipeline is responsible for:
+    1. Creating ArgumentExtractionNodes for model parameters and inputs
+    2. Creating GuardCheckNodes for runtime validation
+    3. Creating AOTAutogradWrapperNode for autograd function generation
+    4. Creating CUDAGraphSetupNode (if CUDA graphs enabled)
+    5. Creating CallableInvocationNode for the compiled callable
+    6. Creating ReturnResultNode for result exposure
+
+    Usage:
+        artifacts = CompilationArtifacts(...)
+        pipeline = RuntimeWrapperPipeline(artifacts)
+        ir = pipeline.build()
+        result = ir.accept_all(my_visitor)
+    """
+
+    def __init__(
+        self,
+        artifacts: CompilationArtifacts,
+        result_variable_name: str = "y",
+    ) -> None:
+        """
+        Initialize the pipeline with compilation artifacts.
+
+        Args:
+            artifacts: The compilation artifacts to process
+            result_variable_name: Variable name to expose the result as in
+                generated code (default: "y" for exec() compatibility)
+        """
+        self.artifacts = artifacts
+        self.result_variable_name = result_variable_name
+        self._ir: Optional[RuntimeWrapperIR] = None
+
+    def build(self) -> RuntimeWrapperIR:
+        """
+        Build the complete IR from compilation artifacts.
+
+        This method constructs all IR nodes in the correct order:
+        1. Argument extraction (parameters, buffers, inputs)
+        2. Guard checks
+        3. Wrapper nodes (from wrapper_stack_metadata in correct order)
+        4. AOT Autograd wrapper
+        5. CUDA graph setup (if enabled)
+        6. Kernel load (if Inductor source code is available)
+        7. Callable invocation
+        8. Return result
+
+        Returns:
+            RuntimeWrapperIR containing all nodes in execution order
+
+        Raises:
+            PythonifyError: If IR construction fails at any stage
+        """
+        try:
+            self._ir = RuntimeWrapperIR(
+                metadata=self.artifacts.metadata.copy(),
+                source_info={
+                    "model_name": self.artifacts.model_name,
+                    "model_source": self.artifacts.model_source,
+                    "input_names": self.artifacts.input_names.copy(),
+                    "parameter_names": self.artifacts.parameter_names.copy(),
+                    "buffer_names": self.artifacts.buffer_names.copy(),
+                },
+            )
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.IR_CONSTRUCTION,
+                e,
+                context={"step": "RuntimeWrapperIR initialization"},
+            ) from e
+
+        try:
+            self._build_argument_extraction_nodes()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.ARGUMENT_EXTRACTION,
+                e,
+                context={
+                    "parameter_names": self.artifacts.parameter_names,
+                    "buffer_names": self.artifacts.buffer_names,
+                    "input_names": self.artifacts.input_names,
+                },
+            ) from e
+
+        try:
+            self._build_guard_check_nodes()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.GUARD_TRANSLATION,
+                e,
+                context={"num_guards": len(self.artifacts.guards)},
+            ) from e
+
+        try:
+            self._build_wrapper_nodes()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.IR_CONSTRUCTION,
+                e,
+                context={"step": "wrapper nodes"},
+            ) from e
+
+        try:
+            self._build_aot_autograd_wrapper_node()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.AOT_AUTOGRAD,
+                e,
+                context={
+                    "has_forward_graph": self.artifacts.forward_graph is not None,
+                    "has_backward_graph": self.artifacts.backward_graph is not None,
+                },
+            ) from e
+
+        try:
+            self._build_kernel_load_node()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.KERNEL_SERIALIZATION,
+                e,
+                context={"has_inductor_source": self.artifacts.inductor_source_code is not None},
+            ) from e
+
+        try:
+            self._build_cuda_graph_setup_node()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.CUDA_GRAPH_SETUP,
+                e,
+                context={"cuda_graphs_enabled": self.artifacts.cuda_graphs_enabled},
+            ) from e
+
+        try:
+            self._build_callable_invocation_node()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.IR_CONSTRUCTION,
+                e,
+                context={"step": "callable invocation node"},
+            ) from e
+
+        try:
+            self._build_return_result_node()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.IR_CONSTRUCTION,
+                e,
+                context={"step": "return result node"},
+            ) from e
+
+        return self._ir
+
+    def _build_argument_extraction_nodes(self) -> None:
+        """
+        Build ArgumentExtractionNodes for all inputs to the compiled function.
+
+        Creates nodes for model inputs, parameters, and buffers. The order
+        MUST match what Inductor expects.
+
+        When ordered_arg_info is available (populated from the iteration order of
+        input_source_to_sizes_strides during compilation), we use that order since
+        it exactly matches what the Inductor kernel expects.
+
+        Otherwise, we fall back to the legacy order: (inputs, parameters, buffers)
+        which may not always be correct for all models.
+
+        When parameter_tensors or buffer_tensors are available in the artifacts,
+        we capture the object IDs of the actual tensor objects. This allows the
+        generated code to retrieve tensors via ctypes without needing the model
+        object in scope. The object_id field is set to id(tensor) for each
+        parameter/buffer tensor that we have access to.
+        """
+        assert self._ir is not None
+
+        arg_counter = 1
+
+        # Determine whether we can prefer module-based reconstruction. For the
+        # ordered_arg_info path we assume module-based access is available when
+        # a model name is provided; OBJECT_ID remains a fallback when no module
+        # path is available.
+        module_context_available = bool(self.artifacts.model_name)
+
+        # Use ordered_arg_info if available - this preserves the exact order
+        # the Inductor kernel expects (from input_source_to_sizes_strides)
+        if self.artifacts.ordered_arg_info:
+            for info in self.artifacts.ordered_arg_info:
+                name = info.get("name", "")
+                source_type = info.get("source_type", "input")
+                nested_path = info.get("nested_path", [])
+                object_id = info.get("object_id")
+
+                # Use provided nested_path if available, otherwise parse from name.
+                # Strip leading 'self' since external access is model.attr not model.self.attr.
+                if nested_path:
+                    resolved_nested_path = self._strip_self_from_path(nested_path)
+                else:
+                    resolved_nested_path = self._parse_nested_path(name)
+                use_module_path = module_context_available and bool(resolved_nested_path)
+
+                if source_type == "parameter":
+                    source = ArgumentSource.PARAMETER
+                    if not use_module_path:
+                        if object_id is None and name in self.artifacts.parameter_tensors:
+                            tensor = self.artifacts.parameter_tensors[name]
+                            object_id = id(tensor)
+                        if object_id is not None:
+                            source = ArgumentSource.OBJECT_ID
+                    node = ArgumentExtractionNode(
+                        name=f"arg{arg_counter}",
+                        source=source,
+                        access_path=name,
+                        nested_path=resolved_nested_path,
+                        object_id=object_id,
+                    )
+                elif source_type == "buffer":
+                    source = ArgumentSource.BUFFER
+                    if not use_module_path:
+                        if object_id is None and name in self.artifacts.buffer_tensors:
+                            tensor = self.artifacts.buffer_tensors[name]
+                            object_id = id(tensor)
+                        if object_id is not None:
+                            source = ArgumentSource.OBJECT_ID
+                    node = ArgumentExtractionNode(
+                        name=f"arg{arg_counter}",
+                        source=source,
+                        access_path=name,
+                        nested_path=resolved_nested_path,
+                        object_id=object_id,
+                    )
+                else:
+                    # Input from locals
+                    node = ArgumentExtractionNode(
+                        name=f"arg{arg_counter}",
+                        source=ArgumentSource.F_LOCALS,
+                        access_path=name,
+                    )
+
+                self._ir.add_node(node)
+                arg_counter += 1
+            return
+
+        # Legacy fallback: use (inputs, parameters, buffers) order
+        # This may not be correct for all models but maintains backward compat.
+
+        # Inputs first
+        for input_name in self.artifacts.input_names:
+            node = ArgumentExtractionNode(
+                name=f"arg{arg_counter}",
+                source=ArgumentSource.F_LOCALS,
+                access_path=input_name,
+            )
+            self._ir.add_node(node)
+            arg_counter += 1
+
+        # Then parameters
+        for param_name in self.artifacts.parameter_names:
+            nested_path = self._parse_nested_path(param_name)
+            use_module_path = module_context_available and bool(nested_path)
+
+            object_id = None
+            source = ArgumentSource.PARAMETER
+            if not use_module_path and param_name in self.artifacts.parameter_tensors:
+                tensor = self.artifacts.parameter_tensors[param_name]
+                object_id = id(tensor)
+                source = ArgumentSource.OBJECT_ID
+            node = ArgumentExtractionNode(
+                name=f"arg{arg_counter}",
+                source=source,
+                access_path=param_name,
+                nested_path=nested_path,
+                object_id=object_id,
+            )
+            self._ir.add_node(node)
+            arg_counter += 1
+
+        # Then buffers
+        for buffer_name in self.artifacts.buffer_names:
+            nested_path = self._parse_nested_path(buffer_name)
+            use_module_path = module_context_available and bool(nested_path)
+
+            object_id = None
+            source = ArgumentSource.BUFFER
+            if not use_module_path and buffer_name in self.artifacts.buffer_tensors:
+                tensor = self.artifacts.buffer_tensors[buffer_name]
+                object_id = id(tensor)
+                source = ArgumentSource.OBJECT_ID
+            node = ArgumentExtractionNode(
+                name=f"arg{arg_counter}",
+                source=source,
+                access_path=buffer_name,
+                nested_path=nested_path,
+                object_id=object_id,
+            )
+            self._ir.add_node(node)
+            arg_counter += 1
+
+    def _build_guard_check_nodes(self) -> None:
+        """
+        Build GuardCheckNodes from the guard conditions.
+
+        Translates Dynamo guard conditions into IR nodes that can be
+        used to generate runtime assertions. Guards for dynamic dimensions
+        are marked with is_dynamic=True so code generators can handle them
+        appropriately (e.g., skip assertion generation or emit comments).
+
+        Internal guards (is_internal=True) are skipped since they're not
+        meant to be user-visible and use internal Dynamo functions that
+        won't be available in the generated code.
+
+        Guards that use Dynamo internal functions (those starting with ___
+        or known internal functions like check_no_aliasing, check_tensor)
+        are also skipped since these functions are not available in the
+        generated Python code context. However, tensor_match guards are
+        handled specially - they are expanded into individual shape/dtype
+        checks that don't use internal functions.
+
+        Tensor match guards are expanded into individual shape and dtype
+        checks using shape_info and dtype_info from the guard metadata.
+        """
+        assert self._ir is not None
+
+        for guard in self.artifacts.guards:
+            if guard.get("is_internal", False):
+                continue
+
+            guard_type_str = guard.get("type", "")
+
+            if guard_type_str == "tensor_match":
+                self._build_tensor_match_guards(guard)
+            elif guard_type_str in ("type", "identity"):
+                continue
+            else:
+                condition = guard.get("condition", "")
+                if self._uses_dynamo_internals(condition):
+                    continue
+
+                target_name = guard.get("target", "")
+                if self._is_invalid_target_name(target_name):
+                    continue
+
+                guard_type = self._map_guard_type(guard_type_str)
+                dimension = guard.get("dimension")
+
+                is_dynamic = self._is_dynamic_guard(target_name, dimension, guard_type)
+                min_value = guard.get("min_value")
+                max_value = guard.get("max_value")
+
+                node = GuardCheckNode(
+                    guard_type=guard_type,
+                    target_name=target_name,
+                    condition=guard.get("condition", ""),
+                    expected_value=guard.get("expected_value"),
+                    dimension=dimension,
+                    error_message=guard.get(
+                        "error_message",
+                        f"Guard failed: {guard.get('condition', '')}",
+                    ),
+                    is_dynamic=is_dynamic,
+                    min_value=min_value,
+                    max_value=max_value,
+                )
+                self._ir.add_node(node)
+
+    def _uses_dynamo_internals(self, condition: str) -> bool:
+        """
+        Check if a guard condition uses Dynamo internal functions.
+
+        Dynamo generates guards that use internal functions like ___check_type_id,
+        ___dict_contains, check_no_aliasing, check_tensor, etc. These functions
+        are not available in the generated Python code context, so guards using
+        them must be skipped.
+
+        Args:
+            condition: The guard condition string
+
+        Returns:
+            True if the condition uses Dynamo internal functions
+        """
+        if not condition:
+            return False
+
+        dynamo_internal_prefixes = [
+            "___",
+            "check_no_aliasing",
+            "check_tensor",
+            "check_",
+            "utils_device.CURRENT_DEVICE",
+        ]
+        for prefix in dynamo_internal_prefixes:
+            if prefix in condition:
+                return True
+
+        return False
+
+    def _is_invalid_target_name(self, target_name: str) -> bool:
+        """
+        Check if a guard target name is invalid for code generation.
+
+        Some guards have malformed target names like 'not' or Python keywords
+        that would produce invalid code when used in assertions.
+
+        Args:
+            target_name: The guard target name
+
+        Returns:
+            True if the target name is invalid for code generation
+        """
+        if not target_name:
+            return True
+
+        invalid_targets = {
+            "not",
+            "and",
+            "or",
+            "is",
+            "in",
+            "if",
+            "else",
+            "for",
+            "while",
+            "def",
+            "class",
+            "return",
+            "yield",
+            "import",
+            "from",
+            "as",
+            "try",
+            "except",
+            "finally",
+            "with",
+            "assert",
+            "raise",
+            "pass",
+            "break",
+            "continue",
+            "lambda",
+            "global",
+            "nonlocal",
+            "True",
+            "False",
+            "None",
+            "self",
+            "model",
+            "module",
+        }
+        return target_name in invalid_targets
+
+    def _build_tensor_match_guards(self, guard: dict) -> None:
+        """
+        Expand a tensor_match guard into individual shape and dtype guards.
+
+        Tensor match guards in Dynamo use check_tensor() which is an internal
+        function. We expand these into individual Python assertions for shape
+        and dtype that can be executed without Dynamo internals.
+
+        When ordered_arg_info is available, the argument numbering follows that
+        order (typically: params, inputs, buffers - matching FX graph tracing).
+        Otherwise falls back to legacy order (inputs, params, buffers).
+
+        For guards with target="self", we extract the parameter name from the
+        condition string (e.g., L['self']._parameters['W'] -> W).
+
+        Args:
+            guard: The tensor_match guard dictionary from CompilationArtifacts
+        """
+        assert self._ir is not None
+
+        target_name = guard.get("target", "")
+        shape_info = guard.get("shape_info")
+        dtype_info = guard.get("dtype_info")
+        condition = guard.get("condition", "")
+
+        if target_name == "self" and "_parameters[" in condition:
+            import re
+            match = re.search(r"_parameters\['([^']+)'\]", condition)
+            if match:
+                target_name = match.group(1)
+
+        # Determine variable name based on ordering
+        var_name = None
+
+        # Use ordered_arg_info if available (new ordering from FX graph)
+        if self.artifacts.ordered_arg_info:
+            for idx, info in enumerate(self.artifacts.ordered_arg_info):
+                if info.get("name") == target_name:
+                    var_name = f"arg{idx + 1}"
+                    break
+        else:
+            # Legacy fallback: inputs first, then params, then buffers
+            num_inputs = len(self.artifacts.input_names)
+            num_params = len(self.artifacts.parameter_names)
+
+            if target_name in self.artifacts.input_names:
+                idx = self.artifacts.input_names.index(target_name) + 1
+                var_name = f"arg{idx}"
+            elif target_name in self.artifacts.parameter_names:
+                idx = num_inputs + self.artifacts.parameter_names.index(target_name) + 1
+                var_name = f"arg{idx}"
+            elif target_name in self.artifacts.buffer_names:
+                idx = num_inputs + num_params + self.artifacts.buffer_names.index(target_name) + 1
+                var_name = f"arg{idx}"
+
+        if var_name is None:
+            return
+
+        if shape_info and isinstance(shape_info, list):
+            for dim, size in enumerate(shape_info):
+                if size is not None:
+                    is_dynamic = self._is_dynamic_guard(target_name, dim, GuardType.SHAPE)
+                    node = GuardCheckNode(
+                        guard_type=GuardType.SHAPE,
+                        target_name=var_name,
+                        condition=f"{var_name}.shape[{dim}] == {size}",
+                        expected_value=size,
+                        dimension=dim,
+                        error_message=f"Expected {target_name}.shape[{dim}] == {size}",
+                        is_dynamic=is_dynamic,
+                    )
+                    self._ir.add_node(node)
+
+        if dtype_info is not None:
+            node = GuardCheckNode(
+                guard_type=GuardType.DTYPE,
+                target_name=var_name,
+                condition=f"{var_name}.dtype == {dtype_info}",
+                expected_value=dtype_info,
+                error_message=f"Expected {target_name}.dtype == {dtype_info}",
+            )
+            self._ir.add_node(node)
+
+    def _is_dynamic_guard(
+        self,
+        target_name: str,
+        dimension: Optional[int],
+        guard_type: GuardType,
+    ) -> bool:
+        """
+        Check if a guard should be marked as dynamic.
+
+        A guard is dynamic if:
+        1. It's a shape guard (guard_type is SHAPE)
+        2. The target input has dynamic dimensions configured
+        3. The specific dimension being guarded is in the dynamic dims list
+
+        Args:
+            target_name: Name of the variable being guarded
+            dimension: The dimension index (for shape guards)
+            guard_type: The type of guard
+
+        Returns:
+            True if this is a dynamic guard that should not be asserted
+        """
+        if guard_type != GuardType.SHAPE:
+            return False
+
+        if dimension is None:
+            return False
+
+        dynamic_dims_for_target = self.artifacts.dynamic_dims.get(target_name, [])
+        return dimension in dynamic_dims_for_target
+
+    def _build_wrapper_nodes(self) -> None:
+        """
+        Build wrapper IR nodes from wrapper_stack_metadata in correct order.
+
+        This method creates IR nodes for each post-compile wrapper specified in
+        the artifacts' wrapper_stack_order and wrapper_stack_metadata. The order
+        follows the AOTAutograd wrapper stack:
+
+        1. FORWARD_INFERENCE segment (inner-most first):
+           - EffectTokensWrapper
+           - AOTDispatchSubclassWrapper
+           - FunctionalizedRngRuntimeWrapper
+           - FakifiedOutWrapper
+
+        2. AUTOGRAD_ASSEMBLY segment (for training):
+           - RuntimeWrapper
+           - DebugAssertWrapper
+
+        3. DISPATCH segment (applied in reverse at runtime):
+           - AOTSyntheticBaseWrapper
+           - AOTDedupeWrapper
+
+        For each wrapper found in wrapper_stack_order, we create the corresponding
+        IR node with metadata from wrapper_stack_metadata. The nodes are added to
+        the IR and recorded in the wrapper_stack_order for later use by codegen.
+
+        The ordering follows the audit in wrapper_audit.md: wrappers are recorded
+        inner-most callable first. When generating code, dispatch wrappers are
+        applied in reverse to match runtime semantics.
+        """
+        assert self._ir is not None
+
+        wrapper_stack_order = self.artifacts.wrapper_stack_order
+        wrapper_stack_metadata = self.artifacts.wrapper_stack_metadata
+
+        if not wrapper_stack_order:
+            return
+
+        # Map segment names from artifacts to WrapperStackSegment enums.
+        # The artifacts use string keys matching compile_fx.py naming.
+        segment_mapping = {
+            "forward_inference": WrapperStackSegment.FORWARD_INFERENCE,
+            "forward": WrapperStackSegment.FORWARD_INFERENCE,
+            "autograd_assembly": WrapperStackSegment.AUTOGRAD_ASSEMBLY,
+            "autograd": WrapperStackSegment.AUTOGRAD_ASSEMBLY,
+            "dispatch": WrapperStackSegment.DISPATCH,
+        }
+
+        # Process each segment in the defined order (forward_inference first,
+        # then autograd_assembly, then dispatch). Within each segment, wrappers
+        # are processed in the order they appear (inner-most callable first).
+        segment_order = ["forward_inference", "forward", "autograd_assembly", "autograd", "dispatch"]
+
+        for segment_key in segment_order:
+            if segment_key not in wrapper_stack_order:
+                continue
+
+            segment = segment_mapping.get(segment_key)
+            if segment is None:
+                continue
+
+            wrapper_names = wrapper_stack_order[segment_key]
+            for wrapper_name in wrapper_names:
+                meta = wrapper_stack_metadata.get(wrapper_name, {})
+                node = self._create_wrapper_node(wrapper_name, meta)
+                if node is not None:
+                    self._ir.add_node(node)
+                    self._ir.record_wrapper(segment, wrapper_name, meta)
+
+    def _create_wrapper_node(self, wrapper_name: str, meta: dict) -> Optional[Any]:
+        """
+        Create an IR node for a specific wrapper based on its name and metadata.
+
+        This factory method maps wrapper names to their corresponding IR node
+        classes and populates them with the appropriate metadata fields.
+
+        Args:
+            wrapper_name: Name of the wrapper (e.g., "EffectTokensWrapper")
+            meta: Metadata dict for the wrapper from wrapper_stack_metadata
+
+        Returns:
+            The corresponding IR node, or None if the wrapper is not recognized
+        """
+        if wrapper_name == "EffectTokensWrapper":
+            return EffectTokensWrapperNode(
+                token_count=meta.get("num_tokens", meta.get("token_count", 0)),
+            )
+        elif wrapper_name == "AOTDispatchSubclassWrapper":
+            return AOTDispatchSubclassWrapperNode(
+                subclass_inp_meta=meta.get("subclass_inp_meta"),
+                subclass_fw_graph_out_meta=meta.get("subclass_fw_graph_out_meta"),
+                num_fw_outs_saved_for_bw=meta.get("num_fw_outs_saved_for_bw", 0),
+                maybe_subclass_meta=meta.get("maybe_subclass_meta"),
+            )
+        elif wrapper_name == "FunctionalizedRngRuntimeWrapper":
+            return FunctionalizedRngRuntimeWrapperNode(
+                is_rng_op_functionalized=meta.get("is_rng_op_functionalized", False),
+                num_outputs_rng_offset=meta.get("num_outputs_rng_offset", 0),
+                num_forward_returns=meta.get("num_forward_returns", 0),
+                num_graphsafe_rng_states=meta.get("num_graphsafe_rng_states", 0),
+                graphsafe_rng_state_index=meta.get("graphsafe_rng_state_index"),
+            )
+        elif wrapper_name == "FakifiedOutWrapper":
+            return FakifiedOutWrapperNode(
+                out_metas=meta.get("out_metas"),
+                fwd_output_strides=meta.get("fwd_output_strides"),
+            )
+        elif wrapper_name == "RuntimeWrapper":
+            return RuntimeWrapperNode(
+                indices_of_inps_to_detach=meta.get("indices_of_inps_to_detach", []),
+                disable_amp=meta.get("disable_amp", False),
+                runtime_metadata=meta.get("runtime_metadata"),
+                trace_joint=meta.get("trace_joint", False),
+            )
+        elif wrapper_name == "AOTDedupeWrapper":
+            return AOTDedupeWrapperNode(
+                keep_arg_mask=meta.get("keep_arg_mask"),
+                add_dupe_map=meta.get("add_dupe_map"),
+                needs_post_compile=meta.get("needs_post_compile", False),
+                old_input_metadata=meta.get("old_input_metadata"),
+            )
+        elif wrapper_name == "AOTSyntheticBaseWrapper":
+            return AOTSyntheticBaseWrapperNode(
+                synthetic_base_info=meta.get("synthetic_base_info"),
+                aliased_arg_idx_with_metadata_mutations=meta.get(
+                    "aliased_arg_idx_with_metadata_mutations"
+                ),
+                old_input_info=meta.get("old_input_info"),
+                needs_post_compile=meta.get("needs_post_compile", False),
+                trace_joint=meta.get("trace_joint", False),
+            )
+        elif wrapper_name == "DebugAssertWrapper":
+            return DebugAssertWrapperNode(
+                flat_requires_grad=meta.get("flat_requires_grad"),
+            )
+        else:
+            return None
+
+    def _build_aot_autograd_wrapper_node(self) -> None:
+        """
+        Build the AOTAutogradWrapperNode for autograd function generation.
+
+        Creates a node that encapsulates the forward and backward graphs
+        along with metadata needed for autograd.Function generation.
+        """
+        assert self._ir is not None
+
+        node = AOTAutogradWrapperNode(
+            class_name="CompiledFunction",
+            forward_graph=self.artifacts.forward_graph,
+            backward_graph=self.artifacts.backward_graph,
+            saved_tensors_indices=self.artifacts.saved_tensors_indices.copy(),
+            num_inputs=self.artifacts.num_inputs,
+            num_outputs=self.artifacts.num_outputs,
+            metadata=self.artifacts.metadata.copy(),
+        )
+        self._ir.add_node(node)
+
+    def _build_cuda_graph_setup_node(self) -> None:
+        """
+        Build CUDAGraphSetupNode if CUDA graphs are enabled.
+
+        Only creates the node when CUDA graphs mode is active.
+        """
+        assert self._ir is not None
+
+        if not self.artifacts.cuda_graphs_enabled:
+            return
+
+        config = self.artifacts.cuda_graph_config
+        static_input_indices = list(config.get("static_input_indices", []))
+        node = CUDAGraphSetupNode(
+            graph_id=config.get("graph_id", "cuda_graph_0"),
+            warmup_runs=config.get("warmup_runs", 1),
+            capture_mode=config.get("capture_mode", "thread_local"),
+            stream_name=config.get("stream_name", "default"),
+            pool_id=config.get("pool_id"),
+            static_inputs=config.get("static_inputs", False) or len(static_input_indices) > 0,
+            static_input_indices=static_input_indices,
+            skip_dynamic_graphs=config.get("skip_dynamic_graphs", False),
+            device_index=config.get("device_index"),
+            force_cudagraph_sync=config.get("force_cudagraph_sync", False),
+        )
+        self._ir.add_node(node)
+
+    def _build_kernel_load_node(self) -> None:
+        """
+        Build KernelLoadNode for Inductor source code (forward and backward).
+
+        Creates nodes that represent loading the Inductor-compiled kernels.
+        For models with gradients, both forward and backward kernels are loaded:
+        - Forward kernel: compiled_fn (from inductor_source_code)
+        - Backward kernel: compiled_fn_backward (from backward_inductor_source_code)
+
+        The kernels can be:
+        - Inlined as Python source code in the generated output
+        - Loaded from a serialized file
+        - A reference to an external compiled kernel
+
+        This enables the generated Python file to execute the same compiled
+        code that torch.compile normally runs.
+
+        Error Handling:
+        - If inductor_source_code is None or empty, no forward node is created
+        - If backward_inductor_source_code is None or empty, no backward node is created
+        - The nodes are created even if source may be malformed; validation
+          happens in gen_python.py which generates a fallback function
+        - Metadata includes validation_hint if source appears problematic
+        """
+        assert self._ir is not None
+
+        if self.artifacts.inductor_source_code:
+            source_code = self.artifacts.inductor_source_code
+            metadata = {
+                "graph_str": self.artifacts.inductor_graph_str,
+                "source": "inductor",
+                "is_backward": False,
+            }
+
+            validation_hint = self._quick_validate_inductor_source(source_code)
+            if validation_hint:
+                metadata["validation_hint"] = validation_hint
+
+            node = KernelLoadNode(
+                kernel_type=KernelType.INLINE,
+                kernel_id="inductor_compiled",
+                kernel_path="",
+                entry_point="call",
+                variable_name="compiled_fn",
+                inline_content=source_code,
+                metadata=metadata,
+            )
+            self._ir.add_node(node)
+
+        if self.artifacts.backward_inductor_source_code:
+            backward_source = self.artifacts.backward_inductor_source_code
+            backward_metadata = {
+                "graph_str": self.artifacts.backward_inductor_graph_str,
+                "source": "inductor",
+                "is_backward": True,
+            }
+
+            validation_hint = self._quick_validate_inductor_source(backward_source)
+            if validation_hint:
+                backward_metadata["validation_hint"] = validation_hint
+
+            backward_node = KernelLoadNode(
+                kernel_type=KernelType.INLINE,
+                kernel_id="inductor_compiled_backward",
+                kernel_path="",
+                entry_point="call",
+                variable_name="compiled_fn_backward",
+                inline_content=backward_source,
+                metadata=backward_metadata,
+            )
+            self._ir.add_node(backward_node)
+
+    def _quick_validate_inductor_source(self, source_code: str) -> Optional[str]:
+        """
+        Perform quick validation of Inductor source code.
+
+        This is a fast check to detect obvious issues with Inductor source
+        before it's passed to the code generator. It doesn't do full syntax
+        validation (that happens in gen_python.py), but catches common issues
+        early for better error messages.
+
+        Args:
+            source_code: The Inductor-generated Python source code
+
+        Returns:
+            None if source appears valid, or a hint string describing the issue
+        """
+        if not source_code or not source_code.strip():
+            return "empty_source"
+
+        if "def call(" not in source_code:
+            return "missing_call_function"
+
+        if len(source_code) < 50:
+            return "suspiciously_short"
+
+        return None
+
+    def _build_callable_invocation_node(self) -> None:
+        """
+        Build the CallableInvocationNode for invoking the compiled callable.
+
+        Creates a node that represents the actual call to the compiled
+        function with all extracted arguments in the correct order.
+
+        When Inductor source code is present:
+        - args_as_list is set to True because Inductor's call() function
+          expects arguments as a single list (e.g., call([arg1, arg2]))
+        - extract_first_output is set to True because Inductor's call()
+          returns a tuple (output, saved_tensors...) and we need to
+          extract just the first element for the user's result.
+
+        When backward Inductor source code is present:
+        - is_autograd_function is set to True to indicate the generated code
+          should use a torch.autograd.Function with both forward and backward
+        """
+        assert self._ir is not None
+
+        extraction_nodes = self._ir.get_nodes_by_type(ArgumentExtractionNode)
+        argument_names = [node.name for node in extraction_nodes]  # type: ignore[union-attr]
+
+        has_inductor_source = self.artifacts.inductor_source_code is not None
+        has_backward_source = self.artifacts.backward_inductor_source_code is not None
+
+        # Determine if we're using an autograd.Function wrapper.
+        # We need the autograd wrapper (CompiledFunction) when:
+        # 1. We have an Inductor kernel (has_inductor_source) - because the
+        #    Inductor kernel uses out= ops that don't support autograd directly,
+        #    so we need to wrap it in an autograd.Function for gradient tracking
+        # 2. We have an explicit backward kernel or graph
+        #
+        # When using the autograd wrapper, the forward() method handles
+        # list conversion and output extraction internally, so the
+        # invocation should use regular positional args and not extract.
+        is_autograd_function = (
+            has_inductor_source
+            or has_backward_source
+            or self.artifacts.backward_graph is not None
+        )
+
+        # Only use list args and extract first output when calling
+        # compiled_fn directly (not through autograd wrapper).
+        # The autograd wrapper's forward() method handles these internally.
+        use_list_args = has_inductor_source and not is_autograd_function
+        extract_output = has_inductor_source and not is_autograd_function
+
+        node = CallableInvocationNode(
+            callable_name="compiled_fn",
+            argument_names=argument_names,
+            result_name="result",
+            is_autograd_function=is_autograd_function,
+            args_as_list=use_list_args,
+            extract_first_output=extract_output,
+        )
+        self._ir.add_node(node)
+
+    def _build_return_result_node(self) -> None:
+        """
+        Build the ReturnResultNode for result exposure.
+
+        Creates a node that ensures the result is accessible after
+        exec() completes by assigning it to a named variable.
+        """
+        assert self._ir is not None
+
+        node = ReturnResultNode(
+            result_name="result",
+            expose_as=self.result_variable_name,
+        )
+        self._ir.add_node(node)
+
+    def _parse_nested_path(self, path: str) -> list[str]:
+        """
+        Parse a dotted path into a list of attribute names.
+
+        When the path has a 'self.' prefix (from Dynamo's internal representation),
+        we strip it because external code accesses attributes directly on the model
+        (e.g., model.W not model.self.W).
+
+        Args:
+            path: A dotted attribute path (e.g., "layer1.weight" or "self.layer1.weight")
+
+        Returns:
+            List of individual attribute names (e.g., ["layer1", "weight"])
+        """
+        if path.startswith("self."):
+            path = path[5:]
+        if "." in path:
+            return path.split(".")
+        return [path]
+
+    def _strip_self_from_path(self, path: list[str]) -> list[str]:
+        """
+        Strip leading 'self' from a nested path list.
+
+        Dynamo's internal representation uses 'self' as the first element
+        (e.g., ['self', 'layer', 'weight']), but external code accesses
+        attributes directly on the model (model.layer.weight not model.self.layer.weight).
+
+        Args:
+            path: A list of attribute names, possibly starting with 'self'
+
+        Returns:
+            The path with leading 'self' removed if present
+        """
+        if path and path[0] == "self":
+            return path[1:]
+        return path
+
+    def _map_guard_type(self, guard_type_str: str) -> GuardType:
+        """
+        Map a guard type string to a GuardType enum value.
+
+        Args:
+            guard_type_str: String representation of guard type
+
+        Returns:
+            Corresponding GuardType enum value
+        """
+        mapping = {
+            "shape": GuardType.SHAPE,
+            "dtype": GuardType.DTYPE,
+            "device": GuardType.DEVICE,
+            "value": GuardType.VALUE,
+            "tensor_match": GuardType.TENSOR_MATCH,
+            "identity": GuardType.IDENTITY,
+            "type": GuardType.TYPE,
+        }
+        return mapping.get(guard_type_str.lower(), GuardType.VALUE)
+
+    def get_ir(self) -> Optional[RuntimeWrapperIR]:
+        """
+        Get the built IR, or None if build() hasn't been called.
+
+        Returns:
+            The RuntimeWrapperIR if built, None otherwise
+        """
+        return self._ir
+
+    def process_with_visitor(self, visitor: CodeGenVisitor) -> list[Any]:
+        """
+        Build the IR (if not already built) and process it with a visitor.
+
+        This is a convenience method that combines build() and accept_all().
+
+        Args:
+            visitor: The CodeGenVisitor to apply to all nodes
+
+        Returns:
+            List of results from visiting each node
+        """
+        if self._ir is None:
+            self.build()
+        assert self._ir is not None
+        return self._ir.accept_all(visitor)
