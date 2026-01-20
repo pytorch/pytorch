@@ -3986,9 +3986,10 @@ class ShapeEnv:
             # not be valid.
             self.name_to_node: dict[str, torch.fx.Node] = {}
 
-        # Maps shape_id -> unbacked symbol.
+        # Maps shape_id to the first unbacked symbol allocated for that id.
         # When mark_unbacked is called with a shape_id, we allocate fresh
-        # symbols but add runtime equality checks via torch._check.
+        # symbols but add runtime equality checks via torch._check to ensure
+        # all dims with the same shape_id are treated as the same symbol.
         self._shape_id_to_unbacked_symbol: dict[str, sympy.Expr] = {}
 
     @property

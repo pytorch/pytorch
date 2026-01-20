@@ -584,7 +584,8 @@ def mark_unbacked(
             If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
         shape_id (Optional[str], default=None): An optional identifier to group unbacked dimensions together.
             All unbacked dimensions with the same shape_id will share the same unbacked symbol. This is useful when multiple tensors
-            are known to have the same batch size at runtime.
+            are known to have the same batch size at runtime. A runtime assertion is added
+            to ensure this property at runtime.
     """
     if torch.distributed.is_available() and isinstance(
         t, torch.distributed.tensor.DTensor
