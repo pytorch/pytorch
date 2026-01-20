@@ -149,7 +149,10 @@ def _rand_eager_offsets_impl(offsets, device: torch.device) -> Tensor:
     states = [_reserve_rng_state(device, int(off)) for off in offsets]
     seeds = [s for s, _ in states]
     bases = [b for _, b in states]
-    _to_i64 = lambda x: x if isinstance(x, torch.Tensor) else torch.as_tensor(x, device=device, dtype=torch.int64)
+    def _to_i64(x):
+        if isinstance(x, torch.Tensor):
+            return x
+        return torch.as_tensor(x, device=device, dtype=torch.int64)
     seeds_tensor = torch.stack([_to_i64(x) for x in seeds]).view(-1)
     bases_tensor = torch.stack([_to_i64(x) for x in bases]).view(-1)
     i64 = torch.int64

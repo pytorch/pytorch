@@ -1,5 +1,6 @@
-#include <torch/library.h>
 #include <c10/core/SymInt.h>
+#include <torch/library.h>
+#include <torch/csrc/inductor/inductor_ops.h>
 
 #if defined(USE_CUDA) || defined(USE_ROCM)
 #include <ATen/cuda/CUDAContext.h>
