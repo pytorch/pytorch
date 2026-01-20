@@ -489,6 +489,11 @@ enable_cpp_symbolic_shape_guards = False
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
 
+# Enable tracing through einops instead of using allow_in_graph
+# WARNING: This config is only used if einops version==0.6.1
+# See PyTorch issue https://github.com/pytorch/pytorch/issues/157417
+enable_einops_tracing = True
+
 # Enable tracing through unittest
 enable_trace_unittest = False
 
