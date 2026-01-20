@@ -52,14 +52,13 @@ struct TensorListMetadata {
 
 template <int n>
 struct TensorListDimMetadata {
-  const void* addresses[n][depth_to_max_tensors_dim[n - 1]];  // 8nT bytes
-  int64_t num_rows[depth_to_max_tensors_dim[n - 1]];      // rows per tensor, 8T bytes
-  int64_t num_cols[depth_to_max_tensors_dim[n - 1]];      // cols per tensor, 8T bytes  
-  int64_t row_stride[depth_to_max_tensors_dim[n - 1]];    // stride between rows, 8T bytes
-  unsigned char block_to_tensor[depth_to_max_blocks_dim[n - 1]];  // B bytes
-  int block_to_chunk[depth_to_max_blocks_dim[n - 1]]; // which row/col this block handles, // 4B bytes
-  int start_tensor_this_launch;  // 4 bytes
-  int reduce_dim;  // 0 = reduce across rows (col-wise norm), 1 = reduce across cols (row-wise norm), // 4 bytes
+  const void* addresses[n][depth_to_max_tensors_dim[n - 1]];
+  int64_t num_rows[depth_to_max_tensors_dim[n - 1]];      
+  int64_t num_cols[depth_to_max_tensors_dim[n - 1]];      
+  int64_t prod_of_other_dim[depth_to_max_tensors_dim[n - 1]];
+  unsigned char block_to_tensor[depth_to_max_blocks_dim[n - 1]];
+  int block_to_chunk[depth_to_max_blocks_dim[n - 1]]; 
+  int start_tensor_this_launch;
 };
 
 template <typename scalar_vals_t, int n>
@@ -406,7 +405,6 @@ void multi_tensor_apply_dim(
   const size_t n_tensors = tensor_lists[0].size();
   TensorListDimMetadata<depth> tensorListMeta;
   tensorListMeta.start_tensor_this_launch = 0;
-  tensorListMeta.reduce_dim = reduce_dim;
 
   int loc_block_info = 0;
   int loc_tensor_info = 0;
@@ -416,12 +414,12 @@ void multi_tensor_apply_dim(
     const auto& tensor = tensor_lists[0][t];
     if (tensor.numel() == 0) continue;
     
-    TORCH_CHECK(tensor.dim() == 2, "Dimensional norm requires 2D tensors");
+    TORCH_CHECK(tensor.dim() >= 2, "Dimensional foreach_norm requires tensors with at least 2 dimensions");
     
     processed++;
-    tensorListMeta.num_rows[loc_tensor_info] = tensor.size(0);
-    tensorListMeta.num_cols[loc_tensor_info] = tensor.size(1);
-    tensorListMeta.row_stride[loc_tensor_info] = tensor.stride(0);
+    tensorListMeta.num_rows[loc_tensor_info] = tensor.size(-2);
+    tensorListMeta.num_cols[loc_tensor_info] = tensor.size(-1);
+    tensorListMeta.prod_of_other_dim[loc_tensor_info] = c10::multiply_integers(tensor.sizes().begin(), tensor.sizes().end() - 2);
     
     for (int d = 0; d < depth; d++) {
       tensorListMeta.addresses[d][loc_tensor_info] =
@@ -429,8 +427,9 @@ void multi_tensor_apply_dim(
     }
     loc_tensor_info++;
  
-    int outer_dim_size = reduce_dim == 1 ? tensor.size(0) : tensor.size(1);
-    const int CHUNK_SIZE = kBlockSizeDim.y;  //   reduce_dim_is_row ? kBlockSizeDim.y: kBlockSizeDim.y;  // 128 : 16
+    int outer_dim_size = reduce_dim == tensor.dim()-1 ? tensor.size(-2) : tensor.size(-1);
+    outer_dim_size *= tensorListMeta.prod_of_other_dim[loc_tensor_info-1];
+    const int CHUNK_SIZE = kBlockSizeDim.y;
     const int64_t num_chunks_per_tensor = (outer_dim_size + CHUNK_SIZE - 1) / CHUNK_SIZE; 
     for (int64_t idx = 0; idx < num_chunks_per_tensor; idx++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
@@ -459,7 +458,6 @@ void multi_tensor_apply_dim(
           // Copy current tensor info to slot 0
           tensorListMeta.num_rows[0] = tensorListMeta.num_rows[loc_tensor_info - 1];
           tensorListMeta.num_cols[0] = tensorListMeta.num_cols[loc_tensor_info - 1];
-          tensorListMeta.row_stride[0] = tensorListMeta.row_stride[loc_tensor_info - 1];
           for (int d = 0; d < depth; d++) {
             tensorListMeta.addresses[d][0] = tensorListMeta.addresses[d][loc_tensor_info - 1];
           }
