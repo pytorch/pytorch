@@ -960,6 +960,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
+# pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
@@ -969,7 +970,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             or _all_in_parens(string)
         ):
             # don't put extra parens for strings that are already wrapped in parens
-            # pyrefly: ignore [bad-return]
+
             return string
         return f"({string})"
 
@@ -2431,7 +2432,6 @@ class KernelTemplate:
             class DetailedTemplateSyntaxError(TemplateSyntaxError):
                 def __init__(self, original_error: TemplateSyntaxError) -> None:
                     super().__init__(
-                        # pyrefly: ignore [bad-argument-type]
                         original_error.message,
                         original_error.lineno,
                         original_error.name,
@@ -2443,7 +2443,6 @@ class KernelTemplate:
                     error_info = f"Error in template at line {self.lineno}\n"
                     error_info += f"Error message: {self.message}\n"
                     if hasattr(self.original_error, "source"):
-                        # pyrefly: ignore [missing-attribute]
                         lines = self.original_error.source.split("\n")
                         error_info += "Context:\n"
                         start = max(0, self.lineno - 2)

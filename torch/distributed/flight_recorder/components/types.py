@@ -500,7 +500,7 @@ class Op:
                 and other.input_sizes[0]
             )
             or (
-                self.type not in ["gather"]
+                self.type != "gather"
                 and set(self.output_dtypes) != set(other.output_dtypes)
                 and self.output_sizes[0]
                 and other.output_sizes[0]

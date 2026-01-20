@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpzrjjaet7/4b/c4bnmdqz7bmokgbfuufm3szy2rhb3jjbgvvjbq5tuw3lkh5zhbsn.py", line 11, in pallas_fused_add_slice_07765f4e_kernel
-    tmp1 = round(s77 / 2)
-                 ^^^
-NameError: name 's77' is not defined

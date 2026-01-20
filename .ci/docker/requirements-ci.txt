@@ -394,7 +394,7 @@ cmake==3.31.6
 tlparse==0.4.0
 #Description: required for log parsing
 
-filelock==3.20.1
+filelock==3.20.3
 #Description: required for inductor testing
 
 cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_system != "Darwin"
@@ -412,5 +412,5 @@ tqdm>=4.66.0
 #test that import: benchmarks/dynamo/*
 
 Jinja2==3.1.6
-aiohttp==3.13.2
+aiohttp==3.13.3
 #Description: required for torch.distributed.debug

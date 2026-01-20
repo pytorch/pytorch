@@ -747,3 +747,30 @@ class SavedForBackwardsAOTOutput(AOTOutput):
 
     def expr(self) -> str:
         return f"__saved_for_backwards_{self.idx}"
+
+
+# Note [Activations with no version counter checks in eager]
+# In eager, when a tensor is saved for backward, the autograd engine
+# generally performs version counter checks when grabbing the activation
+# at backward time.
+# One exception is in a custom autograd.Function: if the user stashes a tensor
+# for use in the backward using `ctx.foo = foo`, rather than
+# `ctx.save_for_backward(foo)`, then the autograd engine will not know
+# to perform any checks.
+# In torch.compile, we handle autograd by tracing through it ahead of time,
+# and wrapping the fw + bw graphs into a custom autograd.Function.
+# In order to provide parity with eager around VC checks, though, we need
+# to know which activations had gotten this "no VC checks" treatment in eager,
+# so we can plumb this info into the AOTAutograd runtime,
+# and avoid calling ctx.save_for_backward on these tensors.
+#
+# This dataclass tells us that a given AOTOutput corresponds to:
+# - An activation output from the forward graph
+# - that should *not* have its version counter checked at runtime in the backward.
+#   This is done by stashing this activation on the ctx object directly
+@dataclasses.dataclass(frozen=True)
+class SavedForBackwardsNoVcCheckAOTOutput(AOTOutput):
+    idx: int
+
+    def expr(self) -> str:
+        return f"__saved_for_backwards_no_vc_check_{self.idx}"

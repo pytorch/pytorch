@@ -31,7 +31,6 @@ TritonKernel::TritonKernel(
 
   std::string kernel_name{};
   std::string symbol_name{};
-  bool found_grid = false;
 
   // To prevent vector reallocation and dangling pointers
   size_t num_double_attrs = 0;
@@ -42,6 +41,9 @@ TritonKernel::TritonKernel(
   }
   float_attrs_.reserve(num_double_attrs);
 
+  // Parse only TritonKernel-specific attributes here.
+  // Launch parameters (grid, num_warps, etc.) are parsed by the target-specific
+  // TritonKernelManager via createLaunchParams().
   for (const auto& attr : node_->attributes()) {
     if (attr.name.empty()) {
       attr_ptrs_.emplace_back(std::visit(
@@ -50,10 +52,11 @@ TritonKernel::TritonKernel(
             if constexpr (std::is_same_v<T, None>) {
               return nullptr;
             } else if constexpr (std::is_same_v<T, double>) {
-              // Triton always uses fp32 for floats. See create_specialize_impl
-              // in jit.py. However, due to the Thrift schema, floats are
-              // serialized as doubles here. But, Triton kernels read them as
-              // floats. So, we need to downcast double to float here.
+              // Triton always uses fp32 for floats. See
+              // create_specialize_impl in jit.py. However, due to the
+              // Thrift schema, floats are serialized as doubles here. But,
+              // Triton kernels read them as floats. So, we need to downcast
+              // double to float here.
               float_attrs_.push_back(static_cast<float>(arg));
               return static_cast<void*>(&float_attrs_.back());
             }
@@ -64,39 +67,20 @@ TritonKernel::TritonKernel(
       kernel_name = std::get<std::string>(attr.value);
       size_t last_underscore = kernel_name.find_last_of('_');
       symbol_name = kernel_name.substr(0, last_underscore);
-    } else if (attr.name == "grid") {
-      found_grid = true;
-      auto grid = std::get<std::vector<int64_t>>(attr.value);
-      TORCH_CHECK(grid.size() == 3, "grid must be a 3D vector");
-      launch_params_.grid_dims = GridDims(
-          static_cast<int>(grid[0]),
-          static_cast<int>(grid[1]),
-          static_cast<int>(grid[2]));
-    } else if (attr.name == "num_cpu_threads") {
-      if (const int num_cpu_threads =
-              static_cast<int>(std::get<int64_t>(attr.value));
-          num_cpu_threads >= 0) {
-        launch_params_.num_cpu_threads = num_cpu_threads;
-      }
-    } else if (attr.name == "num_warps") {
-      if (const int num_warps = static_cast<int>(std::get<int64_t>(attr.value));
-          num_warps > 0) {
-        launch_params_.num_warps = num_warps;
-      }
-    } else if (attr.name == "shared_memory_bytes") {
-      if (const int shared_memory_bytes =
-              static_cast<int>(std::get<int64_t>(attr.value));
-          shared_memory_bytes > 0) {
-        launch_params_.shared_memory_bytes = shared_memory_bytes;
-      }
     } else if (attr.name == "output_indices") {
       output_indices_ = std::get<std::vector<int64_t>>(attr.value);
+      kernel_input_params_.output_indices = output_indices_;
+    } else if (attr.name == "kernel_param_names") {
+      kernel_input_params_.kernel_param_names =
+          std::get<std::vector<std::string>>(attr.value);
+    } else if (attr.name == "kernel_param_types") {
+      kernel_input_params_.kernel_param_types =
+          std::get<std::vector<std::string>>(attr.value);
     }
   }
 
   TORCH_CHECK(!kernel_name.empty(), "kernel name not found");
   TORCH_CHECK(!symbol_name.empty(), "symbol_name not found");
-  TORCH_CHECK(found_grid, "grid attribute not found");
   TORCH_CHECK(!output_indices_.empty(), "output_indices attribute not found");
 
   auto kernel_prefix = std::string("data/triton") + "/" + kernel_name;
@@ -115,17 +99,28 @@ TritonKernel::TritonKernel(
     TORCH_CHECK(
         loader_ != nullptr,
         "couldn't find cuda loader -- is this a gpu build?");
-  } else {
+  } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".so")) {
     loader_ = TritonKernelManagerRegistry()->Create(
         at::kCPU,
         symbol_name,
         tmp_dir + kernel_name + ".so",
         tmp_dir + kernel_name + ".launcher.so");
+    TORCH_CHECK(
+        loader_ != nullptr, "couldn't find CPU loader -- is this a cpu build?");
+  } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".bin")) {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kMTIA, symbol_name, tmp_dir + kernel_name + ".bin", "");
+    TORCH_CHECK(
+        loader_ != nullptr,
+        "couldn't find MTIA loader -- is this a mtia build?");
   }
 
   TORCH_CHECK(
       loader_ != nullptr,
       "couldn't find triton kernel loader -- are you trying to run gpu kernels on a cpu build?");
+
+  // Create target-specific launch parameters
+  launch_params_ = loader_->createLaunchParams(node_);
 }
 
 TritonKernel::~TritonKernel() = default;
@@ -136,17 +131,18 @@ void TritonKernel::computeInternal(ExecutionFrame& executionFrame) const {
 
   auto* loader = const_cast<TritonKernelManager*>(loader_.get());
 
-  auto inputs = loader->create_inputs(num_inputs, num_attrs);
+  auto inputs =
+      loader->create_inputs(num_inputs, num_attrs, kernel_input_params_);
 
   for (const auto i : c10::irange(num_inputs)) {
-    inputs->add_arg(input(i, executionFrame).toTensor().data_ptr());
+    inputs->add_tensor_arg(input(i, executionFrame).toTensor());
   }
 
   for (const auto i : c10::irange(num_attrs)) {
     inputs->add_attribute(attr_ptrs_[i]);
   }
 
-  loader->launch(launch_params_, inputs->as_void());
+  loader->launch(*launch_params_, inputs->as_void());
 
   auto& out = output(0, executionFrame);
   if (out.isNone()) {

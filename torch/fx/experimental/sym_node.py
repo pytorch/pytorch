@@ -216,7 +216,7 @@ class SymNode:
                     else self.shape_env.var_to_val[s]
                     for s in self.expr.free_symbols
                 }
-                return self.expr.xreplace(replacements)
+                return int(self.expr.xreplace(replacements))
             # NB: we expect this to raise
             return self.shape_env.size_hint(self.expr)
         return self._hint

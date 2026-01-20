@@ -426,9 +426,14 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
                 my_coord = spec.mesh.get_coordinate()
                 assert my_coord is not None, "current rank not in mesh!"
                 my_coord_on_mesh_dim = my_coord[idx]
-                local_shard = placement._split_tensor(
-                    local_shard, num_chunks, with_padding=False, contiguous=True
-                )[0][my_coord_on_mesh_dim]
+                local_shard = placement._select_split_tensor(
+                    local_shard,
+                    num_chunks,
+                    my_coord_on_mesh_dim,
+                    with_padding=False,
+                    contiguous=True,
+                    clone=False,
+                )
         return local_shard
     elif isinstance(val, (list, tuple)):
         return val.__class__(_partition_val(v, spec) for v in val)

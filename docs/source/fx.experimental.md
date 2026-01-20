@@ -78,6 +78,7 @@ These APIs are experimental and subject to change without notice.
     Specialization
 
     hint_int
+    size_hint
     is_concrete_int
     is_concrete_bool
     is_concrete_float

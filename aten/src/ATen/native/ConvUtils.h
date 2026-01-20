@@ -196,6 +196,15 @@ inline void convolution_shape_check(
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
   check_args(c, dilation, padding.size(), "dilation");
+  for (auto s : stride) {
+      TORCH_CHECK(s > 0, "Stride must be greater than 0 but got ", s);
+  }
+  for (auto d : dilation) {
+      TORCH_CHECK(d > 0, "Dilation must be greater than 0 but got ", d);
+  }
+  for (auto p : padding) {
+      TORCH_CHECK(p >= 0, "Padding must be non-negative but got ", p);
+  }
 
   // Input
   checkDimRange(c, input, 3, 6 /* exclusive */);

@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import functools
 import json
 import random
 import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
+
+
+# Patch ast._splitlines_no_ff with caching to avoid O(n²) re-splitting.
+# get_source_segment() calls _splitlines_no_ff() for every keyword argument,
+# but the same source string is passed repeatedly for the same file.
+if hasattr(ast, "_splitlines_no_ff"):
+    ast._splitlines_no_ff = functools.lru_cache(maxsize=128)(ast._splitlines_no_ff)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

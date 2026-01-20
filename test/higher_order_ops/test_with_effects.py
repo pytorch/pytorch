@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TEST_CUDA,
-    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
@@ -301,7 +300,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res.sum().backward()
 
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(TEST_WITH_ROCM, "triton")
     @unittest.skipIf(not SM80OrLater, "triton")
     @unittest.skipIf(not TEST_CUDA, "triton")
     @skipIfNoDynamoSupport

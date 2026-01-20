@@ -141,7 +141,6 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore [unsupported-operation]
                 return tensor**self.norm_type
         return tensor
 
@@ -152,7 +151,6 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore [unsupported-operation]
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 

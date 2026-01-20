@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpc113kdgd/b5/cb5nq7ruljo74cjhl67cpxortzhdn6mpigvqokumudgyrjyeq5sj.py", line 10, in pallas_fused__to_copy__unsafe_index_add_arange_clamp_mul_sub_e0f127fe_kernel
-    tmp0 = x0
-           ^^
-NameError: name 'x0' is not defined

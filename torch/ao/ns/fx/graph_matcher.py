@@ -482,5 +482,4 @@ of subgraphs."""
     # subgraphs in their order of execution.
     results = collections.OrderedDict(reversed(results.items()))
 
-    # pyrefly: ignore [bad-return]
     return results

@@ -4321,6 +4321,18 @@ def forward(self, tangents_1):
         # Overrides _base and _view_func tensor attributes, so as to avoid the view-replay
         # execution path when reconstructing views.
         class NoViewReplayTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, tensor):
+                kwargs = {
+                    "strides": tensor.stride(),
+                    "storage_offset": tensor.storage_offset(),
+                    "device": tensor.device,
+                    "layout": tensor.layout,
+                    "requires_grad": tensor.requires_grad,
+                    "dtype": tensor.dtype,
+                }
+                return torch.Tensor._make_wrapper_subclass(cls, tensor.shape, **kwargs)
+
             @property
             def _base(self):
                 return None
@@ -4328,6 +4340,11 @@ def forward(self, tangents_1):
             @property
             def _view_func(self):
                 return None
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_dispatch__(func, types, args, kwargs)
 
         # Wraps the outputs that are views of the FX graph 'g' with NoViewReplayTensor,
         # since they are the only ones that will get reconstructed.
@@ -5338,7 +5355,7 @@ class <lambda>(torch.nn.Module):
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
-        """,  # noqa: B950
+""",  # noqa: B950
         )
 
         self.assertExpectedInline(
@@ -5412,7 +5429,7 @@ class <lambda>(torch.nn.Module):
             sum_1,  # PlainAOTOutput(idx=0)
             detach,  # PlainAOTOutput(idx=1)
         )
-        """,  # noqa: B950
+""",  # noqa: B950
         )
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input

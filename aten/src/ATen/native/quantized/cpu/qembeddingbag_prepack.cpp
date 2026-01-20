@@ -401,7 +401,7 @@ Tensor qembeddingbag_byte_prepack_meta(const Tensor& weight) {
   const auto cols_dim = weight.ndimension() - 1;
   const auto& embedding_cols = weight_sizes[cols_dim];
   // Add 8 bytes per column to store FP32 scale and zero_point per row.
-  const auto output_columns = embedding_cols + 2 * sizeof(float);
+  const auto output_columns = embedding_cols + 2 * c10::SymInt(sizeof(float));
 
   // Adjust output dimensions to account for FP32 scale and zero_points.
   auto output_shape = weight_sizes.vec();

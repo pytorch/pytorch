@@ -59,7 +59,7 @@ def fuse_conv_bn(is_qat, conv, bn):
             raise AssertionError(
                 "Only support fusing BatchNorm2d with tracking_running_stats set to True"
             )
-        fused_module_class = fused_module_class_map.get((type(conv)), None)
+        fused_module_class = fused_module_class_map.get(type(conv))
         if fused_module_class is not None:
             return fused_module_class(conv, bn)
         else:
@@ -110,7 +110,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
             raise AssertionError(
                 "Only support fusing BatchNorm2d with tracking_running_stats set to True"
             )
-        fused_module = map_to_fused_module_train.get(type(conv), None)
+        fused_module = map_to_fused_module_train.get(type(conv))
         if fused_module is not None:
             return fused_module(conv, bn, relu)
         else:
@@ -121,7 +121,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
             nn.Conv2d: nni.ConvReLU2d,
             nn.Conv3d: nni.ConvReLU3d,
         }
-        fused_module = map_to_fused_module_eval.get(type(conv), None)
+        fused_module = map_to_fused_module_eval.get(type(conv))
         if fused_module is not None:
             fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
             return fused_module(fused_conv, relu)

@@ -118,7 +118,6 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
                 for idx in sorted(self.input_col[1:], reverse=True):
                     del data[idx]
             else:
-                # pyrefly: ignore [unsupported-operation]
                 data[self.input_col] = res
         else:
             if self.output_col == -1:

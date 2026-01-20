@@ -14,6 +14,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
+from torch._logging import trace_structured
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -710,6 +711,20 @@ class OverlapScheduler:
                 world_size,
                 "fx_collectives_node_runtime_estimation",
             )
+        else:
+            # No benchmarking - log analytical estimations for all collectives
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_collective_benchmarks,
+            )
+
+            all_collective_nodes = [
+                info.start_node for info in self.collective_info.values()
+            ]
+            if all_collective_nodes:
+                _log_collective_benchmarks(
+                    all_collective_nodes,
+                    artifact_name="fx_collectives_analytical_estimation",
+                )
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
@@ -1402,7 +1417,15 @@ def schedule_overlap_bucketing(
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
     """
-    return OverlapScheduler(
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "overlap_scheduling_graph_before",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(False),
+    )
+    ret = OverlapScheduler(
         gm,
         compute_overlap_multipler=compute_overlap_multipler,
         max_in_flight_gb=max_in_flight_gb,
@@ -1418,6 +1441,15 @@ def schedule_overlap_bucketing(
         bucket_exposed_first=bucket_exposed_first,
         enable_fusion_regions=enable_fusion_regions,
     ).run()
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "overlap_scheduling_graph_after",
+            "encoding": "string",
+        },
+        payload_fn=lambda: ret.print_readable(False),
+    )
+    return ret
 
 
 def schedule_overlap_bucketing_from_inductor_configs(

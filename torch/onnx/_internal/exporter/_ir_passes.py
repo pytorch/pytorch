@@ -5,7 +5,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter import _constants
 
 
@@ -76,7 +76,7 @@ def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
                 continue
             dim_name = dim.value
             if dim_name in sorted_rename_mapping:
-                # pyrefly: ignore
+                # pyrefly: ignore [bad-index]
                 new_shape.append(sorted_rename_mapping[dim_name])
                 changed = True
             elif dim_name is not None:

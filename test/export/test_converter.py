@@ -873,7 +873,7 @@ class TestConverter(TestCase):
 
         class MNotIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [torch.int8]
+                return x.dtype == torch.int8
 
         class MTensorIn(torch.nn.Module):
             def forward(self, x: torch.Tensor, x_dict: dict[torch.Tensor, str]):

@@ -213,6 +213,12 @@ class VllmTestRunner(BaseRunner):
             raise ValueError(
                 "missing required TORCH_CUDA_ARCH_LIST, please set TORCH_CUDA_ARCH_LIST env var"
             )
+        # HF_HOME is absolutely needed on CI to avoid rate limit to HF, so explicitly fail
+        # vLLM jobs when it's not set so that we know when it's missing
+        if get_env("CI") and not get_env("HF_HOME"):
+            raise ValueError(
+                "missing required HF_HOME when running on CI, please set HF_HOME env var"
+            )
 
 
 def preprocess_test_in(

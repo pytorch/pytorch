@@ -1382,7 +1382,7 @@ def define_buck_targets(
             ":torch_mobile_deserialize",
             ":torch_mobile_headers",
             ":torch_mobile_observer",
-        ] + ([] if IS_OSS else ["//xplat/folly:molly"]),
+        ],
         exported_deps = [
             ":aten_cpu",
             ":torch_common",
@@ -1697,7 +1697,7 @@ def define_buck_targets(
             ":torch_mobile_headers",
             ":torch_mobile_observer",
             ":torch_mobile_core",
-        ] + ([] if IS_OSS else ["//xplat/folly:molly"]),
+        ],
         exported_deps = [
             ":aten_cpu",
             ":torch_common",

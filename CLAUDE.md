@@ -13,3 +13,58 @@ if __name__ == "__main__":
 ```
 
 To test Tensor equality, use assertEqual.
+
+# Commit messages
+
+Don't commit unless the user explicitly asks you to.
+
+When writing a commit message, don't make a bullet list of the individual
+changes. Instead, if the PR is large, explain the order to review changes
+(e.g., the logical progression), or if it's short just omit the bullet list
+entirely.
+
+Disclose that the PR was authored with Claude.
+
+# Dynamo Config
+
+Use `torch._dynamo.config.patch` for temporarily changing config. It can be used as a decorator on test methods or as a context manager:
+
+```python
+# Good - use patch as decorator on test method
+@torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+def test_my_feature(self):
+    # test code here
+    pass
+
+# Good - use patch as context manager
+with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
+    # test code here
+    pass
+
+# Bad - manual save/restore
+orig = torch._dynamo.config.force_compile_during_fx_trace
+try:
+    torch._dynamo.config.force_compile_during_fx_trace = True
+    # test code here
+finally:
+    torch._dynamo.config.force_compile_during_fx_trace = orig
+```
+
+# Fixing B950 line too long in multi-line string blocks
+
+If B950 line too long triggers on a multi-line string block, you cannot fix it by
+putting # noqa: B950 on that line directly, as that would change the meaning of the
+string, nor can you fix it by line breaking the string (since you need the string
+to stay the same).  Instead, put # noqa: B950 on the same line as the terminating
+triple quote.
+
+Example:
+
+```
+    self.assertExpectedInline(
+        foo(),
+        """
+this line is too long...
+""",  # noqa: B950
+    )
+```

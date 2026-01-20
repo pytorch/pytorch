@@ -361,6 +361,7 @@ class CUTLASSTemplate(CUDATemplate):
         torch.bool: "bool",
         torch.bfloat16: "cutlass::bfloat16_t",
         torch.float8_e4m3fn: "cutlass::float_e4m3_t",
+        torch.float8_e5m2: "cutlass::float_e5m2_t",
     }
 
     _DTYPE_TO_CUTLASS_SPARSE_META = {

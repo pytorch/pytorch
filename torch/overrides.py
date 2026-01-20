@@ -193,6 +193,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.cudnn_convolution_add_relu,
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
+        torch.miopen_ctc_loss,
         torch.empty,
         torch.empty_permuted,
         torch.empty_strided,

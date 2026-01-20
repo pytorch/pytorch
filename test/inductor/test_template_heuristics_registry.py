@@ -6,7 +6,50 @@ from torch._inductor.template_heuristics.registry import (
     get_template_heuristic,
     register_template_heuristic,
 )
+from torch._inductor.template_heuristics.triton import BlackwellGPUGemmConfig
 from torch._inductor.test_case import run_tests, TestCase
+
+
+class TestBlackwellGPUGemmConfig(TestCase):
+    """Tests for BlackwellGPUGemmConfig class."""
+
+    def test_default_values(self):
+        """Test that BlackwellGPUGemmConfig has correct default values."""
+        config = BlackwellGPUGemmConfig(
+            block_m=128,
+            block_n=256,
+            block_k=64,
+            num_stages=3,
+            num_warps=8,
+        )
+        # Verify inherited GemmConfig fields
+        self.assertEqual(config.block_m, 128)
+        self.assertEqual(config.block_n, 256)
+        self.assertEqual(config.block_k, 64)
+        self.assertEqual(config.num_stages, 3)
+        self.assertEqual(config.num_warps, 8)
+
+        # Verify new BlackwellGPUGemmConfig-specific fields with default values
+        self.assertFalse(config.epilogue_subtile)  # default=False
+        self.assertTrue(config.warp_specialize)  # default=True
+        self.assertTrue(config.flatten)  # default=True
+
+    def test_custom_values(self):
+        """Test that BlackwellGPUGemmConfig accepts custom values for new fields."""
+        config = BlackwellGPUGemmConfig(
+            block_m=64,
+            block_n=128,
+            block_k=32,
+            num_stages=2,
+            num_warps=4,
+            epilogue_subtile=True,
+            warp_specialize=False,
+            flatten=False,
+        )
+        # Verify custom values are set correctly
+        self.assertTrue(config.epilogue_subtile)
+        self.assertFalse(config.warp_specialize)
+        self.assertFalse(config.flatten)
 
 
 class TestTemplateHeuristicsRegistry(TestCase):

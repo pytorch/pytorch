@@ -643,7 +643,6 @@ class InductorChoices:
 
         type_score = node1.is_reduction() == node2.is_reduction() and memory_score > 0
 
-        # pyrefly: ignore [bad-return]
         return FusionScore(
             template_score,
             type_score,

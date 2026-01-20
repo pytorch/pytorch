@@ -208,10 +208,10 @@ code is not called in the compiled region.
 ```{code-cell}
 @torch.compile(fullgraph=True)
 def f(x):
-   y = x ** 2  / 2
-   torch.save(y, "foo.pt")
-   z = y ** 3 / 6
-   return z
+    y = x ** 2  / 2
+    torch.save(y, "foo.pt")
+    z = y ** 3 / 6
+    return z
 
 x = torch.randn(3)
 try:
@@ -222,20 +222,20 @@ except Exception as e:
 
 ```{code-cell}
 def f_rewritten(x):
-   y = g(x)
-   torch.save(y, "foo.pt")
-   z = h(y)
-   return z
+    y = g(x)
+    torch.save(y, "foo.pt")
+    z = h(y)
+    return z
 
 @torch.compile(fullgraph=True)
 def g(x):
-   y = x ** 2  / 2
-   return y
+    y = x ** 2  / 2
+    return y
 
 @torch.compile(fullgraph=True)
 def h(y):
-   z = y ** 3 / 6
-   return z
+    z = y ** 3 / 6
+    return z
 
 f_rewritten(x)
 ```
@@ -245,3 +245,48 @@ f_rewritten(x)
 import os
 os.remove("foo.pt")
 ```
+
+(programming_model.fullgraph_true.skipping_functions)=
+
+If you have a problematic function that you don't need to run under compilation, then
+consider using `torch.compiler.is_compiling()` to skip the problematic function.
+
+```{code-cell}
+@torch.compile(fullgraph=True)
+def f(x):
+    y = x ** 2  / 2
+    if not torch.compiler.is_compiling():
+        torch.save(y, "foo.pt")
+    z = y ** 3 / 6
+    return z
+
+x = torch.randn(3)
+f(x)  # torch.save is not called
+```
+
+If you have a function that is called in many places and you are fine with `torch.compile`
+unconditionally skipping it, then you can add it to `torch._dynamo.config.ignore_logging_functions`.
+
+```{code-cell}
+def bad_fn(y):
+    torch.save(y, "foo.pt")
+
+torch._dynamo.config.ignore_logging_functions.add(bad_fn)
+
+@torch.compile(fullgraph=True)
+def f(x):
+    y = x ** 2  / 2
+    bad_fn()
+    z = y ** 3 / 6
+    return z
+
+x = torch.randn(3)
+f(x)  # torch.save is not called
+```
+
+Note that there are some restrictions to the kinds of functions that can be added to `ignore_logging_functions`.
+In particular:
+- The function can take any arguments, but MUST return `None`.
+- Functions should either be module-level functions, `logging.Logger.<method>` (ignores that method for all `logging.Logger` instances) or `logger_obj.<method>` (ignores that method only for the specific `logger_obj` instance).
+
+Other functions may or may not be ignored due to implementation details. If you want to ignore a function that `ignore_logging_functions` is failing to ignore, please submit an issue.

@@ -53,14 +53,16 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     markDynamoStrictTest,
+    MI200_ARCH,
+    MI300_ARCH,
     NestedTensorTestCase,
     parametrize,
     run_tests,
     serialTest,
+    skipIfRocmArch,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
-    TEST_WITH_ROCM,
     xfailIfTorchDynamo,
     xfailIfWindows,
 )
@@ -1236,6 +1238,56 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         expected_argmin = torch.tensor([0, 0, 0], dtype=torch.long, device=device)
 
         self.assertEqual(result_argmin, expected_argmin)
+
+    @dtypes(torch.int64)
+    def test_jagged_max_extreme_values(self, device, dtype):
+        # Values beyond 2^53 expose an issue where finite padding sentinels
+        # (1 << 53) - 1 would be incorrectly selected as the max/min
+        large_neg = -(2**60)
+
+        t1 = torch.tensor(
+            [large_neg, large_neg + 1, large_neg + 2], dtype=dtype, device=device
+        )
+        t2 = torch.tensor([large_neg, large_neg + 5], dtype=dtype, device=device)
+        t3 = torch.tensor(
+            [large_neg, large_neg + 10, large_neg + 3, large_neg + 7],
+            dtype=dtype,
+            device=device,
+        )
+
+        x = torch.nested.nested_tensor([t1, t2, t3], layout=torch.jagged)
+
+        result_max = x.max(dim=1)
+        expected_max = torch.tensor(
+            [large_neg + 2, large_neg + 5, large_neg + 10], dtype=dtype, device=device
+        )
+
+        self.assertEqual(result_max.values, expected_max)
+
+    @dtypes(torch.int64)
+    def test_jagged_min_extreme_values(self, device, dtype):
+        # Values beyond 2^53 expose an issue where finite padding sentinels
+        # (1 << 53) - 1 would be incorrectly selected as the max/min
+        large_pos = 2**60
+
+        t1 = torch.tensor(
+            [large_pos, large_pos - 1, large_pos - 2], dtype=dtype, device=device
+        )
+        t2 = torch.tensor([large_pos, large_pos - 5], dtype=dtype, device=device)
+        t3 = torch.tensor(
+            [large_pos, large_pos - 10, large_pos - 3, large_pos - 7],
+            dtype=dtype,
+            device=device,
+        )
+
+        x = torch.nested.nested_tensor([t1, t2, t3], layout=torch.jagged)
+
+        result_min = x.min(dim=1)
+        expected_min = torch.tensor(
+            [large_pos - 2, large_pos - 5, large_pos - 10], dtype=dtype, device=device
+        )
+
+        self.assertEqual(result_min.values, expected_min)
 
     @skipMeta
     @torch.inference_mode()
@@ -6571,11 +6623,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
-    # This can't happen in the opinfo tests due to subprocess creation
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "In ROCm, kernel asserts are disabled due to performance overhead",
-    )
     def test_index_put_error(self, device):
         import subprocess
 
@@ -6729,12 +6776,7 @@ torch.cuda.synchronize()
         check_results(fn, compiled_fn, generate_inp(20))
         self.assertEqual(compile_counter.frame_count, frame_count_2)
 
-    # Note 1: Math fallback doesn't work with bfloat16 on CUDA
-    # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "ROCm doesn't support flash attention or mem_efficient attention for NT",
-    )
+    # Note: Math fallback doesn't work with bfloat16 on CUDA
     @tf32_on_and_off(0.005)
     @dtypes(
         *(
@@ -7004,9 +7046,7 @@ torch.cuda.synchronize()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    # Guarding with sqrt() doesn't work on ROCm?
     @xfailIfWindows
-    @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(
         *(
@@ -7193,9 +7233,9 @@ torch.cuda.synchronize()
     @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    # mha_varlen_fwd not supported on ROCm
-    @skipCUDAIfRocm
     @onlyCUDA
+    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -7225,8 +7265,9 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @onlyCUDA
+    # flash_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @skipIfTorchDynamo()
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
@@ -7308,7 +7349,6 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
     def test_sdpa_flop_counter(self, device):
@@ -7730,8 +7770,9 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
+    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
         nt = random_nt_from_dims(
@@ -7758,7 +7799,6 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -7791,7 +7831,6 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_dynamic_min_seq_len(self, device, dtype):
         # shape (B, *, D)
         # min seq len: 7
@@ -7824,7 +7863,6 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -7951,7 +7989,6 @@ torch.cuda.synchronize()
     @torch._dynamo.utils.disable_cache_limit()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
@@ -8053,7 +8090,6 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
         self, device, dtype
     ):
@@ -8464,7 +8500,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="SymIntArrayRef expected to contain only concrete integers",
-        op_match_fn=lambda device, op: (op.full_name in {"mean"}),
+        op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
             and "normal dim reduction" not in sample.name
@@ -8499,7 +8535,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="cannot view shape",
-        op_match_fn=lambda device, op: (op.full_name in {"unflatten"}),
+        op_match_fn=lambda device, op: (op.full_name == "unflatten"),
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
     ),

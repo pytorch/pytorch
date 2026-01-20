@@ -32,10 +32,8 @@ if TYPE_CHECKING:
     import onnxscript
     import onnxscript._framework_apis.torch_2_9 as onnxscript_apis
 
-    onnxscript_ir = onnx_ir
-
 else:
     onnx = _LazyModule("onnx")
+    onnx_ir = _LazyModule("onnx_ir")
     onnxscript = _LazyModule("onnxscript")
-    onnxscript_ir = _LazyModule("onnx_ir")
     onnxscript_apis = _LazyModule("onnxscript._framework_apis.torch_2_9")

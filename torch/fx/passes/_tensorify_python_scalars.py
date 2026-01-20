@@ -246,7 +246,7 @@ def tensorify_python_scalars(
             # Specialize all dimensions that contain symfloats. Here's
             # an example test that requires this:
             # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
-            # pyrefly: ignore [missing-attribute]
+
             val = node.meta.get("val")
             if isinstance(val, FakeTensor):
                 for dim in val.shape:
@@ -265,17 +265,15 @@ def tensorify_python_scalars(
                                 should_restart = True
 
             # Look for functions to convert
-            # pyrefly: ignore [missing-attribute]
+
             if node.op == "call_function" and (
-                # pyrefly: ignore [missing-attribute]
                 replacement_op := SUPPORTED_OPS.get(node.target)
             ):
                 args: list[Any] = []
                 transform = False
-                # pyrefly: ignore [missing-attribute]
+
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
-                # pyrefly: ignore [missing-attribute]
                 for a in node.args:
                     if (
                         isinstance(a, fx.Node)
@@ -312,7 +310,6 @@ def tensorify_python_scalars(
                 if transform:
                     replacement_proxy = replacement_op(*args)
 
-                    # pyrefly: ignore [missing-attribute]
                     if compute_dtype != node.meta["val"].dtype:
                         replacement_proxy = (
                             torch.ops.prims.convert_element_type.default(
@@ -321,9 +318,8 @@ def tensorify_python_scalars(
                             )
                         )
 
-                    # pyrefly: ignore [missing-attribute]
                     node.replace_all_uses_with(replacement_proxy.node)
-                    # pyrefly: ignore [bad-argument-type]
+
                     graph.erase_node(node)
 
                     metrics_context = get_metrics_context()
@@ -332,16 +328,14 @@ def tensorify_python_scalars(
                             "tensorify_float_success", True, overwrite=True
                         )
             else:
-                # pyrefly: ignore [missing-attribute]
                 for a in node.args:
                     if (
                         isinstance(a, fx.Node)
                         and "val" in a.meta
                         and isinstance(zf := a.meta["val"], torch.SymFloat)
                     ):
-                        # pyrefly: ignore [missing-attribute]
                         failed_tensorify_ops.update(str(node.target))
-                        # pyrefly: ignore [missing-attribute]
+
                         log.info("Failed to tensorify %s", str(node.target))
 
     # Now do one more pass that specializes all symfloats we didn't manage

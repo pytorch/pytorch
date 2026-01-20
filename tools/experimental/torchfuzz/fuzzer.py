@@ -262,7 +262,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--template",
-        choices=["default", "dtensor", "unbacked"],
+        choices=["default", "dtensor", "dtensor_placements", "unbacked"],
         default="default",
         help="Template to use for code generation (default: default)",
     )

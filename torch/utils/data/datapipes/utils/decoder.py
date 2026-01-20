@@ -73,7 +73,7 @@ def basichandlers(extension: str, data):
     if extension in ["pyd", "pickle"]:
         return pickle.loads(data)
 
-    if extension in ["pt"]:
+    if extension == "pt":
         stream = io.BytesIO(data)
         return torch.load(stream)
 

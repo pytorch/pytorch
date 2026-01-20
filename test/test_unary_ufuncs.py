@@ -283,7 +283,7 @@ class TestUnaryUfuncs(TestCase):
     @ops(reference_filtered_ops)
     @slowTestIf(IS_WINDOWS)
     def test_reference_numerics_small(self, device, dtype, op):
-        if dtype in (torch.bool,):
+        if dtype == torch.bool:
             raise self.skipTest("bool has no small values")
 
         tensors = generate_elementwise_unary_small_value_tensors(

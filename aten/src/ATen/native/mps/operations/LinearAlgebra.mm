@@ -24,6 +24,7 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/eye.h>
 #include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
@@ -33,6 +34,7 @@
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_native.h>
+#include <ATen/ops/matmul.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/slice.h>
@@ -1405,6 +1407,36 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   return self;
 }
 
+static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, bool upper) {
+  using namespace mps;
+  TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
+  TORCH_CHECK(result.scalar_type() == kFloat, "cholesky_inverse: MPS only supports float type!");
+
+  infos.zero_();
+  if (result.numel() == 0) {
+    return result;
+  }
+  auto cholesky = upper ? result.triu().clone() : result.tril().clone();
+  cholesky = cholesky.contiguous();
+
+  auto n = result.size(-1);
+  auto identity = at::eye(n, result.options()).expand_as(result).contiguous();
+  auto temp = at::empty(result.sizes(), result.options());
+  linalg_solve_triangular_mps_impl(cholesky,
+                                   identity,
+                                   upper,
+                                   /*transpose=*/false,
+                                   /*left=*/true,
+                                   /*unitriangular=*/false,
+                                   temp);
+  if (upper) {
+    result.copy_(at::matmul(temp, temp.mT()));
+  } else {
+    result.copy_(at::matmul(temp.mT(), temp));
+  }
+  return result;
+}
+
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
@@ -1632,5 +1664,6 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
 REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
+REGISTER_DISPATCH(cholesky_inverse_stub, mps::cholesky_inverse_kernel_impl_mps);
 
 } // namespace at::native

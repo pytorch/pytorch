@@ -1,7 +1,10 @@
 # Owner(s): ["module: intel"]
 
+import collections
 import ctypes
 import gc
+import json
+import random
 import re
 import subprocess
 import sys
@@ -23,6 +26,7 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_LINUX,
     IS_WINDOWS,
+    IS_X86,
     run_tests,
     serialTest,
     suppress_warnings,
@@ -140,6 +144,20 @@ class TestXpu(TestCase):
             len(str(device_properties.uuid)), 36
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
+
+    def test_get_device_capability(self):
+        device_capability = torch.xpu.get_device_capability()
+        acc_capability = torch.accelerator.get_device_capability()
+        supported_dtypes = acc_capability["supported_dtypes"]
+        self.assertIn(torch.bool, supported_dtypes)
+        self.assertIn(torch.int, supported_dtypes)
+        self.assertIn(torch.float, supported_dtypes)
+        if device_capability["has_fp16"]:
+            self.assertIn(torch.float16, supported_dtypes)
+        if device_capability["has_fp64"]:
+            self.assertIn(torch.double, supported_dtypes)
+        if torch.xpu.is_bf16_supported(including_emulation=True):
+            self.assertIn(torch.bfloat16, supported_dtypes)
 
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
@@ -440,6 +458,28 @@ if __name__ == "__main__":
             torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
 
     @serialTest()
+    def test_1mb_allocation_uses_small_block(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        prev_allocated = torch.xpu.memory_allocated()
+        prev_reserved = torch.xpu.memory_reserved()
+
+        # Allocate a 1MB float32 tensor
+        one_mb = 1024 * 1024
+        a = torch.ones(one_mb // 4, device="xpu")
+
+        b = a.clone()
+        for _ in range(5):
+            b = b.clone() + 1
+
+        torch.xpu.synchronize()
+        current_allocated = torch.xpu.memory_allocated()
+        current_reserved = torch.xpu.memory_reserved()
+        # Two live tensors remain (a and b), each 1MB
+        self.assertEqual(current_allocated, prev_allocated + 2 * 1024 * 1024)
+        self.assertEqual(current_reserved, prev_reserved + 4 * 1024 * 1024)  # 4MB
+
+    @serialTest()
     def test_set_per_process_memory_fraction(self):
         gc.collect()
         torch.xpu.empty_cache()
@@ -580,6 +620,372 @@ if __name__ == "__main__":
                     torch.xpu.can_device_access_peer(device, peer),
                     torch.xpu.can_device_access_peer(peer, device),
                 )
+
+    @serialTest()
+    def test_memory_snapshot(self):
+        def _test_memory_stats_generator(N=35):
+            m0 = torch.xpu.memory_allocated()
+
+            def alloc(*size):
+                return torch.empty(*size, device="xpu")
+
+            yield
+
+            tensors1 = [alloc(1), alloc(10, 20), alloc(200, 300, 2000)]
+            m1 = torch.xpu.memory_allocated()
+            yield
+
+            tensors2 = []
+
+            for i in range(1, int(N / 2) + 1):
+                # small ones
+                tensors2.append(alloc(i, i * 4))
+                yield
+
+            for i in range(5, int(N / 2) + 5):
+                # large ones
+                tensors2.append(alloc(i, i * 7, i * 9, i * 11))
+                yield
+
+            tensors2.append(alloc(0, 0, 0))
+            yield
+
+            permute = []
+            for i in torch.randperm(len(tensors2)):
+                permute.append(tensors2[i])
+                yield
+
+            del tensors2
+            yield
+            tensors2 = permute
+            yield
+            del permute
+            yield
+
+            for i in range(int(N / 2)):
+                del tensors2[i]
+                yield
+
+            for i in range(2, int(2 * N / 3) + 2):
+                tensors2.append(alloc(i, i * 3, i * 8))
+                yield
+
+            del tensors2
+            self.assertEqual(torch.xpu.memory_allocated(), m1)
+            yield True
+
+            del tensors1
+            self.assertEqual(torch.xpu.memory_allocated(), m0)
+
+        def _check_memory_stat_consistency():
+            snapshot = torch.xpu.memory_snapshot()
+
+            expected_each_device = collections.defaultdict(
+                lambda: collections.defaultdict(int)
+            )
+
+            for segment in snapshot:
+                expandable = segment["is_expandable"]
+                expected = expected_each_device[segment["device"]]
+                pool_str = segment["segment_type"] + "_pool"
+
+                if not expandable:
+                    expected["segment.all.current"] += 1
+                    expected[f"segment.{pool_str}.current"] += 1
+
+                expected["allocated_bytes.all.current"] += segment["allocated_size"]
+                expected[f"allocated_bytes.{pool_str}.current"] += segment[
+                    "allocated_size"
+                ]
+
+                expected["reserved_bytes.all.current"] += segment["total_size"]
+                expected[f"reserved_bytes.{pool_str}.current"] += segment["total_size"]
+
+                expected["active_bytes.all.current"] += segment["active_size"]
+                expected[f"active_bytes.{pool_str}.current"] += segment["active_size"]
+
+                expected["requested_bytes.all.current"] += segment["requested_size"]
+                expected[f"requested_bytes.{pool_str}.current"] += segment[
+                    "requested_size"
+                ]
+
+                sum_requested = 0
+                is_split = len(segment["blocks"]) > 1
+                for block in segment["blocks"]:
+                    if block["state"] == "active_allocated":
+                        expected["allocation.all.current"] += 1
+                        expected[f"allocation.{pool_str}.current"] += 1
+
+                    if block["state"].startswith("active_"):
+                        sum_requested += block["requested_size"]
+                        expected["active.all.current"] += 1
+                        expected[f"active.{pool_str}.current"] += 1
+
+                    if block["state"] == "inactive" and is_split and not expandable:
+                        expected["inactive_split.all.current"] += 1
+                        expected[f"inactive_split.{pool_str}.current"] += 1
+                        expected["inactive_split_bytes.all.current"] += block["size"]
+                        expected[f"inactive_split_bytes.{pool_str}.current"] += block[
+                            "size"
+                        ]
+
+                self.assertEqual(sum_requested, segment["requested_size"])
+
+            for device, expected in expected_each_device.items():
+                stats = torch.xpu.memory_stats(device)
+                for k, v in expected.items():
+                    self.assertEqual(v, stats[k])
+
+        gc.collect()
+        torch.xpu.empty_cache()
+        for _ in _test_memory_stats_generator():
+            _check_memory_stat_consistency()
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_direct_traceback(self):
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+
+        c = gather_traceback(True, True, True)
+        (r,) = symbolize_tracebacks([c])
+        r = str(r)
+        self.assertTrue("test_xpu.py" in r)
+        self.assertTrue("unwind" in r)
+
+    def test_memory_snapshot_with_python(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="python")
+            # Make x the second block in a segment
+            torch.rand(2 * 311, 411, device="xpu")
+            unused = torch.rand(310, 410, device="xpu")
+            x = torch.rand(311, 411, device="xpu")
+
+            # Allocate many 512B tensors to fill a segment and test history merging.
+            tensors = [torch.rand(128, device="xpu") for _ in range(1000)]
+            while tensors:
+                del tensors[random.randint(0, len(tensors) - 1)]
+
+            torch.rand(128 * 5, device="xpu")
+
+            ss = torch._C._xpu_memorySnapshot(None)
+            found_it = False
+            for seg in ss["segments"]:
+                self.assertTrue("frames" in seg)
+                for b in seg["blocks"]:
+                    # Look for x by size
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertTrue("test_xpu" in b["frames"][0]["filename"])
+                        found_it = True
+                        self.assertEqual(x.untyped_storage().data_ptr(), b["address"])
+            self.assertTrue(found_it)
+
+            del unused
+            del x
+            gc.collect()
+            torch.xpu.empty_cache()
+            ss = torch._C._xpu_memorySnapshot(None)
+            self.assertTrue(
+                ss["device_traces"][0][-1]["action"]
+                in ("segment_free", "segment_unmap")
+            )
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_memory_snapshot_with_cpp(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="all")
+            _ = torch.rand(311, 411, device="xpu")
+
+            ss = torch.xpu.memory.memory_snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg["blocks"]:
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertTrue("::rand" in str(b["frames"]))
+                        found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_memory_plots_free_stack(self):
+        for context in ["alloc", "all", "state"]:
+            try:
+                gc.collect()
+                torch.xpu.memory.empty_cache()
+                torch.xpu.memory._record_memory_history(context=context)
+                x = None
+
+                def thealloc():
+                    nonlocal x
+                    x = torch.rand(3, 4, device="xpu")
+
+                def thefree():
+                    nonlocal x
+                    del x
+
+                thealloc()
+                thefree()
+                ss = json.dumps(torch.xpu.memory._snapshot())
+                self.assertEqual(("thefree" in ss), (context == "all"))
+                self.assertEqual(("thealloc" in ss), (context != "state"))
+            finally:
+                torch.xpu.memory._record_memory_history(None)
+
+    def test_memory_snapshot_script(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="python")
+
+            @torch.jit.script
+            def foo():
+                return torch.rand(311, 411, device="xpu")
+
+            _ = foo()
+
+            ss = torch.xpu.memory.memory_snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg["blocks"]:
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertEqual(b["frames"][0]["name"], "foo")
+                        found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
+
+    def collect_frames(
+        self, augmented_snapshot, collect_device_traces=True, collect_segments=True
+    ):
+        """Collects all frames that has node metadata from a memory snapshot."""
+        # Collect all frames with FX metadata
+        fx_frames = []
+
+        # Check device traces for FX debug fields
+        if collect_device_traces:
+            for trace_list in augmented_snapshot.get("device_traces", []):
+                for trace_entry in trace_list:
+                    if not isinstance(trace_entry, dict):
+                        continue
+                    for frame in trace_entry.get("frames", []):
+                        if not isinstance(frame, dict):
+                            continue
+                        if "fx_node_op" in frame or "fx_node_name" in frame:
+                            fx_frames.append(frame)
+
+        # Check segments/blocks for FX debug fields
+        if collect_segments:
+            for segment in augmented_snapshot.get("segments", []):
+                for block in segment.get("blocks", []):
+                    for frame in block.get("frames", []):
+                        if not isinstance(frame, dict):
+                            continue
+                        if "fx_node_op" in frame or "fx_node_name" in frame:
+                            fx_frames.append(frame)
+        return fx_frames
+
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_fx_memory_profiler_augmentation(self):
+        """Test that memory snapshots are augmented with FX debug information."""
+
+        class MLPModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch.manual_seed(5)
+                self.net1 = torch.nn.Linear(10, 16, bias=True, device="xpu")
+                self.relu = torch.nn.ReLU()
+                self.net2 = torch.nn.Linear(16, 10, bias=True, device="xpu")
+
+            def forward(self, x):
+                a = self.net1(x)
+                b = self.relu(a)
+                c = self.net2(b)
+                return c
+
+        class MLPModule2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch.manual_seed(5)
+                self.net1 = torch.nn.Linear(10, 16, bias=True, device="xpu")
+                self.relu = torch.nn.ReLU()
+                self.net2 = torch.nn.Linear(16, 10, bias=True, device="xpu")
+
+            def forward(self, x):
+                d = self.net1(x)
+                e = self.relu(d)
+                f = self.net2(e)
+                return f
+
+        if self.expandable_segments:
+            self.skipTest(
+                "Requires driver update to fix oneDNN primitive operations when using expandable segments."
+            )
+        mod = MLPModule()
+        gc.collect()
+        torch.xpu.memory.empty_cache()
+        torch.xpu.memory._record_memory_history()
+        compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+        _ = compiled(torch.randn(10, 10, device="xpu"))
+        augmented_snapshot = torch.xpu.memory._snapshot(augment_with_fx_traces=True)
+        torch.xpu.memory._record_memory_history(enabled=None, clear_history=True)
+        gc.collect()
+        torch.xpu.empty_cache()
+
+        fx_frames = self.collect_frames(augmented_snapshot)
+        self.assertGreater(len(fx_frames), 2)
+
+        for frame in fx_frames:
+            # Every FX frame should have both node_op and node_name
+            self.assertIn("fx_node_op", frame)
+            self.assertIn("fx_node_name", frame)
+            self.assertIn("fx_node_target", frame)
+            self.assertIn("fx_original_trace", frame)
+
+            self.assertIn(frame["fx_node_name"], ["addmm", "relu", "addmm_1"])
+            fx_node_name = frame["fx_node_name"]
+            if fx_node_name == "addmm":
+                self.assertIn("a = self.net1(x)", frame["fx_original_trace"])
+            elif fx_node_name == "addmm_1":
+                self.assertIn("c = self.net2(b)", frame["fx_original_trace"])
+            elif fx_node_name == "relu":
+                self.assertIn("b = self.relu(a)", frame["fx_original_trace"])
+
+        # Test that when we have two graphs with the same src_code, they're not hashed
+        # to the same metadata
+        mod = MLPModule2()
+        torch.xpu.memory._record_memory_history()
+        compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+        _ = compiled(torch.randn(10, 10, device="xpu"))
+        augmented_snapshot = torch.xpu.memory._snapshot(augment_with_fx_traces=True)
+        torch.xpu.memory._record_memory_history(enabled=None, clear_history=True)
+
+        # avoid collecting segments from previous run for unit test purpose
+        fx_frames = self.collect_frames(augmented_snapshot, collect_segments=False)
+        self.assertGreater(len(fx_frames), 0)
+
+        for frame in fx_frames:
+            # Every FX frame should have both node_op and node_name
+            self.assertIn("fx_node_op", frame)
+            self.assertIn("fx_node_name", frame)
+            self.assertIn("fx_node_target", frame)
+            self.assertIn("fx_original_trace", frame)
+
+            self.assertIn(frame["fx_node_name"], ["addmm", "relu", "addmm_1"])
+            fx_node_name = frame["fx_node_name"]
+            if fx_node_name == "addmm":
+                self.assertIn("d = self.net1(x)", frame["fx_original_trace"])
+            elif fx_node_name == "addmm_1":
+                self.assertIn("f = self.net2(e)", frame["fx_original_trace"])
+            elif fx_node_name == "relu":
+                self.assertIn("e = self.relu(d)", frame["fx_original_trace"])
 
     def get_dummy_allocator(self, check_vars):
         dummy_allocator_source_vars = """

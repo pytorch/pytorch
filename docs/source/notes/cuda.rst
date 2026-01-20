@@ -508,6 +508,9 @@ Available options:
   ``cudaMallocAsync`` requires CUDA 11.4 or newer. The default is ``native``.
   ``backend`` applies to all devices used by the process, and can't be
   specified on a per-device basis.
+* ``large_segment_size_mb`` the native allocator uses small and large blocks
+  to manage allocated memory. This setting is used to configure the size of
+  the large block. The default value is 20 MB.
 * ``max_split_size_mb`` prevents the native allocator
   from splitting blocks larger than this size (in MB). This can reduce
   fragmentation and may allow some borderline workloads to complete without

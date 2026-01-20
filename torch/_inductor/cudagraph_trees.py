@@ -118,6 +118,31 @@ else:
 log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 
+def format_inputs_log(inputs: list[Any]) -> str:
+    def format_item(i: int, inp: Any) -> str:
+        if isinstance(inp, torch.Tensor):
+            return (
+                f"[{i}]: Tensor(size={list(inp.size())}, stride={inp.stride()}, "
+                f"dtype={inp.dtype}, data_ptr=0x{inp.data_ptr():X})"
+            )
+        elif inp is None:
+            return f"[{i}]: None"
+        else:
+            return f"[{i}]: {type(inp).__name__}({inp})"
+
+    n = len(inputs)
+    if n == 0:
+        return "[]"
+
+    # Only display the first 10 inputs if the input list is too long
+    max_items = 10
+    parts = [format_item(i, inp) for i, inp in enumerate(inputs[:max_items])]
+    if n > max_items:
+        parts.append(f"... ({n - max_items} more items)")
+
+    return ", ".join(parts)
+
+
 from . import config
 
 
@@ -306,6 +331,11 @@ def mark_step_begin() -> None:
 def reset_cudagraph_trees() -> None:
     "Clear all cudagraph trees"
     # see shutdown below for why this is necessary
+    # Note: get_obj may fail if called from a thread that wasn't spawned by
+    # autograd (e.g., test threads). In that case, there's nothing to reset.
+    if not torch._C._is_key_in_tls("tree_manager_containers"):
+        # TLS not set up for this thread, nothing to reset
+        return
     container_dict = get_obj(local, "tree_manager_containers")
     locks_dict = get_obj(local, "tree_manager_locks")
     for device, lock in locks_dict.items():
@@ -390,9 +420,9 @@ def cudagraphify_impl(
             return fn(inputs)
 
         if int_key is None:
-            log.info("recording cudagraph tree for graph without symints")
+            log.info("Recording cudagraph tree for graph without symints")
         else:
-            log.info("recording cudagraph tree for symint key %s", int_key)
+            log.info("Recording cudagraph tree for symint key %s", int_key)
 
         if not has_warn:
             has_warn = maybe_warning_due_to_dynamic_shape(fn_cache, int_key)
@@ -409,7 +439,7 @@ def cudagraphify_impl(
         fn = align_inputs_from_check_idxs(
             fn, inputs_to_check=check_input_idxs, mutated_input_idxs=mutated_input_idxs
         )
-        # pyrefly: ignore [unsupported-operation]
+
         fn_cache[int_key] = fn
 
         return out
@@ -930,7 +960,6 @@ class CUDAGraphNode:
             return None
 
         self.static_input_data_ptrs: InputList[Optional[int]] = [
-            # pyrefly: ignore [bad-argument-type]
             maybe_get_static_data_ptr(i, inputs, self.static_input_idxs)
             for i in range(len(inputs))
         ]
@@ -977,10 +1006,10 @@ class CUDAGraphNode:
             self.expected_dead_indices_before_graph = different_indices
 
         rng_states = [inp for inp in inputs if isinstance(inp, torch.Generator)]
-        # pyrefly: ignore [bad-argument-type]
+
         recording_inputs = self._allocate_and_copy_recording_inputs(inputs)
         # recording inputs will copy over memory, so we can free non recording inputs
-        # pyrefly: ignore [missing-attribute]
+
         inputs.clear()
         del inputs
 
@@ -1334,7 +1363,7 @@ class CUDAGraphNode:
             )
 
             ref = static_input_persistent_storage_ptrs.get(
-                o.untyped_storage().data_ptr(), None
+                o.untyped_storage().data_ptr()
             )
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
@@ -1698,7 +1727,7 @@ class CUDAGraphNode:
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
                     assert isinstance(inp, (int, torch.Generator))
-                    # pyrefly: ignore [bad-argument-type]
+
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!
@@ -2302,9 +2331,11 @@ class CUDAGraphTreeManager:
         ):
             graph_id = self.new_graph_id()
             log.debug(
-                "Recording function %d of graph recording id %d",
+                "Recording function %d (%s) of graph recording id %d, inputs: %s",
                 function_id.id,
+                self.get_func_name(function_id),
                 graph_id.id,
+                format_inputs_log(new_inputs),
             )
             torch.cuda.synchronize()
             node = CUDAGraphNode(
@@ -2343,12 +2374,14 @@ class CUDAGraphTreeManager:
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
         already_warm = function_id in self.warmed_up_functions
+        func_name = self.get_func_name(function_id)
         if not already_warm:
-            log.debug("Running warmup of function %d", function_id.id)
+            log.debug("Running warmup of function %d (%s)", function_id.id, func_name)
         else:
             log.debug(
-                "Running eager of function %d because ancestor needed to warm up",
+                "Running eager of function %d (%s) because ancestor needed to warm up",
                 function_id.id,
+                func_name,
             )
         self.warmed_up_functions.add(function_id)
         node = CUDAWarmupNode(
@@ -2372,6 +2405,9 @@ class CUDAGraphTreeManager:
 
     def new_func_id(self) -> FunctionID:
         return FunctionID(next(self.func_counter))
+
+    def get_func_name(self, function_id: FunctionID) -> str:
+        return getattr(self.ids_to_funcs[function_id].model, "__name__", "unknown")
 
     def add_function(
         self,

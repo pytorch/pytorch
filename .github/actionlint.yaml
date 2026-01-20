@@ -29,6 +29,7 @@ self-hosted-runner:
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
+    - linux.c7i.2xlarge
     # Pytorch/pytorch AWS Linux Runners on Linux Foundation account
     - lf.linux.large
     - lf.linux.2xlarge
@@ -40,6 +41,7 @@ self-hosted-runner:
     - lf.linux.8xlarge.nvidia.gpu
     - lf.linux.16xlarge.nvidia.gpu
     - lf.linux.g5.4xlarge.nvidia.gpu
+    - lf.linux.c7i.2xlarge
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
     # Organization wide AWS Windows runners

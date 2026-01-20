@@ -25,8 +25,8 @@ from torch._higher_order_ops.utils import (
     filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -308,14 +308,14 @@ class CondAutogradOp(torch.autograd.Function):
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
-        save_tensors_and_symints_for_backward(ctx, operands)
+        save_values_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, true_fn, false_fn, operands)
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        operands = saved_tensors_and_symints(ctx)
+        operands = saved_values(ctx)
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.

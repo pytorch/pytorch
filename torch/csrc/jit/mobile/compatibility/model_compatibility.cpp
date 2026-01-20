@@ -416,15 +416,15 @@ ModelCompatCheckResult is_compatible(
 
   // Check Operator Versions
   if (model_info.operator_version <
-          runtime_info.min_max_supported_opperator_versions.first ||
+          runtime_info.min_max_supported_operator_versions.first ||
       model_info.operator_version >
-          runtime_info.min_max_supported_opperator_versions.second) {
+          runtime_info.min_max_supported_operator_versions.second) {
     result.status = ModelCompatibilityStatus::ERROR;
     std::ostringstream s;
     s << "Model Operator Version " << model_info.operator_version
       << "is not within supported version range of the runtime "
-      << runtime_info.min_max_supported_opperator_versions.first << " to "
-      << runtime_info.min_max_supported_opperator_versions.second;
+      << runtime_info.min_max_supported_operator_versions.first << " to "
+      << runtime_info.min_max_supported_operator_versions.second;
     result.errors.push_back(s.str());
   }
 

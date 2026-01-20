@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "shellcheck-py==0.7.2.1",
+# ]
+# ///
 from __future__ import annotations
 
 import argparse

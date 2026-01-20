@@ -293,6 +293,42 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
         compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
 
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_init_helper_tensor_meta_strides(self):
+        """Test that DTensorSpec.tensor_meta has correct strides in _distribute_region."""
+        import torch.distributed.tensor._random as random_module
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        captured_specs = []
+
+        class SpecCapturingTracker:
+            """Wrapper to intercept _distribute_region and capture DTensorSpec."""
+
+            def __init__(self, tracker):
+                self._tracker = tracker
+
+            def _distribute_region(self, spec):
+                captured_specs.append(spec.tensor_meta)
+                return self._tracker._distribute_region(spec)
+
+        # Initialize the RNG tracker
+        torch.manual_seed(42)
+        torch.distributed.tensor.randn(
+            (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+
+        # Wrap tracker to capture specs
+        random_module._rng_tracker = SpecCapturingTracker(random_module._rng_tracker)
+
+        torch.distributed.tensor.randn(
+            (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+
+        self.assertEqual(len(captured_specs), 1)
+        self.assertEqual(captured_specs[0].shape, torch.Size([8, 8]))
+        self.assertEqual(captured_specs[0].stride, (8, 1))
+
 
 class DistTensorRandomOpTest(DTensorTestBase):
     @with_comms

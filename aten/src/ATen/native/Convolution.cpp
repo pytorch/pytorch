@@ -410,18 +410,6 @@ struct ConvParams {
       return false;
     }
     static long cudnn_version = detail::getCUDAHooks().versionRuntimeCuDNN();
-    // broken on cuDNN 9.8 - 9.14
-    if (cudnn_version >= 90800 && cudnn_version < 91500) {
-      if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous &&
-          (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) &&
-          weight.dim() == 5) {
-        for (int i = 2; i < weight.dim(); i++) {
-          if (weight.size(i) != 1) {
-            return false;
-          }
-        }
-      }
-    }
     if (needs_64bit_indexing_no_split(input, weight)) {
       if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
         TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"

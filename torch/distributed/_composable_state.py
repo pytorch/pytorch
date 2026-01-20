@@ -32,7 +32,6 @@ def _get_module_state(module: nn.Module) -> _State | None:
     """
     global _module_state_mapping
     if isinstance(module, _State):
-        # pyrefly: ignore [redundant-cast]
         return cast(_State, module)
     else:
         # https://github.com/pytorch/pytorch/issues/107054

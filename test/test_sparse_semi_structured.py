@@ -330,7 +330,7 @@ class TestSparseSemiStructured(TestCase):
         B = torch.rand(dense_input_shape, device=A_sparse.device).to(dtype)
 
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
-        if dtype is torch.int8 and dense_input_shape in {(1, 128)}:
+        if dtype is torch.int8 and dense_input_shape == (1, 128):
             # padding with int8 throws an error because transposing B yields a contiguous output
             # and row-row 2:4 sparse @ dense with NN is not supported by cuSPARSELt or CUTLASS.
             if backend == "cutlass":

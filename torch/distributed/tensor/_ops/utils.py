@@ -400,29 +400,40 @@ def expand_to_full_mesh_op_strategy(
     all_strategies = []
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
-        spec_index = 0
-        for specs in zip(*strategy_comb):
+        # Track how many non-None output specs we've seen (for output_tensor_meta indexing).
+        # This is needed because output_tensor_meta may contain only non-None entries,
+        # so we can't use position directly when there are None entries in the output.
+        output_spec_count = 0
+        # Track input args separately since not all tensor inputs have OpStrategy
+        # (e.g., philox_seed/offset in SDPA are scalar tensors without OpStrategy)
+        input_strategy_counter = 0
+        for position, specs in enumerate(zip(*strategy_comb, strict=True)):
             if specs[0] is not None:
                 # Populate tensor_meta field for both output and input specs,
                 # including for tuple output cases
                 tensor_meta = None
-                if spec_index < input_index:
+                # Use position to determine output vs input territory
+                # (position includes None entries, unlike the old spec_index)
+                if position < input_index:
+                    # This is an output position
                     if output_tensor_meta is not None:
                         if isinstance(output_tensor_meta, TensorMeta):
                             tensor_meta = output_tensor_meta
                         elif isinstance(output_tensor_meta, (tuple, list)):
-                            if spec_index < len(output_tensor_meta):
-                                tensor_meta = output_tensor_meta[spec_index]
+                            if output_spec_count < len(output_tensor_meta):
+                                tensor_meta = output_tensor_meta[output_spec_count]
+                    output_spec_count += 1
                 else:
-                    input_strategy_index = spec_index - input_index
-                    if input_strategy_index < len(input_args_strategy):
+                    # This is an input position
+                    # Only get tensor_meta if we have a corresponding input_args_strategy entry
+                    if input_strategy_counter < len(input_args_strategy):
                         tensor_meta = input_args_strategy[
-                            input_strategy_index
+                            input_strategy_counter
                         ].tensor_meta
+                        input_strategy_counter += 1
 
                 # pyrefly: ignore [bad-argument-type]
                 spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
-                spec_index += 1
             else:
                 spec_list.append(None)
 

@@ -280,10 +280,10 @@ id<MTLBuffer> MPSStream::getErrorBuffer() {
 
 void MPSStream::checkLastError() {
   auto msgs = reinterpret_cast<c10::metal::ErrorMessages*>([_errorBuffer contents]);
-  const auto& msg = msgs->msg[0];
   if (!msgs) {
     return;
   }
+  const auto& msg = msgs->msg[0];
   unsigned int count = 0;
   std::swap(count, msgs->count);
   if (!count) {

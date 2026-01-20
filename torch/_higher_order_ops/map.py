@@ -26,8 +26,8 @@ from .utils import (
     fill_none_with_masks,
     filter_with_masks,
     materialize_as_graph,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
     split_into_chunks,
 )
 
@@ -136,7 +136,7 @@ class MapAutogradOp(torch.autograd.Function):
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
-        save_tensors_and_symints_for_backward(ctx, flat_args)
+        save_values_for_backward(ctx, flat_args)
         with torch._C._AutoDispatchBelowAutograd():
             return (
                 *map_impl(f, flat_args[:num_mapped_args], flat_args[num_mapped_args:]),
@@ -144,7 +144,7 @@ class MapAutogradOp(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        fw_args = saved_tensors_and_symints(ctx)
+        fw_args = saved_values(ctx)
         num_mapped_args = ctx._num_mapped_args
         num_pos_args = ctx._num_pos_args
         num_grads = len(flat_grads)

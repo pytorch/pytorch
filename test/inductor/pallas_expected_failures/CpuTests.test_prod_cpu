@@ -1,5 +1,3 @@
 FAIL
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/torch/testing/_internal/common_utils.py", line 4280, in assertEqual
-    raise error_metas.pop()[0].to_error(  # type: ignore[index]
 AssertionError: Tensor-likes are not close!
+Numerical accuracy issue in prod

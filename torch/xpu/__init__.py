@@ -376,7 +376,7 @@ def _set_stream_by_id(stream_id, device_index, device_type) -> None:
 
 
 def set_stream(stream: Stream) -> None:
-    r"""Set the current stream.This is a wrapper API to set the stream.
+    r"""Set the current stream. This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 
@@ -525,6 +525,7 @@ from .memory import (
     mem_get_info,
     memory_allocated,
     memory_reserved,
+    memory_snapshot,
     memory_stats,
     memory_stats_as_nested_dict,
     reset_accumulated_memory_stats,
@@ -581,6 +582,7 @@ __all__ = [
     "mem_get_info",
     "memory_allocated",
     "memory_reserved",
+    "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",

@@ -1,5 +1,2 @@
-ERROR
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/torch/_inductor/ops_handler.py", line 120, in masked
-    raise NotImplementedError
-torch._inductor.exc.InductorError: NotImplementedError:
+FAIL
+Accuracy failed: allclose not within tol

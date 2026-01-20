@@ -528,7 +528,7 @@ As we can see, the previously in-place operator,
 ### Core ATen IR
 
 We can further lower the Inference IR to the
-`Core ATen Operator Set <https://pytorch.org/docs/main/torch.compiler_ir.html#core-aten-ir>`__,
+`Core ATen Operator Set <https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_ir.html#core-aten-ir>`__,
 which contains only ~180 operators. This is achieved by passing `decomp_table=None`
 (which uses the default decomposition table) to `run_decompositions()`. This IR
 is optimal for backends who want to minimize the number of operators they need

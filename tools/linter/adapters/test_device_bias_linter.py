@@ -102,7 +102,9 @@ class DeviceBiasVisitor(ast.NodeVisitor):
             return
         val = subnode.value
         if isinstance(val, ast.Constant) and any(
-            bias in val.value for bias in DEVICE_BIAS
+            # pyrefly: ignore [not-iterable, unsupported-operation]
+            bias in val.value
+            for bias in DEVICE_BIAS
         ):
             self.record(
                 subnode,
@@ -114,6 +116,7 @@ class DeviceBiasVisitor(ast.NodeVisitor):
                 and val.func.attr == "device"
                 and len(val.args) > 0
                 and isinstance(val.args[0], ast.Constant)
+                # pyrefly: ignore [not-iterable, unsupported-operation]
                 and any(bias in val.args[0].value for bias in DEVICE_BIAS)
             ):
                 self.record(
@@ -135,7 +138,9 @@ class DeviceBiasVisitor(ast.NodeVisitor):
         elif method_name == "to" and subnode.args:
             arg = subnode.args[0]
             if isinstance(arg, ast.Constant) and any(
-                bias in arg.value for bias in DEVICE_BIAS
+                # pyrefly: ignore [not-iterable, unsupported-operation]
+                bias in arg.value
+                for bias in DEVICE_BIAS
             ):
                 self.record(
                     subnode,
@@ -154,6 +159,7 @@ class DeviceBiasVisitor(ast.NodeVisitor):
                     and func.value.id == "torch"
                     and ctx_expr.args
                     and isinstance(ctx_expr.args[0], ast.Constant)
+                    # pyrefly: ignore [not-iterable, unsupported-operation]
                     and any(bias in ctx_expr.args[0].value for bias in DEVICE_BIAS)
                 ):
                     self.record(

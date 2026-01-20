@@ -927,6 +927,115 @@ class TestDTensorDebugMode(TestCase):
         gm_str = gm.print_readable(colored=False, print_output=False)
         self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
 
+    def test_invoke_subgraph(self):
+        # Test that DebugMode can trace the operations inside
+        # invoke_subgraph HOP
+
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            a = torch.sin(x)
+            return a
+
+        def fn(x):
+            foo1 = gn(x)
+            y = foo1 * 2
+            foo2 = gn(y)
+            return foo2
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        x.grad = None
+        x_clone.grad = None
+
+        ref = fn(x)
+        ref.sum().backward()
+
+        with DebugMode() as debug_mode:
+            res = opt_fn(x_clone)
+            res.sum().backward()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, t: f32[8, 8])  ->  ('t: f32[8, 8]', 't: f32[8, 8]')
+    [annotate] [enter InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+      aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]
+    torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, t: f32[8, 8])  ->  ('t: f32[8, 8]', 't: f32[8, 8]')
+    [annotate] [enter InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+      aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+    aten::sum(t: f32[8, 8])  ->  t: f32[]
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [8, 8])  ->  t: f32[8, 8]
+    aten::clone(t: f32[8, 8], memory_format=torch.contiguous_format)  ->  t: f32[8, 8]
+    torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, t: f32[8, 8], t: f32[8, 8])  ->  ('t: f32[8, 8]',)
+    [annotate] [enter InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
+      aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
+      aten::mul.Tensor(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]
+    torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, t: f32[8, 8], t: f32[8, 8])  ->  ('t: f32[8, 8]',)
+    [annotate] [enter InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
+      aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
+      aten::mul.Tensor(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
+    aten::detach(t: f32[8, 8])  ->  t: f32[8, 8]""",  # noqa: B950
+            ignore_comments=True,
+        )
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+    def test_nested_invoke_subgraph(self):
+        # Test that DebugMode can trace the operations inside
+        # invoke_subgraph HOP
+        @torch.compiler.nested_compile_region
+        def ggn(x):
+            a = torch.cos(x)
+            return a
+
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            x = x + 1
+            x = ggn(x)
+            a = torch.sin(x)
+            return a
+
+        def fn(x):
+            foo1 = gn(x)
+            y = foo1 * 2
+            return y
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        x = torch.randn(8, 8)
+
+        ref = fn(x)
+
+        with DebugMode() as debug_mode:
+            res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    torch.ops.higher_order.invoke_subgraph(subgraph_1, t: f32[8, 8])  ->  ('t: f32[8, 8]',)
+    [annotate] [enter InvokeSubgraph HOP] subgraph_1
+      aten::add.Tensor(t: f32[8, 8], 1)  ->  t: f32[8, 8]
+      torch.ops.higher_order.invoke_subgraph(subgraph_0, t: f32[8, 8])  ->  ('t: f32[8, 8]',)
+      [annotate] [enter InvokeSubgraph HOP] subgraph_0
+        aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
+      [annotate] [exit InvokeSubgraph HOP] subgraph_0
+      aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] subgraph_1
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",  # noqa: B950
+            ignore_comments=True,
+        )
+
 
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""

@@ -20,13 +20,12 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipIf,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfXpu,
-    TEST_WITH_SLOW,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
@@ -333,7 +332,7 @@ class TestAnalysis(TestCase):
         ):
             main()
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not (SM80OrLater or TEST_XPU), "Requires SM80 or XPU")
     def test_augment_trace_helper_unit(self):
         js = json.loads(example_profile)
         out_profile = _augment_trace_helper(js)
@@ -341,7 +340,6 @@ class TestAnalysis(TestCase):
         verify_flops(self, expected_flops, out_profile)
 
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
-    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
         "maxat",
@@ -399,7 +397,6 @@ class TestAnalysis(TestCase):
     @skipIfXpu(
         msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5491"
     )
-    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -512,7 +509,6 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_conv)
 
     @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
-    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",

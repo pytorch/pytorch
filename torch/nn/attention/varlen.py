@@ -43,6 +43,7 @@ def _varlen_attn(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -67,6 +68,7 @@ def _varlen_attn(
             0.0,  # dropout_p hardcoded to 0.0
             is_causal,
             False,  # return_debug_mask
+            scale=scale,
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
         output, softmax_lse, rng_state = result[0], result[1], result[6]
@@ -83,6 +85,7 @@ def _varlen_attn(
             0.0,  # dropout_p hardcoded to 0.0
             is_causal,
             return_debug_mask=False,
+            scale=scale,
         )
 
     rng_state_ = torch.zeros(
@@ -101,6 +104,7 @@ def _varlen_attn_fake(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -115,9 +119,16 @@ def _varlen_attn_fake(
     # For varlen path: logsumexp shape is (num_heads, total_q)
     total_q = query.size(0)
     num_heads = query.size(1)
-    logsumexp = torch.empty(
-        (num_heads, total_q), dtype=torch.float, device=query.device
-    )
+    if torch.version.hip:
+        # ROCm uses batched format: [batch_size, num_heads, max_q]
+        batch_size = cu_seq_q.size(0) - 1
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+        )
+    else:
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
 
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
 
@@ -134,33 +145,37 @@ def varlen_attn(
     max_k: int,
     is_causal: bool = False,
     return_aux: AuxRequest | None = None,
+    scale: float | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Compute variable-length attention using Flash Attention.
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
-    Args:
-    - query (Tensor): Query tensor; shape :math:`(T_q, H, D)`
-    - key (Tensor): Key tensor; shape :math:`(T_k, H, D)`
-    - value (Tensor): Value tensor; shape :math:`(T_k, H, D)`
-    - cu_seq_q (Tensor): Cumulative sequence positions for queries; shape :math:`(N+1,)`
-    - cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
-    - max_q (int): Maximum query sequence length in the batch.
-    - max_k (int): Maximum key/value sequence length in the batch.
-    - is_causal (bool, optional): If set to True, applies causal masking (default: False).
-    - return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
 
-    Shape legend:
-    - :math:`N`: Batch size
-    - :math:`T_q`: Total number of query tokens in the batch (sum of all query sequence lengths)
-    - :math:`T_k`: Total number of key/value tokens in the batch (sum of all key/value sequence lengths)
-    - :math:`H`: Number of attention heads
-    - :math:`D`: Head dimension
+    Args:
+        query (Tensor): Query tensor; shape :math:`(T_q, H, D)`
+        key (Tensor): Key tensor; shape :math:`(T_k, H, D)`
+        value (Tensor): Value tensor; shape :math:`(T_k, H, D)`
+        cu_seq_q (Tensor): Cumulative sequence positions for queries; shape :math:`(N+1,)`
+        cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
+        max_q (int): Maximum query sequence length in the batch.
+        max_k (int): Maximum key/value sequence length in the batch.
+        is_causal (bool, optional): If set to True, applies causal masking (default: False).
+        return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
+        scale (float, optional): Scaling factor for attention scores
 
     Returns:
-    - Tensor: Output tensor from attention computation
-    - If ``return_aux`` is not None and ``return_aux.lse`` is True, returns a tuple of Tensors:
-    (output, lse), where lse is the logsumexp
+        output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
+
+        If ``return_aux`` is not None and ``return_aux.lse`` is True:
+            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(T_q, H)`.
+
+    Shape legend:
+        - :math:`N`: Batch size
+        - :math:`T_q`: Total number of query tokens in the batch (sum of all query sequence lengths)
+        - :math:`T_k`: Total number of key/value tokens in the batch (sum of all key/value sequence lengths)
+        - :math:`H`: Number of attention heads
+        - :math:`D`: Head dimension
 
     Example::
 
@@ -196,7 +211,7 @@ def varlen_attn(
         ... )
     """
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
-        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
+        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -204,7 +219,7 @@ def varlen_attn(
 
 
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
-    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
+    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale = inputs
     out, lse, rng_state = output
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
@@ -212,6 +227,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ctx.max_q = max_q
     ctx.max_k = max_k
     ctx.is_causal = is_causal
+    ctx.scale = scale
 
 
 @torch.library.custom_op("torch_attn::_varlen_attn_backward", mutates_args={})
@@ -228,6 +244,7 @@ def _varlen_attn_backward(
     max_k: int,
     is_causal: bool,
     rng_state: torch.Tensor,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     unused = torch.empty(0, device=query.device)
 
@@ -249,6 +266,7 @@ def _varlen_attn_backward(
             is_causal,
             rng_state,
             unused,
+            scale=scale,
         )
     else:
         log.info("Using Flash Attention backend for varlen_attn")
@@ -267,6 +285,7 @@ def _varlen_attn_backward(
             is_causal,
             rng_state,
             unused,
+            scale=scale,
         )
     return dq, dk, dv
 
@@ -285,6 +304,7 @@ def _varlen_attn_backward_fake(
     max_k: int,
     is_causal: bool,
     rng_state: torch.Tensor,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -305,6 +325,7 @@ def _backward(
     max_q = ctx.max_q
     max_k = ctx.max_k
     is_causal = ctx.is_causal
+    scale = ctx.scale
 
     dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
         grad_out,
@@ -319,6 +340,7 @@ def _backward(
         max_k,
         is_causal,
         rng_state,
+        scale,
     )
     return dq, dk, dv, None, None, None, None, None, None
 
