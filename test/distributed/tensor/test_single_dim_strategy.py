@@ -95,7 +95,11 @@ class TestExpandPlaceholder(TestCase):
     def test_foreach_ops_variants(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
 
-        def _test_op(op, *args, linearity=None):
+        def _test_op(op, *args, linearity=None, inplace=None):
+            # Auto-detect inplace ops by checking for "_." in the op name (e.g., _foreach_add_.List)
+            if inplace is None:
+                inplace = "_." in str(op)
+
             # creates specs, computes single-dim strategy, and expands to mesh
             out_spec = None
             specs = []
@@ -134,7 +138,11 @@ class TestExpandPlaceholder(TestCase):
             self.assertEqual(
                 len(strategy.children), len(args[0])
             )  # no. of list elements
-            if linearity == 1:
+            if inplace:
+                # For inplace ops, the self argument cannot be redistributed,
+                # so there should be exactly 1 strategy (the input placement)
+                self.assertEqual(len(strategy.children[0].strategies), 1)
+            elif linearity == 1:
                 self.assertEqual(
                     len(strategy.children[0].strategies), 125
                 )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
@@ -195,9 +203,12 @@ class TestExpandPlaceholder(TestCase):
         ]:
             _test_op(op, [(shard0, t)], [(shard0, t)], [(shard0, t)], 1.0)
 
-        # Test inplace variant
+        # Test inplace variant (auto-detected via "_." in op name)
         _test_op(
-            torch.ops.aten._foreach_add_.List, [(shard0, t)], [(shard0, t)], linearity=1
+            torch.ops.aten._foreach_add_.List,
+            [(shard0, t)],
+            [(shard0, t)],
+            linearity=1,
         )
 
     def test_expand_foreach_add_to_3d_mesh(self):
