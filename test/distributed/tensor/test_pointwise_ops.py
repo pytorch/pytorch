@@ -693,6 +693,185 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
     @with_comms
+    def test_deg2rad_rad2deg_partial(self):
+        # test that deg2rad and rad2deg preserve Partial placement without communication
+        # math: deg2rad(A1 + A2) = deg2rad(A1) + deg2rad(A2) because deg2rad(x) = x * (pi/180)
+        # math: rad2deg(A1 + A2) = rad2deg(A1) + rad2deg(A2) because rad2deg(x) = x * (180/pi)
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input_deg = torch.full((8, 8), 90.0, device=self.device_type)
+        input_rad = torch.full((8, 8), 1.0, device=self.device_type)
+
+        for partial_op in ["sum", "avg"]:
+            # Test deg2rad
+            expected_deg2rad = (
+                torch.deg2rad(input_deg) * self.world_size
+                if partial_op == "sum"
+                else torch.deg2rad(input_deg)
+            )
+
+            d_input = DTensor.from_local(input_deg, device_mesh, [Partial(partial_op)])
+
+            with comm_mode:
+                z = torch.deg2rad(d_input)
+
+            comm_counts = comm_mode.get_total_counts()
+            self.assertEqual(comm_counts, 0)
+            self.assertTrue(isinstance(z, DTensor))
+            self.assertEqual(z.placements, (Partial(partial_op),))
+            self.assertEqual(z.full_tensor(), expected_deg2rad)
+
+            # Test rad2deg
+            expected_rad2deg = (
+                torch.rad2deg(input_rad) * self.world_size
+                if partial_op == "sum"
+                else torch.rad2deg(input_rad)
+            )
+
+            d_input = DTensor.from_local(input_rad, device_mesh, [Partial(partial_op)])
+
+            with comm_mode:
+                z = torch.rad2deg(d_input)
+
+            comm_counts = comm_mode.get_total_counts()
+            self.assertEqual(comm_counts, 0)
+            self.assertTrue(isinstance(z, DTensor))
+            self.assertEqual(z.placements, (Partial(partial_op),))
+            self.assertEqual(z.full_tensor(), expected_rad2deg)
+
+        # test non-sum/avg partial to assert the partial not getting propagated
+        # (linear ops only propagate sum/avg in current implementation)
+        d_input = DTensor.from_local(input_deg, device_mesh, [Partial("max")])
+
+        z = torch.deg2rad(d_input)
+        self.assertEqual(z.placements, (Replicate(),))
+
+    @with_comms
+    def test_monotonic_ops_preserve_partial_max_min(self):
+        # Test that monotonic ops preserve Partial("max") and Partial("min")
+        # without communication. This enables delaying reduction through chains
+        # of monotonic ops (useful for gradient clipping, quantization, etc.)
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input_pos = torch.full((8, 8), 2.0, device=self.device_type)
+
+        # Test with Partial("max")
+        # Include various monotonic ops: exponential, logarithmic, activations
+        monotonic_ops = [
+            torch.exp,
+            torch.log,
+            torch.sqrt,
+            torch.sigmoid,
+            torch.tanh,
+            torch.nn.functional.softplus,
+            torch.nn.functional.elu,
+            torch.nn.functional.leaky_relu,
+        ]
+        for op in monotonic_ops:
+            d_input = DTensor.from_local(input_pos, device_mesh, [Partial("max")])
+
+            with comm_mode:
+                result = op(d_input)
+
+            comm_counts = comm_mode.get_total_counts()
+            self.assertEqual(
+                comm_counts, 0, f"{op.__name__} should not trigger communication"
+            )
+            self.assertEqual(
+                result.placements,
+                (Partial("max"),),
+                f"{op.__name__} should preserve Partial('max')",
+            )
+
+        # Test with Partial("min")
+        for op in monotonic_ops:
+            d_input = DTensor.from_local(input_pos, device_mesh, [Partial("min")])
+
+            with comm_mode:
+                result = op(d_input)
+
+            comm_counts = comm_mode.get_total_counts()
+            self.assertEqual(
+                comm_counts, 0, f"{op.__name__} should not trigger communication"
+            )
+            self.assertEqual(
+                result.placements,
+                (Partial("min"),),
+                f"{op.__name__} should preserve Partial('min')",
+            )
+
+        # Test chained monotonic ops - still no communication
+        d_input = DTensor.from_local(input_pos, device_mesh, [Partial("max")])
+        with comm_mode:
+            result = torch.sqrt(torch.log(d_input))
+
+        comm_counts = comm_mode.get_total_counts()
+        self.assertEqual(comm_counts, 0, "Chained monotonic ops should not communicate")
+        self.assertEqual(result.placements, (Partial("max"),))
+
+        # Verify correctness: for Partial("max"), full_tensor does AllReduce MAX
+        # Since all ranks have the same local value, max = local value
+        expected = torch.sqrt(torch.log(input_pos))
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    def test_monotonic_ops_backward_behavior(self):
+        # Test backward behavior for monotonic ops with Partial("max").
+        #
+        # Key design notes:
+        # 1. Forward: monotonic ops correctly preserve Partial("max") with no comm
+        # 2. Backward: exp backward computes grad * exp(input), which involves
+        #    multiplying two Partial tensors. DTensor's mul strategy requires
+        #    one operand to be Replicate, so reduction happens during backward.
+        # 3. This backward communication is unavoidable and the same whether
+        #    we use the monotonic optimization or not.
+        # 4. DTensor intentionally broadcasts gradients for Partial reductions
+        #    rather than implementing sparse gradients.
+        #
+        # Note: This test requires concrete rank values for correctness checks,
+        # so we skip it in LocalTensor mode where rank is symbolic.
+        if not isinstance(self.rank, int):
+            self.skipTest("Test requires concrete rank values")
+
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        # Each rank has different value to make max meaningful
+        local_val = torch.tensor(
+            [float(self.rank + 1)], device=self.device_type, requires_grad=True
+        )
+
+        # Forward: exp on Partial("max") stays Partial("max")
+        x = DTensor.from_local(local_val, device_mesh, [Partial("max")])
+        with comm_mode:
+            y = torch.exp(x)
+
+        fwd_comm = comm_mode.get_total_counts()
+        self.assertEqual(fwd_comm, 0, "Forward exp should not communicate")
+        self.assertEqual(y.placements, (Partial("max"),))
+
+        # Redistribute to Replicate for backward
+        y_rep = y.redistribute(device_mesh, [Replicate()])
+
+        # Verify forward correctness: max(exp(1), exp(2), ...) = exp(world_size)
+        expected_val = torch.exp(torch.tensor([float(self.world_size)]))
+        self.assertEqual(y_rep.to_local(), expected_val)
+
+        # Backward: will have communication due to mul of two Partials
+        with comm_mode:
+            y_rep.to_local().backward()
+
+        bwd_comm = comm_mode.get_total_counts()
+        # Backward involves multiplying two Partial tensors (grad and exp(input)),
+        # which requires reducing at least one to Replicate. This is expected.
+        self.assertGreater(bwd_comm, 0, "Backward should have communication")
+
+        # Gradients should be defined
+        self.assertIsNotNone(local_val.grad)
+
+    @with_comms
     def test_maximum_mixed_partials_redistribution(self):
         # Test that mixing Partial("max") with Partial("sum") correctly
         # redistributes the incompatible partial before computing maximum
@@ -721,6 +900,77 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         # final max = 4
         expected_value = float(self.world_size)
         self.assertEqual(result.full_tensor()[0, 0].item(), expected_value)
+
+    @with_comms
+    def test_monotonic_composition_preserves_partial(self):
+        """Chains of monotonic ops preserve Partial(max/min)."""
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        input_tensor = torch.ones(4, 4, device=self.device_type) * 2.0
+
+        for reduce_op in ["max", "min"]:
+            d_input = DTensor.from_local(
+                input_tensor, device_mesh, [Partial(reduce_op)]
+            )
+
+            # exp(sigmoid(x))
+            with comm_mode:
+                result1 = torch.exp(torch.sigmoid(d_input))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result1.placements, (Partial(reduce_op),))
+
+            # sqrt(relu(x))
+            with comm_mode:
+                result2 = torch.sqrt(torch.relu(d_input))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result2.placements, (Partial(reduce_op),))
+
+            # tanh(log(exp(x)))
+            with comm_mode:
+                result3 = torch.tanh(torch.log(torch.exp(d_input)))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result3.placements, (Partial(reduce_op),))
+
+    @with_comms
+    def test_linear_composition_preserves_partial_sum(self):
+        """Chains of linear ops preserve Partial(sum/avg)."""
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        input_tensor = torch.ones(4, 4, device=self.device_type) * 2.0
+
+        for reduce_op in ["sum", "avg"]:
+            d_input = DTensor.from_local(
+                input_tensor, device_mesh, [Partial(reduce_op)]
+            )
+
+            # neg(neg(x))
+            with comm_mode:
+                result = torch.neg(torch.neg(d_input))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(result.placements, (Partial(reduce_op),))
+
+            # Verify correctness
+            if reduce_op == "sum":
+                expected_full = input_tensor * self.world_size
+            else:
+                expected_full = input_tensor
+            torch.testing.assert_close(result.full_tensor(), expected_full)
+
+    @with_comms
+    def test_mixed_monotonic_linear_chain(self):
+        """Non-linear op in chain forces reduction."""
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        input_tensor = torch.ones(4, 4, device=self.device_type) * 2.0
+        d_input = DTensor.from_local(input_tensor, device_mesh, [Partial("sum")])
+
+        # neg(exp(x)) on P(sum): exp is not linear, must reduce
+        with comm_mode:
+            result = torch.neg(torch.exp(d_input))
+
+        self.assertGreater(comm_mode.get_total_counts(), 0)
+        # After reduction to Replicate, the result stays Replicate
+        self.assertEqual(result.placements, (Replicate(),))
 
 
 instantiate_parametrized_tests(DistElementwiseOpsTest)

@@ -168,9 +168,7 @@ pointwise_ops = [
     aten.cosh.default,
     aten.cosh.out,
     aten.cosh_.default,
-    aten.deg2rad.default,
     aten.deg2rad.out,
-    aten.deg2rad_.default,
     aten.digamma.default,
     aten.digamma.out,
     aten.digamma_.default,
@@ -333,9 +331,7 @@ pointwise_ops = [
     aten.reciprocal.default,
     aten.reciprocal.out,
     aten.reciprocal_.default,
-    aten.rad2deg.default,
     aten.rad2deg.out,
-    aten.rad2deg_.default,
     aten.relu.default,
     aten.relu_.default,
     aten.remainder.Scalar,
@@ -430,9 +426,13 @@ linear_pointwise_ops = {
     aten.mul_.Scalar: 0,
     aten.mul.Tensor: 2,
     aten.mul_.Tensor: 2,
-    # neg is linear: -(A1 + A2) = -A1 + -A2
     aten.neg.default: 0,
     aten.neg_.default: 0,
+    aten.deg2rad.default: 0,
+    aten.deg2rad_.default: 0,
+    aten.rad2deg.default: 0,
+    aten.rad2deg_.default: 0,
+    aten._conj_physical.default: 0,
 }
 
 # Ops that preserve specific Partial types through the operation.
@@ -445,11 +445,69 @@ partial_preserving_ops: dict[torch._ops.OpOverload, str] = {
     aten.minimum.out: "min",
 }
 
+# Monotonically increasing ops preserve Partial("max") and Partial("min").
+# For increasing f: max(f(a), f(b)) = f(max(a, b)), enabling delayed reduction.
+# NOTE: abs, silu, gelu, mish, hardswish are NOT monotonic.
+monotonic_pointwise_ops: set[torch._ops.OpOverload] = {
+    # Exponential/log
+    aten.exp.default,
+    aten.exp_.default,
+    aten.exp2.default,
+    aten.exp2_.default,
+    aten.expm1.default,
+    aten.expm1_.default,
+    aten.log.default,
+    aten.log_.default,
+    aten.log2.default,
+    aten.log2_.default,
+    aten.log10.default,
+    aten.log10_.default,
+    aten.log1p.default,
+    aten.log1p_.default,
+    # Power/root
+    aten.sqrt.default,
+    aten.sqrt_.default,
+    # Activations
+    aten.relu.default,
+    aten.relu_.default,
+    aten.sigmoid.default,
+    aten.sigmoid_.default,
+    aten.tanh.default,
+    aten.tanh_.default,
+    aten.softplus.default,
+    aten.elu.default,
+    aten.elu_.default,
+    aten.celu.default,
+    aten.celu_.default,
+    aten.selu.default,
+    aten.selu_.default,
+    aten.leaky_relu.default,
+    aten.leaky_relu_.default,
+    aten.hardtanh.default,
+    aten.hardtanh_.default,
+    aten.hardsigmoid.default,
+    aten.hardsigmoid_.default,
+    # Rounding
+    aten.floor.default,
+    aten.floor_.default,
+    aten.ceil.default,
+    aten.ceil_.default,
+    aten.round.default,
+    aten.round_.default,
+    aten.trunc.default,
+    aten.trunc_.default,
+    # Special
+    aten.asinh.default,
+    aten.atanh.default,
+    aten.erf.default,
+    aten.erf_.default,
+}
+
 
 def pointwise_strategy(
     op_schema: OpSchema,
     linearity: int = -1,
-    preserve_partial: str | None = None,
+    preserve_partial: str | set[str] | None = None,
 ) -> OpStrategy:
     followed_strategy_index = -1
     max_shards = -1
@@ -525,6 +583,20 @@ def partial_preserving_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     """
     preserve_partial = partial_preserving_ops.get(op_schema.op)
     return pointwise_strategy(op_schema, preserve_partial=preserve_partial)
+
+
+def monotonic_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for unary monotonic ops that preserve Partial("max") and Partial("min").
+
+    Mathematical basis: for monotonically increasing f,
+      max(f(a), f(b)) = f(max(a, b))
+      min(f(a), f(b)) = f(min(a, b))
+
+    This enables delaying reduction through chains of monotonic ops, which is
+    useful for gradient clipping, quantization calibration, and activation stats.
+    """
+    return pointwise_strategy(op_schema, preserve_partial={"max", "min"})
 
 
 def single_mesh_dim_pointwise_strategy(
@@ -621,7 +693,7 @@ def common_pointwise_strategy(
     followed_strategy_index: int,
     linearity: int = -1,
     scalar_tensor_idx: int | None = None,
-    preserve_partial: str | None = None,
+    preserve_partial: str | set[str] | None = None,
 ) -> OpStrategy:
     """
     Common strategy for pointwise operations.
@@ -641,7 +713,8 @@ def common_pointwise_strategy(
         scalar_tensor_idx: Index of the Replicate scalar tensor for which we allow the mesh
             to be different from the mesh of followed_strategy
         preserve_partial: If set, Partial placements with this reduce_op will be preserved
-            through the operation (e.g., "max" for torch.maximum, "min" for torch.minimum).
+            through the operation. Can be a single reduce_op string (e.g., "max"), a set
+            of reduce_ops (e.g., {"max", "min"} for monotonic ops), or "all" for copy_.
     """
     # handle broadcasting
     common_shape = torch.broadcast_shapes(
@@ -686,9 +759,16 @@ def common_pointwise_strategy(
 
                 # Check if this partial type should be preserved
                 # preserve_partial="all" preserves any Partial type (used for copy_)
+                # preserve_partial can also be a set of reduce_ops (for monotonic ops)
                 if preserve_partial == "all":
                     out_placements.append(placement)
-                elif preserve_partial is not None and placement.is_partial(
+                elif (
+                    isinstance(preserve_partial, set)
+                    and placement.reduce_op in preserve_partial
+                ):
+                    # Monotonic ops preserve max/min
+                    out_placements.append(placement)
+                elif isinstance(preserve_partial, str) and placement.is_partial(
                     preserve_partial
                 ):
                     out_placements.append(placement)
@@ -825,12 +905,20 @@ for op in partial_preserving_ops:
         partial_preserving_pointwise_strategy
     )
 
+for op in monotonic_pointwise_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        monotonic_pointwise_strategy
+    )
+
 # Register copy_ with its custom strategy that preserves all Partial types
 register_op_strategy(
     aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
 )(copy_strategy)
 
 for op in pointwise_ops:
+    # Skip ops that are already registered with specialized strategies
+    if op in monotonic_pointwise_ops:
+        continue
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         pointwise_strategy
     )
