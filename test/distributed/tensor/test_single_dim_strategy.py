@@ -703,6 +703,7 @@ class TestExpandPlaceholder(TestCase):
         num_inputs = _get_num_tensor_inputs(op_schema)
         self.assertEqual(num_inputs, 3)  # 2 args + 1 out kwarg
 
+<<<<<<< HEAD
     def test_expand_strategy_handles_symbolic_shapes(self):
         """Test that _create_expanded_strategy handles symbolic shapes (SymInts).
         When using dynamic shapes with torch.compile, TensorMeta may contain SymInts
@@ -764,6 +765,8 @@ class TestExpandPlaceholder(TestCase):
         self.assertIsInstance(result, OpStrategy)
         self.assertGreater(len(result.strategies), 0)
 
+=======
+>>>>>>> 11519182dd5 ([DTensor] Make single-dim rules support multi-output ops)
     def test_expand_multi_output_strategy(self):
         """Test expanding single-dim strategies for multi-output ops.
 
