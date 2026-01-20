@@ -36,6 +36,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -1296,3 +1297,70 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+def _flip_strategy_impl(
+    op_schema: OpSchema, input_strategy: OpStrategy, flip_dims: set[int]
+) -> StrategyType:
+    """
+    Flip reverses elements along specified dimensions. When flipping along a sharded
+    dimension, the tensor must be replicated because local flips don't produce the
+    correct global result.
+    """
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
+    output_strategy = OpStrategy([])
+    for input_placement_strategy in input_strategy.strategies:
+        input_src_spec = input_placement_strategy.output_spec
+
+        # If sharded on any flip dimension, we need to replicate.
+        # Use inverted logic to default to Replicate() for unknown placement types.
+        input_tgt_placements = []
+        for placement in input_src_spec.placements:
+            if isinstance(placement, (Replicate, Partial)):
+                input_tgt_placements.append(placement)
+            elif isinstance(placement, (Shard, _StridedShard)) and placement.dim not in flip_dims:
+                input_tgt_placements.append(placement)
+            else:
+                input_tgt_placements.append(Replicate())
+
+        input_tgt_spec = DTensorSpec(
+            placements=tuple(input_tgt_placements),
+            mesh=mesh,
+            tensor_meta=input_src_spec.tensor_meta,
+        )
+
+        redistribute_costs: list[list[float]] = [
+            generate_redistribute_costs(input_strategy, input_tgt_spec)
+        ]
+
+        output_spec = DTensorSpec(mesh=mesh, placements=tuple(input_tgt_placements))
+        output_strategy.strategies.append(
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=(input_tgt_spec,),
+                redistribute_cost=redistribute_costs,
+            )
+        )
+
+    return output_strategy
+
+
+@register_op_strategy(aten.flip.default, schema_info=RuntimeSchemaInfo(1))
+def flip_strategy(op_schema: OpSchema) -> StrategyType:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    dims = cast(tuple[int, ...], op_schema.args_schema[1])
+    ndim = len(input_strategy.shape) if input_strategy.shape is not None else 0
+    flip_dims = {normalize_dim(d, ndim) for d in dims}
+    return _flip_strategy_impl(op_schema, input_strategy, flip_dims)
+
+
+@register_op_strategy(aten.fliplr.default)
+def fliplr_strategy(op_schema: OpSchema) -> StrategyType:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    return _flip_strategy_impl(op_schema, input_strategy, {1})
+
+
+@register_op_strategy(aten.flipud.default)
+def flipud_strategy(op_schema: OpSchema) -> StrategyType:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    return _flip_strategy_impl(op_schema, input_strategy, {0})
