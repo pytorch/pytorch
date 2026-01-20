@@ -21,10 +21,17 @@ from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
+
+from torch.utils._python_dispatch import TorchDispatchMode
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 import torch
 import torch.fx as fx
+import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo import config as dynamo_config
@@ -43,6 +50,7 @@ from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
+from torch._subclasses.complex_tensor import ComplexTensor, WrapComplexMode
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -57,6 +65,7 @@ from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadat
 from .descriptors import (
     AOTInput,
     AOTOutput,
+    ComplexWrappedAOTInput,
     DummyAOTInput,
     MetadataMutationAOTOutput,
     SyntheticBaseAOTInput,
@@ -907,6 +916,92 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
         # box it
         inner_fn._boxed_call = True  # type: ignore[attr-defined]
         return inner_fn
+
+
+@dataclass
+class ComplexWrapper(CompilerWrapper):
+    """First pass naive approach:
+
+    1) This gets applied first
+    2) just wrap and let everything else do its thing
+    3) Don't do anything with metadata or descriptors and pray for the best
+    """
+
+    complex_wrap_mode: TorchDispatchMode = WrapComplexMode()
+    wrapped_arg_indices: list[int] = field(default_factory=list)
+    did_wrap: bool = False
+
+    def wrap_args(self, args):
+        return [
+            ComplexTensor.from_interleaved(a) if i in self.wrapped_arg_indices else a
+            for i, a in enumerate(args)
+        ]
+
+    def pre_compile(
+        self,
+        flat_fn: TraceFn,
+        flat_args: list[FxValue],
+        flat_args_descs: list[AOTInput],
+        aot_config: AOTConfig,
+        *,
+        fw_metadata: ViewAndMutationMeta,
+    ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+        @simple_wraps(flat_fn)
+        def wrapped_flat_fn(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
+            wrapped_args = pytree.tree_map(ComplexTensor.from_interleaved, args)
+            with self.complex_wrap_mode:
+                outs, out_descs = call_and_expect_output_descs(flat_fn, wrapped_args)
+            return outs, out_descs
+
+        if config.enable_complex_wrapper:
+            wrapped_args = pytree.tree_map(ComplexTensor.from_interleaved, flat_args)
+            self.wrapped_arg_indices = [
+                i
+                for i, arg in enumerate(wrapped_args)
+                if isinstance(arg, ComplexTensor)
+            ]
+            wrapped_args_descs = [
+                ComplexWrappedAOTInput(inp_desc)
+                if i in self.wrapped_arg_indices
+                else inp_desc
+                for i, inp_desc in enumerate(flat_args_descs)
+            ]
+
+            updated_metadata = run_functionalized_fw_and_collect_metadata(
+                without_output_descs(wrapped_flat_fn),
+                flat_args_descs=wrapped_args_descs,
+                static_input_indices=aot_config.static_input_indices,
+                keep_input_mutations=fw_metadata.keep_input_mutations,
+                is_train=fw_metadata.is_train,
+            )(*wrapped_args)
+            self.did_wrap = True
+            return (wrapped_flat_fn, wrapped_args, wrapped_args_descs, updated_metadata)
+        return (flat_fn, flat_args, flat_args_descs, fw_metadata)
+
+    def post_compile(
+        self,
+        compiled_fn,
+        _aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ):
+        if not self.did_wrap:
+            return compiled_fn
+
+        @wraps(compiled_fn)
+        def wrapped_compiled_fn(args: list[Any]):
+            wrapped_args = self.wrap_args(args)
+            args.clear()
+            outs = compiled_fn(wrapped_args)
+            outs_unwrapped = pytree.tree_map(
+                lambda x: x.as_interleaved(),
+                outs,
+                is_leaf=lambda x: isinstance(x, ComplexTensor),
+            )
+            return outs_unwrapped
+
+        wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
+        return wrapped_compiled_fn
 
 
 @dataclass
