@@ -261,7 +261,6 @@ __device__ inline void cmtdStore(void* address, T value) {
 #endif
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 }
-#endif
 
 // This function implements warp-level opportunistic fastatomics
 // To reduce contention on an atomicAdd, this replaces per-thread atomicAdd with a per-warp atomicAdd.
@@ -274,10 +273,8 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-#ifdef USE_ROCM
   if(!(__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950")))
     return;
-#endif
     scalar_t* dst = self_ptr + index;
 
     //pack coalesced bf16 and fp16
@@ -409,7 +406,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
       fastAtomicAdd(self_ptr, index, numel, crnt_val, true);
     }
 }
-
+#endif
 #undef ATOMICADD
 #undef NATIVE_ZERO_BF16
 
