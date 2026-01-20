@@ -51,7 +51,6 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
-using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::DeviceStats;
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
