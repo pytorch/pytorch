@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo", "module: higher order operators"]
 import re
-from abc import ABC
 from dataclasses import dataclass
 
 import torch
@@ -31,7 +30,7 @@ def distance(a, b, norm):
 
 
 @dataclass(frozen=True)
-class Norm(metaclass=torch._opaque_base.OpaqueBase):
+class Norm(torch._opaque_base.OpaqueBase):
     typ: str
 
     def __fx_repr__(self):

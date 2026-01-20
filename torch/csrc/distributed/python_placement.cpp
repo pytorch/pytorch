@@ -25,7 +25,7 @@ void initPlacementBindings(PyObject* module) {
   // Use OpaqueBase as the metaclass to allow isinstance(fake_obj, Placement) to
   // work.
   py::object opaque_base_module = py::module_::import("torch._opaque_base");
-  py::object opaque_base = opaque_base_module.attr("OpaqueBase");
+  py::object opaque_base = opaque_base_module.attr("OpaqueBaseMeta");
 
   auto placement_cls =
       py::class_<Placement>(
