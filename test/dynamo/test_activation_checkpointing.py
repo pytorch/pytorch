@@ -441,8 +441,7 @@ class ActivationCheckpointingViaTagsTests(
         backend = aot_autograd(
             fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
         )
-        backend_good = aot_autograd(fw_compiler=nop, bw_compiler=nop)
-        result = torch.compile(fn, backend=backend)(x, y)
+        _ = torch.compile(fn, backend=backend)(x, y)
 
     @requires_cuda_and_triton
     @parametrize(
