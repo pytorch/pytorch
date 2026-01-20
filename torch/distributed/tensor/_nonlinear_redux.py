@@ -336,6 +336,7 @@ def vector_norm_handler(
     ):
         # Decompose: vector_norm(x, p) = powsum(x, p) ** (1/p)
         # Step 1: Compute sum(|x|^p) with powsum -> Partial("sum")
+        # pyrefly: ignore[missing-attribute]
         partial_result = torch.linalg.powsum(
             input_tensor,
             ord=norm_type,
@@ -350,7 +351,7 @@ def vector_norm_handler(
         )
         replicated_result = partial_result.redistribute(placements=new_placements)
         # Step 3: Apply root locally
-        return replicated_result ** (1.0 / norm_type)
+        return replicated_result ** (1.0 / float(norm_type))
 
     # For inf/-inf/0/1 norms or Partial inputs, use normal dispatch
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)

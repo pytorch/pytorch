@@ -12,12 +12,18 @@ from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
+from torch.testing._internal.common_utils import (
+    assertExpectedInline,
+    run_tests,
+    TEST_XPU,
+    xfailIf,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
     TransformerBlock,
 )
+from torch.utils._debug_mode import DebugMode
 
 
 device_type = torch.device(get_devtype())
@@ -115,6 +121,30 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
             self._test_clip_grad_norm(
                 1, norm_type, ref_model, ref_optim, model, optim, inp
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_clip_grad_norm_powsum_efficiency(self):
+        """Test that powsum optimization uses one allreduce and one pow for p-norms."""
+        # Use a simple tensor to verify the op sequence
+        x = torch.randn(4, requires_grad=True, device=device_type)
+        x.grad = torch.randn(4, device=device_type)
+
+        with DebugMode() as debug_mode:
+            torch.nn.utils.clip_grad_norm_([x], max_norm=1.0, norm_type=2)
+
+        # Verify: powsum -> sum -> pow (one pow for final root)
+        assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::linalg_powsum(t$0: f32[4], 2.0)  ->  t$1: f32[]
+    aten::stack([t$1: f32[]])  ->  t$2: f32[1]
+    aten::sum.default(t$2: f32[1])  ->  t$3: f32[]
+    aten::pow.Tensor_Scalar(t$3: f32[], 0.5)  ->  t$4: f32[]
+    aten::add.Tensor(t$4: f32[], 1e-06)  ->  t$5: f32[]
+    aten::div.Tensor(1.0, t$5: f32[])  ->  t$6: f32[]
+    aten::clamp_max.default(t$6: f32[], 1.0)  ->  t$7: f32[]
+    aten::mul_.Tensor(t$0: f32[4], t$7: f32[])  ->  t$0: f32[4]""",
+        )
 
 
 class TestClipGradNormWorldSize4(_TestClipGradNormBase):
