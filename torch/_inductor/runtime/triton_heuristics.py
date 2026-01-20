@@ -2631,10 +2631,11 @@ def _handle_combo_kernel_per_subkernel_blocks(
     the maximum num_warps and num_stages across all sub-kernels.
 
     Returns:
-        List of configs if combo kernel with combo_grid_meta, None otherwise.
+        List of configs if combo kernel with combo_grid_meta and per-subkernel
+        blocks enabled, None otherwise.
     """
     combo_meta = inductor_meta.get("combo_grid_meta")
-    if combo_meta is None:
+    if combo_meta is None or "heuristic_0" not in combo_meta:
         return None
 
     num_kernels = combo_meta["num_kernels"]
@@ -3425,9 +3426,7 @@ def reduction(
     inductor_meta=None,
     return_configs=False,
 ):
-    """
-    Construct @triton.heuristics() decorator for reduction kernels based on size_hints.
-    """
+    """args to @triton.heuristics()"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
@@ -4139,6 +4138,8 @@ class ComboKernelGrid(GridExpr):
         xnumels = []
         ynumels = []
         znumels = []
+        # Check if per-subkernel blocks is enabled
+        per_subkernel = "heuristic_0" in combo_meta
         for num in range(combo_meta["num_kernels"]):
             assert (
                 combo_meta[f"xnumel_{num}"] is None or combo_meta[f"xnumel_{num}"] > 0
@@ -4154,19 +4155,29 @@ class ComboKernelGrid(GridExpr):
         if combo_meta["min_blocks"]:
             self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
         if ynumels:
-            self.y_grid = self.maximum(
-                [
-                    self.ceildiv(ynumel, meta.get(f"YBLOCK_{num}"))
-                    for ynumel, num in ynumels
-                ]
-            )
+            if per_subkernel:
+                self.y_grid = self.maximum(
+                    [
+                        self.ceildiv(ynumel, meta.get(f"YBLOCK_{num}"))
+                        for ynumel, num in ynumels
+                    ]
+                )
+            else:
+                self.y_grid = self.ceildiv(
+                    self.maximum([y for y, _ in ynumels]), meta.get("YBLOCK")
+                )
         if znumels:
-            self.z_grid = self.maximum(
-                [
-                    self.ceildiv(znumel, meta.get(f"ZBLOCK_{num}"))
-                    for znumel, num in znumels
-                ]
-            )
+            if per_subkernel:
+                self.z_grid = self.maximum(
+                    [
+                        self.ceildiv(znumel, meta.get(f"ZBLOCK_{num}"))
+                        for znumel, num in znumels
+                    ]
+                )
+            else:
+                self.z_grid = self.ceildiv(
+                    self.maximum([z for z, _ in znumels]), meta.get("ZBLOCK")
+                )
 
     def combo_x_grid(
         self,
@@ -4191,3 +4202,19 @@ class SequentialComboKernelGrid(ComboKernelGrid):
                 for i, (x, no_x_dim) in enumerate(zip(xnumels, no_x_dims))
             ]
         )
+
+
+class RoundRobinComboKernelGrid(ComboKernelGrid):
+    def combo_x_grid(
+        self,
+        xnumels: list[int | str],
+        no_x_dims: list[bool],
+        meta: dict[str, int],
+    ) -> str:
+        assert len(xnumels) == len(no_x_dims)
+        num_kernels = self.inductor_meta["combo_grid_meta"]["num_kernels"]
+        exprs = [x for x, no_x_dim in zip(xnumels, no_x_dims) if no_x_dim]
+        xnumels_x_dim = [x for x, no_x_dim in zip(xnumels, no_x_dims) if not no_x_dim]
+        if xnumels_x_dim:
+            exprs.append(self.ceildiv(self.maximum(xnumels_x_dim), meta.get("XBLOCK")))
+        return f"({self.maximum(exprs)}) * {num_kernels}"
