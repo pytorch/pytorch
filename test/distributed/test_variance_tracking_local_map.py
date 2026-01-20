@@ -6,9 +6,9 @@ import torch
 import torch.distributed as dist
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.experimental import local_map
 from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
-from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,

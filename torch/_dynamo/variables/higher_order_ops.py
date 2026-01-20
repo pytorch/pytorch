@@ -48,6 +48,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.fx.proxy import Proxy
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
+
 from .. import graph_break_hints, variables
 from ..exc import (
     ObservedException,
