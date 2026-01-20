@@ -1,11 +1,18 @@
 #include <c10/core/SymInt.h>
-#include <torch/library.h>
 #include <torch/csrc/inductor/inductor_ops.h>
+#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #if defined(USE_CUDA) || defined(USE_ROCM)
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <ATen/ops/from_blob.h>
 #include <tuple>
 #endif
 
@@ -55,8 +62,8 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
         static_cast<void*>(st.seed_.ptr), {1}, [](void*) {}, dev_opts);
     auto off_t = at::from_blob(
         static_cast<void*>(st.offset_.ptr), {1}, [](void*) {}, dev_opts);
-    auto intra_t =
-        at::tensor({static_cast<int64_t>(st.offset_intragraph_)}, cpu_opts);
+    auto intra_t = at::scalar_tensor({static_cast<int64_t>(st.offset_intragraph_)}, cpu_opts)
+                       .unsqueeze(0);
     return {seed_t, off_t, intra_t};
   }
 
