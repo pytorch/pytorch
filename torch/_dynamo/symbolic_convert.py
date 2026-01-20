@@ -4414,7 +4414,7 @@ class InstructionTranslatorBase(
         #   STORE_FAST iter_var     # Restoration of the iterator variable (original value)
         # We only want the FIRST STORE_FAST (the result), not subsequent ones
         # which are iterator restorations (might be NULL/unbound)
-        comprehension_stored_vars: list[str] = []
+        comprehension_result_var: Optional[str] = None
         ip = start_ip
         found_end_for = False
         while ip < end_ip:
@@ -4422,16 +4422,15 @@ class InstructionTranslatorBase(
             if inst_at_ip.opname == "END_FOR":
                 found_end_for = True
             elif found_end_for and inst_at_ip.opname == "STORE_FAST":
-                # Only take the first STORE_FAST (the result)
-                comprehension_stored_vars.append(inst_at_ip.argval)
-                break  # Stop after the result variable
+                comprehension_result_var = inst_at_ip.argval
+                break
             ip += 1
 
         log.debug(
-            "Handling comprehension graph break from ip %s to %s, created vars: %s",
+            "Handling comprehension graph break from ip %s to %s, result var: %s",
             start_ip,
             end_ip,
-            comprehension_stored_vars,
+            comprehension_result_var,
         )
 
         reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
@@ -4474,51 +4473,40 @@ class InstructionTranslatorBase(
         # Get the metadata for the current frame (first in list for single frame)
         meta = all_stack_locals_metadata[0]
 
-        # Determine which comprehension-created locals are actually read after the comprehension
-        from .bytecode_analysis import livevars_analysis
-
-        resume_inst = self.instructions[end_ip]
-        reads = livevars_analysis(self.instructions, resume_inst)
-
-        # Filter to only variables that are actually read
-        needed_vars = [var for var in comprehension_stored_vars if var in reads]
-
         log.debug(
-            "Comprehension graph break: comprehension_stored_vars=%s, reads=%s, needed_vars=%s",
-            comprehension_stored_vars,
-            reads,
-            needed_vars,
+            "Comprehension graph break: result_var=%s",
+            comprehension_result_var,
         )
 
-        # For each needed comprehension-created local, we need to:
+        # If we have a result variable, we need to:
         # 1. Add it to meta.locals_names so create_call_resume_at knows about it
         # 2. Add it to symbolic_locals so it's included in argnames
         # 3. Generate bytecode to load the local and append it to the frame values list
 
         from .variables.misc import UnknownVariable
 
-        for var_name in needed_vars:
-            if var_name not in meta.locals_names:
+        if comprehension_result_var is not None:
+            if comprehension_result_var not in meta.locals_names:
                 # Assign the next index in locals_names
                 # meta.locals_names stores local indices (0, 1, 2, ...)
                 # The actual index in frame values is meta.num_stack + this index
-                meta.locals_names[var_name] = len(meta.locals_names)
+                meta.locals_names[comprehension_result_var] = len(meta.locals_names)
             # Also add to symbolic_locals so create_call_resume_at includes it in argnames
-            self.symbolic_locals[var_name] = UnknownVariable()
+            self.symbolic_locals[comprehension_result_var] = UnknownVariable()
 
         # Generate bytecode to extend the frame values list
         # Stack state: [cells_list, frame_values_list]
         # We need to:
         # 1. Access frame_values_list[0] (our frame's values)
-        # 2. Append each comprehension local to it
+        # 2. Append the comprehension result to it
 
         from .codegen import PyCodegen
         from .bytecode_transformation import create_dup_top, create_instruction
 
         cg = PyCodegen(self)
 
-        # Generate bytecode to extend frame_values_list[0] with comprehension locals
-        for var_name in needed_vars:
+        # Generate bytecode to extend frame_values_list[0] with comprehension result
+        if comprehension_result_var is not None:
             # Stack: [..., frame_values_list]
             cg.append_output(create_dup_top())
             # Stack: [..., frame_values_list, frame_values_list]
@@ -4526,7 +4514,7 @@ class InstructionTranslatorBase(
             # Stack: [..., frame_values_list, frame_values_list, 0]
             cg.append_output(cg.create_binary_subscr())
             # Stack: [..., frame_values_list, frame_values_list[0]]
-            cg.append_output(create_instruction("LOAD_FAST", argval=var_name))
+            cg.append_output(create_instruction("LOAD_FAST", argval=comprehension_result_var))
             # Stack: [..., frame_values_list, frame_values_list[0], value]
             # LIST_APPEND: append TOS to TOS[-2], pops TOS
             cg.append_output(create_instruction("LIST_APPEND", arg=1))
