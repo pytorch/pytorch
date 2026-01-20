@@ -245,6 +245,18 @@ def get_added_lines(filename: str) -> set[int]:
 
         # Get merge-base with origin/main to check all PR commits
         result = subprocess.run(
+            ["git", "fetch", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            # Just print this as an error, no need to fail the linter here, as
+            # long as we can find the merge base, then this step doesn't matter
+            msg = "Failed to fetch origin: {result.stderr.strip()}"
+            logging.error(msg)
+
+        result = subprocess.run(
             ["git", "merge-base", "HEAD", "origin/main"],
             capture_output=True,
             text=True,
