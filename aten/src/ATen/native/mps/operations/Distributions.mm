@@ -16,6 +16,7 @@
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
 #include <ATen/ops/random_native.h>
@@ -434,6 +435,25 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
                                       MPSGraphRandomDistributionUniform,
                                       gen,
                                       "exponential_mps_:" + std::to_string(lambda),
+                                      random_op_block);
+}
+
+Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    return [mpsGraph exponentWithTensor:randomTensor name:nil];
+  };
+
+  return mps::random_mps_impl<double>(self,
+                                      mean,
+                                      std,
+                                      std::nullopt,
+                                      std::nullopt,
+                                      MPSGraphRandomDistributionNormal,
+                                      gen,
+                                      "log_normal_mps_:" + std::to_string(mean) + ":" + std::to_string(std),
                                       random_op_block);
 }
 
