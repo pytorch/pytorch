@@ -53,6 +53,9 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
             logger.warning("Triton not available, find_triton_kernels = []")
             return []
 
+        # unwrap decorated fn's (e.g., @lru_cache) to get the original
+        fn = inspect.unwrap(fn)
+
         # init visited set and check for cycles/depth limit
         if visited_fns is None:
             visited_fns = set()
@@ -167,6 +170,12 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
 
         def build_namespace(func_obj: object) -> dict[str, Any]:
             """Build a combined namespace from a function's globals and closures."""
+            # unwrap decorated fns (e.g., @lru_cache)
+            if callable(func_obj):
+                try:
+                    func_obj = inspect.unwrap(func_obj)
+                except ValueError:
+                    pass
             if not callable(func_obj) or not hasattr(func_obj, "__code__"):
                 return {}
             func_closure_vars = inspect.getclosurevars(func_obj)
@@ -204,12 +213,20 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                     if kernel is not None:
                         results.append(kernel)
                         continue
-                    # recurse into callables (e.g., factory fn's)
-                    if callable(obj) and hasattr(obj, "__code__"):
-                        nested = find_triton_kernels(obj, visited_fns, depth + 1)
-                        if nested:
-                            results.extend(nested)
-                            continue
+                    # recurse into callable objects (factory fn's),
+                    # unwrapping decorators if applicable
+                    if callable(obj):
+                        try:
+                            unwrapped = inspect.unwrap(obj)
+                        except ValueError:
+                            unwrapped = obj
+                        if hasattr(unwrapped, "__code__"):
+                            nested = find_triton_kernels(
+                                unwrapped, visited_fns, depth + 1
+                            )
+                            if nested:
+                                results.extend(nested)
+                                continue
                     logger.warning("failed to resolve %s to a triton kernel", name)
                 elif assignments is not None and name in assignments:
                     # trace through local assignments
