@@ -6381,7 +6381,10 @@ def forward(self, primals_1, tangents_1):
         as a forward output. It is still important to test this case because it can actually
         happen if you use subclasses.
         """
-        from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
+        from torch.utils.checkpoint import (
+            checkpoint,
+            create_selective_checkpoint_contexts,
+        )
 
         class GetitemAsGradOutput(torch.autograd.Function):
             @staticmethod
@@ -6394,11 +6397,19 @@ def forward(self, primals_1, tangents_1):
             def backward(ctx, grad_var):
                 return ctx.saved_tensors[0]
 
-        context_fn = partial(create_selective_checkpoint_contexts, [torch.ops.aten.var_mean.correction])
+        context_fn = partial(
+            create_selective_checkpoint_contexts,
+            [torch.ops.aten.var_mean.correction],
+        )
 
         @torch.compile(backend="aot_eager_decomp_partition", fullgraph=True)
         def fn(x):
-            return checkpoint(GetitemAsGradOutput.apply, x, use_reentrant=False, context_fn=context_fn)
+            return checkpoint(
+                GetitemAsGradOutput.apply,
+                x,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
 
         x = torch.randn(4, requires_grad=True)
         fn(x).sum().backward()
