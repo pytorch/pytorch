@@ -647,11 +647,10 @@ def propagate_shape_and_sharding(
                             mesh_dim_size = mesh_sizes[shard_mesh_dim]
                             if tensor_dim_size % mesh_dim_size != 0:
                                 raise RuntimeError(
-                                    f"Attempted to flatten a dimension that is unevenly sharded: "
-                                    f"tensor dimension {dim.input_dim} has size {tensor_dim_size} "
-                                    f"which is not divisible by mesh dimension size {mesh_dim_size}. "
-                                    f"This would require resharding the input. "
-                                    f"Please explicitly redistribute the tensor instead."
+                                    f"Cannot flatten unevenly sharded tensor: "
+                                    f"dimension {dim.input_dim} (size {tensor_dim_size}) "
+                                    f"is not evenly divisible by mesh dimension {shard_mesh_dim} (size {mesh_dim_size}). "
+                                    f"Please redistribute the tensor before this operation."
                                 )
                         for x in range(dim.input_dim + 1):
                             shardable_dims[x] = [True] * mesh_ndim
@@ -668,11 +667,10 @@ def propagate_shape_and_sharding(
                         can_shard_dim = False
                         if strict_view:
                             raise RuntimeError(
-                                f"Attempted to flatten a dimension that is unevenly sharded: "
-                                f"tensor dimension {dim.input_dim} has size {tensor_dim_size} "
-                                f"which is not divisible by mesh dimension size {mesh_dim_size}. "
-                                f"This would require resharding the input. "
-                                f"Please explicitly redistribute the tensor instead."
+                                f"Cannot flatten unevenly sharded tensor: "
+                                f"dimension {dim.input_dim} (size {tensor_dim_size}) "
+                                f"is not evenly divisible by mesh dimension {shard_mesh_dim} (size {mesh_dim_size}). "
+                                f"Please redistribute the tensor before this operation."
                             )
                 shardable_dims[dim.input_dim] = [can_shard_dim] * mesh_ndim
 
@@ -842,7 +840,12 @@ def propagate_shape_and_sharding(
             if local_tensor_shapes[p.dim] % mesh.size(
                 mesh_dim
             ) != 0 and not _is_last_shard_on_tensor_dim_plus(mesh_dim, placements):
-                raise RuntimeError("cannot further shard on uneven sharded dims")
+                raise RuntimeError(
+                    f"Cannot shard unevenly distributed tensor: "
+                    f"dimension {p.dim} (size {local_tensor_shapes[p.dim]}) "
+                    f"is not evenly divisible by mesh dimension {mesh_dim} (size {mesh.size(mesh_dim)}). "
+                    f"Please redistribute the tensor before this operation."
+                )
             else:
                 local_tensor_shapes[p.dim] = local_tensor_shapes[p.dim] // mesh.size(
                     mesh_dim

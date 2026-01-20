@@ -699,7 +699,7 @@ class TestViewOps(DTensorTestBase):
                             ) != 0 and shard_dim != (flatten_end - 1):
                                 ctx = self.assertRaisesRegex(
                                     RuntimeError,
-                                    "Attempted to flatten a dimension that is unevenly sharded",
+                                    "is not evenly divisible by mesh dimension",
                                 )
                             with ctx:
                                 self._test_dtensor_flatten_1d_shard(
@@ -820,7 +820,10 @@ class TestViewOps(DTensorTestBase):
                                 if tensor_dims[shard_dim] % mesh.size(
                                     shard_placement_idx
                                 ) != 0 and shard_dim != (flatten_end - 1):
-                                    ctx = self.assertRaises(RuntimeError)
+                                    ctx = self.assertRaisesRegex(
+                                        RuntimeError,
+                                        "is not evenly divisible by mesh dimension",
+                                    )
                                 with ctx:
                                     self._test_dtensor_flatten_2d_sr_rs(
                                         tensor_dims,
@@ -833,38 +836,71 @@ class TestViewOps(DTensorTestBase):
 
                     # S, S
                     for shard_dim0 in range(flatten_start, flatten_end):
+                        # Note: only test shard_dim1 >= shard_dim0 as the helper
+                        # _get_expected_placements_ss assumes this ordering
                         for shard_dim1 in range(shard_dim0, flatten_end):
-                            tensor_dim_values = [
-                                2 * self.world_size - 1,
-                                2 * self.world_size,
-                                2 * self.world_size + 1,
+                            # Use mesh dimension sizes for proper uneven testing
+                            # shard_dim0 is sharded on mesh dim 0, shard_dim1 on mesh dim 1
+                            dim0_values = [
+                                2 * mesh.size(0) - 1,
+                                2 * mesh.size(0),
+                                2 * mesh.size(0) + 1,
                             ]
-                            for tensor_dims in list(
-                                itertools.product(tensor_dim_values, repeat=tensor_ndim)
-                            ):
-                                local_tensor_dims = list(tensor_dims)
-                                placements = (Shard(shard_dim0), Shard(shard_dim1))
-                                ctx = contextlib.nullcontext()
-                                if local_tensor_dims[shard_dim0] % mesh.size(0) != 0:
-                                    ctx = self.assertRaises(RuntimeError)
-                                local_tensor_dims[shard_dim0] = local_tensor_dims[
-                                    shard_dim0
-                                ] // mesh.size(0)
-                                if local_tensor_dims[shard_dim1] % mesh.size(
-                                    1
-                                ) != 0 and shard_dim1 != (flatten_end - 1):
-                                    ctx = self.assertRaises(RuntimeError)
-                                local_tensor_dims[shard_dim1] = math.ceil(
-                                    local_tensor_dims[shard_dim1] * 1.0 / mesh.size(1)
-                                )
-                                with ctx:
-                                    self._test_dtensor_flatten_2d_ss(
-                                        tensor_dims,
-                                        flatten_start,
-                                        flatten_end,
-                                        mesh,
-                                        placements,
+                            dim1_values = [
+                                2 * mesh.size(1) - 1,
+                                2 * mesh.size(1),
+                                2 * mesh.size(1) + 1,
+                            ]
+                            # For non-sharded dims, use a value divisible by both mesh sizes
+                            other_dim_value = 2 * mesh.size(0) * mesh.size(1)
+
+                            for dim0_val in dim0_values:
+                                for dim1_val in dim1_values:
+                                    # Build tensor_dims with appropriate values
+                                    tensor_dims = [other_dim_value] * tensor_ndim
+                                    tensor_dims[shard_dim0] = dim0_val
+                                    if shard_dim0 != shard_dim1:
+                                        tensor_dims[shard_dim1] = dim1_val
+                                    # else: same dim sharded on both mesh dims, use dim0_val
+
+                                    tensor_dims = tuple(tensor_dims)
+                                    local_tensor_dims = list(tensor_dims)
+                                    placements = (Shard(shard_dim0), Shard(shard_dim1))
+                                    ctx = contextlib.nullcontext()
+                                    # Error if shard_dim0 size not divisible by mesh dim 0 size
+                                    if (
+                                        local_tensor_dims[shard_dim0] % mesh.size(0)
+                                        != 0
+                                    ):
+                                        ctx = self.assertRaisesRegex(
+                                            RuntimeError,
+                                            "is not evenly divisible by mesh dimension",
+                                        )
+                                    local_tensor_dims[shard_dim0] = local_tensor_dims[
+                                        shard_dim0
+                                    ] // mesh.size(0)
+                                    # Error if shard_dim1 size (after first shard) not divisible
+                                    # by mesh dim 1 size, unless it's the last flattened dim
+                                    if local_tensor_dims[shard_dim1] % mesh.size(
+                                        1
+                                    ) != 0 and shard_dim1 != (flatten_end - 1):
+                                        ctx = self.assertRaisesRegex(
+                                            RuntimeError,
+                                            "is not evenly divisible by mesh dimension",
+                                        )
+                                    local_tensor_dims[shard_dim1] = math.ceil(
+                                        local_tensor_dims[shard_dim1]
+                                        * 1.0
+                                        / mesh.size(1)
                                     )
+                                    with ctx:
+                                        self._test_dtensor_flatten_2d_ss(
+                                            tensor_dims,
+                                            flatten_start,
+                                            flatten_end,
+                                            mesh,
+                                            placements,
+                                        )
 
                     # Replicate
                     tensor_dims = [2 * mesh.size(0) - 1] * tensor_ndim
