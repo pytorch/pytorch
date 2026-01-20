@@ -70,8 +70,8 @@ inline void resetPeakStats(c10::DeviceIndex device) {
   return get()->resetPeakStats(device);
 }
 
-inline HIPCachingAllocator::SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) {
-  return get()->snapshot(mempool_id);
+inline HIPCachingAllocator::SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}, bool include_traces = true) {
+  return get()->snapshot(mempool_id, include_traces);
 }
 
 inline std::shared_ptr<HIPCachingAllocator::AllocatorState> getCheckpointState(
