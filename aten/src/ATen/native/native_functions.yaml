@@ -14528,6 +14528,7 @@
   python_module: linalg
   variants: function
   dispatch:
+    CompositeExplicitAutograd: linalg_powsum_slow
     CPU, CUDA: linalg_powsum
   tags: reduction
 

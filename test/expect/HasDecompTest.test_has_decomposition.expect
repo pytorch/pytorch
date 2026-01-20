@@ -305,6 +305,7 @@ aten::_foreach_pow.Scalar_out
 aten::_foreach_pow_.List
 aten::_foreach_pow_.Scalar
 aten::_foreach_pow_.ScalarList
+aten::_foreach_powsum.Scalar
 aten::_foreach_reciprocal
 aten::_foreach_reciprocal.out
 aten::_foreach_reciprocal_
@@ -917,6 +918,7 @@ aten::linalg_matrix_exp
 aten::linalg_matrix_exp.out
 aten::linalg_pinv.atol_rtol_tensor
 aten::linalg_pinv.atol_rtol_tensor_out
+aten::linalg_powsum
 aten::linalg_qr
 aten::linalg_qr.out
 aten::linalg_solve_triangular

@@ -2925,6 +2925,36 @@ Tensor linalg_powsum(
   return result;
 }
 
+// linalg_powsum_slow: fallback implementation for backends without optimized kernels
+// Computes sum(|x|^ord) using basic ops
+Tensor linalg_powsum_slow(
+    const Tensor& self,
+    const Scalar& scalar_ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  auto ord = scalar_ord.toDouble();
+
+  // Validate ord: powsum only makes sense for p-norms where p > 0 and p != inf
+  TORCH_CHECK(
+      ord > 0 && ord != INFINITY,
+      "linalg.powsum only supports finite positive ord values, got: ", ord);
+
+  // Handle dtype conversion
+  Tensor self_;
+  if (opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true) != self.scalar_type()
+        ? self.to(at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true))
+        : self;
+  }
+
+  // Compute |x|^ord and sum
+  auto abs_pow = at::pow(at::abs(self_), scalar_ord);
+  return at::sum(abs_pow, opt_dim, keepdim, toRealValueType(abs_pow.scalar_type()));
+}
+
 static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, std::optional<ScalarType> opt_dtype, bool low_precision) {
   // A
   at::native::checkIsMatrix(A, "linalg.matrix_norm");
