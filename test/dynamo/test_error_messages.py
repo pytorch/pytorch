@@ -897,6 +897,8 @@ RuntimeError when making fake tensor call
 
   Developer debug context:
 
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4315.html
+
 from user code:
    File "test_error_messages.py", line N, in fn
     return x + y""",

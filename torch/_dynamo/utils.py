@@ -3747,6 +3747,8 @@ def run_node(
                 + repr(e)
             )
 
+        from .exc import Unsupported
+
         try:
             if op == "call_function":
                 return node.target(*args, **kwargs)  # type: ignore[operator]
@@ -3791,6 +3793,12 @@ def run_node(
                 hints=hints,
                 from_exc=e,
             )
+        except Unsupported:
+            raise
+        except Exception as e:
+            raise RuntimeError(make_error_message(e)).with_traceback(
+                e.__traceback__
+            ) from e
 
     raise AssertionError(op)
 
