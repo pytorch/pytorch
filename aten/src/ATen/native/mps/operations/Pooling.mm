@@ -369,7 +369,8 @@ static PoolSizes process_pool_sizes(const Tensor& input,
       out_size += stride_expanded[dim] - 1;
     }
 
-    out_size = out_size / stride_expanded[dim] + 1;
+    // Use div_rtn for proper floor division (matching CPU behavior)
+    out_size = div_rtn<int64_t>(out_size, static_cast<int64_t>(stride_expanded[dim])) + 1;
 
     if (ceil_mode) {
       if (((out_size - 1) * stride_expanded[dim]) >= (input.size(leading_dims + dim) + padding_expanded[dim])) {
@@ -385,6 +386,48 @@ static PoolSizes process_pool_sizes(const Tensor& input,
   }
   for (const auto dim : c10::irange(pooling_dims)) {
     output_size[leading_dims + dim] = output_pooling_size[dim];
+  }
+
+  // Validate output sizes using the same shape check functions as CPU/CUDA
+  if (pooling_dims == 2) {
+    const auto memory_format = input.suggest_memory_format();
+    pool2d_shape_check(input,
+                       kernel_size_expanded[0],
+                       kernel_size_expanded[1],
+                       stride_expanded[0],
+                       stride_expanded[1],
+                       padding_expanded[0],
+                       padding_expanded[1],
+                       dilation_expanded[0],
+                       dilation_expanded[1],
+                       input.size(leading_dims - 1),
+                       input.size(leading_dims),
+                       input.size(leading_dims + 1),
+                       output_pooling_size[0],
+                       output_pooling_size[1],
+                       memory_format);
+  } else if (pooling_dims == 3) {
+    pool3d_shape_check(input,
+                       input.size(leading_dims - 1),
+                       kernel_size_expanded[0],
+                       kernel_size_expanded[1],
+                       kernel_size_expanded[2],
+                       stride_expanded[0],
+                       stride_expanded[1],
+                       stride_expanded[2],
+                       padding_expanded[0],
+                       padding_expanded[1],
+                       padding_expanded[2],
+                       dilation_expanded[0],
+                       dilation_expanded[1],
+                       dilation_expanded[2],
+                       input.size(leading_dims),
+                       input.size(leading_dims + 1),
+                       input.size(leading_dims + 2),
+                       output_pooling_size[0],
+                       output_pooling_size[1],
+                       output_pooling_size[2],
+                       op_name.c_str());
   }
 
   return PoolSizes(dims,
@@ -527,6 +570,13 @@ static void max_unpool_out_mps_template(const Tensor& input,
               " elements but got ",
               output_size_.size());
 
+  // Check that input and indices have the same shape
+  TORCH_CHECK(input.sizes() == indices.sizes(),
+              "Expected shape of indices to be same as that of the input tensor (",
+              input.sizes(),
+              ") but got indices tensor with shape: ",
+              indices.sizes());
+
   auto dims = input.dim();
   auto leading_dims = input.dim() - pooling_dims;
 
@@ -541,19 +591,6 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
   output.resize_(output_size, memory_format);
   output.fill_(0);
-
-  if (indices.defined() && indices.numel() > 0) {
-    auto output_image_size = c10::multiply_integers(output_size_);
-
-    auto [min_idx_tensor, max_idx_tensor] = indices.aminmax();
-    int64_t min_idx = min_idx_tensor.item<int64_t>();
-    int64_t max_idx = max_idx_tensor.item<int64_t>();
-
-    if (min_idx < 0 || max_idx >= output_image_size) {
-      int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
-      TORCH_CHECK(false, "Found an invalid max index: ", error_idx, " for output tensor of shape ", output_size_);
-    }
-  }
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -578,7 +615,7 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
       getMPSProfiler().beginProfileKernel(PSO, op_name, {input});
       [computeEncoder setComputePipelineState:PSO];
-      mtl_setArgs(computeEncoder, output, input, indices, params);
+      mtl_setArgs(computeEncoder, output, input, indices, params, mpsStream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
       getMPSProfiler().endProfileKernel(PSO);
@@ -893,7 +930,7 @@ Tensor mps_max_pool2d_backward(const Tensor& grad_output,
   mps::pool2d_template(input,
                        grad_input,
                        std::nullopt,
-                       grad_output,
+                       grad_output.contiguous(input.suggest_memory_format()),
                        kernel_size,
                        stride,
                        padding,

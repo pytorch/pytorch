@@ -282,7 +282,7 @@ void gpu_kernel_multiple_outputs_impl(TensorIteratorBase& iter, const func_t& f)
   using traits = function_traits<func_t>;
   using output_t = typename traits::result_type;
   static_assert(is_tuple<output_t>::value, "f's return type must be `thrust::tuple`");
-  constexpr int num_outputs = std::tuple_size<output_t>::value;
+  constexpr int num_outputs = thrust::tuple_size<output_t>::value;
   constexpr int num_inputs = traits::arity;
   constexpr int ntensors = num_outputs + num_inputs;
 

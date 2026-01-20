@@ -8,7 +8,6 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
@@ -59,7 +58,6 @@ class TestTorchDeviceAssertTrigger(TestCase):
         f_c()
 
     @requires_gpu_and_triton
-    @skipIfRocm
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_assert_fusion(self):
         torch._logging.set_logs(inductor_metrics=True)
@@ -78,7 +76,6 @@ class TestTorchDeviceAssertTrigger(TestCase):
         torch._logging.set_logs()
 
     @requires_gpu_and_triton
-    @skipIfRocm
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_run_assert_triton(self):
         @torch.compile(backend="inductor")

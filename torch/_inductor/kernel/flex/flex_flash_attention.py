@@ -5,14 +5,13 @@ import functools
 import importlib
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Literal, Optional
+from typing import Any, cast, Literal, Optional
 
 import sympy
 from sympy import Expr, Integer
 
 import torch
 from torch.fx import GraphModule
-from torch.utils._sympy.functions import Identity
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
@@ -48,37 +47,46 @@ flash_attention_backward_cutedsl_template = CuteDSLTemplate(
 )
 
 
-def _fixed_indexer_cute(
+class HierarchicalIndex(sympy.Function):
+    """
+    Inert wrapper to carry an N-D index tuple through Inductor's SymPy-based IR.
+
+    Inductor generally represents a tensor index as a single `sympy.Expr` (often a
+    flattened linear offset in memory). CuteDSL, however, wants structured coordinates so it
+    can emit `tensor[i, j, ...]` and handle strides internally. We therefore wrap
+    the per-dimension indices in a `sympy.Function` node: this keeps the value a
+    `sympy.Expr` for existing substitution/CSE machinery, while letting CuteDSL
+    codegen pattern-match and unpack the coordinates via `index.args`.
+
+    `eval()` returns None to keep the node inert (no simplification/flattening).
+
+    These nodes are intended to be short-lived wrappers and are only interpreted by
+    CuteDSL codegen (see `ModificationWrapperCuteDSL.load` in
+    `torch/_inductor/codegen/cutedsl/cutedsl_kernel.py`).
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        return None
+
+
+def _hierarchical_indexer_cute(
     size: Sequence[int],
-    stride: Optional[Sequence[int]] = None,
+    stride: Sequence[int] | None = None,
     offset: Expr = Integer(0),
 ) -> Callable[[Sequence[Expr]], Expr]:
-    """
-    Colexicographic indexer for CuteDSL - matches CuTe's coordinate interpretation.
+    """Return an indexer that preserves multi-dimensional indices for CuteDSL."""
 
-    CuTe interprets linear indices in colexicographic (column-major) order,
-    whereas Inductor's default _fixed_indexer uses lexicographic (row-major) order.
-
-    For size=[4, 128] with index=[b, q_idx]:
-    - Lexicographic:    b*128 + q_idx*1
-    - Colexicographic:  b*1 + q_idx*2
-
-    CuTe then applies the tensor's actual memory strides to get the correct offset.
-    """
-
-    def indexer(index: Sequence[Expr]) -> Expr:
-        assert offset == Integer(0), "Offset not supported for colexicographic indexing"
-        if not index:
+    def indexer(indices: Sequence[Expr]) -> Expr:
+        assert offset == Integer(0), "Offset not supported for hierarchical indexing"
+        assert len(indices) == len(size), (
+            f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
+        )
+        if not indices:
             return Integer(0)
-
-        result = index[0]
-        runner = size[0]
-
-        for idx, sz in zip(index[1:], size[1:], strict=True):
-            result = result + runner * Identity(idx)
-            runner = runner * sz
-
-        return result
+        if len(indices) == 1:
+            return indices[0]
+        return HierarchicalIndex(*indices)
 
     return indexer
 
@@ -86,17 +94,17 @@ def _fixed_indexer_cute(
 @contextmanager
 def patch_fixed_layout_indexer_for_cutedsl():
     """
-    Temporarily swap FixedLayout.make_indexer so CuteDSL sees colexicographic indexing.
+    Temporarily swap FixedLayout.make_indexer so CuteDSL sees hierarchical indexing.
 
     Note [CuteDSL indexer patch]:
     Flex flash attention only supports a limited set of IR ops (pointwise, reads, no stores),
-    so temporarily changing the indexing order is safe for the kernels we emit today.
+    so temporarily changing the indexing behavior is safe for the kernels we emit today.
     TODO(dynamic shapes): Reconfirm once flex flash attention supports dynamic shapes.
     """
     original_make_indexer = FixedLayout.make_indexer
 
     def cutedsl_make_indexer(self):
-        return _fixed_indexer_cute(self.size, self.stride, self.offset)
+        return _hierarchical_indexer_cute(self.size, self.stride, self.offset)
 
     FixedLayout.make_indexer = cutedsl_make_indexer  # type: ignore[assignment]
     try:
@@ -110,18 +118,18 @@ def wrap_choice_render_with_cutedsl_indexer(choice: Any) -> None:
     Wrap a template choice's kernel render to apply CuteDSL indexer patching.
 
     See Note [CuteDSL indexer patch]:
-    This wrapper allows the template to construct its closures normally, then
-    scopes the indexer patch to the actual render call that emits the kernel.
-    This ensures CuteDSL templates see colexicographic indexing while preserving
-    the template's setup logic.
+    CuteDSL handles tensor strides internally, so template rendering must use
+    hierarchical indexing.
     """
     original_make_kernel_render = choice.make_kernel_render
 
     def make_kernel_render_with_patch(*args, **kwargs):
         render_kernel, render = original_make_kernel_render(*args, **kwargs)
-        # Let the template construct its closures, then scope the indexer patch
-        # to the actual render call that emits the kernel
-        render_with_patch = patch_fixed_layout_indexer_for_cutedsl()(render)
+
+        def render_with_patch():
+            with patch_fixed_layout_indexer_for_cutedsl():
+                return render()
+
         return render_kernel, render_with_patch
 
     choice.make_kernel_render = make_kernel_render_with_patch
@@ -169,13 +177,54 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 
 
 @functools.lru_cache(maxsize=1)
-def _supports_nontrivial_mask_graphs() -> bool:
-    """Currently only supported on Hopper (SM90) GPUs."""
-    return torch.cuda.get_device_capability()[0] in [9, 10]
+def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
+    """Check if a symbol originates from a tensor size/stride (TensorPropertySource)."""
+    from torch._dynamo.source import TensorPropertySource
+
+    sources = shape_env.var_to_sources.get(symbol, [])
+    return any(isinstance(s, TensorPropertySource) for s in sources)
+
+
+def _has_unsupported_captured_scalars(
+    score_mod_other_buffers: Sequence[Any],
+    mask_mod_other_buffers: Sequence[Any],
+) -> bool:
+    """Check if any captured buffers are dynamic scalars that cannot be inlined.
+
+    When compiling with dynamic=True, captured Python scalars in score_mod or
+    mask_mod may become:
+    - sympy symbols from LocalSource (captured ints) - NOT from tensor shapes
+    - 0-dim CPU tensors (captured floats)
+
+    Symbols from TensorPropertySource (tensor size/stride) are fine because they
+    get resolved at runtime.
+
+    The FLASH backend cannot inline captured scalar symbolic values into the CuteDSL template.
+    """
+    from torch._inductor.virtualized import V
+
+    shape_env = V.graph.sizevars.shape_env
+
+    for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
+        # Captured int becomes sympy.Symbol - check if it's NOT from a tensor shape
+        if isinstance(buf, sympy.Expr):
+            for symbol in buf.free_symbols:
+                if not _is_symbol_from_tensor_shape(symbol, shape_env):
+                    return True
+        # Captured float becomes 0-dim TensorBox on CPU
+        if isinstance(buf, TensorBox):
+            device = buf.get_device()
+            size = buf.get_size()
+            if device is not None and device.type == "cpu" and len(size) == 0:
+                # 0-dimensional CPU tensor (scalar) - can't be inlined into CUDA kernel
+                return True
+    return False
 
 
 def _can_use_flex_flash_attention(
-    subgraph: Subgraph, mask_graph: Subgraph, num_score_mod_placeholders: int
+    subgraph: Subgraph,
+    mask_graph: Subgraph,
+    num_score_mod_placeholders: int,
 ) -> tuple[bool, str]:
     """Check if flex flash attention can be used for the given inputs.
 
@@ -189,16 +238,6 @@ def _can_use_flex_flash_attention(
         return (
             False,
             "Input buffers require gradients (not supported by flash attention)",
-        )
-    mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
-
-    if mask_trivial:
-        return True, ""
-
-    if not _supports_nontrivial_mask_graphs():
-        return (
-            False,
-            "NYI: Non-trivial mask graphs only supported on Hopper (SM90) for flash attention",
         )
 
     return True, ""
@@ -228,7 +267,9 @@ def _use_flex_flash_attention(
         return False
 
     can_use, reason = _can_use_flex_flash_attention(
-        subgraph, mask_graph, num_score_mod_placeholders
+        subgraph,
+        mask_graph,
+        num_score_mod_placeholders,
     )
 
     if not can_use:
@@ -256,8 +297,14 @@ def create_flex_flash_attention_kernel(
     full_kv_indices: TensorBox | None,
     mask_graph: Subgraph,
     subgraph: Subgraph | None = None,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
+) -> tuple[TensorBox, TensorBox]:
     """Create a flex flash attention kernel using CuteDSL template."""
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Mixed query, key, and value dtype is not supported on this platform, "
+            f"got query.dtype: {query.dtype}, key.dtype: {key.dtype}, "
+            f"and value.dtype: {value.dtype}."
+        )
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
 
@@ -295,10 +342,13 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
-    # Used to check if we can skip block sparse impl
     mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
+    score_graph_is_trivial = subgraph is None or is_trivial_score_graph(
+        subgraph.graph_module
+    )
 
     needs_block_mask = not mask_graph_is_trivial
+    has_score_mod = not score_graph_is_trivial
     has_full_blocks = full_kv_num_blocks is not None
 
     choices: list[Any] = []
@@ -315,15 +365,22 @@ def create_flex_flash_attention_kernel(
             "Flash attention with block mask but without full blocks is not supported yet"
         )
 
-    error = flash_attention_cutedsl_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=output_layout,
-        mutated_inputs=[lse],
-        subgraphs=[subgraph_buffer, mask_graph_buffer],
-        SM_SCALE=scale,
-        NEEDS_BLOCK_MASK=needs_block_mask,
-    )
+    subgraphs = []
+    if has_score_mod:
+        subgraphs.append(subgraph_buffer)
+    subgraphs.append(mask_graph_buffer)
+
+    with patch_fixed_layout_indexer_for_cutedsl():
+        error = flash_attention_cutedsl_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=output_layout,
+            mutated_inputs=[lse],
+            subgraphs=subgraphs,
+            SM_SCALE=scale,
+            HAS_SCORE_MOD=has_score_mod,
+            NEEDS_BLOCK_MASK=needs_block_mask,
+        )
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)
@@ -341,18 +398,32 @@ def create_flex_flash_attention_kernel(
 def _can_use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
+    joint_outputs: Optional[Any] = None,
+    score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
+    num_score_mod_placeholders: int = 5,
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
         return False, "CUTE flash attention is not available"
 
-    if not is_trivial_score_graph(fw_subgraph.graph_module):
+    if input_buffers_require_grads(
+        fw_subgraph.graph_module, num_score_mod_placeholders
+    ):
         return (
             False,
-            "NYI: Flex Flash Attention doesn't support score_mods in bwds yet.",
+            "Input buffers require gradients (not supported by flash attention backward)",
         )
 
-    if not is_trivial_mask_graph(mask_graph.graph_module):
-        return False, "NYI: Flex Flash Attention doesn't support block_sparsity yet."
+    if joint_outputs is not None:
+        if joint_outputs.captured_grads_compute:
+            return (
+                False,
+                "NYI: Flex Flash Attention bwd doesn't support captured grads yet.",
+            )
+        if joint_outputs.mutated_grads:
+            return (
+                False,
+                "NYI: Flex Flash Attention bwd doesn't support mutated grads yet.",
+            )
 
     return True, ""
 
@@ -361,15 +432,17 @@ def _use_flex_flash_attention_backward(
     fw_subgraph: Subgraph,
     mask_graph: Subgraph,
     backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
+    joint_outputs: Optional[Any] = None,
+    score_mod_other_buffers: Optional[Sequence[TensorBox]] = None,
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
     Args:
-        subgraph: The score modification subgraph
+        fw_subgraph: The forward score modification subgraph
         mask_graph: The mask modification subgraph
-        kernel_options: Kernel configuration options
-        num_score_mod_placeholders: Number of placeholders in score_mod
         backend: Implementation selector (AUTO, TRITON, FLASH, TRITON_DECODE)
+        joint_outputs: Processed joint outputs (for PR1 constraint checking)
+        score_mod_other_buffers: Additional buffers used by score_mod
 
     Returns:
         True if flash attention should be used, False otherwise
@@ -381,6 +454,8 @@ def _use_flex_flash_attention_backward(
     can_use, reason = _can_use_flex_flash_attention_backward(
         fw_subgraph,
         mask_graph,
+        joint_outputs,
+        score_mod_other_buffers,
     )
 
     if not can_use:
@@ -400,24 +475,21 @@ def create_flex_flash_attention_backward_kernel(
     grad_out: TensorBox,
     scale: float,
     kernel_options: dict[str, Any],
-    # TODO: will be needed
-    # grad_logsumexp,
-    # fw_graph: SubgraphResults,
-    # joint_graph: SubgraphResults,
-    # mask_graph: SubgraphResults,
-    # score_mod_other_buffers: list[TensorBox],
-    # mask_mod_other_buffers: list[TensorBox],
-    # kv_num_blocks: TensorBox | None,
-    # kv_indices: TensorBox | None,
-    # full_kv_num_blocks: TensorBox | None,
-    # full_kv_indices: TensorBox | None,
+    fw_subgraph_buffer: Optional[SubgraphResults] = None,
+    joint_subgraph_buffer: Optional[Any] = None,
+    score_mod_other_buffers: Optional[list[TensorBox]] = None,
+    mask_graph_buffer: Optional[SubgraphResults] = None,
+    q_num_blocks: Optional[TensorBox] = None,
+    q_indices: Optional[TensorBox] = None,
+    full_q_num_blocks: Optional[TensorBox] = None,
+    full_q_indices: Optional[TensorBox] = None,
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
 
     batch_size, num_heads, seq_len_q, head_dim = query.get_size()
-    v_head_dim = value.get_size()[-1]
+    _, num_heads_kv, seq_len_kv, v_head_dim = value.get_size()
     device = query.get_device()
     dtype = query.get_dtype()
     assert device is not None
@@ -433,25 +505,26 @@ def create_flex_flash_attention_backward_kernel(
     )
 
     grad_key_strides = infer_dense_strides(
-        [batch_size, num_heads, value.get_size()[2], head_dim], key.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, head_dim], key.get_stride()
     )
     grad_key = empty_strided(
-        size=[batch_size, num_heads, value.get_size()[2], head_dim],
+        size=[batch_size, num_heads_kv, seq_len_kv, head_dim],
         stride=grad_key_strides,
         dtype=dtype,
         device=device,
     )
 
     grad_value_strides = infer_dense_strides(
-        [batch_size, num_heads, value.get_size()[2], v_head_dim], value.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], value.get_stride()
     )
     grad_value = empty_strided(
-        size=[batch_size, num_heads, value.get_size()[2], v_head_dim],
+        size=[batch_size, num_heads_kv, seq_len_kv, v_head_dim],
         stride=grad_value_strides,
         dtype=dtype,
         device=device,
     )
 
+    # we use dq as the output layout
     output_layout = FixedLayout(
         device=device,
         dtype=dtype,
@@ -461,7 +534,7 @@ def create_flex_flash_attention_backward_kernel(
 
     choices: list[Any] = []
 
-    input_nodes = [
+    input_nodes: list[TensorBox] = [
         query,
         key,
         value,
@@ -472,13 +545,39 @@ def create_flex_flash_attention_backward_kernel(
         grad_value,
     ]
 
-    error = flash_attention_backward_cutedsl_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=output_layout,
-        mutated_inputs=[grad_key, grad_value],
-        SM_SCALE=scale,
-    )
+    has_block_mask = mask_graph_buffer is not None
+    if has_block_mask:
+        assert q_indices is not None
+        assert full_q_num_blocks is not None
+        assert full_q_indices is not None
+        input_nodes.extend(
+            [
+                cast(TensorBox, q_num_blocks),
+                q_indices,
+                full_q_num_blocks,
+                full_q_indices,
+            ]
+        )
+
+    has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
+    subgraphs = []
+    if has_score_mod:
+        subgraphs.append(fw_subgraph_buffer)
+        subgraphs.append(joint_subgraph_buffer)
+    if has_block_mask:
+        subgraphs.append(mask_graph_buffer)
+
+    with patch_fixed_layout_indexer_for_cutedsl():
+        error = flash_attention_backward_cutedsl_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=output_layout,
+            mutated_inputs=[grad_key, grad_value],
+            subgraphs=subgraphs if subgraphs else None,
+            SM_SCALE=scale,
+            HAS_SCORE_MOD=has_score_mod,
+            HAS_BLOCK_MASK=has_block_mask,
+        )
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)

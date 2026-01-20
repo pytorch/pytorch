@@ -108,10 +108,10 @@ def build_triton(
             triton_pkg_name = "triton"
             triton_repo = "https://github.com/ROCm/triton"
         elif device == "xpu":
-            triton_pkg_name = "pytorch-triton-xpu"
+            triton_pkg_name = "triton-xpu"
             triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
         else:
-            triton_pkg_name = "pytorch-triton"
+            triton_pkg_name = "triton"
         check_call(["git", "clone", triton_repo, "triton"], cwd=tmpdir)
         if release:
             ver, rev, patch = version.split(".")

@@ -30,13 +30,13 @@
 
 #if defined(USE_ROCM)
 #include <miopen/version.h>
+#include <hipblaslt/hipblaslt-version.h>
 #endif
 
 #ifndef USE_ROCM
 #include <ATen/cuda/detail/LazyNVRTC.h>
 #endif
 
-#include <cuda.h>
 
 #include <sstream>
 #include <cstddef>
@@ -60,7 +60,7 @@ void set_magma_init_fn(void (*fn)()) {
 namespace {
 bool _hasPrimaryContext(DeviceIndex device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
+              "hasPrimaryContext expects a valid device index, but got device_index=", static_cast<int>(device_index));
   unsigned int ctx_flags = 0;
   // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
   // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
@@ -379,6 +379,16 @@ long CUDAHooks::versionMIOpen() const {
          MIOPEN_VERSION_PATCH;
 #else
   TORCH_CHECK(false, "Cannot query MIOpen version if ATen_cuda is not built with ROCm");
+#endif
+}
+
+long CUDAHooks::versionHipBLASLt() const {
+#if AT_ROCM_ENABLED()
+  return HIPBLASLT_VERSION_MAJOR * 10000 +
+         HIPBLASLT_VERSION_MINOR * 100 +
+         HIPBLASLT_VERSION_PATCH;
+#else
+  TORCH_CHECK(false, "Cannot query HipBLASLt version if ATen_cuda is not built with ROCm");
 #endif
 }
 

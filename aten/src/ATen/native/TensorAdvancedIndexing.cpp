@@ -2233,8 +2233,12 @@ static void scatter_impl(
       scatter_reduce_exclude_self_helper(mut_out, dim, index, op);
     }
     // _scatter_via_index_put can only handle sum and mean reduction type
+    // we don't need to go index_put route if our inputs are integral
+    // we check in the meta function that self and src dtypes match,
+    // so here we need to check just one of them
     deterministic = deterministic &&
-        (op == ReductionType::SUM || op == ReductionType::MEAN);
+        (op == ReductionType::SUM || op == ReductionType::MEAN) &&
+        !at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
   }
 
   // Scalar src should already be deterministic
@@ -2326,9 +2330,13 @@ TORCH_IMPL_FUNC(scatter_add)
 
   // See Note [Enabling Deterministic Operations]
   // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  // we don't need to go index_put route if our inputs are integral
+  // we check in the meta function that self and src dtypes match,
+  // so here we need to check just one of them
   if (globalContext().deterministicAlgorithms() &&
       (self.device().type() == DeviceType::CUDA ||
-       self.device().type() == DeviceType::XPU)) {
+       self.device().type() == DeviceType::XPU) &&
+      !at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/ true);
   } else {
     if (can_use_expanded_index_path(
@@ -2669,6 +2677,9 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
   auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
+  // Wrap negative indices to positive (Python-style)
+  indices_broadcasted =
+      indices_broadcasted.remainder(self_broadcasted.size(dim));
   return std::make_tuple(
       std::move(self_broadcasted),
       std::move(indices_broadcasted),

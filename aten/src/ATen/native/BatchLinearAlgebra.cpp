@@ -1957,15 +1957,10 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out)(const Tensor& A,
                                       const Tensor& LU,
                                       const Tensor& pivots,
                                       const Tensor& info) {
-  // Possible optimization: Compute the LU factorization of A^T if A is contiguous
-  // Then we solve A^T X = B with adjoint=True
-  // This saves a copy as A doesn't need to be copied into an F-contig matrix in lu_factor
-  // This optimization makes functorch's batching rule difficult. See NOTE [ solve_ex Batch Rule Contiguity ]
-  const bool use_A_T = A.is_contiguous() && !A.is_complex();
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU),
                               const_cast<Tensor&>(pivots),
                               const_cast<Tensor&>(info),
-                              use_A_T ? A.mT() : A);
+                              A);
   if (check_errors) {
     at::_linalg_check_errors(info, "torch.linalg.solve_ex", A.dim() == 2);
   }
@@ -1974,7 +1969,7 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out)(const Tensor& A,
   const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, B);
   auto result_ = vector_case ? result.unsqueeze(-1) : result;
   auto B_ = vector_case ? B.unsqueeze(-1) : B;
-  at::linalg_lu_solve_out(result_, LU, pivots, B_, left, /*adjoint*/use_A_T);
+  at::linalg_lu_solve_out(result_, LU, pivots, B_, left);
 }
 
 std::tuple<Tensor&, Tensor&> linalg_solve_ex_out(const Tensor& A,
@@ -2857,61 +2852,24 @@ Tensor& linalg_eigvalsh_out(const Tensor& A, std::string_view uplo, Tensor& L) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// This function returns complex-valued eigenvectors that is obtained from LAPACK GEEV's real-valued output
-// This function is also used for the MAGMA path because intermediate MAGMA's results live on CPU
-template <typename scalar_t>
-static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tensor& complex_values, const Tensor& real_vectors) {
-  // From GEEV documentation:
-  // Complex conjugate pairs of eigenvalues appear consecutively with the eigenvalue having the positive imaginary part first
-  // If the j-th eigenvalue is real, then v(j) = VR(:,j), the j-th column of VR.
-  // If the j-th and (j+1)-st eigenvalues form a complex conjugate pair, then v(j) = VR(:,j) + i*VR(:,j+1) and v(j+1) = VR(:,j) - i*VR(:,j+1).
+DEFINE_DISPATCH(linalg_eig_make_complex_eigenvectors_stub);
 
-  auto batch_size = batchCount(real_vectors);
-  auto n = real_vectors.size(-1);
-  auto matrix_stride = matrixStride(real_vectors);
+// Converts LAPACK's real-valued eigenvector encoding to complex eigenvectors.
+// This function dispatches to device-specific implementations (CPU or CUDA) based
+// on the device type of the input tensors.
+void linalg_eig_make_complex_eigenvectors(const Tensor& complex_vectors, const Tensor& complex_values, const Tensor& real_vectors) {
+  // Device consistency checks
+  TORCH_CHECK(
+      complex_vectors.device() == complex_values.device() &&
+      complex_vectors.device() == real_vectors.device(),
+      "linalg_eig_make_complex_eigenvectors: all tensors must be on the same device");
 
-  auto result_data = result.data_ptr<c10::complex<scalar_t>>();
-  auto real_vectors_data = real_vectors.const_data_ptr<scalar_t>();
-  auto values_data = complex_values.const_data_ptr<c10::complex<scalar_t>>();
-
-  for (auto b = decltype(batch_size){0}; b < batch_size; b++) {
-    const scalar_t* vecs = &real_vectors_data[b * matrix_stride];
-    c10::complex<scalar_t>* res = &result_data[b * matrix_stride];
-    const c10::complex<scalar_t>* vals = &values_data[b * n];
-    for (auto j = decltype(n){0}; j < n; j++) {
-      if (vals[j].imag() == 0.0) {  // eigenvalue is real, then v(j) = VR(:,j)
-        for (auto i = decltype(n){0}; i < n; i++) {
-          res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i], 0);
-        }
-      } else {
-        for (auto i = decltype(n){0}; i < n; i++) {
-          res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i],  vecs[(j+1) * n + i]);      // v(j)   = VR(:,j) + i*VR(:,j+1)
-          res[(j+1) * n + i] = c10::complex<scalar_t>(vecs[j * n + i], -vecs[(j+1) * n + i]);  // v(j+1) = VR(:,j) - i*VR(:,j+1)
-        }
-        j++;
-      }
-    }
-  }
-}
-
-static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, const Tensor& complex_values, const Tensor& real_vectors) {
-  // These asserts make explicit the requirements on tensors for 'linalg_eig_make_complex_eigenvectors_impl'
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.device() == at::kCPU);
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.is_complex());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_complex());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.is_floating_point());
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.mT().is_contiguous());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_contiguous());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.mT().is_contiguous());
-
-  AT_DISPATCH_FLOATING_TYPES(real_vectors.scalar_type(), "linalg_eig_make_complex_vector", [&]{
-    linalg_eig_make_complex_eigenvectors_impl<scalar_t>(complex_vectors, complex_values, real_vectors);
-  });
-  return complex_vectors;
+  // Dispatch to device-specific implementation
+  linalg_eig_make_complex_eigenvectors_stub(
+      complex_vectors.device().type(),
+      complex_vectors,
+      complex_values,
+      real_vectors);
 }
 
 DEFINE_DISPATCH(linalg_eig_stub);
@@ -3006,14 +2964,9 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     }
     if (compute_eigenvectors) {
       if (vectors.is_complex()) {
-        // We move to the CPU because linalg_eig_make_complex_eigenvectors requires it.
-        // Performance note: this function could be implemented via a TensorIterator,
-        // which would avoid an explicit host-device synchronization.
-        auto vectors_cpu = vectors.cpu();
-        auto values_cpu  = values.cpu();
-        auto maybe_complex_vectors_cpu = maybe_complex_vectors.cpu();
-        vectors_cpu = linalg_eig_make_complex_eigenvectors(vectors_cpu, values_cpu, maybe_complex_vectors_cpu);
-        vectors.copy_(vectors_cpu);
+        // Decode LAPACK's real eigenvector format into complex eigenvectors
+        // This now dispatches to device-specific implementations (CPU/CUDA)
+        linalg_eig_make_complex_eigenvectors(vectors, values, maybe_complex_vectors);
       } else {
         TORCH_CHECK(false, "torch.linalg.eig: imaginary part of eigenvectors is non-zero, can't safely cast eigenvectors to non-complex dtype.")
       }

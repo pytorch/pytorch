@@ -2,7 +2,7 @@
 import argparse
 import os
 from enum import Enum
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -58,7 +58,7 @@ class BroadcastingTorchSaveReader(StorageReader):
 
     def __init__(
         self,
-        checkpoint_id: Optional[Union[str, os.PathLike]] = None,
+        checkpoint_id: str | os.PathLike | None = None,
         coordinator_rank: int = 0,
     ) -> None:
         self.checkpoint_id = checkpoint_id
@@ -149,12 +149,12 @@ class BroadcastingTorchSaveReader(StorageReader):
         """Implementation of the StorageReader method"""
         return global_plan
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         """Implementation of the StorageReader method"""
         self.checkpoint_id = checkpoint_id
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         """Implementation of the StorageReader method"""
         return os.path.isfile(checkpoint_id)
 
@@ -183,7 +183,7 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Optional[Metadata] = None,
+        metadata: Metadata | None = None,
         is_coordinator: bool = False,
     ) -> None:
         """Setups of the planner, extnding default behavior by creating the Metadata object from the state dict"""
@@ -206,8 +206,8 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
 
 
 def dcp_to_torch_save(
-    dcp_checkpoint_dir: Union[str, os.PathLike],
-    torch_save_path: Union[str, os.PathLike],
+    dcp_checkpoint_dir: str | os.PathLike,
+    torch_save_path: str | os.PathLike,
 ):
     """
     Given a directory containing a DCP checkpoint, this function will convert it into a
@@ -231,8 +231,8 @@ def dcp_to_torch_save(
 
 
 def torch_save_to_dcp(
-    torch_save_path: Union[str, os.PathLike],
-    dcp_checkpoint_dir: Union[str, os.PathLike],
+    torch_save_path: str | os.PathLike,
+    dcp_checkpoint_dir: str | os.PathLike,
 ):
     """
     Given the location of a torch save file, converts it into a DCP checkpoint.

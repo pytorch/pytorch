@@ -1,4 +1,4 @@
-from typing import Optional, TypeAlias as _TypeAlias, TypeVar
+from typing import TypeAlias as _TypeAlias, TypeVar
 
 from torch import Tensor
 
@@ -29,9 +29,9 @@ _size_5_t: _TypeAlias = _scalar_or_tuple_5_t[int]
 _size_6_t: _TypeAlias = _scalar_or_tuple_6_t[int]
 
 # For arguments which represent optional size parameters (eg, adaptive pool parameters)
-_size_any_opt_t: _TypeAlias = _scalar_or_tuple_any_t[Optional[int]]
-_size_2_opt_t: _TypeAlias = _scalar_or_tuple_2_t[Optional[int]]
-_size_3_opt_t: _TypeAlias = _scalar_or_tuple_3_t[Optional[int]]
+_size_any_opt_t: _TypeAlias = _scalar_or_tuple_any_t[int | None]
+_size_2_opt_t: _TypeAlias = _scalar_or_tuple_2_t[int | None]
+_size_3_opt_t: _TypeAlias = _scalar_or_tuple_3_t[int | None]
 
 # For arguments that represent a ratio to adjust each dimension of an input with (eg, upsampling parameters)
 _ratio_2_t: _TypeAlias = _scalar_or_tuple_2_t[float]
