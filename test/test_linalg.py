@@ -1457,52 +1457,6 @@ class TestLinalg(TestCase):
                             keepdim,
                             norm_dtype)
 
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_vector_norm_skip_root(self, device, dtype):
-        # Test skip_root returns sum(|x|^p) instead of (sum(|x|^p))^(1/p)
-        for size, ord in product([(10,), (3, 4, 5)], [2, 3, 4.5]):
-            x = make_tensor(size, dtype=dtype, device=device, low=0.1, high=2.0)
-            result = torch.linalg.vector_norm(x, ord=ord, skip_root=True)
-            expected = x.abs().pow(ord).sum()
-            self.assertEqual(result, expected)
-
-        # Test dim and keepdim
-        x = make_tensor((3, 4, 5), dtype=dtype, device=device, low=0.1, high=2.0)
-        for ord, dim, keepdim in product([2, 3], [0, (0, 2), None], [True, False]):
-            result = torch.linalg.vector_norm(x, ord=ord, dim=dim, keepdim=keepdim, skip_root=True)
-            expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
-            self.assertEqual(result, expected)
-
-        # Test skip_root has no effect for inf, -inf, 0, 1
-        x = make_tensor((10,), dtype=dtype, device=device, low=0.1, high=2.0)
-        for ord in [float('inf'), float('-inf'), 0, 1]:
-            self.assertEqual(
-                torch.linalg.vector_norm(x, ord=ord),
-                torch.linalg.vector_norm(x, ord=ord, skip_root=True))
-
-        # Test 1D fast path (all reduce dims have size 1)
-        x = make_tensor((1, 1, 1), dtype=dtype, device=device, low=0.1, high=2.0)
-        result = torch.linalg.vector_norm(x, ord=2, skip_root=True)
-        self.assertEqual(result, x.abs().pow(2).sum())
-
-    @onlyCUDA
-    @dtypes(torch.half, torch.bfloat16)
-    def test_vector_norm_skip_root_low_precision(self, device, dtype):
-        for size, ord in product([(10,), (4, 5)], [2, 3]):
-            x = make_tensor(size, dtype=dtype, device=device, low=0.1, high=2.0)
-            result = torch.linalg.vector_norm(x, ord=ord, skip_root=True)
-            expected = x.abs().pow(ord).sum()
-            self.assertEqual(result, expected, atol=1e-2, rtol=1e-2)
-
-    @dtypes(torch.float, torch.double)
-    def test_foreach_norm_skip_root(self, device, dtype):
-        tensors = [make_tensor(s, dtype=dtype, device=device, low=0.1, high=2.0)
-                   for s in [(10,), (20,), (5, 6)]]
-        for ord in [2, 3]:
-            results = torch._foreach_norm(tensors, ord=ord, skip_root=True)
-            for t, r in zip(tensors, results):
-                self.assertEqual(r, t.abs().pow(ord).sum())
-
 
     def test_vector_norm_decom_unbacked_checks(self):
         from torch._refs.linalg import _check_vector_norm_args

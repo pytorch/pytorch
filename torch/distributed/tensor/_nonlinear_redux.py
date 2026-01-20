@@ -303,18 +303,17 @@ def vector_norm_handler(
     kwargs: dict[str, object],
 ) -> object:
     """
-    Custom handler for linalg_vector_norm that decomposes p-norms without skip_root.
+    Custom handler for linalg_vector_norm that decomposes p-norms.
 
-    For p-norms (p not in {inf, -inf, 0, 1}) with skip_root=False on Shard inputs:
-    - Computes vector_norm(skip_root=True) to get sum(|x|^p) as Partial("sum")
+    For p-norms (p not in {inf, -inf, 0, 1}) on Shard inputs:
+    - Computes linalg_powsum to get sum(|x|^p) as Partial("sum")
     - Redistributes Partial to Replicate (allreduce), preserving Shard on non-reduced dims
     - Applies root locally: result ** (1/p)
 
-    This avoids the sqrt->pow->sqrt cycle of _NormPartial while only allreducing
-    a scalar instead of allgathering the full tensor.
+    This avoids the sqrt->pow->sqrt cycle of the old _NormPartial approach
+    while only allreducing a scalar instead of allgathering the full tensor.
 
-    For other cases (inf/-inf/0/1 norms, skip_root=True, or Partial inputs),
-    uses normal dispatch.
+    For other cases (inf/-inf/0/1 norms or Partial inputs), uses normal dispatch.
     """
     input_tensor = args[0]
     if not isinstance(input_tensor, dtensor.DTensor):
@@ -324,28 +323,25 @@ def vector_norm_handler(
     norm_type = args[1] if len(args) > 1 else 2
     dim = args[2] if len(args) > 2 else None
     keepdim = args[3] if len(args) > 3 else False
-    skip_root = kwargs.get("skip_root", False)
     dtype = kwargs.get("dtype")
 
     # Check if input has any Partial placements - if so, use normal dispatch
     # because the decomposition only works correctly for Shard inputs
     has_partial = any(p.is_partial() for p in input_tensor.placements)
 
-    # For p-norms without skip_root on non-Partial inputs, decompose
+    # For p-norms on non-Partial inputs, decompose using powsum
     if (
         norm_type not in (float("inf"), "inf", float("-inf"), "-inf", 0, 1)
-        and not skip_root
         and not has_partial
     ):
-        # Decompose: vector_norm(x, p) = vector_norm(x, p, skip_root=True) ** (1/p)
-        # Step 1: Compute sum(|x|^p) with skip_root=True -> Partial("sum")
-        partial_result = torch.linalg.vector_norm(
+        # Decompose: vector_norm(x, p) = powsum(x, p) ** (1/p)
+        # Step 1: Compute sum(|x|^p) with powsum -> Partial("sum")
+        partial_result = torch.linalg.powsum(
             input_tensor,
             ord=norm_type,
             dim=dim,
             keepdim=keepdim,
             dtype=dtype,
-            skip_root=True,
         )
         # Step 2: Redistribute Partial to Replicate (allreduce), preserving Shard
         # on non-reduced dims
@@ -356,7 +352,7 @@ def vector_norm_handler(
         # Step 3: Apply root locally
         return replicated_result ** (1.0 / norm_type)
 
-    # For inf/-inf/0/1 norms, skip_root=True, or Partial inputs, use normal dispatch
+    # For inf/-inf/0/1 norms or Partial inputs, use normal dispatch
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
     dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding

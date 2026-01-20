@@ -88,33 +88,36 @@ def _get_total_norm(
         [tensors]  # type: ignore[list-item]
     )  # type: ignore[assignment]
 
-    # For p-norms (p not in {inf, -inf, 0, 1}), use skip_root=True to avoid
-    # sqrt -> pow -> sqrt cycles. We accumulate sum(|x|^p) and apply root once.
-    use_skip_root = norm_type not in (float("inf"), float("-inf"), 0.0, 1.0)
-
     norms: list[Tensor] = []
+    # For p-norms (p not in {inf, -inf, 0, 1}), use powsum to accumulate sum(|x|^p)
+    # and apply the root once at the end. This avoids sqrt -> pow -> sqrt cycles.
+    use_powsum = norm_type not in (float("inf"), float("-inf"), 0.0, 1.0)
+
     for (device, _), ([device_tensors], _) in grouped_tensors.items():
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
-            norms.extend(
-                torch._foreach_norm(device_tensors, norm_type, skip_root=use_skip_root)
-            )
+            if use_powsum:
+                norms.extend(torch._foreach_powsum(device_tensors, norm_type))
+            else:
+                norms.extend(torch._foreach_norm(device_tensors, norm_type))
         elif foreach:
             raise RuntimeError(
                 f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
             )
         else:
-            norms.extend(
-                [
-                    torch.linalg.vector_norm(g, norm_type, skip_root=use_skip_root)
-                    for g in device_tensors
-                ]
-            )
+            if use_powsum:
+                norms.extend(
+                    [torch.linalg.powsum(g, norm_type) for g in device_tensors]
+                )
+            else:
+                norms.extend(
+                    [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
+                )
 
     stacked_norms = torch.stack([norm.to(first_device) for norm in norms])
 
-    if use_skip_root:
+    if use_powsum:
         # norms are sum(|x|^p), just sum them and apply root once
         total_norm = stacked_norms.sum() ** (1.0 / norm_type)
     else:

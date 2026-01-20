@@ -315,11 +315,23 @@ def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
-def _get_norm_reduction_params(
-    norm_type: int | float | str, skip_root: bool
-) -> tuple[str, bool]:
+def _get_norm_reduction_op(norm_type: int | float | str) -> str:
+    """Get the reduction op for vector/foreach norm based on norm_type.
+
+    For inf/-inf norms, returns "max" or "min".
+    For all other norms (including p-norms), returns "sum".
     """
-    Get reduction_op and reduction_linear for norm operations.
+    if norm_type in (float("inf"), "inf"):
+        return "max"
+    elif norm_type in (float("-inf"), "-inf"):
+        return "min"
+    else:
+        return "sum"
+
+
+def _get_norm_reduction_params(norm_type: int | float | str) -> tuple[str, bool]:
+    """
+    Get reduction_op and reduction_linear for vector_norm operations.
 
     Returns:
         (reduction_op, reduction_linear) tuple
@@ -330,13 +342,10 @@ def _get_norm_reduction_params(
         return "min", True
     elif norm_type == 0 or norm_type == 1:
         return "sum", True
-    elif skip_root:
-        # With skip_root, output is sum(|x|^p), directly reducible with sum
-        return "sum", True
     else:
-        # For p-norms without skip_root, force redistribution before the norm
-        # Shard inputs are handled by the custom handler which decomposes
-        # Partial inputs need redistribution first
+        # For p-norms, force redistribution before the norm.
+        # Shard inputs are handled by the custom handler which decomposes.
+        # Partial inputs need redistribution first.
         return "sum", False
 
 
@@ -354,12 +363,9 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
     dim = args_schema[2] if len(args_schema) > 2 else None
     keepdim = args_schema[3] if len(args_schema) > 3 else False
-    skip_root = op_schema.kwargs_schema.get("skip_root", False)
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
-
-    reduction_op, reduction_linear = _get_norm_reduction_params(norm_type, skip_root)
-
+    reduction_op, reduction_linear = _get_norm_reduction_params(norm_type)
     return common_reduction_strategy(
         input_strategy,
         reduce_dims,
@@ -382,10 +388,6 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
-    skip_root = args_schema[3] if len(args_schema) > 3 else False
-
-    reduction_op, reduction_linear = _get_norm_reduction_params(norm_type, skip_root)
-
     output_tuple_strategy_children: list[OpStrategy] = []
     for op_strategy in input_tuple_strategy.children:
         if not isinstance(op_strategy, OpStrategy):
@@ -394,8 +396,61 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=reduction_linear,
-            reduction_op=reduction_op,
+            reduction_linear=True,
+            reduction_op=_get_norm_reduction_op(norm_type),
+        )
+        output_tuple_strategy_children.append(output_strategy)
+    return TupleStrategy(output_tuple_strategy_children)
+
+
+@register_op_strategy([aten.linalg_powsum.default], schema_info=RuntimeSchemaInfo(1))
+def powsum_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Strategy for linalg_powsum: computes sum(|x|^ord) without the final root.
+    Output is always reducible with Partial("sum").
+    """
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
+    dim = args_schema[2] if len(args_schema) > 2 else None
+    keepdim = args_schema[3] if len(args_schema) > 3 else False
+    dims = _infer_reduction_dims(dim, input_strategy.ndim)
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+    return common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=cast(bool, keepdim),
+        reduction_linear=True,
+        reduction_op="sum",
+    )
+
+
+@register_op_strategy(
+    [aten._foreach_powsum.Scalar], schema_info=RuntimeSchemaInfo(1, needs_pytree=True)
+)
+def foreach_powsum_strategy(op_schema: OpSchema) -> TupleStrategy:
+    """
+    Strategy for _foreach_powsum: computes sum(|x|^ord) for each tensor.
+    Output is always reducible with Partial("sum").
+    """
+    args_schema = op_schema.args_schema
+    input_tuple_strategy = args_schema[0]
+    if not isinstance(input_tuple_strategy, TupleStrategy):
+        raise AssertionError(
+            f"Expected TupleStrategy, got {type(input_tuple_strategy)}"
+        )
+    output_tuple_strategy_children: list[OpStrategy] = []
+    for op_strategy in input_tuple_strategy.children:
+        if not isinstance(op_strategy, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {type(op_strategy)}")
+        reduce_dims = list(range(op_strategy.ndim))
+        output_strategy = common_reduction_strategy(
+            op_strategy,
+            reduce_dims,
+            reduction_linear=True,
+            reduction_op="sum",
         )
         output_tuple_strategy_children.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_children)

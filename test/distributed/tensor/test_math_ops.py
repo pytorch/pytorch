@@ -739,28 +739,28 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(po.full_tensor(), o)
 
     @with_comms
-    def test_vector_norm_skip_root(self):
-        # Test that skip_root=True produces Partial(sum) placement and correct values
+    def test_powsum_sharded(self):
+        """Test that linalg_powsum produces Partial(sum) placement for sharded input."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
         grad = torch.randn(12, 8)
         sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
 
-        # With skip_root=True, the result should be sum(|x|^p) without the root
-        sharded_out = torch.ops.aten.linalg_vector_norm(sharded_grad, 2, skip_root=True)
+        # powsum computes sum(|x|^p) without the root
+        sharded_out = torch.ops.aten.linalg_powsum(sharded_grad, 2)
 
         # Expected: sum(|x|^2) over all elements
         expected = (grad.abs() ** 2).sum()
         self.assertEqual(sharded_out.full_tensor(), expected)
 
-        # The placement should be Partial("sum") for sharded input with skip_root=True
+        # The placement should be Partial("sum")
         self.assertTrue(sharded_out.placements[0].is_partial())
         self.assertEqual(sharded_out.placements[0].reduce_op, "sum")
 
     @with_comms
     def test_vector_norm_special_norms_placement(self):
-        # Test that inf/-inf/0/1 norms produce correct Partial placements
+        """Test that inf/-inf/0/1 norms produce correct Partial placements."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
@@ -792,36 +792,8 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(out_0.placements[0].reduce_op, "sum")
 
     @with_comms
-    def test_vector_norm_decomposed_handler_comm(self):
-        # Test that the decomposed handler uses allreduce (not allgather) before root
-        device_mesh = self.build_device_mesh()
-        comm_mode = CommDebugMode()
-
-        torch.manual_seed(42)
-        grad = torch.randn(12, 8)
-        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
-
-        # 2-norm on sharded input should trigger the decomposed handler:
-        # 1. vector_norm(skip_root=True) -> Partial("sum")
-        # 2. allreduce to get global sum
-        # 3. apply root locally
-        with comm_mode:
-            result = torch.linalg.vector_norm(sharded_grad, 2)
-
-        # Should use exactly one allreduce (for Partial -> Replicate)
-        comm_counts = comm_mode.get_comm_counts()
-        self.assertEqual(comm_counts.get(funcol.all_reduce, 0), 1)
-        # Should NOT use allgather
-        self.assertEqual(comm_counts.get(funcol.all_gather_into_tensor, 0), 0)
-
-        # Result should be Replicate and correct
-        self.assertTrue(result.placements[0].is_replicate())
-        expected = torch.linalg.vector_norm(grad, 2)
-        self.assertEqual(result.full_tensor(), expected)
-
-    @with_comms
-    def test_foreach_norm_skip_root(self):
-        # Test that skip_root=True produces correct values for foreach_norm
+    def test_foreach_powsum_sharded(self):
+        """Test that _foreach_powsum produces correct values for sharded input."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
@@ -831,10 +803,8 @@ class DistMathOpsTest(DTensorTestBase):
         sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
         sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
 
-        # With skip_root=True
-        sharded_out = torch.ops.aten._foreach_norm(
-            [sharded_grad0, sharded_grad1], 2, skip_root=True
-        )
+        # foreach_powsum computes sum(|x|^p) for each tensor
+        sharded_out = torch.ops.aten._foreach_powsum([sharded_grad0, sharded_grad1], 2)
 
         # Expected: sum(|x|^2) for each tensor
         expected0 = (grad0.abs() ** 2).sum()
@@ -842,6 +812,33 @@ class DistMathOpsTest(DTensorTestBase):
 
         self.assertEqual(sharded_out[0].full_tensor(), expected0)
         self.assertEqual(sharded_out[1].full_tensor(), expected1)
+
+    @with_comms
+    def test_vector_norm_handler_decomposition(self):
+        """Test that p-norms on Shard inputs use the powsum decomposition.
+
+        For p-norms (p not in {inf, -inf, 0, 1}), the handler should:
+        1. Compute powsum(x, p) to get sum(|x|^p) as Partial("sum")
+        2. Redistribute to Replicate (allreduce)
+        3. Apply root locally
+
+        The result should be Replicate and match the expected value.
+        """
+        device_mesh = self.build_device_mesh()
+
+        torch.manual_seed(42)
+        grad = torch.randn(12, 8)
+        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+
+        # 2-norm on sharded input should be decomposed and produce correct result
+        result = torch.linalg.vector_norm(sharded_grad, 2)
+
+        # Expected: sqrt(sum(|x|^2))
+        expected = (grad.abs() ** 2).sum() ** 0.5
+        self.assertEqual(result.full_tensor(), expected)
+
+        # The result should be Replicate (after redistribution)
+        self.assertTrue(result.placements[0].is_replicate())
 
     @with_comms
     def test_foreach_norm_different_mesh(self):

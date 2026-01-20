@@ -1195,7 +1195,7 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
 
 
 @_onnx_symbolic("aten::linalg_vector_norm")
-@symbolic_helper.parse_args("v", "f", "is", "b", "v", "b")
+@symbolic_helper.parse_args("v", "f", "is", "b", "v")
 def linalg_vector_norm(
     g: jit_utils.GraphContext,
     self,
@@ -1203,7 +1203,6 @@ def linalg_vector_norm(
     dim: Sequence[int] | None,
     keepdim: bool,
     dtype,
-    skip_root: bool = False,
 ):
     return symbolic_helper._linalg_vector_norm_helper(g, self, ord, dim, keepdim, dtype)
 
