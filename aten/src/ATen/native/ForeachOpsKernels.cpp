@@ -57,7 +57,7 @@
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
 #include <ATen/ops/copy.h>
-#include <ATen/ops/linalg_powsum.h>
+#include <ATen/ops/linalg__powsum.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max.h>
 #include <ATen/ops/maximum.h>
@@ -490,7 +490,7 @@ std::vector<Tensor> foreach_tensor_powsum_slow(
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
-    result.emplace_back(at::linalg_powsum(t, ord, {}, false, dtype));
+    result.emplace_back(at::linalg__powsum(t, ord, {}, false, dtype));
   }
   return result;
 }
