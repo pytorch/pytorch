@@ -739,28 +739,28 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(po.full_tensor(), o)
 
     @with_comms
-    def test_vector_norm_skip_root(self):
-        # Test that skip_root=True produces Partial(sum) placement and correct values
+    def test_powsum_sharded(self):
+        """Test that linalg_powsum produces Partial(sum) placement for sharded input."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
         grad = torch.randn(12, 8)
         sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
 
-        # With skip_root=True, the result should be sum(|x|^p) without the root
-        sharded_out = torch.ops.aten.linalg_vector_norm(sharded_grad, 2, skip_root=True)
+        # powsum computes sum(|x|^p) without the root
+        sharded_out = torch.ops.aten.linalg_powsum(sharded_grad, 2)
 
         # Expected: sum(|x|^2) over all elements
         expected = (grad.abs() ** 2).sum()
         self.assertEqual(sharded_out.full_tensor(), expected)
 
-        # The placement should be Partial("sum") for sharded input with skip_root=True
+        # The placement should be Partial("sum")
         self.assertTrue(sharded_out.placements[0].is_partial())
         self.assertEqual(sharded_out.placements[0].reduce_op, "sum")
 
     @with_comms
     def test_vector_norm_special_norms_placement(self):
-        # Test that inf/-inf/0/1 norms produce correct Partial placements
+        """Test that inf/-inf/0/1 norms produce correct Partial placements."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
@@ -792,8 +792,8 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(out_0.placements[0].reduce_op, "sum")
 
     @with_comms
-    def test_foreach_norm_skip_root(self):
-        # Test that skip_root=True produces correct values for foreach_norm
+    def test_foreach_powsum_sharded(self):
+        """Test that _foreach_powsum produces correct values for sharded input."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
@@ -803,10 +803,8 @@ class DistMathOpsTest(DTensorTestBase):
         sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
         sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
 
-        # With skip_root=True
-        sharded_out = torch.ops.aten._foreach_norm(
-            [sharded_grad0, sharded_grad1], 2, skip_root=True
-        )
+        # foreach_powsum computes sum(|x|^p) for each tensor
+        sharded_out = torch.ops.aten._foreach_powsum([sharded_grad0, sharded_grad1], 2)
 
         # Expected: sum(|x|^2) for each tensor
         expected0 = (grad0.abs() ** 2).sum()
