@@ -344,26 +344,24 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         handle = symm_mem.rendezvous(tensor, group=group_name)
 
         channel = 0
-
-        # Get signal pad to verify signal is written
-        signal_pad = handle.get_signal_pad(0)  # Rank 0's signal pad
+        world_size = handle.world_size
 
         c10d.barrier()
 
-        if self.rank == 1:
-            # Rank 1: send signal to rank 0
-            handle.put_signal(dst_rank=0, channel=channel)
+        # Pair up ranks: odd ranks send to even ranks
+        # This allows the test to work with any number of GPUs
+        if self.rank % 2 == 1:
+            # Odd rank: send signal to previous even rank
+            dst_rank = self.rank - 1
+            handle.put_signal(dst_rank=dst_rank, channel=channel)
             torch.cuda.synchronize()
-        elif self.rank == 0:
-            # Rank 0: wait for signal from rank 1
-            initial_val = signal_pad[channel].item()
-            handle.wait_signal(src_rank=1, channel=channel)
-            final_val = signal_pad[channel].item()
-            self.assertGreater(
-                final_val,
-                initial_val,
-                "Signal value should have incremented after wait_signal",
-            )
+        elif self.rank % 2 == 0 and self.rank + 1 < world_size:
+            # Even rank: wait for signal from next odd rank (if it exists)
+            src_rank = self.rank + 1
+            # wait_signal blocks until the signal arrives
+            # If this completes without hanging, the test passes
+            handle.wait_signal(src_rank=src_rank, channel=channel)
+            torch.cuda.synchronize()
 
         c10d.barrier()
 

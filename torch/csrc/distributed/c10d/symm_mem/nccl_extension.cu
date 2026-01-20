@@ -190,34 +190,15 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer) {
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
 
-#ifdef NCCL_HAS_ONE_SIDED_API
-  // use NCCL 2.29+ host-side API
-  auto& manager = c10d::symmetric_memory::NCCLDevCommManager::get(sigpad.device());
-  ncclComm_t comm = manager.get_comm("0");  // group_name is "0"
-
-  // Populate all fields in ncclWaitSignalDesc_t
-  ncclWaitSignalDesc_t signalDesc;
-  signalDesc.opCnt = 1;
-  signalDesc.peer = peer;
-  signalDesc.sigIdx = signal;
-  signalDesc.ctx = 0;
-
-  C10D_NCCL_CHECK(
-      ncclWaitSignal(
-          1,
-          &signalDesc,
-          comm,
-          stream),
-      c10::str("ncclWaitSignal failed for signal=", signal, ", peer=", peer));
-#else
-  // use device-side kernel for NCCL < 2.29
+  // Always use device-side kernel because this function waits for a SPECIFIC signal value.
+  // ncclWaitSignal only synchronizes on a channel without checking values, so it's not
+  // suitable for this API which expects to wait for signal pad to reach a specific value.
   int cur_rank = symm_mem->get_rank();
   nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
     symm_mem->get_signal_pad_ptrs_dev(),
     cur_rank,
     signal);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-#endif
 #else
   TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
 #endif
@@ -233,33 +214,9 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
 
-#ifdef NCCL_HAS_ONE_SIDED_API
-  // use NCCL 2.29+ host-side API
-  auto& manager = c10d::symmetric_memory::NCCLDevCommManager::get(tensor.device());
-  ncclComm_t comm = manager.get_comm("0");  // group_name is "0"
-
-  auto* nccl_symm_mem = dynamic_cast<c10d::symmetric_memory::NCCLSymmetricMemory*>(symm_mem.get());
-  TORCH_CHECK(nccl_symm_mem != nullptr, "Expected NCCLSymmetricMemory for NCCL one-sided API");
-
-  size_t offset = nccl_symm_mem->get_offset();
-  size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
-
-  C10D_NCCL_CHECK(
-      ncclPutSignal(
-          tensor.data_ptr(),
-          nbytes,
-          ncclChar,
-          peer,
-          nccl_symm_mem->get_window(),
-          offset,
-          signal,
-          0,
-          0,
-          comm,
-          stream),
-      c10::str("ncclPutSignal failed for peer=", peer, ", signal=", signal));
-#else
-  // use device-side kernel for NCCL < 2.29
+  // Always use device-side kernel because this function writes a SPECIFIC signal value.
+  // ncclPutSignal expects a channel index (0-7) for the signal parameter, not a signal value,
+  // so it's not suitable for this API which needs to write specific values to the signal pad.
   int threads = THREADS_PER_BLOCK;
   int blocks = (tensor.numel() + threads - 1) / threads;
   auto opts = at::TensorOptions()
@@ -280,7 +237,6 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
     blocks_done_dev,
     signal);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-#endif
 #else
   TORCH_CHECK(false, "NCCL symmetric memory is not supported. Requires NCCL >= 2.28.9");
 #endif
