@@ -24,7 +24,16 @@ _CUSTOM_OPERATOR_HANDLER_MAP: dict[Callable, Callable] = {
 
 
 def register_variance_strategy(ops):
-    """Register custom variance strategy for calculating output variance."""
+    """Register custom variance strategy for calculating output variance.
+
+    The decorated function receives:
+      - input_variant_dims: set[str] - union of variant dims from all LTensor inputs
+      - mesh: DeviceMesh - the mesh from input LTensors
+      - *args, **kwargs: the original function arguments
+
+    Returns:
+      - output_variant_dims: set[str] - which dims the output varies along
+    """
 
     def wrapper(func):
         for op in ops:
@@ -34,12 +43,51 @@ def register_variance_strategy(ops):
     return wrapper
 
 
-def _get_axis_name_from_group(mesh: DeviceMesh, group_name: str) -> Optional[str]:
-    """Get mesh axis name for a process group."""
+def register_variance_for_function(func_class: type[torch.autograd.Function]):
+    """
+    Register variance tracking strategy for a custom autograd.Function.
+
+    The decorated function receives:
+      - input_variant_dims: set[str] - union of variant dims from all LTensor inputs
+      - mesh: DeviceMesh - the mesh from input LTensors
+      - *args, **kwargs: the original function arguments
+
+    Returns:
+      - output_variant_dims: set[str] - which dims the output varies along
+
+    Example::
+
+        class MyAllReduceOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input, group_name):
+                ctx.group_name = group_name
+                return all_reduce(input, "sum", group_name)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, None
+
+
+        @register_variance_for_function(MyAllReduceOp)
+        def _(input_variant_dims, mesh, input, group_name):
+            # all_reduce makes output invariant on the reduced dim
+            dim_name = _get_dim_name_from_group(mesh, group_name)
+            return input_variant_dims - {dim_name}
+    """
+
+    def wrapper(variance_fn):
+        _CUSTOM_VARIANCE_STRATEGY_MAP[func_class.apply] = variance_fn
+        return variance_fn
+
+    return wrapper
+
+
+def _get_dim_name_from_group(mesh: DeviceMesh, group_name: str) -> Optional[str]:
+    """Get mesh dim name for a process group."""
     if mesh.mesh_dim_names:
-        for axis_name in mesh.mesh_dim_names:
-            if mesh.get_group(axis_name).group_name == group_name:
-                return axis_name
+        for dim_name in mesh.mesh_dim_names:
+            if mesh.get_group(dim_name).group_name == group_name:
+                return dim_name
     return None
 
 
@@ -51,47 +99,43 @@ def _get_axis_name_from_group(mesh: DeviceMesh, group_name: str) -> Optional[str
         torch.ops._c10d_functional.all_reduce,
     ]
 )
-def _invariant_output_strategy(input_variant_dims, *args, **kwargs):
-    """Collectives that make output invariant on the reduced axis (all_reduce, all_gather)."""
+def _invariant_output_strategy(input_variant_dims, mesh, *args, **kwargs):
+    """Collectives that make output invariant on the reduced dim (all_reduce, all_gather)."""
     input_tensor, _, group_name = args
 
-    if not isinstance(input_tensor, LTensor):
-        return input_variant_dims
-
-    mesh = input_tensor._mesh
-    axis_name = _get_axis_name_from_group(mesh, group_name)
-    if axis_name is None:
+    dim_name = _get_dim_name_from_group(mesh, group_name)
+    if dim_name is None:
         raise ValueError(
-            f"Could not find mesh axis for group {group_name}. "
-            f"Available axes: {mesh.mesh_dim_names}"
+            f"Could not find mesh dim for group {group_name}. "
+            f"Available dims: {mesh.mesh_dim_names}"
         )
 
-    return input_variant_dims - {axis_name}
+    return input_variant_dims - {dim_name}
 
 
 @register_variance_strategy([])  # [FIXME]: scatter ops
-def _variant_output_strategy(input_variant_dims, *args, **kwargs):
-    """Collectives that make output variant on the scatter axis (reduce_scatter)."""
+def _variant_output_strategy(input_variant_dims, mesh, *args, **kwargs):
+    """Collectives that make output variant on the scatter dim (reduce_scatter)."""
     return input_variant_dims
 
 
 class LTensor(torch.Tensor):
     """
     ``LTensor`` (Local Tensor) is a subclass of ``torch.Tensor`` that tracks variance metadata
-    through DTensor -> Tensor -> DTensor transitions. It tracks mesh axes that a tensor varies along
+    through DTensor -> Tensor -> DTensor transitions. It tracks mesh dims that a tensor varies along
     (i.e., has different values across ranks)
 
     States:
-    * Variant on axis: Tensor has different values across ranks on this mesh axis
-    * Invariant on axis: Tensor has identical values across ranks on this mesh axis (Replicate())
+    * Variant on dim: Tensor has different values across ranks on this mesh dim
+    * Invariant on dim: Tensor has identical values across ranks on this mesh dim (Replicate())
 
-    When calling PyTorch operators, ``LTensor`` computes the union of variant axes from all inputs
+    When calling PyTorch operators, ``LTensor`` computes the union of variant dims from all inputs
     and automatically inserts gradient aggregation collectives where needed to ensure correctness
     during backward pass
 
     .. note:: The recommended way to use ``LTensor`` is within ``local_map`` or ``DTensor.to_local``
         which automatically infers variance from DTensor placements (non-Replicate placements become
-        variant axes).
+        variant dims).
     """
 
     _local_tensor: torch.Tensor
@@ -118,7 +162,7 @@ class LTensor(torch.Tensor):
         if mesh.mesh_dim_names is None:
             raise ValueError(
                 "DTensor's mesh must have mesh_dim_names to convert to LTensor. "
-                "LTensor requires named mesh axes for variance tracking."
+                "LTensor requires named mesh dims for variance tracking."
             )
 
         variant_dims = set()
@@ -161,7 +205,7 @@ class LTensor(torch.Tensor):
 
         if func in _CUSTOM_VARIANCE_STRATEGY_MAP:
             out_variant_dims = _CUSTOM_VARIANCE_STRATEGY_MAP[func](
-                out_variant_dims, *args, **kwargs
+                out_variant_dims, mesh, *args, **kwargs
             )
 
         func = _CUSTOM_OPERATOR_HANDLER_MAP.get(func, func)
@@ -176,13 +220,13 @@ class LTensor(torch.Tensor):
 
             local_tensor = t._local_tensor
             src_variant_dims = t._variant_dims
-            missing_axes = out_variant_dims - src_variant_dims
+            missing_dims = out_variant_dims - src_variant_dims
 
-            if not missing_axes:
+            if not missing_dims:
                 return local_tensor
 
-            for axis_name in missing_axes:
-                group_name = mesh.get_group(axis_name).group_name
+            for dim_name in missing_dims:
+                group_name = mesh.get_group(dim_name).group_name
                 local_tensor = vcols.mark_varying(local_tensor, group_name=group_name)
 
             return local_tensor

@@ -355,9 +355,9 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         """
         FSDP + TP (Fully Sharded Data Parallel + Tensor Parallel) with local_map.
 
-        - FSDP axis: Parameters are sharded and gathered via all_gather, gradients
+        - FSDP dim: Parameters are sharded and gathered via all_gather, gradients
           use reduce_scatter
-        - TP axis: Activations are sharded across the TP dimension, using psum_scatter
+        - TP dim: Activations are sharded across the TP dimension, using psum_scatter
           for forward and all_gather for backward
         """
 
@@ -381,7 +381,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         x_global = torch.randn(batch_size, d_in, device=DEVICE, requires_grad=True)
         y_global = torch.randn(batch_size, d_out, device=DEVICE, requires_grad=True)
 
-        # Weights: sharded along both FSDP and TP axes
+        # Weights: sharded along both FSDP and TP dims
         # W1: [d_in, d_hidden] - sharded along FSDP (dim 0) and TP (dim 1)
         w1_global = torch.randn(d_in, d_hidden, device=DEVICE, requires_grad=True)
 
@@ -419,12 +419,12 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         w1_dtensor = distribute_tensor(
             w1_global.detach().clone().requires_grad_(True),
             mesh,
-            placements=[Shard(1), Shard(0)],  # Sharded on both axes
+            placements=[Shard(1), Shard(0)],  # Sharded on both dims
         )
         w2_dtensor = distribute_tensor(
             w2_global.detach().clone().requires_grad_(True),
             mesh,
-            placements=[Shard(0), Shard(0)],  # Sharded on both axes (dim 0)
+            placements=[Shard(0), Shard(0)],  # Sharded on both dims (dim 0)
         )
 
         h1_dtensor = x_dtensor @ w1_dtensor
@@ -451,12 +451,12 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
         w1_dist = distribute_tensor(
             w1_global.detach().clone().requires_grad_(True),
             mesh,
-            placements=[Shard(1), Shard(0)],  # Sharded on both axes
+            placements=[Shard(1), Shard(0)],  # Sharded on both dims
         )
         w2_dist = distribute_tensor(
             w2_global.detach().clone().requires_grad_(True),
             mesh,
-            placements=[Shard(0), Shard(0)],  # Sharded on both axes (dim 0)
+            placements=[Shard(0), Shard(0)],  # Sharded on both dims (dim 0)
         )
 
         fsdp_group_name = mesh.get_group("fsdp").group_name
@@ -474,7 +474,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
             track_variant_dims=True,
         )
         def fsdp_tp_forward(x_local, y_local, w1_frag, w2_frag):
-            # FSDP: all_gather weights along FSDP axis
+            # FSDP: all_gather weights along FSDP dim
             w1 = all_gather_tensor_autograd(
                 w1_frag, gather_dim=0, group=fsdp_group_name
             )
@@ -757,14 +757,6 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
             return loss
 
         loss_dist = loss_parallel_cross_entropy(logits_dist_TCp, targets_T, Cp, C)
-        from torchviz import make_dot
-        # import pdb
-        # if dist.get_rank() == 0:
-        #     pdb.set_trace()
-        make_dot(loss_dist, params={f"Logits(L)" : logits_dist_TCp}).render("graph_loss_parallel", format="png")
-        return
-
-
         loss_dist.backward()
 
         # Verify forward: loss values should match

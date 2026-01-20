@@ -133,7 +133,7 @@ def local_map(
             an exception will be raised. Default: False.
         track_variant_dims (bool, optional):
             If True, local tensors extracted from DTensors will be wrapped in
-            :class:`LTensor` to track variance axes through the computation. This enables
+            :class:`LTensor` to track variance dims through the computation. This enables
             automatic gradient aggregation for invariant inputs (e.g., replicated weights)
             when combined with variant tensors (e.g., sharded activations) during
             backward pass. Useful for data parallel and tensor parallel patterns where
