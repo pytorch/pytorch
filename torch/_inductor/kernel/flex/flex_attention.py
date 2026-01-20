@@ -55,6 +55,8 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 Expr = sympy.Expr
 
+INT32_MAX = 2**31 - 1
+
 
 def _sanitize_kernel_options_for_triton(
     kernel_options: dict[str, Any],
@@ -402,8 +404,8 @@ def flex_attention(
         USE_TMA_DEFAULT = bool(torch.xpu.is_available())
         # The shape dtype of tensor desc is i32
         if V.graph.sizevars.statically_known_true(
-            seq_len_q > 2**31 - 1
-        ) or V.graph.sizevars.statically_known_true(seq_len_kv > 2**31 - 1):
+            seq_len_q > INT32_MAX
+        ) or V.graph.sizevars.statically_known_true(seq_len_kv > INT32_MAX):
             USE_TMA_DEFAULT = False
         cur_kernel_options.setdefault("USE_TMA", USE_TMA_DEFAULT)
 
