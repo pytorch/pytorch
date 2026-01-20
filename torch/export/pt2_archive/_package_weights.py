@@ -127,11 +127,11 @@ def get_complete_tensor(
     for model_name, weight_name in group:
         tensor_property = models_weights[model_name].get_weight_properties(weight_name)
 
-        # Case 1: Found a complete tensor
+        # Case 1: Found a complete tensor.
         if tensor_property.is_complete():
             return models_weights[model_name].get_weight(weight_name)[0]
 
-        # Case 2: Track the widest boundary across all slices
+        # Case 2: Track the widest boundary across all slices.
         if tensor_property.start is not None:
             start_addr = (
                 tensor_property.start
@@ -145,8 +145,8 @@ def get_complete_tensor(
                 else max(end_addr, tensor_property.end)
             )
 
-    # Case 2: Reconstruct complete tensor from slices
-    # Pick any tensor from the group as a reference (they all share the same storage)
+    # Case 2: Reconstruct complete tensor from slices.
+    # Pick any tensor from the group as a reference (they all share the same storage).
     warnings.warn(
         "No complete tensor found in the group! Returning the first one. "
         "This may cause issues when your weights are not on CPU.",
@@ -156,25 +156,25 @@ def get_complete_tensor(
     model_name, weight_name = next(iter(group))
     reference_tensor = models_weights[model_name].get_weight(weight_name)[0]
 
-    # If no boundary information available, return reference tensor as-is
+    # If no boundary information available (e.g., FakeTensor), return reference tensor as is.
     if start_addr is None and end_addr is None:
         return reference_tensor
 
-    # Validate that we have both boundaries
+    # Validate that we have both boundaries.
     if start_addr is None or end_addr is None:
         raise AssertionError(
             f"Inconsistent boundary information: start={start_addr}, end={end_addr}. "
             "Unable to reconstruct complete tensor from group."
         )
 
-    # Reconstruct a view over the full contiguous storage range
+    # Reconstruct a view over the full contiguous storage range.
     storage = reference_tensor.untyped_storage()
     total_size_bytes = end_addr - storage.data_ptr()
     element_size = reference_tensor.element_size()
-    # It assumes all tensors in the group have the same dtype
+    # It assumes all tensors in the group have the same dtype.
     total_size = total_size_bytes // element_size
 
-    # Validate alignment: size must be multiples of element_size
+    # Validate alignment: size must be multiples of element_size.
     if total_size_bytes % element_size != 0:
         raise AssertionError(
             f"Total size ({total_size_bytes} bytes) is not aligned with "
@@ -182,6 +182,7 @@ def get_complete_tensor(
             f"Expected size to be a multiple of {element_size}."
         )
 
+    # Reconstruct a tensor that spans the needed storage range, the metadata will be handled separately.
     return torch.tensor(
         [], device=reference_tensor.device, dtype=reference_tensor.dtype
     ).set_(
