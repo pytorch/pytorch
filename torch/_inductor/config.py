@@ -91,7 +91,9 @@ worker_log_path = (
 )
 
 # precompilation timeout
-precompilation_timeout_seconds: int = 60 * 60
+precompilation_timeout_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_PRECOMPILATION_TIMEOUT_SECONDS", 60 * 5)
+)
 
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
@@ -1608,7 +1610,7 @@ class triton:
     # Note: Native matmul does not currently support block pointers or TMA matmul.
     # If both native_matmul and (use_block_ptr or enable_persistent_tma_matmul) are enabled,
     # an error will be thrown.
-    native_matmul: bool = False
+    native_matmul: bool = os.getenv("TORCHINDUCTOR_NATIVE_MATMUL", "0") == "1"
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -1760,6 +1762,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
     )
+    # If set to true, will skip some non-critical checks in the mix order reduction
+    # this could be helpful to avoid recompilations in some cases
+    mix_order_reduction_non_strict_mode = False
 
     enable_tlx_templates: bool = (
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
