@@ -2601,12 +2601,10 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                     n, use_nccl_estimator=False
                 )
                 assert est_ms > 0
-                # TODO(ruisizhang123): Currently, NCCL estimation API does not support kwargs input
-                # (input_split_sizes & output_split_sizes in all-to-all) with dynamic shapes.
-                # est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
-                #     n, use_nccl_estimator=True
-                # )
-                # assert est_ms_nccl > 0
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                assert est_ms_nccl > 0
 
         # test for backed dynamic shape input estimation
         inp = torch.ones(4, 4, device=self.device)
