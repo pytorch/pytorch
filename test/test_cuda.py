@@ -6433,7 +6433,7 @@ class TestMemPool(TestCase):
         self.assertEqual(
             allocated_with_traces,
             allocated_without_traces,
-            "Allocated memory should be the same with or without traces",
+            "Allocated memory should be same with or without traces",
         )
 
 
