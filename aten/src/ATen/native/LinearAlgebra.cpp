@@ -2926,8 +2926,6 @@ Tensor linalg_powsum_slow(
     OptionalIntArrayRef opt_dim,
     bool keepdim,
     std::optional<ScalarType> opt_dtype) {
-  auto ord = scalar_ord.toDouble();
-
   // Handle dtype conversion
   Tensor self_;
   if (opt_dtype.has_value()) {
