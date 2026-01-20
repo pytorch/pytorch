@@ -13,12 +13,7 @@ from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
-from torch.testing._internal.common_utils import (
-    assertExpectedInline,
-    run_tests,
-    TEST_XPU,
-    xfailIf,
-)
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -151,7 +146,7 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
             torch.nn.utils._get_total_norm([x.grad, y.grad], norm_type=2.0)
 
         # Verify: foreach_powsum on local tensors -> stack -> sum -> allreduce -> pow
-        assertExpectedInline(
+        self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
   torch.nn.utils.clip_grad._get_total_norm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 8]| S(0), 2.0)  ->  dt$8: f32[]| R

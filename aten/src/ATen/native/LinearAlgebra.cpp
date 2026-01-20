@@ -112,7 +112,7 @@
 #include <ATen/ops/linalg_tensorsolve_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/linalg_vector_norm_native.h>
-#include <ATen/ops/linalg_powsum_native.h>
+#include <ATen/ops/linalg__powsum_native.h>
 #include <ATen/ops/log2.h>
 #include <ATen/ops/logdet_native.h>
 #include <ATen/ops/matmul.h>
@@ -2882,10 +2882,10 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   norm_stub(iter.device_type(), iter, ord);
 }
 
-// linalg_powsum: computes sum(|x|^ord) - the "power sum" without the final root
+// linalg__powsum: computes sum(|x|^ord) - the "power sum" without the final root
 // This is useful for distributed computing where we want to reduce partial
 // power sums across shards before taking the final root.
-Tensor linalg_powsum(
+Tensor linalg__powsum(
     const Tensor& self,
     const Scalar& scalar_ord,
     OptionalIntArrayRef opt_dim,
@@ -2918,9 +2918,9 @@ Tensor linalg_powsum(
   return result;
 }
 
-// linalg_powsum_slow: fallback implementation for backends without optimized kernels
+// linalg__powsum_slow: fallback implementation for backends without optimized kernels
 // Computes sum(|x|^ord) using basic ops
-Tensor linalg_powsum_slow(
+Tensor linalg__powsum_slow(
     const Tensor& self,
     const Scalar& scalar_ord,
     OptionalIntArrayRef opt_dim,
