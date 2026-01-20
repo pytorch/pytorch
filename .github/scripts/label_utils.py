@@ -63,9 +63,10 @@ def gh_get_labels(org: str, repo: str) -> list[str]:
     update_labels(labels, info)
 
     last_page = get_last_page_num_from_header(header)
-    assert last_page > 0, (
-        "Error reading header info to determine total number of pages of labels"
-    )
+    if last_page <= 0:
+        raise AssertionError(
+            f"Error reading header info to determine total number of pages of labels, got last_page={last_page}"
+        )
     for page_number in range(2, last_page + 1):  # skip page 1
         _, info = request_for_labels(prefix + f"&page={page_number}")
         update_labels(labels, info)

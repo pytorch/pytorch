@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 @register_template_heuristic(aten_mm_plus_mm.uid, None)
 # bmm dtype is only valid on cuda
 @register_template_heuristic(aten_bmm_dtype.uid, "cuda")
+@register_template_heuristic(aten_bmm_dtype.uid, "xpu")
 class ATenConfigHeuristics(TemplateConfigHeuristics):
     """
     Pseudo heuristic to make ATen choices go through the same flow as other templates

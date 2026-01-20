@@ -228,26 +228,35 @@ def native_batch_norm_backward(
 ) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_rank = input.dim()
-    assert input_rank >= 2, "rank of the input must be at least 2"
+    if input_rank < 2:
+        raise AssertionError(f"rank of the input must be at least 2, got {input_rank}")
 
     axis = 1
     num_features = prod(input_shape) / input_shape[axis]  # type: ignore[arg-type]
     mean = save_mean
     invstd = save_invstd
     if train:
-        assert save_mean is not None and save_invstd is not None, (
-            "when train=True, save_mean and save_invstd are required"
-        )
+        if save_mean is None or save_invstd is None:
+            raise AssertionError(
+                "when train=True, save_mean and save_invstd are required"
+            )
 
         reduciton_dims = [0] + list(range(2, input.dim()))
-        assert invstd is not None  # for typing
+        if invstd is None:
+            raise AssertionError("invstd must not be None for typing")
         mean, invstd = recompute_mean_var(input, invstd, reduciton_dims, keepdim=False)
     else:
-        assert running_mean is not None and running_var is not None
+        if running_mean is None or running_var is None:
+            raise AssertionError(
+                "running_mean and running_var must not be None when train=False"
+            )
         mean = running_mean
         invstd = torch.rsqrt(running_var + eps)
 
-    assert invstd is not None and mean is not None
+    if invstd is None or mean is None:
+        raise AssertionError(
+            f"invstd and mean must not be None, got invstd={invstd}, mean={mean}"
+        )
 
     broadcast_mask = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]

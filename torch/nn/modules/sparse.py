@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -124,8 +123,8 @@ class Embedding(Module):
 
     num_embeddings: int
     embedding_dim: int
-    padding_idx: Optional[int]
-    max_norm: Optional[float]
+    padding_idx: int | None
+    max_norm: float | None
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
@@ -136,12 +135,12 @@ class Embedding(Module):
         self,
         num_embeddings: int,
         embedding_dim: int,
-        padding_idx: Optional[int] = None,
-        max_norm: Optional[float] = None,
+        padding_idx: int | None = None,
+        max_norm: float | None = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         sparse: bool = False,
-        _weight: Optional[Tensor] = None,
+        _weight: Tensor | None = None,
         _freeze: bool = False,
         device=None,
         dtype=None,
@@ -152,13 +151,11 @@ class Embedding(Module):
         self.embedding_dim = embedding_dim
         if padding_idx is not None:
             if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, (
-                    "Padding_idx must be within num_embeddings"
-                )
+                if padding_idx >= self.num_embeddings:
+                    raise AssertionError("Padding_idx must be within num_embeddings")
             elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, (
-                    "Padding_idx must be within num_embeddings"
-                )
+                if padding_idx < -self.num_embeddings:
+                    raise AssertionError("Padding_idx must be within num_embeddings")
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         self.max_norm = max_norm
@@ -171,10 +168,10 @@ class Embedding(Module):
             )
             self.reset_parameters()
         else:
-            assert list(_weight.shape) == [
-                num_embeddings,
-                embedding_dim,
-            ], "Shape of weight does not match num_embeddings and embedding_dim"
+            if list(_weight.shape) != [num_embeddings, embedding_dim]:
+                raise AssertionError(
+                    "Shape of weight does not match num_embeddings and embedding_dim"
+                )
             self.weight = Parameter(_weight, requires_grad=not _freeze)
 
         self.sparse = sparse
@@ -250,9 +247,8 @@ class Embedding(Module):
             >>> embedding(input)
             tensor([[ 4.0000,  5.1000,  6.3000]])
         """
-        assert embeddings.dim() == 2, (
-            "Embeddings parameter is expected to be 2-dimensional"
-        )
+        if embeddings.dim() != 2:
+            raise AssertionError("Embeddings parameter is expected to be 2-dimensional")
         rows, cols = embeddings.shape
         embedding = cls(
             num_embeddings=rows,
@@ -362,27 +358,27 @@ class EmbeddingBag(Module):
 
     num_embeddings: int
     embedding_dim: int
-    max_norm: Optional[float]
+    max_norm: float | None
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
     mode: str
     sparse: bool
     include_last_offset: bool
-    padding_idx: Optional[int]
+    padding_idx: int | None
 
     def __init__(
         self,
         num_embeddings: int,
         embedding_dim: int,
-        max_norm: Optional[float] = None,
+        max_norm: float | None = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         mode: str = "mean",
         sparse: bool = False,
-        _weight: Optional[Tensor] = None,
+        _weight: Tensor | None = None,
         include_last_offset: bool = False,
-        padding_idx: Optional[int] = None,
+        padding_idx: int | None = None,
         device=None,
         dtype=None,
     ) -> None:
@@ -395,13 +391,11 @@ class EmbeddingBag(Module):
         self.scale_grad_by_freq = scale_grad_by_freq
         if padding_idx is not None:
             if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, (
-                    "padding_idx must be within num_embeddings"
-                )
+                if padding_idx >= self.num_embeddings:
+                    raise AssertionError("padding_idx must be within num_embeddings")
             elif padding_idx < 0:
-                assert padding_idx >= -self.num_embeddings, (
-                    "padding_idx must be within num_embeddings"
-                )
+                if padding_idx < -self.num_embeddings:
+                    raise AssertionError("padding_idx must be within num_embeddings")
                 padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         if _weight is None:
@@ -410,10 +404,10 @@ class EmbeddingBag(Module):
             )
             self.reset_parameters()
         else:
-            assert list(_weight.shape) == [
-                num_embeddings,
-                embedding_dim,
-            ], "Shape of weight does not match num_embeddings and embedding_dim"
+            if list(_weight.shape) != [num_embeddings, embedding_dim]:
+                raise AssertionError(
+                    "Shape of weight does not match num_embeddings and embedding_dim"
+                )
             self.weight = Parameter(_weight)
         self.mode = mode
         self.sparse = sparse
@@ -431,8 +425,8 @@ class EmbeddingBag(Module):
     def forward(
         self,
         input: Tensor,
-        offsets: Optional[Tensor] = None,
-        per_sample_weights: Optional[Tensor] = None,
+        offsets: Tensor | None = None,
+        per_sample_weights: Tensor | None = None,
     ) -> Tensor:
         """Forward pass of EmbeddingBag.
 
@@ -496,13 +490,13 @@ class EmbeddingBag(Module):
         cls,
         embeddings: Tensor,
         freeze: bool = True,
-        max_norm: Optional[float] = None,
+        max_norm: float | None = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         mode: str = "mean",
         sparse: bool = False,
         include_last_offset: bool = False,
-        padding_idx: Optional[int] = None,
+        padding_idx: int | None = None,
     ) -> "EmbeddingBag":
         r"""Create EmbeddingBag instance from given 2-dimensional FloatTensor.
 
@@ -530,9 +524,8 @@ class EmbeddingBag(Module):
             >>> embeddingbag(input)
             tensor([[ 2.5000,  3.7000,  4.6500]])
         """
-        assert embeddings.dim() == 2, (
-            "Embeddings parameter is expected to be 2-dimensional"
-        )
+        if embeddings.dim() != 2:
+            raise AssertionError("Embeddings parameter is expected to be 2-dimensional")
         rows, cols = embeddings.shape
         embeddingbag = cls(
             num_embeddings=rows,

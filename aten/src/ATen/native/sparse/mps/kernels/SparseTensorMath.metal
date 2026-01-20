@@ -282,6 +282,186 @@ kernel void spmm_addmm_coo(
 }
 
 
+kernel void mark_segments(
+    device const int64_t* indices [[buffer(0)]],
+    device int*           mask    [[buffer(1)]],
+    uint                  tid     [[thread_position_in_grid]])
+{
+    mask[tid] = (tid == 0 || indices[tid] != indices[tid - 1]) ? 1 : 0;
+}
+
+kernel void compute_offsets_and_counts(
+    device const int* scan           [[buffer(0)]],
+    device int*       offsets        [[buffer(1)]],
+    device int*       counts         [[buffer(2)]],
+    constant uint&    total_elements [[buffer(3)]],
+    uint              tid            [[thread_position_in_grid]])
+{
+    int num_pools = scan[total_elements - 1];
+
+    int target = int(tid) + 1;
+    int lo = 0;
+    int hi = int(total_elements);
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (scan[mid] < target) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    int start = lo;
+    offsets[tid] = start;
+
+    int end;
+    if (int(tid) == num_pools - 1) {
+        end = int(total_elements);
+    } else {
+        target = int(tid) + 2;
+        lo = start + 1;
+        hi = int(total_elements);
+        while (lo < hi) {
+            int mid = lo + (hi - lo) / 2;
+            if (scan[mid] < target) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        end = lo;
+    }
+
+    counts[tid] = end - start;
+}
+
+template <typename T>
+kernel void softmax_sparse_forward(
+    device const T*    values       [[buffer(0)]],
+    device T*          output       [[buffer(1)]],
+    device const int*  pool_offsets [[buffer(2)]],
+    device const int*  pool_sizes   [[buffer(3)]],
+    device const int*  scan         [[buffer(4)]],
+    constant uint2&    nnz_nvalues  [[buffer(5)]],
+    constant bool&     is_log       [[buffer(6)]],
+    uint               tid          [[thread_position_in_grid]])
+{
+    uint nnz = nnz_nvalues.x;
+    uint nvalues = nnz_nvalues.y;
+    int num_pools = scan[nnz - 1];
+    if (tid >= uint(num_pools)) return;
+
+    int start = pool_offsets[tid];
+    int count = pool_sizes[tid];
+
+    for (uint j = 0; j < nvalues; ++j) {
+        float max_val = -INFINITY;
+        for (int i = 0; i < count; ++i) {
+            float val = static_cast<float>(values[(start + i) * nvalues + j]);
+            if (val > max_val) max_val = val;
+        }
+
+        float sum_exp = 0.0f;
+        for (int i = 0; i < count; ++i) {
+            float val = static_cast<float>(values[(start + i) * nvalues + j]);
+            sum_exp += exp(val - max_val);
+        }
+
+        float log_sum = is_log ? log(sum_exp) : 0.0f;
+        float inv_sum = is_log ? 0.0f : (1.0f / sum_exp);
+
+        for (int i = 0; i < count; ++i) {
+            uint idx = (start + i) * nvalues + j;
+            float val = static_cast<float>(values[idx]);
+
+            if (is_log) {
+                output[idx] = static_cast<T>(val - max_val - log_sum);
+            } else {
+                output[idx] = static_cast<T>(exp(val - max_val) * inv_sum);
+            }
+        }
+    }
+}
+
+template <typename T>
+kernel void softmax_sparse_backward(
+    device const T*    grad_output  [[buffer(0)]],
+    device const T*    output       [[buffer(1)]],
+    device T*          grad_input   [[buffer(2)]],
+    device const int*  offsets      [[buffer(3)]],
+    device const int*  counts       [[buffer(4)]],
+    device const int*  scan         [[buffer(5)]],
+    constant uint2&    nnz_nvalues  [[buffer(6)]],
+    constant bool&     is_log       [[buffer(7)]],
+    uint               tid          [[thread_position_in_grid]])
+{
+    uint nnz = nnz_nvalues.x;
+    uint nvalues = nnz_nvalues.y;
+    int num_pools = scan[nnz - 1];
+    if (tid >= uint(num_pools)) return;
+
+    int start = offsets[tid];
+    int count = counts[tid];
+
+    for (uint j = 0; j < nvalues; ++j) {
+        float sum_val = 0.0f;
+
+        for (int i = 0; i < count; ++i) {
+            uint idx = (start + i) * nvalues + j;
+            float g = static_cast<float>(grad_output[idx]);
+            if (is_log) {
+                sum_val += g;
+            } else {
+                float y = static_cast<float>(output[idx]);
+                sum_val += g * y;
+            }
+        }
+
+        for (int i = 0; i < count; ++i) {
+            uint idx = (start + i) * nvalues + j;
+            float g = static_cast<float>(grad_output[idx]);
+            float y = static_cast<float>(output[idx]);
+            float res;
+
+            if (is_log) {
+                res = g - exp(y) * sum_val;
+            } else {
+                res = y * (g - sum_val);
+            }
+            grad_input[idx] = static_cast<T>(res);
+        }
+    }
+}
+
+#define INSTANTIATE_SOFTMAX_SPARSE_FORWARD(DTYPE)                           \
+  template [[host_name("softmax_sparse_forward_" #DTYPE)]] kernel void      \
+  softmax_sparse_forward<DTYPE>(                                            \
+      device const DTYPE* values       [[buffer(0)]],                       \
+      device DTYPE*       output       [[buffer(1)]],                       \
+      device const int*   pool_offsets [[buffer(2)]],                       \
+      device const int*   pool_sizes   [[buffer(3)]],                       \
+      device const int*   scan         [[buffer(4)]],                       \
+      constant uint2&     nnz_nvalues  [[buffer(5)]],                       \
+      constant bool&      is_log       [[buffer(6)]],                       \
+      uint                tid          [[thread_position_in_grid]]);
+
+#define INSTANTIATE_SOFTMAX_SPARSE_BACKWARD(DTYPE)                          \
+  template [[host_name("softmax_sparse_backward_" #DTYPE)]] kernel void     \
+  softmax_sparse_backward<DTYPE>(                                           \
+      device const DTYPE* grad         [[buffer(0)]],                       \
+      device const DTYPE* output       [[buffer(1)]],                       \
+      device DTYPE*       grad_input   [[buffer(2)]],                       \
+      device const int*   pool_offsets [[buffer(3)]],                       \
+      device const int*   pool_sizes   [[buffer(4)]],                       \
+      device const int*   scan         [[buffer(5)]],                       \
+      constant uint2&     nnz_nvalues  [[buffer(6)]],                       \
+      constant bool&      is_log       [[buffer(7)]],                       \
+      uint                tid          [[thread_position_in_grid]]);
+
+
+INSTANTIATE_FOR_FLOAT_TYPES(INSTANTIATE_SOFTMAX_SPARSE_FORWARD);
+INSTANTIATE_FOR_FLOAT_TYPES(INSTANTIATE_SOFTMAX_SPARSE_BACKWARD);
+
+
 #define INSTANTIATE_DENSE_SPARSE_MUL(DTYPE)                                 \
   template [[host_name("dense_sparse_mul_kernel_" #DTYPE)]] kernel void     \
   dense_sparse_mul_kernel<DTYPE>(                                           \

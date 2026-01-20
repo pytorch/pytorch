@@ -6,7 +6,7 @@ import sys
 import tempfile
 import typing_extensions
 from collections.abc import Callable
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -255,7 +255,7 @@ def max_clock_rate():
             return 1100
 
 
-def get_mast_job_name_version() -> Optional[tuple[str, int]]:
+def get_mast_job_name_version() -> tuple[str, int] | None:
     return None
 
 
@@ -274,7 +274,7 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> str | None:
     print("Uploading profile stats (fb-only otherwise no-op)")
     return None
 
@@ -367,11 +367,11 @@ def get_default_numa_options():
     return None
 
 
-def log_triton_builds(fail: Optional[str]):
+def log_triton_builds(fail: str | None):
     pass
 
 
-def find_compile_subproc_binary() -> Optional[str]:
+def find_compile_subproc_binary() -> str | None:
     """
     Allows overriding the binary used for subprocesses
     """

@@ -6,7 +6,6 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/inductor-rocm/*
       - ciflow/inductor-rocm-mi300/*
   workflow_dispatch:
 
@@ -61,7 +60,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-noble-rocm-py3_12-inductor-build
     with:
-      build-environment: linux-noble-rocm-py3.12-mi300
+      build-environment: ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-noble-rocm-py3_12-inductor-build.outputs.test-matrix }}
     secrets: inherit

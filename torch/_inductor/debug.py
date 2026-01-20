@@ -12,6 +12,7 @@ import os.path
 import pickle
 import pstats
 import shutil
+import tempfile
 import traceback
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any, IO, Optional, Union
@@ -346,6 +347,7 @@ def reset_provenance_globals() -> Iterator[None]:
     global _inductor_triton_kernel_to_post_grad_node_info
     global _inductor_pre_grad_node_stack_trace
     global _inductor_kernel_stack_trace
+    global _inductor_kernel_provenance_debug_handle
 
     # Store original values
     original_pre_grad_graph_id = _pre_grad_graph_id
@@ -357,6 +359,9 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_pre_grad_node_stack_trace.copy()
     )
     original_inductor_kernel_stack_trace = _inductor_kernel_stack_trace.copy()
+    original_inductor_kernel_provenance_debug_handle = (
+        _inductor_kernel_provenance_debug_handle
+    )
 
     # Reset to default values
     _pre_grad_graph_id = -1
@@ -364,6 +369,7 @@ def reset_provenance_globals() -> Iterator[None]:
     _inductor_triton_kernel_to_post_grad_node_info = {}
     _inductor_pre_grad_node_stack_trace = {}
     _inductor_kernel_stack_trace = {}
+    _inductor_kernel_provenance_debug_handle = 0
 
     try:
         yield
@@ -377,6 +383,9 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_kernel_stack_trace = original_inductor_kernel_stack_trace
         _inductor_pre_grad_node_stack_trace = (
             original_inductor_pre_grad_node_stack_trace
+        )
+        _inductor_kernel_provenance_debug_handle = (
+            original_inductor_kernel_provenance_debug_handle
         )
 
 
@@ -1182,7 +1191,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    folder = "/tmp/inductor_saved_args"
+    folder = os.path.join(tempfile.gettempdir(), "inductor_saved_args")
     if not os.path.exists(folder):
         os.mkdir(folder)
 
