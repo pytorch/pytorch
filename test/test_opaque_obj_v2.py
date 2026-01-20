@@ -24,6 +24,7 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
     aot_export_module,
 )
+from torch._inductor.compile_fx import compile_fx
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
@@ -2051,7 +2052,6 @@ class GraphModule(torch.nn.Module):
 
     def test_opaque_object_with_inductor_backend(self):
         """Test that opaque objects work correctly with inductor's get_attr handling."""
-        from torch._inductor.compile_fx import compile_fx
 
         class TestModule(torch.nn.Module):
             def __init__(self):
