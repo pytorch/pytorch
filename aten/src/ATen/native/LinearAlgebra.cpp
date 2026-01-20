@@ -112,6 +112,7 @@
 #include <ATen/ops/linalg_tensorsolve_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/linalg_vector_norm_native.h>
+#include <ATen/ops/linalg_powsum_native.h>
 #include <ATen/ops/log2.h>
 #include <ATen/ops/logdet_native.h>
 #include <ATen/ops/matmul.h>
@@ -209,7 +210,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 }
 
-TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, bool /*skip_root*/) {
+TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
   at::native::checkFloatingOrComplex(self, "linalg.vector_norm");
   TORCH_CHECK(!at::isComplexType(scalar_ord.type()), "linalg.vector_norm: Expected a non-complex scalar as the order of norm.");
 
@@ -2815,7 +2816,7 @@ Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   );
 }
 
-TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, bool skip_root, const Tensor& result) {
+TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, const Tensor& result) {
   // Casting a large integer to a double will just introduce an error for
   // values larger than 10^53 (same for negative numbers), so that's fine.
   auto ord = scalar_ord.toDouble();
@@ -2841,9 +2842,6 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     }
   }
 
-  // Check if skip_root applies (only for p-norms where p != inf, -inf, 0, 1)
-  bool should_skip_root = skip_root && std::abs(ord) != INFINITY && ord != 0.0 && ord != 1.0;
-
   if (is_reduce_over_1D_vector) {
     Tensor self_;
     if (opt_dtype.has_value()) {
@@ -2853,9 +2851,6 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     }
     if (ord != 0.0) {
       keepdim ? at::abs_outf(self_, const_cast<Tensor&>(result)) : at::abs_outf(self_.squeeze(reduce_dim), const_cast<Tensor&>(result));
-      if (should_skip_root) {
-        const_cast<Tensor&>(result).pow_(ord);
-      }
     } else {
       keepdim ? at::ne_outf(self_, 0, const_cast<Tensor&>(result)) : at::ne_outf(self_.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
     }
@@ -2884,7 +2879,80 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   }
 
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
-  norm_stub(iter.device_type(), iter, ord, should_skip_root);
+  norm_stub(iter.device_type(), iter, ord, /*skip_root=*/false);
+}
+
+// linalg_powsum: computes sum(|x|^ord) - the "power sum" without the final root
+// This is useful for distributed computing where we want to reduce partial
+// power sums across shards before taking the final root.
+Tensor linalg_powsum(
+    const Tensor& self,
+    const Scalar& scalar_ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  auto ord = scalar_ord.toDouble();
+
+  // Validate ord: powsum only makes sense for p-norms where p > 0 and p != inf
+  TORCH_CHECK(
+      ord > 0 && ord != INFINITY,
+      "linalg.powsum only supports finite positive ord values, got: ", ord);
+
+  auto dim = opt_dim.value_or(IntArrayRef{});
+
+  // Compute output dtype (same logic as vector_norm)
+  auto compute_dtype = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true);
+
+  // Handle dtype conversion
+  Tensor self_;
+  if (opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = self;
+  }
+
+  // Create output tensor with the correct shape
+  auto result = create_reduction_result(self_, opt_dim, keepdim, toRealValueType(compute_dtype));
+
+  if (result.numel() == 0) {
+    // For empty reductions, powsum returns 0
+    result.zero_();
+    return result;
+  }
+
+  auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());
+  norm_stub(iter.device_type(), iter, ord, /*skip_root=*/true);
+  return result;
+}
+
+// linalg_powsum_slow: fallback implementation for backends without optimized kernels
+// Computes sum(|x|^ord) using basic ops
+Tensor linalg_powsum_slow(
+    const Tensor& self,
+    const Scalar& scalar_ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  auto ord = scalar_ord.toDouble();
+
+  // Validate ord: powsum only makes sense for p-norms where p > 0 and p != inf
+  TORCH_CHECK(
+      ord > 0 && ord != INFINITY,
+      "linalg.powsum only supports finite positive ord values, got: ", ord);
+
+  // Handle dtype conversion
+  Tensor self_;
+  if (opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true) != self.scalar_type()
+        ? self.to(at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true))
+        : self;
+  }
+
+  // Compute |x|^ord and sum
+  auto abs_pow = at::pow(at::abs(self_), scalar_ord);
+  return at::sum(abs_pow, opt_dim, keepdim, toRealValueType(abs_pow.scalar_type()));
 }
 
 static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, std::optional<ScalarType> opt_dtype, bool low_precision) {
