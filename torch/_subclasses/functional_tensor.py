@@ -333,10 +333,6 @@ class FunctionalTensor(torch.Tensor):
 
 
 class FunctionalTensorMode(TorchDispatchMode):
-    # Allow higher-order operators (like with_effects) to pass through to __torch_dispatch__.
-    # FunctionalTensorMode handles effects via handle_effects() in __torch_dispatch__.
-    supports_higher_order_operators = True
-
     def __init__(
         self,
         pre_dispatch: bool = False,
@@ -422,13 +418,6 @@ class FunctionalTensorMode(TorchDispatchMode):
             not_implemented_log.debug(
                 "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
             )
-            return NotImplemented
-
-        # Early handling for HigherOrderOperators.
-        # with_effects indicates the operation is already functional (from a previous
-        # functionalization pass), so return NotImplemented to let it pass through.
-        # For other HOPs, also return NotImplemented to maintain original behavior.
-        if isinstance(func, torch._ops.HigherOrderOperator):
             return NotImplemented
 
         def _can_decompose(func: OpOverload) -> bool:
