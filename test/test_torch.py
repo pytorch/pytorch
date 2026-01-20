@@ -254,7 +254,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(s, storage_type(l))
 
     def test_untypedstorage_setitem_and_getitem(self, device):
-        storage = torch.UntypedStorage(5)
+        storage = torch.UntypedStorage(5, device=device)
 
         storage[0] = 10
         storage[1] = 20
@@ -265,12 +265,12 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(storage[4], 99)
 
     def test_untypedstorage_out_of_bounds(self, device):
-        storage = torch.UntypedStorage(3)
+        storage = torch.UntypedStorage(3, device=device)
         with self.assertRaises(RuntimeError):
             storage[3] = 1
 
     def test_untypedstorage_negative_index(self, device):
-        storage = torch.UntypedStorage(3)
+        storage = torch.UntypedStorage(3, device=device)
         with self.assertRaises(RuntimeError):
             storage[-1] = 7
 
