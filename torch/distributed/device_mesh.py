@@ -1563,6 +1563,7 @@ def _register_device_mesh_as_opaque_type():
             "__getitem__": MemberType.INLINED,
             "_get_slice_mesh_layout": MemberType.INLINED,
             "_create_sub_mesh": MemberType.INLINED,
+            "_pg_registry": MemberType.INLINED,
         },
     )
 
