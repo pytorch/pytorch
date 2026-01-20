@@ -201,7 +201,7 @@ void sdpa_backward(
     const Tensor& logsumexp,
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
-    float softmax_scale,
+    double scale,
     Tensor& grad_query,
     Tensor& grad_key,
     Tensor& grad_value);

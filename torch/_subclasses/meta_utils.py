@@ -504,7 +504,7 @@ class MetaTensorDescriber:
         return r
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MetaStorageDesc:
     id: MetaStorageId
     size: int
@@ -520,7 +520,7 @@ class MetaStorageDesc:
         }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ViewFunc(Generic[_TensorT]):
     @abstractmethod
     def apply(
@@ -539,7 +539,7 @@ class ViewFunc(Generic[_TensorT]):
             return _CustomViewFunc(t._view_func_unsafe)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
     @override
     def apply(
@@ -558,7 +558,7 @@ class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
     func: Callable[
         [
@@ -609,7 +609,7 @@ class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
     ) -> _TensorT_cov: ...
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MetaTensorDesc(Generic[_TensorT]):
     id: MetaTensorId
     ndim: int
@@ -2127,14 +2127,6 @@ class MetaConverter(Generic[_TensorT]):
             # NB: Cannot directly use Parameter constructor
             # because that would force a detach, not desirable
             r._is_param = True
-
-        # forward the 'is_buffer' metadata if present (for nn.Buffer checks)
-        if getattr(t, "_is_buffer", False):
-            # pyrefly: ignore [missing-attribute]
-            r._is_buffer = True
-            if hasattr(t, "persistent"):
-                # pyrefly: ignore [missing-attribute]
-                r.persistent = t.persistent
 
         # TODO: return the description for later
         return r

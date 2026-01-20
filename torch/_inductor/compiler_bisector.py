@@ -68,7 +68,6 @@ BACKENDS: dict[str, list[Subsystem]] = {
         ConfigChange("inductor", "emulate_precision_casts", True),
         ConfigChange("inductor", "layout_optimization", False),
         ConfigChange("inductor", "comprehensive_padding", False),
-        BisectSubsystem("cudagraphs"),  # cudagraph wrapping of compiled graphs
         BisectSubsystem("lowerings"),  # lowering aten operators to inductor
     ],  # TODO - add more - fusions ?
 }

@@ -1947,34 +1947,6 @@ class TestSDPAFailureModes(NNTestCase):
                                                           attn_bias=None, compute_log_sumexp=True,
                                                           dropout_p=0.01)
 
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
-    def test_mem_eff_attention_backward_requires_bias_when_bias_grad(self):
-        q = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
-        k = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
-        v = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
-        out, lse, philox_seed, philox_offset = torch.ops.aten._scaled_dot_product_efficient_attention.default(
-            q, k, v, None, True
-        )
-        grad_out = torch.rand_like(out)
-        error_str = "bias_requires_grad is true but no bias was provided"
-        with self.assertRaisesRegex(RuntimeError, error_str):
-            torch.ops.aten._scaled_dot_product_efficient_attention_backward.default(
-                grad_out,
-                q,
-                k,
-                v,
-                None,
-                out,
-                lse,
-                philox_seed,
-                philox_offset,
-                0.0,
-                (True, True, True, True),
-                False,
-                scale=None,
-            )
-
     @largeTensorTest("15GB", "cuda")
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
@@ -2823,8 +2795,7 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
-        def test_attention(backend: SDPBackend, permute_order: list[list[int]], use_compile: bool):
-            torch._dynamo.reset()
+        def test_attention(backend: SDPBackend, permute_order: list[list[int]]):
             BHSqD = [4, 16, 256, 64]
             BHSkvD = [4, 16, 512, 64]
 
@@ -2838,60 +2809,17 @@ class TestSDPACudaOnly(NNTestCase):
             self.assertEqual(k.shape, BHSkvD)
             self.assertEqual(v.shape, BHSkvD)
 
-            def fn(q, k, v):
-                with sdpa_kernel(backend):
-                    return F.scaled_dot_product_attention(q, k, v)
-
-            if use_compile:
-                fn = torch.compile(fn)
-
-            out = fn(q, k, v)
-            self.assertTrue(out.permute(permute_order).is_contiguous())
-            out.sum().backward()
+            with sdpa_kernel(backend):
+                out = F.scaled_dot_product_attention(q, k, v)
+                self.assertTrue(out.permute(permute_order).is_contiguous())
+                out.sum().backward()
 
         permute_orders = list()
         permutable = [0, 1, 2]
         permute_orders = itertools.permutations(permutable)
 
         for permute_order in permute_orders:
-            for use_compile in [False, True]:
-                test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3], use_compile)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
-    @unittest.skipIf(
-        not (isSM90Device and torch.backends.cudnn.version() >= 91000),
-        "head_dim > 128 requires SM90 with cuDNN >= 9.1.0"
-    )
-    def test_cudnn_attention_interleaved_layout_compile(self, device):
-        """
-        Test cudnn attention with interleaved head layout under torch.compile.
-
-        This tests the specific case where query has strides like (B*S*H*D, D, H*D, 1)
-        meaning heads are interleaved within the sequence dimension. This layout
-        triggered a bug where the C++ alloc_with_matching_layout had an operator
-        precedence issue causing stride mismatches between Inductor's meta prediction
-        and runtime allocation.
-        """
-        torch._dynamo.reset()
-
-        B, H, S, D_q, D_v = 1, 128, 512, 192, 128
-
-        q = torch.randn(B, S, H, D_q, dtype=torch.bfloat16, device='cuda').permute(0, 2, 1, 3)
-        k = torch.randn(B, S, H, D_q, dtype=torch.bfloat16, device='cuda').permute(0, 2, 1, 3)
-        v = torch.randn(B, S, H, D_v, dtype=torch.bfloat16, device='cuda').permute(0, 2, 1, 3)
-
-        self.assertEqual(q.shape, (B, H, S, D_q))
-        self.assertEqual(q.stride(1), D_q)
-        self.assertEqual(q.stride(2), H * D_q)
-        self.assertFalse(q.is_contiguous())
-
-        @torch.compile
-        def fn(q, k, v):
-            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
-                return F.scaled_dot_product_attention(q, k, v)
-
-        out = fn(q, k, v)
-        self.assertEqual(out.shape, (B, H, S, D_v))
+            test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_compiles(self):

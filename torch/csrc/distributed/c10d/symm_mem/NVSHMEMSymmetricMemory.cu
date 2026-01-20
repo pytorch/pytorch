@@ -139,13 +139,6 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
         signal_pads_.data(),
         arr_size,
         cudaMemcpyHostToDevice));
-
-    // Initialize multicast address
-    // On unsupported platforms, this API returns a nullptr.
-    auto device = c10::Device(c10::DeviceType::CUDA, allocation->device_idx);
-    auto& team_manager = c10d::nvshmem_extension::TeamManager::get(device);
-    auto team = team_manager.get_team(group_name, rank_to_global_rank);
-    mc_addr_ = nvshmemx_mc_ptr(team, base_ptr_);
   }
 
  private:
@@ -159,8 +152,6 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
   void** signal_pads_dev_;
   // Whether the world is within CUDA P2P only, not network
   bool world_within_cuda_p2p_;
-  // Multicast address
-  void* mc_addr_{nullptr};
 
   friend class NVSHMEMSymmetricMemory;
 };
@@ -215,15 +206,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return pai_->buffer_size_;
   }
 
-  bool has_multicast_support() override {
-    return pai_->mc_addr_ != nullptr;
-  }
-
   void* get_multicast_ptr() override {
-    if (!has_multicast_support()) {
-      return nullptr;
-    }
-    return static_cast<char*>(pai_->mc_addr_) + offset_;
+    auto& team_manager = c10d::nvshmem_extension::TeamManager::get(get_device());
+    auto team = team_manager.get_team(group_name_, get_rank_to_global_rank());
+    return nvshmemx_mc_ptr(team, static_cast<char*>(pai_->base_ptr_) + offset_);
   }
 
   size_t get_offset() override {

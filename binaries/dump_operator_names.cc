@@ -21,7 +21,6 @@
 #include <c10/util/Flags.h>
 
 #include <fstream>
-#include <iostream>
 
 namespace torch {
 namespace jit {

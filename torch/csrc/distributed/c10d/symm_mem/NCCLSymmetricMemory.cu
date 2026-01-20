@@ -9,7 +9,6 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
@@ -111,8 +110,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Create NCCL device communicator if it doesn't exist. Skip if it already exists.
     auto& mr = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
-    // Each CTA will need a separate barrier. Assume `symm_max_nblocks` as a starting point.
-    mr.try_emplace_devcomm(group_name_, comm, /*LSA*/ symm_max_nblocks, /*GIN*/ symm_max_nblocks);
+    mr.try_emplace_devcomm(group_name_, comm);
 
     const size_t arr_size = sizeof(void*) * world_size_;
     buffers_dev_ = reinterpret_cast<void**>(
@@ -140,14 +138,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       arr_size,
       cudaMemcpyDeviceToHost));
 #endif
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
-  // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
-  void* mc_addr = nullptr;
-  if (ncclGetLsaMultimemDevicePointer(buffer_win_, 0, &mc_addr) == ncclSuccess) {
-    mc_addr_ = mc_addr;
-  }
-#endif
   }
 
   // Exact copy is not needed / supported
@@ -169,8 +159,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   std::string group_name_;
   ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
-  // Multicast address
-  void* mc_addr_{nullptr};
 
   friend class NCCLSymmetricMemory;
 };
@@ -206,15 +194,15 @@ size_t NCCLSymmetricMemory::get_buffer_size() {
   return pai_->buffer_size_;
 }
 
-bool NCCLSymmetricMemory::has_multicast_support() {
-  return pai_->mc_addr_ != nullptr;
-}
-
 void* NCCLSymmetricMemory::get_multicast_ptr() {
-  if (!has_multicast_support()) {
-    return nullptr;
+  // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+  void* mc_addr = nullptr;
+  if (ncclGetLsaMultimemDevicePointer(pai_->buffer_win_, offset_, &mc_addr) == ncclSuccess) {
+    return mc_addr;
   }
-  return static_cast<char*>(pai_->mc_addr_) + offset_;
+#endif
+  return nullptr;
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {

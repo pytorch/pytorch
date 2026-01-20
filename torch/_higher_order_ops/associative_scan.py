@@ -18,8 +18,8 @@ from torch._higher_order_ops.utils import (
     first_slice_copy_with_grad,
     materialize_as_graph,
     reenter_make_fx,
-    save_values_for_backward,
-    saved_values,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
     split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
@@ -677,7 +677,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         with torch._C._AutoDispatchBelowAutograd():
             # 1.) Compute the forward output of the associative_scan
             ys = associative_scan_op(combine_fn, xs, additional_inputs)
-            save_values_for_backward(ctx, list(operands) + list(ys))
+            save_tensors_and_symints_for_backward(ctx, list(operands) + list(ys))
 
         return (*ys,)
 
@@ -699,7 +699,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         num_additional_inputs = ctx._num_additional_inputs
 
         # Extract the inputs to the forward path and outputs from the forward path
-        flat_args = saved_values(ctx)
+        flat_args = saved_tensors_and_symints(ctx)
         xs, additional_inputs, outs = split_into_chunks(
             flat_args, [num_xs, num_additional_inputs, num_xs]
         )
