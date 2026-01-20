@@ -701,23 +701,18 @@ class ComboKernel(Kernel):
         )
 
         for block in self.block_args:
-            if "_" in block:
-                base_block = block.rsplit("_", 1)[0]
-            else:
-                base_block = block
-
-            if "ZBLOCK" in base_block:
+            if "ZBLOCK" in block:
                 code.splice(f"{block}: tl.constexpr = {self.block_size_2d}")
-            elif "YBLOCK" in base_block:
+            elif "YBLOCK" in block:
                 code.splice(f"{block}: tl.constexpr = {self.block_size_2d}")
-            elif "XBLOCK" in base_block:
+            elif "XBLOCK" in block:
                 if has_yblock or has_zblock:
                     code.splice(f"{block}: tl.constexpr = {self.block_size_2d}")
                 else:
                     code.splice(f"{block}: tl.constexpr = {self.block_size_1d}")
-            elif "R0_BLOCK" in base_block:
+            elif "R0_BLOCK" in block:
                 code.splice(f"{block}: tl.constexpr = {reduce_block_size}")
-            elif "R1_BLOCK" in base_block:
+            elif "R1_BLOCK" in block:
                 code.splice(f"{block}: tl.constexpr = {reduce_block_size}")
             else:
                 raise AssertionError(f"{block} is not supported without autotuning")
