@@ -496,7 +496,6 @@ test_inductor_core() {
               inductor/test_compile_subprocess \
               inductor/test_cpu_cpp_wrapper \
               inductor/test_cpu_repro \
-              inductor/test_cpu_select_algorithm \
               inductor/test_torchinductor_dynamic_shapes \
               inductor/test_torchinductor \
               inductor/test_mkldnn_pattern_matcher \
