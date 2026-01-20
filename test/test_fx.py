@@ -58,6 +58,7 @@ from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     TypeCheckerTest,
 )
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
+from fx.test_opaque_infrastructure import TestOpaqueInfrastructure  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
@@ -1352,6 +1353,52 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         text = gm.print_readable(False)
         assert 2 == text.count("_torch__ops_aten_aten_relu_")
+
+    def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
+        # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
+        # print_readable() should not produce lines with trailing whitespace.
+
+        # Create an inner GraphModule
+        class InnerModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        inner_gm = torch.fx.symbolic_trace(InnerModule())
+
+        # Create an outer module that has the inner GraphModule as a submodule
+        class OuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.subgraph_0 = inner_gm
+
+            def forward(self, x):
+                return x * 2
+
+        outer = OuterModule()
+
+        # Create a graph that references the submodule
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        subgraph_result = graph.call_module("subgraph_0", (x,))
+        mul_result = graph.call_function(torch.mul, (subgraph_result, 2))
+        graph.output(mul_result)
+
+        # Create the outer GraphModule with this graph
+        outer_gm = torch.fx.GraphModule(outer, graph)
+
+        # Verify that subgraph_0 is a GraphModule with a graph attribute
+        self.assertTrue(hasattr(outer_gm.subgraph_0, "graph"))
+
+        # Get the print_readable output
+        output = outer_gm.print_readable(print_output=False)
+
+        # Check for trailing whitespace on any line
+        for i, line in enumerate(output.split("\n")):
+            self.assertEqual(
+                line,
+                line.rstrip(),
+                f"Line {i + 1} has trailing whitespace: {repr(line)}",
+            )
 
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
