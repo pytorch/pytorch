@@ -15,6 +15,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
+from torch._dynamo.decorators import disable as dynamo_disable
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import (
@@ -693,6 +694,7 @@ class DynamoBytecodeFlatten:
         self.f_globals = f_globals
         self.gm_inputs: tuple[Any, ...] | None = None
 
+    @dynamo_disable(reason="do not trace internal dynamo graph capture")  # type: ignore[misc]
     def __call__(self, *inputs: object) -> object:
         def backend_dummy(*example_inputs: object) -> None:
             self.gm_inputs = example_inputs
@@ -720,6 +722,7 @@ class DynamoBytecodeUnflatten:
         self.out = out
         self.f_globals = f_globals
 
+    @dynamo_disable(reason="do not trace internal dynamo graph capture")  # type: ignore[misc]
     def __call__(
         self, flat_outs: Sequence[object], inputs: tuple[object, ...]
     ) -> object:
