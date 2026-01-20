@@ -64,6 +64,7 @@ class MetalKernelFunction {
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
+  void setErrorBufferIndex(unsigned idx);
   template <
       typename T,
       typename = std::enable_if_t<
@@ -146,6 +147,7 @@ class MetalShaderLibrary {
       const std::string& name,
       const std::optional<c10::Scalar> alpha = std::nullopt,
       const std::optional<c10::ScalarType> scalar_arg_type = std::nullopt);
+  void exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name);
 
   template <typename T>
   void exec_unary_kernel_with_params(

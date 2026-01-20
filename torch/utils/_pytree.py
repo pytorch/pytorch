@@ -608,6 +608,14 @@ def _private_register_pytree_node(
     for the Python pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
+    from torch._library.opaque_object import is_opaque_type
+
+    if is_opaque_type(cls):
+        raise ValueError(
+            f"{cls} cannot be registered as a pytree as it has been "
+            "registered as an opaque object. Opaque objects must be pytree leaves."
+        )
+
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
             # TODO: change this warning to an error after OSS/internal stabilize
@@ -1015,6 +1023,7 @@ _private_register_pytree_node(
 
 
 STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
+# pyrefly: ignore [no-matching-overload]
 BUILTIN_TYPES: frozenset[type] = frozenset(
     {
         tuple,
@@ -1113,8 +1122,10 @@ class TreeSpec:
 
     def __post_init__(self) -> None:
         if self.type is None:
-            assert self._context is None
-            assert len(self._children) == 0
+            if self._context is not None:
+                raise AssertionError("leaf node should not have a context")
+            if len(self._children) != 0:
+                raise AssertionError("leaf node should not have children")
             num_nodes = 1
             num_leaves = 1
             num_children = 0
@@ -1564,7 +1575,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
+TypeAny = type[Any] | tuple[type[Any], ...] | types.UnionType
 
 Fn2 = Callable[[T | S], R]
 Fn3 = Callable[[T | S | U], R]
@@ -1970,7 +1981,7 @@ def enum_object_hook(obj: dict[str, Any]) -> Enum | dict[str, Any]:
         for attr in classname.split("."):
             enum_cls = getattr(enum_cls, attr)
         enum_cls = cast(type[Enum], enum_cls)
-        # pyrefly: ignore [unsupported-operation]
+
         return enum_cls[obj["name"]]
     return obj
 

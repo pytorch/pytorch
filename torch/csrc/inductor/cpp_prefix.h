@@ -306,21 +306,48 @@ inline T cascade_sum_combine(
 }
 
 template <typename T>
-T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::maximum(a, b);
   return T::set(a, out, tail_size);
 }
 
+template <>
+inline at::vec::VecMask<float, 1> max_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a | b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
+}
+
 template <typename T>
-T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::minimum(a, b);
   return T::set(a, out, tail_size);
 }
 
+template <>
+inline at::vec::VecMask<float, 1> min_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a & b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
+}
+
 template <typename T>
-T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a + b;
   return T::set(a, out, tail_size);
+}
+
+template <>
+inline at::vec::VecMask<float, 1> sum_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a | b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
 }
 
 template <typename T>
@@ -332,6 +359,12 @@ T prod_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
 template <typename T>
 T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a ^ b;
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T any_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a | b;
   return T::set(a, out, tail_size);
 }
 #endif
@@ -869,14 +902,16 @@ template <typename T, int NI, int NV>
 void atomic_add_vec(
     T* addr,
     at::vec::VectorizedN<int64_t, NI> index,
-    at::vec::VectorizedN<T, NV> offset) {
+    at::vec::VectorizedN<T, NV> offset,
+    std::optional<int64_t> tail_size = std::nullopt) {
   constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data(), len);
   index.store(tmpidx.data(), len);
-  for (int i = 0; i < len; i++) {
+  int size = tail_size.has_value() ? tail_size.value() : len;
+  for (int i = 0; i < size; i++) {
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
 }

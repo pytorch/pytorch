@@ -23,7 +23,6 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/stack.h>
 #include <ATen/record_function.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
@@ -113,7 +112,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
 
-  std::map<const void*, ID> objectId{};
+  std::map<const void*, ID> objectId;
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 

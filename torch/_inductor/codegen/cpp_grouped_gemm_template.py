@@ -370,7 +370,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         cur_idx = bias_start_idx
         for inp_idx in range(self.gemm_grouped_num):
             inp = None
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             if self.has_bias[inp_idx]:
                 inp = self.input_nodes[cur_idx]
                 cur_idx += 1

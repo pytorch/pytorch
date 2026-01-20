@@ -1,13 +1,17 @@
 import collections
-from typing import Any, Union
+import ctypes
+from typing import Any
 
 import torch
+from torch._utils import _dummy_type
 from torch.types import Device
 
-from . import _get_device_index, _lazy_init, is_initialized
+from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
 
 
-_device_t = Union[Device, str, int, None]
+if not _is_compiled():
+    # Define dummy base classes
+    torch._C.__dict__["_xpu_XPUAllocator"] = _dummy_type("_xpu_XPUAllocator")
 
 
 def empty_cache() -> None:
@@ -23,7 +27,7 @@ def empty_cache() -> None:
         torch._C._xpu_emptyCache()
 
 
-def reset_peak_memory_stats(device: _device_t = None) -> None:
+def reset_peak_memory_stats(device: Device = None) -> None:
     r"""Reset the "peak" stats tracked by the XPU memory allocator.
 
     See :func:`~torch.xpu.memory_stats` for details. Peak stats correspond to the
@@ -38,7 +42,7 @@ def reset_peak_memory_stats(device: _device_t = None) -> None:
     return torch._C._xpu_resetPeakMemoryStats(device)
 
 
-def reset_accumulated_memory_stats(device: _device_t = None) -> None:
+def reset_accumulated_memory_stats(device: Device = None) -> None:
     r"""Reset the "accumulated" (historical) stats tracked by the XPU memory allocator.
 
     See :func:`~torch.xpu.memory_stats` for details. Accumulated stats correspond to
@@ -53,7 +57,7 @@ def reset_accumulated_memory_stats(device: _device_t = None) -> None:
     return torch._C._xpu_resetAccumulatedMemoryStats(device)
 
 
-def memory_stats_as_nested_dict(device: _device_t = None) -> dict[str, Any]:
+def memory_stats_as_nested_dict(device: Device = None) -> dict[str, Any]:
     r"""Return the result of :func:`~torch.xpu.memory_stats` as a nested dictionary."""
     if not is_initialized():
         return {}
@@ -61,7 +65,7 @@ def memory_stats_as_nested_dict(device: _device_t = None) -> dict[str, Any]:
     return torch._C._xpu_memoryStats(device)
 
 
-def memory_stats(device: _device_t = None) -> dict[str, Any]:
+def memory_stats(device: Device = None) -> dict[str, Any]:
     r"""Return a dictionary of XPU memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
@@ -117,7 +121,7 @@ def memory_stats(device: _device_t = None) -> dict[str, Any]:
     return collections.OrderedDict(result)
 
 
-def memory_allocated(device: _device_t = None) -> int:
+def memory_allocated(device: Device = None) -> int:
     r"""Return the current GPU memory occupied by tensors in bytes for a given device.
 
     Args:
@@ -133,7 +137,7 @@ def memory_allocated(device: _device_t = None) -> int:
     return memory_stats(device=device).get("allocated_bytes.all.current", 0)
 
 
-def max_memory_allocated(device: _device_t = None) -> int:
+def max_memory_allocated(device: Device = None) -> int:
     r"""Return the maximum GPU memory occupied by tensors in bytes for a given device.
 
     By default, this returns the peak allocated memory since the beginning of
@@ -150,7 +154,7 @@ def max_memory_allocated(device: _device_t = None) -> int:
     return memory_stats(device=device).get("allocated_bytes.all.peak", 0)
 
 
-def memory_reserved(device: _device_t = None) -> int:
+def memory_reserved(device: Device = None) -> int:
     r"""Return the current GPU memory managed by the caching allocator in bytes for a given device.
 
     Args:
@@ -161,7 +165,7 @@ def memory_reserved(device: _device_t = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.current", 0)
 
 
-def max_memory_reserved(device: _device_t = None) -> int:
+def max_memory_reserved(device: Device = None) -> int:
     r"""Return the maximum GPU memory managed by the caching allocator in bytes for a given device.
 
     By default, this returns the peak cached memory since the beginning of this
@@ -178,7 +182,7 @@ def max_memory_reserved(device: _device_t = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
-def mem_get_info(device: _device_t = None) -> tuple[int, int]:
+def mem_get_info(device: Device = None) -> tuple[int, int]:
     r"""Return the global free and total GPU memory for a given device.
 
     Args:
@@ -195,7 +199,7 @@ def mem_get_info(device: _device_t = None) -> tuple[int, int]:
     return torch._C._xpu_getMemoryInfo(device)
 
 
-def get_per_process_memory_fraction(device: _device_t = None) -> float:
+def get_per_process_memory_fraction(device: Device = None) -> float:
     r"""
     Retrieve the memory fraction currently set for a process on a given XPU device.
     This fraction represents the portion of the total device memory that
@@ -215,7 +219,7 @@ def get_per_process_memory_fraction(device: _device_t = None) -> float:
     return torch._C._xpu_getMemoryFraction(device)
 
 
-def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -> None:
+def set_per_process_memory_fraction(fraction: float, device: Device = None) -> None:
     r"""
     Set the memory fraction for a single process on XPU device.
     This function limits the amount of memory that the caching allocator can allocate
@@ -227,7 +231,7 @@ def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -
     an out-of-memory error will be raised by the allocator.
 
     Arguments:
-        fraction(float): Range: 0~1. Allowed memory equals total_memory * fraction.
+        fraction (float): Range: 0~1. Allowed memory equals total_memory * fraction.
         device (torch.device or int or str, optional): selected device. It uses the current device,
             given by :func:`~torch.xpu.current_device`, if :attr:`device` is ``None`` (default).
 
@@ -241,7 +245,87 @@ def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -
     torch._C._xpu_setMemoryFraction(fraction, device)
 
 
+class _XPUAllocator:
+    r"""Wrapper over internal XPU memory allocators."""
+
+    # pyrefly: ignore [missing-attribute]
+    def __init__(self, allocator: torch._C._xpu_XPUAllocator):
+        self._allocator = allocator
+
+    def allocator(self):
+        return self._allocator
+
+
+class XPUPluggableAllocator(_XPUAllocator):
+    r"""XPU memory allocator loaded from a shared library."""
+
+    def __init__(self, path_to_lib_file: str, alloc_fn_name: str, free_fn_name: str):
+        r"""XPU memory allocator loaded dynamically from a shared library.
+
+        This lets users provide custom allocation and free functions implemented
+        in a separate shared library. The allocator is registered through
+        ``torch._C._xpu_customAllocator`` and becomes available for use via
+        ``torch.memory.xpu.change_current_allocator``.
+
+        Arguments:
+            path_to_lib_file (str):
+                Filesystem path to the shared library file containing the allocation
+                and free functions.
+            alloc_fn_name (str):
+                Name of the allocation function exported from the shared library.
+                The function must have the signature:
+
+                    ``void* alloc_fn(size_t size, int device, sycl::queue* queue);``
+
+            free_fn_name (str):
+                Name of the free function exported from the shared library.
+                The function must have the signature:
+
+                    ``void free_fn(void* ptr, size_t size, sycl::queue* queue);``
+        """
+        allocator_lib = ctypes.CDLL(path_to_lib_file)
+
+        alloc_fn_ptr = getattr(allocator_lib, alloc_fn_name)
+        free_fn_ptr = getattr(allocator_lib, free_fn_name)
+
+        alloc_fn_addr = ctypes.cast(alloc_fn_ptr, ctypes.c_void_p).value
+        free_fn_addr = ctypes.cast(free_fn_ptr, ctypes.c_void_p).value
+
+        if alloc_fn_addr is None or free_fn_addr is None:
+            raise RuntimeError(
+                "Failed to load allocator symbols from the shared library."
+            )
+
+        # pyrefly: ignore [missing-attribute]
+        self._allocator = torch._C._xpu_customAllocator(alloc_fn_addr, free_fn_addr)
+
+
+def change_current_allocator(allocator: _XPUAllocator) -> None:
+    r"""Change the currently used memory allocator to be the one provided.
+
+    .. note::
+        If the current allocator has already been used/initialized, this function will error.
+
+    Arguments:
+        allocator (torch.xpu.memory._XPUAllocator): allocator to be set as the active one.
+    """
+    # pyrefly: ignore [missing-attribute]
+    torch._C._xpu_changeCurrentAllocator(allocator.allocator())
+
+
+def _get_current_allocator() -> _XPUAllocator:
+    r"""Return the allocator being currently used.
+
+    Returns:
+        _XPUAllocator: the allocator being currently used.
+    """
+    # pyrefly: ignore [missing-attribute]
+    return _XPUAllocator(torch._C._xpu_getAllocator())
+
+
 __all__ = [
+    "XPUPluggableAllocator",
+    "change_current_allocator",
     "empty_cache",
     "get_per_process_memory_fraction",
     "max_memory_allocated",

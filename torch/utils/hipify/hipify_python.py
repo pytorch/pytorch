@@ -119,7 +119,7 @@ class GeneratedFileCleaner:
     def open(self, fn, *args, **kwargs):
         if not os.path.exists(fn):
             self.files_to_clean.add(os.path.abspath(fn))
-        # pyrefly: ignore [not-iterable]
+
         return open(fn, *args, **kwargs)
 
     def makedirs(self, dn, exist_ok=False) -> None:
@@ -529,11 +529,14 @@ RE_EXTERN_SHARED = re.compile(r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+
 
 
 def replace_extern_shared(input_string):
-    """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
-       https://github.com/ROCm/hip/blob/master/docs/markdown/hip_kernel_language.md#__shared__
-    Example:
-        "extern __shared__ char smemChar[];" => "HIP_DYNAMIC_SHARED( char, smemChar)"
-        "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
+    """
+    Match 'extern __shared__ type foo[];' syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
+    See: https://github.com/ROCm/hip/blob/master/docs/markdown/hip_kernel_language.md#__shared__
+    Examples:
+        "extern __shared__ char smemChar[];"
+            => "HIP_DYNAMIC_SHARED( char, smemChar)"
+        "extern __shared__ unsigned char smem[];"
+            => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
     """
     output_string = input_string
     output_string = RE_EXTERN_SHARED.sub(
@@ -669,7 +672,7 @@ def is_caffe2_gpu_file(rel_filepath):
         return True
     filename = os.path.basename(rel_filepath)
     _, ext = os.path.splitext(filename)
-    # pyrefly: ignore [unsupported-operation]
+
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 class TrieNode:
@@ -1043,14 +1046,12 @@ RE_INCLUDE = re.compile(r"#include .*\n")
 
 
 def extract_arguments(start, string):
-    """ Return the list of arguments in the upcoming function parameter closure.
-        Example:
-        string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
-        arguments (output):
-            '[{'start': 1, 'end': 7},
-            {'start': 8, 'end': 16},
-            {'start': 17, 'end': 19},
-            {'start': 20, 'end': 53}]'
+    """
+    Return the list of arguments in the upcoming function parameter closure.
+    Example:
+    string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
+    arguments (output): [{'start': 1, 'end': 7}, {'start': 8, 'end': 16}, \
+        {'start': 17, 'end': 19}, {'start': 20, 'end': 53}]
     """
 
     arguments = []
@@ -1145,7 +1146,7 @@ def hipify(
                                         out_of_place_only=out_of_place_only,
                                         is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
-    # pyrefly: ignore [bad-assignment]
+
     for f in extra_files:
         if not os.path.isabs(f):
             f = os.path.join(output_directory, f)
