@@ -691,6 +691,23 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if tree_map_result is not None:
             return tree_map_result
 
+        if hasattr(self.fn, "__module__") and self.fn.__module__ == "einops.einops":
+            try:
+                return super().call_function(tx, args, kwargs)
+            except Unsupported as e:
+                unimplemented(
+                    gb_type="Failed to trace einops function",
+                    context=f"einops function '{self.get_name()}'",
+                    explanation=e.msg,
+                    hints=[
+                        "Tracing through einops functions is experimental and may not be fully supported.\n"
+                        "To disable einops tracing, set `torch._dynamo.config.enable_einops_tracing = False`.\n"
+                        "Alternatively, explicitly allow this function in the graph with "
+                        f"`torch._dynamo.allow_in_graph({self.get_name()})`",
+                        *graph_break_hints.DYNAMO_BUG,
+                    ],
+                    from_exc=e,
+                )
         return super().call_function(tx, args, kwargs)
 
     def _maybe_call_tree_map_fastpath(

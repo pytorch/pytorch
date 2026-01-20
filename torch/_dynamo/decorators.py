@@ -7,7 +7,7 @@ import inspect
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
-from types import TracebackType
+from types import ModuleType, TracebackType
 from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
@@ -826,6 +826,9 @@ def mark_static_address(t: Any, guard: bool = False) -> None:
 def _allow_in_graph_einops() -> None:
     import einops
 
+    if torch._dynamo.config.enable_einops_tracing and einops.__version__ == "0.6.1":
+        _force_trace_einops(einops)
+
     try:
         # requires einops > 0.6.1, torch >= 2.0
         from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
@@ -845,6 +848,35 @@ def _allow_in_graph_einops() -> None:
             allow_in_graph(einops.pack)  # available since einops 0.6.0
         if hasattr(einops, "unpack"):
             allow_in_graph(einops.unpack)  # available since einops 0.6.0
+
+
+def _force_trace_einops(einops: ModuleType) -> None:
+    # einops register some of its methods using "allow_in_graph". Remove them
+    # so Dynamo can trace it.
+
+    if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+        # trigger backend registration up front to avoid a later guard failure
+        # that would otherwise cause a recompilation
+        einops.einops.get_backend(torch.tensor(1))
+
+    trace_rules._force_trace_callable_ids.add(id(einops.rearrange))
+    trace_rules._force_trace_callable_ids.add(id(einops.reduce))
+    if hasattr(einops, "repeat"):
+        trace_rules._force_trace_callable_ids.add(
+            id(einops.repeat)
+        )  # available since einops 0.2.0
+    if hasattr(einops, "einsum"):
+        trace_rules._force_trace_callable_ids.add(
+            id(einops.einsum)
+        )  # available since einops 0.5.0
+    if hasattr(einops, "pack"):
+        trace_rules._force_trace_callable_ids.add(
+            id(einops.pack)
+        )  # available since einops 0.6.0
+    if hasattr(einops, "unpack"):
+        trace_rules._force_trace_callable_ids.add(
+            id(einops.unpack)
+        )  # available since einops 0.6.0
 
 
 # Note: this carefully avoids eagerly import einops.
