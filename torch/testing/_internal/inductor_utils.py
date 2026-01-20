@@ -275,7 +275,9 @@ def clone_preserve_strides_offset(x, device=None):
     # For 0-element tensors, create a new tensor with correct strides directly
     # since as_strided from an empty buffer can't preserve non-zero strides
     if x.numel() == 0:
-        return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=device)
+        return torch.empty_strided(
+            x.size(), x.stride(), dtype=x.dtype, device=device, requires_grad=x.requires_grad
+        )
     buffer = torch.as_strided(
         x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
     )

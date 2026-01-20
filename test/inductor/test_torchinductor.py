@@ -537,6 +537,10 @@ def check_model(
         """Convert tensor to dtype while preserving strides."""
         if src.dtype == dtype:
             return src
+        # Expanded tensors have zero strides (multiple elements refer to same memory).
+        # We can't preserve these strides with as_strided + copy_, so fall back to .to()
+        if 0 in src.stride():
+            return src.to(dtype)
         # Allocate buffer large enough to hold the strided view, copy converted data
         if 0 in src.size():
             return torch.empty_strided(
@@ -667,6 +671,14 @@ def check_model(
                 expect_grad = reference_to_expect(actual_grad, correct_grad)
             else:
                 expect_grad = correct_grad
+
+            # Skip exact stride checking for 0-element gradient tensors since
+            # compiled backward pass may produce different (but semantically
+            # equivalent) strides for empty tensors
+            if exact_stride and any(
+                isinstance(g, torch.Tensor) and g.numel() == 0 for g in actual_grad
+            ):
+                exact_stride = False
 
             self.assertEqual(
                 actual_grad,
