@@ -75,20 +75,6 @@ namespace lazy_linalg {
 
 #if AT_MAGMA_ENABLED()
 
-template <class scalar_t>
-void magmaLdlHermitian(
-    magma_uplo_t uplo,
-    magma_int_t n,
-    scalar_t* dA,
-    magma_int_t ldda,
-    magma_int_t* ipiv,
-    magma_int_t* info) {
-  TORCH_CHECK(
-      false,
-      "LDL decomposition is not available.",
-      "Please rebuild with MAGMA 2.5.4+.");
-}
-
 template<class scalar_t>
 void magmaLu(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
@@ -174,64 +160,6 @@ void magmaGels(
     magma_trans_t trans, magma_int_t m, magma_int_t n, magma_int_t nrhs,
     scalar_t* dA, magma_int_t ldda, scalar_t* dB, magma_int_t lddb,
     scalar_t* hwork, magma_int_t lwork, magma_int_t* info);
-
-#if AT_MAGMA_VERSION >= 254
-
-template <>
-void magmaLdlHermitian<double>(
-    magma_uplo_t uplo,
-    magma_int_t n,
-    double* dA,
-    magma_int_t ldda,
-    magma_int_t* ipiv,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dsytrf_gpu(uplo, n, dA, ldda, ipiv, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaLdlHermitian<float>(
-    magma_uplo_t uplo,
-    magma_int_t n,
-    float* dA,
-    magma_int_t ldda,
-    magma_int_t* ipiv,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_ssytrf_gpu(uplo, n, dA, ldda, ipiv, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaLdlHermitian<c10::complex<double>>(
-    magma_uplo_t uplo,
-    magma_int_t n,
-    c10::complex<double>* dA,
-    magma_int_t ldda,
-    magma_int_t* ipiv,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zhetrf_gpu(
-      uplo, n, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, ipiv, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template <>
-void magmaLdlHermitian<c10::complex<float>>(
-    magma_uplo_t uplo,
-    magma_int_t n,
-    c10::complex<float>* dA,
-    magma_int_t ldda,
-    magma_int_t* ipiv,
-    magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_chetrf_gpu(
-      uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-#endif // AT_MAGMA_VERSION >= 254
 
 template<>
 void magmaLu<double>(
@@ -983,107 +911,14 @@ void _warn_once_magma_deprecation(const std::string& op_name) {
   }
 }
 
-template <typename scalar_t>
-void apply_ldl_factor_magma(
-    const Tensor& A,
-    const Tensor& pivots,
-    const Tensor& info,
-    bool upper) {
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(
-      false,
-      "torch.linalg.ldl_factor: MAGMA library not found in "
-      "compilation. Please rebuild with MAGMA.");
-#else
-  auto batch_size = batchCount(A);
-  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
-  magma_int_t leading_dim = magma_int_cast(A.stride(-1), "A.stride(-1)");
-  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
-
-  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
-  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
-
-  auto a_data = A.mutable_data_ptr<scalar_t>();
-  Tensor pivots_cpu =
-      at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
-  auto pivots_data = pivots_cpu.mutable_data_ptr<magma_int_t>();
-  Tensor info_cpu =
-      at::empty_like(info, info.options().device(kCPU).pinned_memory(true));
-  auto info_data = info_cpu.mutable_data_ptr<magma_int_t>();
-
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* a_working_ptr = &a_data[i * a_stride];
-    magma_int_t* pivots_working_ptr = &pivots_data[i * pivots_stride];
-    magma_int_t* info_working_ptr = &info_data[i];
-    magmaLdlHermitian<scalar_t>(
-        uplo,
-        n,
-        a_working_ptr,
-        leading_dim,
-        pivots_working_ptr,
-        info_working_ptr);
-  }
-  pivots.copy_(pivots_cpu);
-  info.copy_(info_cpu);
-#endif
-}
-
-void ldl_factor_magma(
-    const Tensor& LD,
-    const Tensor& pivots,
-    const Tensor& info,
-    bool upper,
-    bool hermitian) {
-  if (LD.is_complex()) {
-    TORCH_CHECK(
-        hermitian,
-        "torch.linalg.ldl_factor: complex tensors with hermitian=False flag are not supported with MAGMA backend. ",
-        "Currently preferred backend is ",
-        at::globalContext().linalgPreferredBackend(),
-        ", please set 'default' or 'cusolver' backend with torch.backends.cuda.preferred_linalg_library");
-  }
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      LD.scalar_type(), "ldl_factor_magma", [&] {
-        apply_ldl_factor_magma<scalar_t>(LD, pivots, info, upper);
-      });
-}
-
 void ldl_factor_kernel(
     const Tensor& LD,
     const Tensor& pivots,
     const Tensor& info,
     bool upper,
     bool hermitian) {
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-       { ldl_factor_cusolver(
-          LD, pivots, info, upper, hermitian);
-        return;
-}
-    case at::LinalgBackend::Magma:
-       { ldl_factor_magma(LD, pivots, info, upper, hermitian);
-        return;
-}
-    default:
-    // By default use cusolver if available and magma otherwise.
-    // If cusolver and magma 2.5.4+ are both available and hermitian=true,
-    // call magma for complex inputs
-#ifdef USE_LINALG_SOLVER
-#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 254)
-      if (LD.is_complex() && hermitian) {
-        return ldl_factor_magma(
-            LD, pivots, info, upper, hermitian);
-      }
-#endif
-    { ldl_factor_cusolver(
-      LD, pivots, info, upper, hermitian);
-      return;
-    }
-#else
-      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
-#endif
-  }
+  _warn_once_magma_deprecation("linalg.ldl_factor");
+  ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
 }
 
 void ldl_solve_kernel(
