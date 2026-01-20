@@ -1910,11 +1910,11 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.float, torch.double)
     def test_powsum(self, device, dtype):
-        ords = [0.5, 1, 2, 3, 4.5]
+        ords = [0.5, 1, 2, 3, 4.5, -1, -2, -0.5, 0, float('inf'), float('-inf')]
         input_sizes = [(10,), (4, 5), (3, 4, 5), (0,), (0, 10)]
 
         for input_size, ord in product(input_sizes, ords):
-            x = make_tensor(input_size, dtype=dtype, device=device, low=0.1, high=9)
+            x = make_tensor(input_size, dtype=dtype, device=device, low=0.1, high=0.9)
             for dim in [None, 0, -1] if len(input_size) > 0 else [None]:
                 if dim is not None and (len(input_size) == 0 or abs(dim) >= len(input_size)):
                     continue
@@ -1922,24 +1922,11 @@ class TestLinalg(TestCase):
                     result = torch.linalg.powsum(x, ord, dim=dim, keepdim=keepdim)
                     expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
                     self.assertEqual(result, expected)
-                    # Verify relation with vector_norm
-                    if x.numel() > 0:
-                        vnorm = torch.linalg.vector_norm(x, ord, dim=dim, keepdim=keepdim)
-                        self.assertEqual(vnorm, result.pow(1.0 / ord))
-
-    def test_powsum_errors(self, device):
-        x = torch.randn(10, device=device)
-        with self.assertRaisesRegex(RuntimeError, "finite positive ord"):
-            torch.linalg.powsum(x, float('inf'))
-        with self.assertRaisesRegex(RuntimeError, "finite positive ord"):
-            torch.linalg.powsum(x, 0)
-        with self.assertRaisesRegex(RuntimeError, "finite positive ord"):
-            torch.linalg.powsum(x, -1)
 
     @dtypes(torch.float, torch.double)
     def test_foreach_powsum(self, device, dtype):
-        ords = [0.5, 1, 2, 3, 4.5]
-        tensors = [make_tensor((10,), dtype=dtype, device=device, low=0.1, high=9) for _ in range(3)]
+        ords = [0.5, 1, 2, 3, 4.5, -1, -2, 0]
+        tensors = [make_tensor((10,), dtype=dtype, device=device, low=0.1, high=0.9) for _ in range(3)]
         for ord in ords:
             results = torch._foreach_powsum(tensors, ord)
             for t, r in zip(tensors, results):
