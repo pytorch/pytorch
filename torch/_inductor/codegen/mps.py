@@ -134,7 +134,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 2
         x, y = map(self.doprint, expr.args)
-        return f"metal::precise::pow(static_cast<float>({x}), static_cast<float>({y}))"
+        return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -165,7 +165,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
-        return f"metal::precise::log2({x})"
+        return f"metal::log2({x})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (
@@ -212,32 +212,13 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        # TODO: Should it be converted to lambda on MacOS-15+?
+        with V.kernel.mask_loads(mask, other) as new_mask:
+            result = body()
 
-        other_str = value_to_metal(other)
-        scoped_body = IndentedBuffer()
-        with V.kernel.swap_buffers(scoped_body), scoped_body.indent():
-            # Reset the scoped variable counter so that each invocation of the same body
-            # generates identical variable names. Without this reset, repeated calls to
-            # body() would keep incrementing the counter, resulting in different cache key.
-            V.kernel.cse.iter_buffer_ids = itertools.count()
-            V.kernel.cse.name_prefix = "tmp_scoped_"
-            rc = body()
+        if result.bounds.is_bool:
+            other = bool(other)  # type: ignore[assignment]
 
-        # Compute cache key manually as variable name is needed to actually generate the code
-        cache_key = f"{mask}:{scoped_body.getvalue()}:{other_str}"
-        var = V.kernel.cse.try_get(cache_key)
-        if not var:
-            var = V.kernel.cse.newvar(dtype=rc.dtype)
-            V.kernel.cse.put(cache_key, var)
-            V.kernel.compute.writelines(
-                [f"{DTYPE_TO_METAL[rc.dtype]} {var};", f"if ({mask}) {{"]
-            )
-            with V.kernel.compute.indent():
-                V.kernel.compute.splice(scoped_body)
-                V.kernel.compute.writeline(f"{var} = {rc};")
-            V.kernel.compute.writeline(f"}} else {var} = {other_str};")
-        return var
+        return ops.where(new_mask, result, other)
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
@@ -277,11 +258,11 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def log(x: CSEVariable) -> str:
-        return f"metal::precise::log({x})"
+        return f"metal::log({x})"
 
     @staticmethod
     def exp(x: CSEVariable) -> str:
-        return f"metal::precise::exp({x})"
+        return f"metal::exp({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
@@ -305,27 +286,27 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def tan(x: CSEVariable) -> str:
-        return f"metal::precise::tan({x})"
+        return f"metal::tan({x})"
 
     @staticmethod
     def asin(x: CSEVariable) -> str:
-        return f"metal::precise::asin({x})"
+        return f"metal::asin({x})"
 
     @staticmethod
     def acos(x: CSEVariable) -> str:
-        return f"metal::precise::acos({x})"
+        return f"metal::acos({x})"
 
     @staticmethod
     def atan(x: CSEVariable) -> str:
-        return f"metal::precise::atan({x})"
+        return f"metal::atan({x})"
 
     @staticmethod
     def atan2(x: CSEVariable, y: CSEVariable) -> str:
-        return f"::metal::precise::atan2({x}, {y})"
+        return f"::metal::atan2({x}, {y})"
 
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
-        return f"metal::precise::sqrt({x})"
+        return f"metal::sqrt({x})"
 
     @staticmethod
     def neg(x: CSEVariable) -> str:
@@ -335,7 +316,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def rsqrt(x: CSEVariable) -> str:
-        return f"metal::precise::rsqrt({x})"
+        return f"metal::rsqrt({x})"
 
     @staticmethod
     def tanh(x: CSEVariable) -> str:
@@ -343,7 +324,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def atanh(x: CSEVariable) -> str:
-        return f"metal::precise::atanh({x})"
+        return f"metal::atanh({x})"
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
@@ -1082,18 +1063,14 @@ class MetalKernel(SIMDKernel):
         # TODO(malfet): support asserts
         # See https://github.com/pytorch/pytorch/issues/144634
         expr_str = self.index_to_str(expr)
-        size_str = self.index_to_str(size)
-
+        lower_expr = f"{expr_str} < 0" if lower else ""
         # TODO(malfet): Is upper bound inclusive or exclusive?
+        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
-            # Check both lower and upper bounds
-            condition = f"({expr_str} < 0 || {expr_str} >= {size_str})"
-        elif lower:
-            condition = f"{expr_str} < 0"
+            line = f"if (({lower_expr}) && ({upper_expr})) return"
         else:
-            condition = f"{expr_str} >= {size_str}"
-
-        self.cse.generate(self.compute, f"if ({condition}) return", assignment=False)
+            line = f"if ({lower_expr}{upper_expr}) return"
+        self.cse.generate(self.compute, line, assignment=False)
 
 
 class MetalScheduling(SIMDScheduling):

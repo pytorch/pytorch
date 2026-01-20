@@ -50,6 +50,8 @@ from .common import (
 from .wrapper import (
     AllocateLine,
     BufferLike,
+    CommBufferAllocateLine,
+    CommBufferFreeLine,
     CommentLine,
     ConditionalLine,
     DynamicScalarLine,
@@ -925,11 +927,11 @@ class FxConverter:
         # Does nothing.
 
     def _generate_comm_buffer_allocate(self, line: WrapperLine) -> None:
-        assert isinstance(line, AllocateLine) and line.comm_buffer
+        assert isinstance(line, CommBufferAllocateLine)
         raise NotImplementedError("Comm buffer allocation is not yet supported")
 
     def _generate_comm_buffer_free(self, line: WrapperLine) -> None:
-        assert isinstance(line, FreeIfNotReusedLine) and line.comm_buffer
+        assert isinstance(line, CommBufferFreeLine)
         self._free(line.node)
 
     def _generate_triton_call(self, line: WrapperLine) -> None:

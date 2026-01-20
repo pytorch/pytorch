@@ -39,8 +39,7 @@ struct LocalState {
         result = result -
             c10::DispatchKeySet(
                      {c10::DispatchKey::Python,
-                      c10::DispatchKey::PythonTLSSnapshot,
-                      c10::DispatchKey::PythonDispatcher});
+                      c10::DispatchKey::PythonTLSSnapshot});
       }
 
       return result;

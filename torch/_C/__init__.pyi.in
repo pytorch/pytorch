@@ -940,7 +940,7 @@ class Argument:
         name: str,
         type: JitType,
         N: _int | None,
-        default_value: Any | None,
+        defualt_value: Any | None,
         kwarg_only: _bool,
         alias_info: AliasInfo | None,
     ) -> None: ...
@@ -2839,7 +2839,7 @@ class _NodeIter(Iterator[FxNode]):
     def __iter__(self) -> Self: ...
     def __next__(self) -> FxNode: ...
 
-# Defined in torch/csrc/inductor/static_cuda_launcher.cpp
+# Defined in torch/csrc/inductor/static_launcher/cuda.cpp
 class _StaticCudaLauncher:
     @staticmethod
     def _load_kernel(
@@ -2860,6 +2860,9 @@ class _StaticCudaLauncher:
         args: tuple[Any, ...],
         stream: _int,
     ) -> None: ...
+
+# Defined in torch/csrc/inductor/static_launcher/xpu.cpp
+class _StaticXpuLauncher(_StaticCudaLauncher): ...
 
 # Defined in torch/csrc/cuda/GreenContext.cpp
 class GreenContext:

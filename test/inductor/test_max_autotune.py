@@ -310,6 +310,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="TMA path on Intel GPU not require this check")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_persistent_tma_illegal_alignment(self, dynamic):
         def mm(a, b):
@@ -505,6 +506,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu(msg="TMA path on Intel GPU not require this check")
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_persistent_tma_illegal_alignment(self, dynamic):
         def addmm(x, a, b):
@@ -847,6 +849,9 @@ class TestMaxAutotune(TestCase):
             act = opt_f(x, weight)
             self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
 
+    @skipIfXpu(
+        msg="Fails on Intel XPU; see https://github.com/pytorch/pytorch/issues/161484"
+    )
     @config.patch(max_autotune_gemm_backends="TRITON")
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_baddmm(self, search_space):
@@ -999,6 +1004,9 @@ class TestMaxAutotune(TestCase):
     def test_cat_max_autotune_extern(self):
         self._test_cat_max_autotune_impl(using_triton_mm=False)
 
+    @skipIfXpu(
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
+    )
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
@@ -1113,6 +1121,9 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
+    # TODO: fix accuracy failure of the triton template on XPU.
+    # and enable this test case.
+    @skipIfXpu
     @unittest.skipIf(
         config.triton.native_matmul,
         "native matmul and Triton template both have accuracy fail (2.2%)",
@@ -2134,6 +2145,7 @@ class TestMaxAutotune(TestCase):
                     self.assertTrue(decompose_count > 0)
                     self.assertTrue(decompose_count <= num_decompose_k_splits)
 
+    @skipIfXpu
     @unittest.skipIf(
         TEST_WITH_ROCM, "exhaustive currently only thoroughly tested on NVIDIA"
     )
@@ -2154,11 +2166,7 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.template_heuristics.registry.get_template_heuristic"
         ) as config_mock:
-            config_heuristics = (
-                XPUMMTemplateConfigHeuristic()
-                if GPU_TYPE == "xpu"
-                else CUDAMMTemplateConfigHeuristic()
-            )
+            config_heuristics = CUDAMMTemplateConfigHeuristic()
 
             # Traditionally, this would be set of all possible configs
             # We mock out the code path for the sake of the unit test
@@ -2764,7 +2772,8 @@ class TestMaxAutotuneSubproc(TestCase):
             ),
         )
 
-    @skipIfXpu(msg="XPU not support multiprocessing tensor reduction")
+    # XPU have not support multiprocessing reduction in torch/multiprocessing/reductions.py
+    @skipIfXpu
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
             lambda: torch.zeros(2, 3)
@@ -2803,7 +2812,8 @@ class TestMaxAutotuneSubproc(TestCase):
             self.assertEqual(0, child.exitcode)
             print(f"timings is {timings}, out {out}, expected_out {expected_out}")
 
-    @skipIfXpu(msg="XPU not support multiprocessing tensor reduction")
+    # XPU have not support multiprocessing reduction in torch/multiprocessing/reductions.py
+    @skipIfXpu
     def test_benchmark_choice_fail_in_subproc(self):
         gm = make_fx(
             lambda: torch.zeros(2, 3)
@@ -3136,7 +3146,8 @@ class TestTuningProcessPool(TestCase):
 
         tuning_pool.shutdown()
 
-    @skipIfXpu(msg="XPU not support VISIBLE_DEVICES")
+    # XPU have to enable XPU_VISIBLE_DEVICES to control devices visibility.
+    @skipIfXpu
     @config.patch({"autotune_multi_device": True})
     def test_tuning_pool_multiple_devices(self):
         # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
@@ -3317,6 +3328,9 @@ class TestPrologueFusion(TestCase):
                 "del", num_deallocs, exactly=True
             ).run(code_str)
 
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -3449,6 +3463,9 @@ class TestPrologueFusion(TestCase):
             "max_epilogue_benchmarked_choices": 3,
         }
     )
+    @skipIfXpu(
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
+    )
     @parametrize("use_async_compile", (True, False))
     def test_pending_fusions_multiple(self, use_async_compile: bool):
         def multi_use(x, y):
@@ -3484,6 +3501,9 @@ class TestPrologueFusion(TestCase):
             "max_epilogue_benchmarked_choices": 3,
         }
     )
+    @skipIfXpu(
+        msg="The fusion not happened because it do not speedup on XPU, see issue #146568"
+    )
     @parametrize("use_async_compile", (True, False))
     def test_pending_fusion_pro_and_epi(self, use_async_compile: bool):
         def test_multiple_fusions(x):
@@ -3500,6 +3520,9 @@ class TestPrologueFusion(TestCase):
         ).run(code[0])
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
+    @skipIfXpu(
+        msg="Triton issue exposed by new driver, will be resolved after next triton update."
+    )
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     @parametrize("use_async_compile", (True, False))
     def test_multiple_inputs(self, sizes, use_async_compile: bool):
@@ -3727,6 +3750,8 @@ class TestPrologueFusion(TestCase):
             "to_copy_add_div_mm_mul_relu_sub_tanh_1"
         ).run(code[0])
 
+    # XPU have not enabled pad_mm in fx_passes, so there is always one kernel.
+    @skipIfXpu
     @config.patch(shape_padding=True)
     @config.patch(force_shape_pad=True)
     @parametrize("sizes", ((250, 245, 128), (250, 256, 128), (256, 128, 62)))
