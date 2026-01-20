@@ -2235,7 +2235,7 @@ def visualize_min_cut_graph(nx_graph):
     except ImportError:
         log.info(
             "Install pydot to visualize the min-cut graph for debugging: pip install pydot",
-            exc_info=True
+            exc_info=True,
         )
         return
 
