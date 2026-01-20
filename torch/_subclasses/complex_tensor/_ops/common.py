@@ -306,7 +306,7 @@ class WrapComplexMode(TorchDispatchMode):
         types: tuple[type],
         args: tuple = (),
         kwargs: dict[str, Any] | None = None,
-    ):
+    ) -> Any:
         if kwargs is None:
             kwargs = {}
         if func.overloadpacket == torch.ops.aten.complex:
