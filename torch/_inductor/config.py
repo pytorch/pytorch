@@ -906,8 +906,11 @@ remove_pre_grad_passes: Optional[str] = None
 # Comma-separated list of pass names to disable. Passes disabled via this config
 # will be skipped when they go through GraphTransformObserver.
 # Can be set via TORCHINDUCTOR_DISABLED_PASSES env var.
-# Pass names are normalized to uppercase for comparison.
-disabled_passes = os.environ.get("TORCHINDUCTOR_DISABLED_PASSES", "").upper()
+# Use uppercase pass names (e.g., "PASS1,PASS2").
+disabled_passes: str = Config(
+    env_name_force="TORCHINDUCTOR_DISABLED_PASSES",
+    default="",
+)
 
 
 # The multiprocessing start method to use for inductor workers in the codecache.

@@ -105,7 +105,7 @@ class GraphTransformObserver:
     def _check_disable_pass(self):
         from torch._inductor import config as inductor_config
 
-        if self.passname.upper() in inductor_config.disabled_passes:
+        if self.passname.upper() in inductor_config.disabled_passes.upper():
             return True
 
         if self.subsystem is None:

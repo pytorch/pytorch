@@ -346,9 +346,9 @@ def pre_grad_passes(
                         ),
                     )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
-            GraphTransformObserver(
-                gm, "efficient_conv_bn_eval_pass"
-            ).apply_graph_pass(efficient_conv_bn_eval_pass.apply)
+            GraphTransformObserver(gm, "efficient_conv_bn_eval_pass").apply_graph_pass(
+                efficient_conv_bn_eval_pass.apply
+            )
             GraphTransformObserver(gm, "apply_gumbel_max_trick_pass").apply_graph_pass(
                 apply_gumbel_max_trick_pass.apply
             )
