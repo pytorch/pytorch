@@ -3542,14 +3542,20 @@ class CppVecKernel(CppKernel):
             expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
         elif src_dtype != dtype:
             expr = ""
-            if rounding and src_dtype in [torch.float, torch.double] and dtype in [torch.int8,torch.uint8]:
+            if (
+                rounding 
+                and src_dtype in [torch.float, torch.double] 
+                and dtype in [torch.int8, torch.uint8]
+            ):
                 expr = "at::vec::round_convert"
             else:
                 expr = "at::vec::convert"
             if src_num_vectors == dst_num_vectors == 1:
                 expr = expr + f"<{dst_cpp_type}>({src})"
             else:
-                expr = expr + f"<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+                expr = (
+                    expr 
+                    + f"<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})")
         return expr
 
 
