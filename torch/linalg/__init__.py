@@ -3015,10 +3015,10 @@ Examples::
 """,
 )
 
-powsum = _add_docstr(
-    _linalg.linalg_powsum,
+_powsum = _add_docstr(
+    _linalg.linalg__powsum,
     r"""
-linalg.powsum(x, ord, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg._powsum(x, ord, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes the sum of the absolute values raised to the power ``ord``.
 
@@ -3048,11 +3048,11 @@ Returns:
 Example::
 
     >>> x = torch.tensor([1., 2., 3.])
-    >>> torch.linalg.powsum(x, 2)
+    >>> torch.linalg._powsum(x, 2)
     tensor(14.)
     >>> torch.linalg.vector_norm(x, 2)
     tensor(3.7417)
-    >>> torch.linalg.powsum(x, 2) ** 0.5  # equivalent to vector_norm
+    >>> torch.linalg._powsum(x, 2) ** 0.5  # equivalent to vector_norm
     tensor(3.7417)
 """,
 )
