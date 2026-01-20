@@ -6313,6 +6313,8 @@ class GraphModule(torch.nn.Module):
 
     def test_vmap_scalar_tensor_indexing(self):
         data = torch.arange(20).reshape(2, 10)
+        b_indices = torch.arange(2)
+        n_indices = torch.arange(10)
 
         def vmap_index_fn(data_in, b_indices, n_indices):
             def index_fn(b, n):
@@ -6320,14 +6322,15 @@ class GraphModule(torch.nn.Module):
 
             return torch.func.vmap(index_fn, in_dims=(None, 0))(b_indices, n_indices)
 
-        b_indices = torch.arange(2)
-        n_indices = torch.arange(10)
+        reference = torch.stack([data[b_indices, i] for i in range(10)])
+        eager_result = vmap_index_fn(data, b_indices, n_indices)
 
-        expected = vmap_index_fn(data, b_indices, n_indices)
-        result = torch.compile(vmap_index_fn, fullgraph=True)(
+        compiled_result = torch.compile(vmap_index_fn, fullgraph=True)(
             data, b_indices, n_indices
         )
-        self.assertEqual(result, expected)
+
+        self.assertEqual(eager_result, reference)
+        self.assertEqual(compiled_result, reference)
 
     def test_vmap(self):
         def fn(x):
