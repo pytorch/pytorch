@@ -229,22 +229,13 @@ def all_gather_tensor_autograd(
     backwards gradient across workers.
 
     See all_gather_tensor for more details on usage.
-    """
-    group_name = _resolve_group_name(group, tag)
-    group_size = c10d._get_group_size_by_name(group_name)
 
-    tensor = torch.ops._c10d_functional_autograd.all_gather_into_tensor(
-        self, group_size, group_name
-    )
-    res = _FromTorchTensor.apply(tensor)
-    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
-    if gather_dim != 0:
-        # torch.cat access the data so we already need to wait here, first do wait
-        # and then chunk + cat avoid us going through ACT dispatching logic again
-        if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
-    return res
+    .. deprecated::
+        This function is deprecated and will be removed in a future release.
+        Use :func:`all_gather_tensor` instead, which now supports autograd.
+    """
+    # The base all_gather_tensor now has autograd support, so we can just call it
+    return all_gather_tensor(self, gather_dim, group, tag)
 
 
 def reduce_scatter_tensor(
@@ -307,27 +298,13 @@ def reduce_scatter_tensor_autograd(
     Currently only the "sum" reduceOp is supported.
 
     See reduce_scatter_tensor for more details on usage.
+
+    .. deprecated::
+        This function is deprecated and will be removed in a future release.
+        Use :func:`reduce_scatter_tensor` instead, which now supports autograd.
     """
-
-    group_name = _resolve_group_name(group, tag)
-    group_size = c10d._get_group_size_by_name(group_name)
-
-    if self.size(scatter_dim) % group_size != 0:
-        raise AssertionError(
-            f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
-        )
-    if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
-
-    tensor = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
-        self,
-        reduceOp.lower(),
-        group_size,
-        group_name,  # type: ignore[possibly-undefined]
-    )
-    res = _FromTorchTensor.apply(tensor)
-    return res
+    # The base reduce_scatter_tensor now has autograd support, so we can just call it
+    return reduce_scatter_tensor(self, reduceOp, scatter_dim, group, tag)
 
 
 def all_reduce_coalesced(
@@ -515,37 +492,13 @@ def all_to_all_single_autograd(
 ) -> torch.Tensor:
     """
     Same as all_to_all_single but supports autograd.
-    """
-    if output_split_sizes is not None:
-        if not all(
-            isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
-        ):
-            raise AssertionError(
-                f"All output_split_sizes must be int or SymInt, got {output_split_sizes}"
-            )
-    if input_split_sizes is not None:
-        if not all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes):
-            raise AssertionError(
-                f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
-            )
 
-    group_name = _resolve_group_name(group, tag)
-    group_size = c10d._get_group_size_by_name(group_name)
-    if output_split_sizes is None or input_split_sizes is None:
-        if not (output_split_sizes is None and input_split_sizes is None):
-            raise AssertionError(
-                "output_split_sizes and input_split_sizes must either be "
-                "specified together or both set to None"
-            )
-        output_split_sizes = [self.shape[0] // group_size] * group_size
-        input_split_sizes = output_split_sizes
-    tensor = torch.ops._c10d_functional_autograd.all_to_all_single(  # type: ignore[attr-defined]
-        self,
-        output_split_sizes,
-        input_split_sizes,
-        group_name,
-    )
-    return _FromTorchTensor.apply(tensor)
+    .. deprecated::
+        This function is deprecated and will be removed in a future release.
+        Use :func:`all_to_all_single` instead, which now supports autograd.
+    """
+    # The base all_to_all_single now has autograd support, so we can just call it
+    return all_to_all_single(self, output_split_sizes, input_split_sizes, group, tag)
 
 
 # ============================================================================
@@ -784,6 +737,26 @@ def all_to_all_single_setup_context(ctx, inputs, output):
 
 torch.library.register_autograd(
     "_c10d_functional::all_to_all_single",
+    all_to_all_single_backward,
+    setup_context=all_to_all_single_setup_context,
+)
+
+# Backward compatibility: register autograd for _c10d_functional_autograd ops
+# These ops redirect to _c10d_functional but need their own autograd registration
+torch.library.register_autograd(
+    "_c10d_functional_autograd::all_gather_into_tensor",
+    all_gather_into_tensor_backward,
+    setup_context=all_gather_into_tensor_setup_context,
+)
+
+torch.library.register_autograd(
+    "_c10d_functional_autograd::reduce_scatter_tensor",
+    reduce_scatter_tensor_backward,
+    setup_context=reduce_scatter_tensor_setup_context,
+)
+
+torch.library.register_autograd(
+    "_c10d_functional_autograd::all_to_all_single",
     all_to_all_single_backward,
     setup_context=all_to_all_single_setup_context,
 )
@@ -1222,24 +1195,6 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
         return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
-
-
-class _FromTorchTensor(torch.autograd.Function):
-    """
-    _FromTorchTensor allows autograd to propagate from a normal Tensor to an
-    AsyncCollectiveTensor.
-    """
-
-    @staticmethod
-    def forward(  # type: ignore[override]
-        ctx,  # pyre-ignore[2]: Parameter must be annotated.
-        input: torch.Tensor,
-    ) -> torch.Tensor:
-        return _maybe_wrap_tensor(input)
-
-    @staticmethod
-    def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
-        return grad_output
 
 
 @torch.library.custom_op(
