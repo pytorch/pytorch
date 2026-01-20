@@ -245,7 +245,7 @@ def _extract_graph_with_inputs_outputs(
         elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
             all_args = [
-                isinstance(env[x], InvalidNodeBase)
+                isinstance(env.get(x), InvalidNodeBase)
                 for x in all_args
                 if isinstance(x, fx.Node)
             ]
@@ -278,12 +278,17 @@ def _extract_graph_with_inputs_outputs(
     return new_graph
 
 
+def _is_opaque_ref(node: fx.Node) -> bool:
+    return node.op == "placeholder" and node.meta.get("is_opaque_ref", False)
+
+
 def _is_primal(node: fx.Node) -> bool:
     return (
         node.op == "placeholder"
         and "tangents" not in str(node.target)
         and not _is_bwd_seed_offset(node)
         and not _is_fwd_seed_offset(node)
+        and not _is_opaque_ref(node)
     )
 
 
@@ -909,10 +914,15 @@ def _extract_fwd_bwd_modules(
     fwd_seed_offset_inputs = [*filter(_is_fwd_seed_offset, placeholders)]
     bwd_seed_offset_inputs = [*filter(_is_bwd_seed_offset, placeholders)]
     backward_state_inputs = [*filter(_is_backward_state, placeholders)]
+    opaque_ref_inputs = [*filter(_is_opaque_ref, placeholders)]
 
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        saved_sym_nodes
+        + saved_values
+        + tangent_inputs
+        + bwd_seed_offset_inputs
+        + opaque_ref_inputs,
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
@@ -1017,9 +1027,10 @@ def _extract_fwd_bwd_modules(
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
     # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, opaque_objects, symints)
+    # Opaque refs are placed before fwd_seed_offset so they don't get shifted by inner AOT autograd RNG states
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        primal_inputs + fwd_seed_offset_inputs,
+        primal_inputs + opaque_ref_inputs + fwd_seed_offset_inputs,
         fwd_outputs + saved_values + saved_opaque_objects + saved_sym_nodes,
         fwd_outputs_descs
         + [
@@ -1039,7 +1050,8 @@ def _extract_fwd_bwd_modules(
         + saved_opaque_objects
         + tangent_inputs
         + bwd_seed_offset_inputs
-        + backward_state_inputs,
+        + backward_state_inputs
+        + opaque_ref_inputs,
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
@@ -2948,7 +2960,10 @@ def classify_nodes(joint_module, static_lifetime_input_indices, num_fwd_outputs)
 
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
-    inputs = primal_inputs + fwd_seed_offset_inputs
+    opaque_ref_inputs = list(filter(_is_opaque_ref, joint_module.graph.nodes))
+    # opaque refs are placed before fwd_seed_offset so they don't
+    # get shifted by inner AOT autograd RNG states
+    inputs = primal_inputs + opaque_ref_inputs + fwd_seed_offset_inputs
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
