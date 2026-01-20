@@ -1320,6 +1320,11 @@ def _are_we_tracing() -> bool:
 
 
 def _maybe_wrap_tensor(self) -> torch.Tensor:
+    from torch.distributed.tensor._ltensor import LTensor
+
+    if isinstance(self, LTensor):
+        return wait_tensor(self)
+
     if _are_we_tracing():
         return wait_tensor(self)
     return _wrap_tensor_autograd(self)
