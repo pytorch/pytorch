@@ -1919,7 +1919,7 @@ class TestLinalg(TestCase):
                 if dim is not None and (len(input_size) == 0 or abs(dim) >= len(input_size)):
                     continue
                 for keepdim in [True, False]:
-                    result = torch.linalg.powsum(x, ord, dim=dim, keepdim=keepdim)
+                    result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim)
                     expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
                     self.assertEqual(result, expected)
 

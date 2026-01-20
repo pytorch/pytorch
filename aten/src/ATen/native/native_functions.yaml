@@ -14524,12 +14524,12 @@
 # Computes sum(|x|^ord) - the "power sum" without the final root.
 # This is useful for distributed computing where partial power sums
 # can be reduced across shards before taking the final root.
-- func: linalg_powsum(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: linalg__powsum(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_powsum_slow
-    CPU, CUDA: linalg_powsum
+    CompositeExplicitAutograd: linalg__powsum_slow
+    CPU, CUDA: linalg__powsum
   tags: reduction
 
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
