@@ -5136,6 +5136,22 @@ class TestVmapOperatorsOpInfo(TestCase):
             test(f2, (inp, idx))
             test(f3, (inp, idx))
 
+    def test_vmap_scalar_tensor_indexing(self, device):
+        data = torch.arange(20, device=device).reshape(2, 10)
+
+        def vmap_index_fn(data_in, b_indices, n_indices):
+            def index_fn(b, n):
+                return data_in[b, n]
+
+            return torch.vmap(index_fn, in_dims=(None, 0))(b_indices, n_indices)
+
+        b_indices = torch.arange(2, device=device)
+        n_indices = torch.arange(10, device=device)
+
+        result = vmap_index_fn(data, b_indices, n_indices)
+        expected = torch.stack([data[b_indices, i] for i in range(10)])
+        self.assertEqual(result, expected)
+
     def test_nested_advanced_indexing(self, device):
         e = torch.rand(7, 4, device=device)
         idx = torch.tensor([0, 1], device=device).view(2, 1)

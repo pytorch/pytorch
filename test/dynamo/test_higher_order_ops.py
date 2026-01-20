@@ -6311,6 +6311,24 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(expected, got)
 
+    def test_vmap_scalar_tensor_indexing(self):
+        data = torch.arange(20).reshape(2, 10)
+
+        def vmap_index_fn(data_in, b_indices, n_indices):
+            def index_fn(b, n):
+                return data_in[b, n]
+
+            return torch.func.vmap(index_fn, in_dims=(None, 0))(b_indices, n_indices)
+
+        b_indices = torch.arange(2)
+        n_indices = torch.arange(10)
+
+        expected = vmap_index_fn(data, b_indices, n_indices)
+        result = torch.compile(vmap_index_fn, fullgraph=True)(
+            data, b_indices, n_indices
+        )
+        self.assertEqual(result, expected)
+
     def test_vmap(self):
         def fn(x):
             return torch.func.vmap(lambda x: x.sum(0) + x.sum(1))(x)
