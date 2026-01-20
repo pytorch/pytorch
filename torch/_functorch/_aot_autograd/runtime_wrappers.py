@@ -966,7 +966,7 @@ class ComplexWrapper(CompilerWrapper):
                 else inp_desc
                 for i, inp_desc in enumerate(flat_args_descs)
             ]
-
+            breakpoint()
             updated_metadata = run_functionalized_fw_and_collect_metadata(
                 without_output_descs(wrapped_flat_fn),
                 flat_args_descs=wrapped_args_descs,
@@ -974,6 +974,7 @@ class ComplexWrapper(CompilerWrapper):
                 keep_input_mutations=fw_metadata.keep_input_mutations,
                 is_train=fw_metadata.is_train,
             )(*wrapped_args)
+            breakpoint()
             self.did_wrap = True
             return (wrapped_flat_fn, wrapped_args, wrapped_args_descs, updated_metadata)
         return (flat_fn, flat_args, flat_args_descs, fw_metadata)
