@@ -1079,7 +1079,7 @@ class TestViewOps(DTensorTestBase):
             ]:
                 tensor_dims[unflatten_dim] = unflatten_dim_value
                 tensor_dims[shard_dim] = shard_dim_value
-            yield tensor_dims
+                yield list(tensor_dims)
 
     @with_comms
     def test_dtensor_unflatten_1d(self):
@@ -1109,10 +1109,13 @@ class TestViewOps(DTensorTestBase):
                             tensor_ndim, flatten_start, flatten_end, shard_dim, mesh
                         ):
                             ctx = contextlib.nullcontext()
-                            if tensor_dims_unflatten[shard_dim] % mesh.size(
-                                0
-                            ) != 0 and shard_dim != (flatten_end - 1):
-                                ctx = self.assertRaises(RuntimeError)
+                            if tensor_dims_unflatten[shard_dim] % mesh.size(0) != 0:
+                                # Error expected when the shard dimension is not evenly
+                                # divisible by mesh size, regardless of position
+                                ctx = self.assertRaisesRegex(
+                                    RuntimeError,
+                                    "is not evenly divisible by mesh dimension",
+                                )
                             with ctx:
                                 self._test_dtensor_unflatten_1d_shard(
                                     tensor_dims_unflatten,
@@ -1137,6 +1140,22 @@ class TestViewOps(DTensorTestBase):
                             placements,
                             mesh,
                         )
+
+        # Replicate: unflatten should preserve Replicate placement
+        for tensor_ndim in [2, 3, 4]:
+            for unflatten_dim in range(tensor_ndim):
+                tensor_dims = [6] * tensor_ndim
+                tensor_dims[unflatten_dim] = 12  # will unflatten to (3, 4)
+                global_tensor = torch.arange(math.prod(tensor_dims)).view(tensor_dims)
+                dt = distribute_tensor(
+                    global_tensor, mesh, (Replicate(),), src_data_rank=None
+                )
+                # Unflatten dimension to (3, 4)
+                unflatten_shape = list(tensor_dims)
+                unflatten_shape[unflatten_dim : unflatten_dim + 1] = [3, 4]
+                dt_unflattened = dt.view(unflatten_shape)
+                self.assertEqual(dt_unflattened.placements, (Replicate(),))
+                self.assertEqual(dt_unflattened.shape, torch.Size(unflatten_shape))
 
     def _test_dtensor_unflatten_1d_shard(
         self,
@@ -1229,19 +1248,16 @@ class TestViewOps(DTensorTestBase):
                 + tensor_dims[unflatten_dim + 1 :]
             )
 
-            # Determine if we expect an error due to uneven sharding
-            # Uneven sharding on shard_dim causes sharding propagation to fail
-            uneven_shard = tensor_dims[shard_dim] % mesh.size(0) != 0
-
-            # Also check if the unflatten would cause issues when shard_dim == unflatten_dim
-            # and the first factor doesn't align well with mesh.size(0)
-            first_factor = factors[0]
-
+            # Determine if we expect an error
             # When shard_dim == unflatten_dim, the sharding propagates to the first new dimension.
             # This works if first_factor % mesh.size(0) == 0 (even sharding on new dim).
             # If first_factor < mesh.size(0) and not divisible, we get strided shard or error.
             # If first_factor > mesh.size(0) and not divisible, we get uneven shard on new dim.
+            first_factor = factors[0]
+
             if shard_dim == unflatten_dim:
+                # When unflatening the sharded dimension, check factor alignment
+                uneven_shard = tensor_dims[shard_dim] % mesh.size(0) != 0
                 if first_factor % mesh.size(0) == 0:
                     # Even sharding on first new dimension
                     unflatten_shard_issue = False
@@ -1252,6 +1268,9 @@ class TestViewOps(DTensorTestBase):
                     # first_factor > mesh.size(0) but not divisible - uneven shard on new dim
                     unflatten_shard_issue = True
             else:
+                # When shard_dim != unflatten_dim, the sharded dimension is just passed through
+                # unchanged. This works regardless of whether the sharded dim is even/uneven.
+                uneven_shard = False
                 unflatten_shard_issue = False
 
             if uneven_shard or unflatten_shard_issue:
