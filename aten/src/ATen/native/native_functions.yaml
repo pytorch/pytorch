@@ -11553,7 +11553,7 @@
     CUDA: foreach_tensor_neg_cuda_
   autogen: _foreach_neg.out
 
-- func: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None, bool skip_root=False) -> Tensor[]
+- func: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -11561,6 +11561,14 @@
     CUDA: foreach_tensor_norm_cuda
     MTIA: foreach_tensor_norm_mtia
   autogen: _foreach_norm.Scalar_out
+
+# Like _foreach_norm but returns sum(|x|^ord) without the final root
+- func: _foreach_powsum.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_powsum_slow
+  autogen: _foreach_powsum.Scalar_out
 
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -14499,18 +14507,29 @@
   python_module: linalg
   variants: function
 
-- func: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, bool skip_root=False) -> Tensor
+- func: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
   variants: function
   structured_delegate: linalg_vector_norm.out
   tags: reduction
 
-- func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, bool skip_root=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   structured: True
   dispatch:
     CPU, CUDA: linalg_vector_norm_out
     MPS: linalg_vector_norm_out_mps
+  tags: reduction
+
+# Computes sum(|x|^ord) - the "power sum" without the final root.
+# This is useful for distributed computing where partial power sums
+# can be reduced across shards before taking the final root.
+- func: linalg_powsum(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_powsum_slow
+    CPU, CUDA: linalg_powsum
   tags: reduction
 
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
