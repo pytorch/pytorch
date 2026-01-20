@@ -3129,13 +3129,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         # Same as Pillow and Scikit-Image/Scipy ndi.zoom
         osize = output_size[d]
         isize = input.shape[-num_spatial_dims + d]
-
-        # check for scales[d] > 0 is in compute_scales_value in aten/src/ATen/native/UpSample.h
-        scale = (
-            isize / (isize * scales[d])
-            if scales[d] is not None and scales[d] > 0
-            else isize / osize
-        )
+        scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
 
         output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
         input_indices = ((output_indices + offset) * scale).to(torch.int64)
