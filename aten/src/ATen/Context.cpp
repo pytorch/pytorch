@@ -410,7 +410,7 @@ void Context::setFloat32Precision(Float32Backend backend, Float32Op op, Float32P
   it->second = p;
 }
 
-void _warn_once_magma_deprecation() {
+static void _warn_once_magma_deprecation() {
   TORCH_WARN_ONCE(
     "The usage of MAGMA backend for linear algebra operations is deprecated "
     "and will be removed in future releases. cuSOLVER stays as the default backend."
