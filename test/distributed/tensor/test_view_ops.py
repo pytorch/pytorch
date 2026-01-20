@@ -902,16 +902,24 @@ class TestViewOps(DTensorTestBase):
                                             placements,
                                         )
 
-                    # Replicate
-                    tensor_dims = [2 * mesh.size(0) - 1] * tensor_ndim
-                    placements = (Replicate(), Replicate())
-                    self._test_dtensor_flatten_replicate(
-                        tensor_dims,
-                        flatten_start,
-                        flatten_end,
-                        mesh,
-                        placements,
-                    )
+                    # Replicate, Replicate
+                    # Test multiple tensor dimension combinations
+                    tensor_dim_values = [
+                        2 * mesh.size(0) - 1,
+                        2 * mesh.size(0),
+                        2 * mesh.size(0) + 1,
+                    ]
+                    for tensor_dims in itertools.product(
+                        tensor_dim_values, repeat=tensor_ndim
+                    ):
+                        placements = (Replicate(), Replicate())
+                        self._test_dtensor_flatten_replicate(
+                            tensor_dims,
+                            flatten_start,
+                            flatten_end,
+                            mesh,
+                            placements,
+                        )
 
     def _test_dtensor_flatten_2d_sr_rs(
         self,
