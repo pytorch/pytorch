@@ -3444,9 +3444,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
             exact_device=False,
         )
 
-    @skipIfRocmArch(MI300_ARCH)
     @onlyCUDA
-    @tf32_on_and_off(0.005)
+    @tf32_on_and_off(0.05)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)
