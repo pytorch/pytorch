@@ -44,15 +44,6 @@ IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_ca
 IS_SM90 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (9, 0))
 IS_SM100 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (10, 0))
 
-@contextlib.contextmanager
-def blas_library_context(backend):
-    prev_backend = torch.backends.cuda.preferred_blas_library()
-    torch.backends.cuda.preferred_blas_library(backend)
-    try:
-        yield
-    finally:
-        torch.backends.cuda.preferred_blas_library(prev_backend)
-
 def evaluate_gfx_arch_within(arch_list):
     if not torch.cuda.is_available():
         return False
@@ -111,7 +102,32 @@ PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLAS
 
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
-PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
+
+def evaluate_platform_supports_bf16():
+    if torch.version.cuda:
+        return SM80OrLater
+    elif torch.version.hip:
+        return True
+    return False
+
+
+def evaluate_platform_supports_bf16_atomics():
+    if torch.version.cuda:
+        return SM80OrLater
+    elif torch.version.hip:
+        return ROCM_VERSION >= (8, 0)
+    return False
+
+
+def evaluate_platform_supports_half_atomics():
+    if torch.version.hip:
+        return ROCM_VERSION >= (8, 0)
+    return True
+
+
+PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
+PLATFORM_SUPPORTS_BF16_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_bf16_atomics())
+PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_half_atomics())
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
