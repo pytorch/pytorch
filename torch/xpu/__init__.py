@@ -532,8 +532,8 @@ from .memory import (
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
     set_per_process_memory_fraction,
-    XPUPluggableAllocator,
     use_mem_pool,
+    XPUPluggableAllocator,
 )
 from .random import (
     get_rng_state,
