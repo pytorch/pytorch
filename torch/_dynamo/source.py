@@ -305,6 +305,24 @@ class AttrSource(ChainedSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class CellContentsSource(AttrSource):
+    """
+    Source for closure cell contents that also stores the freevar name.
+    This allows guard failure messages to show which variable the closure cell refers to.
+    """
+
+    freevar_name: str = dataclasses.field(default="")
+
+    def __post_init__(self) -> None:
+        assert self.base, (
+            "Can't construct a CellContentsSource without a valid base source"
+        )
+        assert self.member == "cell_contents", (
+            "CellContentsSource should only be used for cell_contents"
+        )
+
+
+@dataclass_with_cached_hash(frozen=True)
 class GenericAttrSource(ChainedSource):
     member: str
 
