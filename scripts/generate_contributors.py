@@ -277,7 +277,10 @@ def main():
         # Regenerate mailmap with the new data
         email_to_github = generate_mailmap(commits, pr_authors)
         if args.verbose:
-            print(f"Generated {len(email_to_github)} email mappings (after fetch)", file=sys.stderr)
+            print(
+                f"Generated {len(email_to_github)} email mappings (after fetch)",
+                file=sys.stderr,
+            )
 
         # Update missing PRs set
         missing_prs -= set(fetched_authors.keys())
@@ -287,7 +290,10 @@ def main():
             for pr_num in sorted(missing_prs):
                 f.write(f"{pr_num}\n")
         if args.verbose:
-            print(f"Wrote {len(missing_prs)} missing PR numbers to {args.missing_prs}", file=sys.stderr)
+            print(
+                f"Wrote {len(missing_prs)} missing PR numbers to {args.missing_prs}",
+                file=sys.stderr,
+            )
 
     # Format and output
     output_content = format_output(email_to_github)
