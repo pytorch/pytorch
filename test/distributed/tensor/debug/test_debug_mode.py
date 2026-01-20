@@ -299,7 +299,7 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::topk(dt: f32[8, 16]| S(1), 4, 1)
-    -> output: (R, R)
+    -> output: ('R', 'R')
     redistribute_input(0, S(1) -> R)
       redistribute_input(t: f32[8, 2], trace: S(1)->R)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]

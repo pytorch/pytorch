@@ -39,7 +39,7 @@ import logging
 import os
 import traceback
 import weakref
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -52,7 +52,13 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import keystr, tree_all, tree_map, tree_map_with_path
+from torch.utils._pytree import (
+    keystr,
+    tree_all,
+    tree_map,
+    tree_map_only,
+    tree_map_with_path,
+)
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
@@ -1113,17 +1119,9 @@ class DebugMode(TorchDispatchMode):
             return
         from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
-        if isinstance(output_spec, DTensorSpec):
-            placements_str = _stringify_dtensor_spec(output_spec)
-        elif isinstance(output_spec, Sequence):
-            # Multi-output operation
-            parts = [
-                _stringify_dtensor_spec(spec) if spec else "None"
-                for spec in output_spec
-            ]
-            placements_str = "(" + ", ".join(parts) + ")"
-        else:
-            placements_str = "None"
+        placements_str = str(
+            tree_map_only(DTensorSpec, _stringify_dtensor_spec, output_spec)
+        )
         call = _OutputPlacementCall(placements_str, self.call_depth + 1)
         self._record_call(call)
 
