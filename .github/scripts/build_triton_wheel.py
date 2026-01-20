@@ -101,7 +101,8 @@ def build_triton(
 
         triton_repo = "https://github.com/openai/triton"
         if device == "rocm":
-            triton_pkg_name = "triton-rocm"
+            triton_repo = "https://github.com/ROCm/triton"
+            triton_pkg_name = "triton"
         elif device == "xpu":
             triton_pkg_name = "triton-xpu"
             triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
