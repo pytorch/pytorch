@@ -21,7 +21,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -962,115 +965,59 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     return result
 
 
-@register_op_strategy(
-    [
-        aten.index_put.default,
-        aten._index_put_impl_.default,
-    ],
+@register_single_dim_strategy(
+    [aten.index_put.default, aten._index_put_impl_.default],
     schema_info=RuntimeSchemaInfo(needs_pytree=True),
 )
-def prop_index_put(op_schema: OpSchema) -> StrategyType:
-    # We have 3 DTensor spec from argument `in`, `indices` and `values`
-    # accordingly.
-    in_spec, indices_spec, values_spec, *_ = op_schema.args_schema
-    if not isinstance(in_spec, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(in_spec)}")
-    # `indices`` is a tuple of scalar LongTensor, so we use TupleStrategy.
-    if not isinstance(indices_spec, TupleStrategy):
-        raise AssertionError(f"Expected TupleStrategy, got {type(indices_spec)}")
-    if not isinstance(values_spec, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(values_spec)}")
-    mesh = values_spec.mesh
-    op_strategy = OpStrategy([])
-    # 1. `indices` should all be replicated first.
-    indices_redistribute_costs = []
-    new_indices_spec: list[DTensorSpec | None] = []
-    for indices_spec_child in indices_spec.children:
-        if not isinstance(indices_spec_child, OpStrategy):
-            raise AssertionError(f"Expected OpStrategy, got {type(indices_spec_child)}")
+def index_put_single_dim_strategy(
+    op: OpOverload, args: ArgsType, kwargs: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """Single-dim sharding strategy for index_put.
 
-        replicated_spec = DTensorSpec(
-            mesh=mesh,
-            placements=tuple([Replicate()] * mesh.ndim),
-            tensor_meta=indices_spec_child.strategies[0].output_spec.tensor_meta,
-        )
-        new_indices_spec.append(replicated_spec)
-        child_costs = generate_redistribute_costs(indices_spec_child, replicated_spec)
-        indices_redistribute_costs.append(child_costs)
+    Strategy format: [output, input, *indices, value]
+    Indices are always Replicate.
+    """
+    self_meta = cast(TensorMeta, args[0])
+    indices_meta = cast(tuple[TensorMeta | None, ...], args[1])
+    values_meta = cast(TensorMeta, args[2])
 
-    # 2. For placement rule of `values` and `in`, assume `values` shape =
-    # [a,b,c,d,e,f], `in` shape = [d,e,f]. Then `values`'s a,b,c (selected dim)
-    # must be replicated and d,e,f (nonselected dim) in both `values` and `in`
-    # should follow the same sharding (replicate or shard, but not partial).
-    size_offset = (
-        in_spec.strategies[0].output_spec.ndim
-        - values_spec.strategies[0].output_spec.ndim
+    num_indices = sum(1 for idx in indices_meta if idx is not None)
+    replicated_indices: list[Placement] = [Replicate()] * num_indices
+    self_ndim = len(self_meta.shape)
+    values_ndim = len(values_meta.shape)
+    size_offset = self_ndim - values_ndim
+
+    strategies: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # Shard on non-indexed dims only (indexed dims would cause incorrect updates
+    # since different ranks may have different rows for the same index)
+    for self_dim in range(num_indices, self_ndim):
+        values_dim = self_dim - size_offset
+        if 0 <= values_dim < values_ndim:
+            strategies.append(
+                [
+                    _ShardingPlaceholder(self_dim),  # output
+                    _ShardingPlaceholder(self_dim),  # input
+                    *replicated_indices,  # indices (always Replicate)
+                    _ShardingPlaceholder(values_dim),  # value
+                ]
+            )
+
+    # Partial for input/output/value (indices are always Replicate):
+    # each rank holds a partial sum, and index_put updates on partial sums
+    # still produce correct partial sums after reduction.
+    strategies.append(
+        [
+            Partial(),  # output
+            Partial(),  # input
+            *replicated_indices,  # indices (always Replicate)
+            Partial(),  # value
+        ]
     )
-    # We can either let `values` follow `in`'s placements or reverse.
-    for exemplar_spec in [in_spec, values_spec]:
-        # use exemplar_spec as the target spec
-        for strategy in exemplar_spec.strategies:
-            in_spec_new_placements: list[Placement] = []
-            values_spec_new_placements: list[Placement] = []
-            placements = strategy.output_spec.placements
-            for placement in placements:
-                if placement.is_shard():
-                    if not isinstance(placement, Shard):
-                        raise AssertionError(f"Expected Shard, got {type(placement)}")
-                    if exemplar_spec is in_spec:
-                        # let `values_spce` follow `in_spec`
-                        if placement.dim < size_offset:
-                            # sharded on selected dim, need to change to replicate
-                            in_spec_new_placements.append(Replicate())
-                            values_spec_new_placements.append(Replicate())
-                        else:
-                            in_spec_new_placements.append(placement)
-                            values_spec_new_placements.append(
-                                Shard(placement.dim - size_offset)
-                            )
-                    else:
-                        # let `in_spec` follow `values_spec`
-                        in_spec_new_placements.append(
-                            Shard(placement.dim + size_offset)
-                        )
-                        values_spec_new_placements.append(placement)
-                else:
-                    in_spec_new_placements.append(Replicate())
-                    values_spec_new_placements.append(Replicate())
-            new_in_spec = DTensorSpec(
-                mesh=mesh,
-                placements=tuple(in_spec_new_placements),
-                tensor_meta=in_spec.strategies[0].output_spec.tensor_meta,
-            )
-            new_values_spec = DTensorSpec(
-                mesh=mesh,
-                placements=tuple(values_spec_new_placements),
-                tensor_meta=values_spec.strategies[0].output_spec.tensor_meta,
-            )
-            output_spec = DTensorSpec(
-                mesh=mesh,
-                placements=tuple(in_spec_new_placements),
-                tensor_meta=in_spec.strategies[0].output_spec.tensor_meta,
-            )
-            cost_in_spec = generate_redistribute_costs(in_spec, new_in_spec)
-            cost_values_spec = generate_redistribute_costs(values_spec, new_values_spec)
-            op_strategy.strategies.append(
-                OpSpec(
-                    # pyrefly: ignore [bad-argument-type]
-                    input_specs=(
-                        new_in_spec,
-                        *new_indices_spec,  # type: ignore[arg-type]
-                        new_values_spec,
-                    ),
-                    output_specs=output_spec,
-                    redistribute_cost=[
-                        cost_in_spec,
-                        *indices_redistribute_costs,
-                        cost_values_spec,
-                    ],
-                )
-            )
-    return op_strategy
+
+    # Replicate strategy is automatically inserted by the single_dim_strategy infra.
+
+    return strategies
 
 
 @register_prop_rule(aten.index.Tensor, schema_info=RuntimeSchemaInfo(needs_pytree=True))

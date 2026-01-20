@@ -195,7 +195,6 @@ dtensor_fails = {
     xfail("index_add"),
     xfail("index_copy"),
     xfail("index_fill"),
-    xfail("index_put"),
     xfail("index_reduce", "prod"),
     xfail("index_reduce", "mean"),
     xfail("index_reduce", "amax"),
