@@ -511,6 +511,13 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int32,
                 torch.int16,
+                torch.float32,
+            ],
+            "nn.functional.multilabel_soft_margin_loss": [
+                torch.int8,
+                torch.uint8,
+                torch.int32,
+                torch.int16,
             ],
             "nn.functional.nll_loss": [
                 torch.int16,
