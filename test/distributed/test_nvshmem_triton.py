@@ -4,6 +4,16 @@
 
 import sys
 
+# Import TEST_WITH_ROCM first to check for ROCm before importing NVSHMEM modules
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
+
+
+# Skip entire module on ROCm before importing NVSHMEM-specific modules
+# NVSHMEM is NVIDIA-specific and can cause crashes during import on ROCm
+if TEST_WITH_ROCM:
+    print("NVSHMEM not available on ROCm, skipping tests")
+    sys.exit(0)
+
 import triton.language as tl
 
 import torch

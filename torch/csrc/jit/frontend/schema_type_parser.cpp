@@ -101,6 +101,14 @@ TypePtr SchemaTypeParser::parseBaseType() {
   }
   std::string text = tok.text();
 
+  // Check if this might be a dotted identifier (for opaque types)
+  // Keep consuming '.' + IDENT sequences to build fully qualified names
+  while (L.cur().kind == '.' && L.lookahead().kind == TK_IDENT) {
+    L.next(); // consume '.'
+    auto ident_tok = L.expect(TK_IDENT);
+    text += "." + ident_tok.text();
+  }
+
   // Check if this type is registered as an opaque type first
   if (isRegisteredOpaqueType(text)) {
     return c10::PyObjectType::get();

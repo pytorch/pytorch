@@ -112,7 +112,7 @@ class FileBackedGraphModule:
     def __post_init__(self) -> None:
         # Write the code to a file for compatibility with debugging utilities.
         # The file is deleted upon program termination.
-        self.tempfile = tempfile.NamedTemporaryFile(
+        self.tempfile = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="w+", suffix=".py", delete=False
         )
         atexit.register(os.remove, self.tempfile.name)
@@ -960,6 +960,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
+# pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:

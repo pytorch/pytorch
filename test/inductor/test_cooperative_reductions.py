@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import unittest
 from typing import Any
 
 import sympy
@@ -13,7 +12,6 @@ from torch._inductor.codegen.triton import FixedTritonConfig, TritonKernel
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import assert_close
-from torch.testing._internal.common_cuda import IS_SM89
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -169,9 +167,6 @@ class CooperativeReductionTests(TestCase):
     )
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
     def test_reduction_fns(self, name, dtype):
-        if IS_SM89 and dtype == torch.float64 and name in ["std", "var_mean"]:
-            raise unittest.SkipTest("Timeouts on SM89")
-
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
 
@@ -220,8 +215,7 @@ class CooperativeReductionTests(TestCase):
 
         # With online softmax, the computation of max and sum are done
         # jointly and they share a single barrier call.
-        # XPU doesn't support online softmax yet.
-        expected_num_barrier = 8 if config.online_softmax and GPU_TYPE != "xpu" else 16
+        expected_num_barrier = 8 if config.online_softmax else 16
         self.assertEqual(
             source_code.count("triton_helpers.x_grid_barrier"), expected_num_barrier
         )

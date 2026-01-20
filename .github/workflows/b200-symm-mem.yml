@@ -53,7 +53,7 @@ jobs:
     needs:
       - linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100-symm
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm.outputs.test-matrix }}
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only

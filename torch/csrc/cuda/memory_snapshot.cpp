@@ -209,7 +209,8 @@ void _record_memory_history(
     bool record_cpp_context,
     bool clearHistory,
     bool compileContext,
-    bool globalRecordAnnotations) {
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -227,7 +228,12 @@ void _record_memory_history(
 
   setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when, clearHistory);
+      enabled,
+      recorder,
+      trace_alloc_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 static void checkOptionIn(
@@ -245,7 +251,8 @@ void _record_memory_history(
     size_t max_entries,
     bool clearHistory,
     bool compileContext,
-    bool globalRecordAnnotations) {
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -282,7 +289,12 @@ void _record_memory_history(
   setRecordFunctionCallbacks(
       enabled.has_value(), compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when, clearHistory);
+      enabled.has_value(),
+      recorder,
+      max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 std::string _memory_snapshot_pickled() {

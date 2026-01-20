@@ -22,7 +22,7 @@ from torch.testing._internal.common_utils import (
 # If testing on eager mode, we use torch._numpy
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
-    from numpy import ediff1d, in1d, intersect1d, setdiff1d, setxor1d, union1d, unique
+    from numpy import ediff1d, intersect1d, isin, setdiff1d, setxor1d, union1d, unique
     from numpy.testing import assert_array_equal, assert_equal, assert_raises_regex
 
 else:
@@ -222,9 +222,6 @@ class TestSetOps(TestCase):
     @skipIf(True, reason="NP_VER: fails with NumPy 1.22.x")
     @parametrize("kind", [None, "sort", "table"])
     def test_isin(self, kind):
-        # the tests for in1d cover most of isin's behavior
-        # if in1d is removed, would need to change those tests to test
-        # isin instead.
         def _isin_slow(a, b):
             b = np.asarray(b).flatten().tolist()
             return a in b
@@ -273,7 +270,7 @@ class TestSetOps(TestCase):
 
             if dtype in {np.int64, np.float64}:
                 ar = np.array([10, 20, 30], dtype=dtype)
-            elif dtype in {bool}:
+            elif dtype is bool:
                 ar = np.array([True, False, False])
 
             empty_array = np.array([], dtype=dtype)
@@ -282,26 +279,24 @@ class TestSetOps(TestCase):
             assert_isin_equal(ar, empty_array)
             assert_isin_equal(empty_array, empty_array)
 
-    @parametrize("kind", [None, "sort", "table"])
-    def test_in1d(self, kind):
         # we use two different sizes for the b array here to test the
-        # two different paths in in1d().
+        # two different paths in isin().
         for mult in (1, 10):
             # One check without np.array to make sure lists are handled correct
             a = [5, 7, 1, 2]
             b = [2, 4, 3, 1, 5] * mult
             ec = np.array([True, False, True, True])
-            c = in1d(a, b, assume_unique=True, kind=kind)
+            c = isin(a, b, assume_unique=True, kind=kind)
             assert_array_equal(c, ec)
 
             a[0] = 8
             ec = np.array([False, False, True, True])
-            c = in1d(a, b, assume_unique=True, kind=kind)
+            c = isin(a, b, assume_unique=True, kind=kind)
             assert_array_equal(c, ec)
 
             a[0], a[3] = 4, 8
             ec = np.array([True, False, True, False])
-            c = in1d(a, b, assume_unique=True, kind=kind)
+            c = isin(a, b, assume_unique=True, kind=kind)
             assert_array_equal(c, ec)
 
             a = np.array([5, 4, 5, 3, 4, 4, 3, 4, 3, 5, 2, 1, 5, 5])
@@ -322,7 +317,7 @@ class TestSetOps(TestCase):
                 False,
                 False,
             ]
-            c = in1d(a, b, kind=kind)
+            c = isin(a, b, kind=kind)
             assert_array_equal(c, ec)
 
             b = b + [5, 5, 4] * mult
@@ -342,55 +337,55 @@ class TestSetOps(TestCase):
                 True,
                 True,
             ]
-            c = in1d(a, b, kind=kind)
+            c = isin(a, b, kind=kind)
             assert_array_equal(c, ec)
 
             a = np.array([5, 7, 1, 2])
             b = np.array([2, 4, 3, 1, 5] * mult)
             ec = np.array([True, False, True, True])
-            c = in1d(a, b, kind=kind)
+            c = isin(a, b, kind=kind)
             assert_array_equal(c, ec)
 
             a = np.array([5, 7, 1, 1, 2])
             b = np.array([2, 4, 3, 3, 1, 5] * mult)
             ec = np.array([True, False, True, True, True])
-            c = in1d(a, b, kind=kind)
+            c = isin(a, b, kind=kind)
             assert_array_equal(c, ec)
 
             a = np.array([5, 5])
             b = np.array([2, 2] * mult)
             ec = np.array([False, False])
-            c = in1d(a, b, kind=kind)
+            c = isin(a, b, kind=kind)
             assert_array_equal(c, ec)
 
         a = np.array([5])
         b = np.array([2])
         ec = np.array([False])
-        c = in1d(a, b, kind=kind)
+        c = isin(a, b, kind=kind)
         assert_array_equal(c, ec)
 
         if kind in {None, "sort"}:
-            assert_array_equal(in1d([], [], kind=kind), [])
+            assert_array_equal(isin([], [], kind=kind), [])
 
-    def test_in1d_char_array(self):
+    def test_isin_char_array(self):
         a = np.array(["a", "b", "c", "d", "e", "c", "e", "b"])
         b = np.array(["a", "c"])
 
         ec = np.array([True, False, True, False, False, True, False, False])
-        c = in1d(a, b)
+        c = isin(a, b)
 
         assert_array_equal(c, ec)
 
     @parametrize("kind", [None, "sort", "table"])
-    def test_in1d_invert(self, kind):
-        "Test in1d's invert parameter"
+    def test_isin_invert(self, kind):
+        "Test isin's invert parameter"
         # We use two different sizes for the b array here to test the
-        # two different paths in in1d().
+        # two different paths in isin().
         for mult in (1, 10):
             a = np.array([5, 4, 5, 3, 4, 4, 3, 4, 3, 5, 2, 1, 5, 5])
             b = [2, 3, 4] * mult
             assert_array_equal(
-                np.invert(in1d(a, b, kind=kind)), in1d(a, b, invert=True, kind=kind)
+                np.invert(isin(a, b, kind=kind)), isin(a, b, invert=True, kind=kind)
             )
 
         # float:
@@ -402,9 +397,13 @@ class TestSetOps(TestCase):
                 b = [2, 3, 4] * mult
                 b = np.array(b, dtype=np.float32)
                 assert_array_equal(
-                    np.invert(in1d(a, b, kind=kind)), in1d(a, b, invert=True, kind=kind)
+                    np.invert(isin(a, b, kind=kind)), isin(a, b, invert=True, kind=kind)
                 )
 
+    @skipIf(
+        numpy.lib.NumpyVersion(numpy.__version__) >= "2.4.0",
+        reason="NP_VER: in1d was deprecated in numpy 2.4",
+    )
     @parametrize("kind", [None, "sort", "table"])
     def test_in1d_ravel(self, kind):
         # Test that in1d ravels its input arrays. This is not documented
@@ -419,48 +418,48 @@ class TestSetOps(TestCase):
         assert_array_equal(in1d(a, long_b, assume_unique=True, kind=kind), ec)
         assert_array_equal(in1d(a, long_b, assume_unique=False, kind=kind), ec)
 
-    def test_in1d_hit_alternate_algorithm(self):
+    def test_isin_hit_alternate_algorithm(self):
         """Hit the standard isin code with integers"""
         # Need extreme range to hit standard code
         # This hits it without the use of kind='table'
         a = np.array([5, 4, 5, 3, 4, 4, 1e9], dtype=np.int64)
         b = np.array([2, 3, 4, 1e9], dtype=np.int64)
         expected = np.array([0, 1, 0, 1, 1, 1, 1], dtype=bool)
-        assert_array_equal(expected, in1d(a, b))
-        assert_array_equal(np.invert(expected), in1d(a, b, invert=True))
+        assert_array_equal(expected, isin(a, b))
+        assert_array_equal(np.invert(expected), isin(a, b, invert=True))
 
         a = np.array([5, 7, 1, 2], dtype=np.int64)
         b = np.array([2, 4, 3, 1, 5, 1e9], dtype=np.int64)
         ec = np.array([True, False, True, True])
-        c = in1d(a, b, assume_unique=True)
+        c = isin(a, b, assume_unique=True)
         assert_array_equal(c, ec)
 
     @parametrize("kind", [None, "sort", "table"])
-    def test_in1d_boolean(self, kind):
-        """Test that in1d works for boolean input"""
+    def test_isin_boolean(self, kind):
+        """Test that isin works for boolean input"""
         a = np.array([True, False])
         b = np.array([False, False, False])
         expected = np.array([False, True])
-        assert_array_equal(expected, in1d(a, b, kind=kind))
-        assert_array_equal(np.invert(expected), in1d(a, b, invert=True, kind=kind))
+        assert_array_equal(expected, isin(a, b, kind=kind))
+        assert_array_equal(np.invert(expected), isin(a, b, invert=True, kind=kind))
 
     @parametrize("kind", [None, "sort"])
-    def test_in1d_timedelta(self, kind):
-        """Test that in1d works for timedelta input"""
+    def test_isin_timedelta(self, kind):
+        """Test that isin works for timedelta input"""
         rstate = np.random.RandomState(0)
         a = rstate.randint(0, 100, size=10)
         b = rstate.randint(0, 100, size=10)
-        truth = in1d(a, b)
+        truth = isin(a, b)
         a_timedelta = a.astype("timedelta64[s]")
         b_timedelta = b.astype("timedelta64[s]")
-        assert_array_equal(truth, in1d(a_timedelta, b_timedelta, kind=kind))
+        assert_array_equal(truth, isin(a_timedelta, b_timedelta, kind=kind))
 
-    def test_in1d_table_timedelta_fails(self):
+    def test_isin_table_timedelta_fails(self):
         a = np.array([0, 1, 2], dtype="timedelta64[s]")
         b = a
         # Make sure it raises a value error:
         with assert_raises(ValueError):
-            in1d(a, b, kind="table")
+            isin(a, b, kind="table")
 
     @parametrize(
         "dtype1,dtype2",
@@ -470,8 +469,8 @@ class TestSetOps(TestCase):
         ],
     )
     @parametrize("kind", [None, "sort", "table"])
-    def test_in1d_mixed_dtype(self, dtype1, dtype2, kind):
-        """Test that in1d works as expected for mixed dtype input."""
+    def test_isin_mixed_dtype(self, dtype1, dtype2, kind):
+        """Test that isin works as expected for mixed dtype input."""
         is_dtype2_signed = np.issubdtype(dtype2, np.signedinteger)
         ar1 = np.array([0, 0, 1, 1], dtype=dtype1)
 
@@ -491,62 +490,62 @@ class TestSetOps(TestCase):
 
         if expect_failure:
             with assert_raises(RuntimeError, match="exceed the maximum"):
-                in1d(ar1, ar2, kind=kind)
+                isin(ar1, ar2, kind=kind)
         else:
-            assert_array_equal(in1d(ar1, ar2, kind=kind), expected)
+            assert_array_equal(isin(ar1, ar2, kind=kind), expected)
 
     @parametrize("kind", [None, "sort", "table"])
-    def test_in1d_mixed_boolean(self, kind):
-        """Test that in1d works as expected for bool/int input."""
+    def test_isin_mixed_boolean(self, kind):
+        """Test that isin works as expected for bool/int input."""
         for dtype in np.typecodes["AllInteger"]:
             a = np.array([True, False, False], dtype=bool)
             b = np.array([0, 0, 0, 0], dtype=dtype)
             expected = np.array([False, True, True], dtype=bool)
-            assert_array_equal(in1d(a, b, kind=kind), expected)
+            assert_array_equal(isin(a, b, kind=kind), expected)
 
             a, b = b, a
             expected = np.array([True, True, True, True], dtype=bool)
-            assert_array_equal(in1d(a, b, kind=kind), expected)
+            assert_array_equal(isin(a, b, kind=kind), expected)
 
-    def test_in1d_first_array_is_object(self):
+    def test_isin_first_array_is_object(self):
         ar1 = [None]
         ar2 = np.array([1] * 10)
         expected = np.array([False])
-        result = np.in1d(ar1, ar2)
+        result = np.isin(ar1, ar2)
         assert_array_equal(result, expected)
 
-    def test_in1d_second_array_is_object(self):
+    def test_isin_second_array_is_object(self):
         ar1 = 1
         ar2 = np.array([None] * 10)
         expected = np.array([False])
-        result = np.in1d(ar1, ar2)
+        result = np.isin(ar1, ar2)
         assert_array_equal(result, expected)
 
-    def test_in1d_both_arrays_are_object(self):
+    def test_isin_both_arrays_are_object(self):
         ar1 = [None]
         ar2 = np.array([None] * 10)
         expected = np.array([True])
-        result = np.in1d(ar1, ar2)
+        result = np.isin(ar1, ar2)
         assert_array_equal(result, expected)
 
     @xfail
-    def test_in1d_both_arrays_have_structured_dtype(self):
+    def test_isin_both_arrays_have_structured_dtype(self):
         # Test arrays of a structured data type containing an integer field
         # and a field of dtype `object` allowing for arbitrary Python objects
         dt = np.dtype([("field1", int), ("field2", object)])
         ar1 = np.array([(1, None)], dtype=dt)
         ar2 = np.array([(1, None)] * 10, dtype=dt)
         expected = np.array([True])
-        result = np.in1d(ar1, ar2)
+        result = np.isin(ar1, ar2)
         assert_array_equal(result, expected)
 
-    def test_in1d_with_arrays_containing_tuples(self):
+    def test_isin_with_arrays_containing_tuples(self):
         ar1 = np.array([(1,), 2], dtype=object)
         ar2 = np.array([(1,), 2], dtype=object)
         expected = np.array([True, True])
-        result = np.in1d(ar1, ar2)
+        result = np.isin(ar1, ar2)
         assert_array_equal(result, expected)
-        result = np.in1d(ar1, ar2, invert=True)
+        result = np.isin(ar1, ar2, invert=True)
         assert_array_equal(result, np.invert(expected))
 
         # An integer is added at the end of the array to make sure
@@ -559,32 +558,32 @@ class TestSetOps(TestCase):
         ar2 = np.array([(1,), (2, 1), 1], dtype=object)
         ar2 = ar2[:-1]
         expected = np.array([True, True])
-        result = np.in1d(ar1, ar2)
+        result = np.isin(ar1, ar2).ravel()
         assert_array_equal(result, expected)
-        result = np.in1d(ar1, ar2, invert=True)
+        result = np.isin(ar1, ar2, invert=True).ravel()
         assert_array_equal(result, np.invert(expected))
 
         ar1 = np.array([(1,), (2, 3), 1], dtype=object)
         ar1 = ar1[:-1]
         ar2 = np.array([(1,), 2], dtype=object)
         expected = np.array([True, False])
-        result = np.in1d(ar1, ar2)
+        result = np.isin(ar1, ar2).ravel()
         assert_array_equal(result, expected)
-        result = np.in1d(ar1, ar2, invert=True)
+        result = np.isin(ar1, ar2, invert=True).ravel()
         assert_array_equal(result, np.invert(expected))
 
-    def test_in1d_errors(self):
-        """Test that in1d raises expected errors."""
+    def test_isin_errors(self):
+        """Test that isin raises expected errors."""
 
         # Error 1: `kind` is not one of 'sort' 'table' or None.
         ar1 = np.array([1, 2, 3, 4, 5])
         ar2 = np.array([2, 4, 6, 8, 10])
-        assert_raises(ValueError, in1d, ar1, ar2, kind="quicksort")
+        assert_raises(ValueError, isin, ar1, ar2, kind="quicksort")
 
         # Error 2: `kind="table"` does not work for non-integral arrays.
         obj_ar1 = np.array([1, "a", 3, "b", 5], dtype=object)
         obj_ar2 = np.array([1, "a", 3, "b", 5], dtype=object)
-        assert_raises(ValueError, in1d, obj_ar1, obj_ar2, kind="table")
+        assert_raises(ValueError, isin, obj_ar1, obj_ar2, kind="table")
 
         for dtype in [np.int32, np.int64]:
             ar1 = np.array([-1, 2, 3, 4, 5], dtype=dtype)
@@ -594,14 +593,14 @@ class TestSetOps(TestCase):
             # Error 3: `kind="table"` will trigger a runtime error
             #  if there is an integer overflow expected when computing the
             #  range of ar2
-            assert_raises(RuntimeError, in1d, ar1, overflow_ar2, kind="table")
+            assert_raises(RuntimeError, isin, ar1, overflow_ar2, kind="table")
 
             # Non-error: `kind=None` will *not* trigger a runtime error
             #  if there is an integer overflow, it will switch to
             #  the `sort` algorithm.
-            result = np.in1d(ar1, overflow_ar2, kind=None)
+            result = np.isin(ar1, overflow_ar2, kind=None)
             assert_array_equal(result, [True] + [False] * 4)
-            result = np.in1d(ar1, overflow_ar2, kind="sort")
+            result = np.isin(ar1, overflow_ar2, kind="sort")
             assert_array_equal(result, [True] + [False] * 4)
 
     def test_union1d(self):

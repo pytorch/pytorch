@@ -810,6 +810,7 @@ def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
         eps = metadata.entry_points()
         group = eps.select(group="torchrun.logs_specs")
         if group.select(name=logs_specs_name):
+            # pyrefly: ignore [bad-index]
             logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
@@ -882,7 +883,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
-    # pyrefly: ignore [bad-instantiation]
+
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),

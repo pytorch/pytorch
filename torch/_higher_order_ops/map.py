@@ -37,6 +37,7 @@ class MapImpl(HigherOrderOperator):
         super().__init__("map_impl")
 
     def __call__(self, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
 

@@ -1,8 +1,6 @@
 #include <torch/nativert/executor/triton/TritonKernelManager.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/FbcodeMaps.h>
-#include <c10/util/Logging.h>
 
 #ifndef _WIN32
 #include <dlfcn.h>

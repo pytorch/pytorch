@@ -113,7 +113,7 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             self.output_node[0].get_layout()
             if isinstance(self.output_node, Iterable)
             else self.output_node.get_layout(),

@@ -36,6 +36,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+  # Disable FBGEMM for CUDA 13 builds
+  export USE_FBGEMM=0
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
@@ -353,13 +358,18 @@ else
       sudo rm -f /opt/cache/bin/c++
       sudo rm -f /opt/cache/bin/gcc
       sudo rm -f /opt/cache/bin/g++
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
+      # Restore original clang compilers that were backed up during sccache wrapping.
+      # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
+      # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
+      if [[ -d /opt/rocm/llvm/bin ]]; then
+        pushd /opt/rocm/llvm/bin
+        if [[ -d original ]]; then
+          sudo mv original/clang .
+          sudo mv original/clang++ .
+        fi
+        sudo rm -rf original
+        popd
       fi
-      sudo rm -rf original
-      popd
     fi
 
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
