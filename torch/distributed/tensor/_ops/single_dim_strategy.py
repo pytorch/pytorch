@@ -230,11 +230,17 @@ def _expand_single_dim_strategy_to_mesh(
             # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
             # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
             # dims
+            # Detect inplace ops by checking if the base op name ends with '_'
+            op_name = op.name()
+            base_name = op_name.split("::")[1].split(".")[0]
+            is_inplace = base_name.endswith("_")
+
             return expand_to_full_mesh_op_strategy(
                 mesh,
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
                 output_tensor_meta=output_tensor_meta,
+                inplace_op=is_inplace,
             )
 
         return expanded_strategy
