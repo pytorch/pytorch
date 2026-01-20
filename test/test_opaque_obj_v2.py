@@ -2053,5 +2053,72 @@ class GraphModule(torch.nn.Module):
 instantiate_parametrized_tests(TestOpaqueObject)
 
 
+class BackwardReduceOp:
+    """
+    Simulates a ReduceOp-like opaque reference type that only appears in backward.
+    This tests the scenario where opaque refs are introduced during backward tracing.
+    """
+
+    def __init__(self, name: str, scale: float) -> None:
+        self._name = name
+        self._scale = scale
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def scale(self) -> float:
+        return self._scale
+
+
+BackwardReduceOp.SUM = BackwardReduceOp("SUM", 1.0)
+BackwardReduceOp.AVG = BackwardReduceOp("AVG", 0.5)
+
+register_opaque_type(
+    BackwardReduceOp, typ="reference", members={"scale": MemberType.USE_REAL}
+)
+
+
+class TestOpaqueRefInBackward(TestCase):
+    """
+    Tests for opaque reference types that are introduced during backward tracing.
+
+    This tests the fix for the "cannot pickle" error that occurred when opaque
+    reference types (like ReduceOp) appeared in backward but not forward.
+    The fix lifts these references to graph inputs instead of storing them as
+    module attributes.
+    """
+
+    def test_opaque_ref_traced_as_placeholder(self):
+        """
+        Test that opaque reference types are traced as placeholders in FX graphs,
+        not as module attributes.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        reduce_op = BackwardReduceOp.SUM
+
+        def fn(x, op):
+            # The op should become a placeholder in the traced graph
+            return x * op.scale
+
+        x = torch.randn(3, 3)
+        traced = make_fx(fn)(x, reduce_op)
+
+        # Verify the opaque ref is a placeholder input
+        placeholders = [n for n in traced.graph.nodes if n.op == "placeholder"]
+        self.assertEqual(len(placeholders), 2)  # x and op
+
+        # The second placeholder should be marked as opaque_ref
+        opaque_placeholder = placeholders[1]
+        self.assertTrue(opaque_placeholder.meta.get("is_opaque_ref", False))
+
+        # Run the traced function - opaque ref should be passed through
+        result = traced(x, reduce_op)
+        expected = x * reduce_op.scale
+        self.assertTrue(torch.allclose(result, expected))
+
+
 if __name__ == "__main__":
     run_tests()

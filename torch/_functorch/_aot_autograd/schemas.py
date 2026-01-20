@@ -486,6 +486,15 @@ class ViewAndMutationMeta:
     # Filled after tracing joint function.
     num_backward_tokens: int = 0
 
+    # Opaque reference objects discovered during backward tracing.
+    # These are reference types (like ReduceOp) that appear in the backward function
+    # but aren't saved from forward. They're lifted to graph inputs and passed at runtime.
+    bw_opaque_refs: list[Any] = field(default_factory=list)
+
+    # Opaque reference objects that appear in the forward function.
+    # These are reference types (like ReduceOp) that are lifted to graph inputs.
+    fw_opaque_refs: list[Any] = field(default_factory=list)
+
     # Number of rng states that will get thread into the forward and backward for
     # cudagraph compatible run_and_save_rng
     num_graphsafe_rng_states: int = 0

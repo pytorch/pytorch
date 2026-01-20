@@ -18,19 +18,27 @@ class FakeScriptObject:
         # Use object.__setattr__ to bypass our custom __setattr__ during initialization
         object.__setattr__(self, "wrapped_obj", wrapped_obj)
         object.__setattr__(self, "script_class_name", script_class_name)
-        try:
-            with _disable_current_modes():
-                real_obj = copy.deepcopy(x)
-        except (RuntimeError, TypeError) as e:
-            log.warning(  # noqa: G200
-                "Unable to deepcopy the custom object %s due to %s. "
-                "Defaulting to the user given object. This might be "
-                "dangerous as side effects may be directly applied "
-                "to the object.",
-                script_class_name,
-                str(e),
-            )
+
+        # skip deepcopy for opaque reference types since they can't be copied
+        # and are meant to maintain their identity across tracing
+        from torch._library.opaque_object import is_opaque_reference_type
+
+        if x is not None and is_opaque_reference_type(type(x)):
             real_obj = x
+        else:
+            try:
+                with _disable_current_modes():
+                    real_obj = copy.deepcopy(x)
+            except (RuntimeError, TypeError) as e:
+                log.warning(  # noqa: G200
+                    "Unable to deepcopy the custom object %s due to %s. "
+                    "Defaulting to the user given object. This might be "
+                    "dangerous as side effects may be directly applied "
+                    "to the object.",
+                    script_class_name,
+                    str(e),
+                )
+                real_obj = x
         object.__setattr__(self, "real_obj", real_obj)
 
     def __getattribute__(self, name):
