@@ -248,7 +248,7 @@ def get_added_lines(filename: str) -> set[int]:
             ["git", "fetch", "origin", "main"],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=600,
         )
         if result.returncode != 0:
             raise RuntimeError(
