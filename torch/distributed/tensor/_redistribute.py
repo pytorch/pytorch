@@ -108,8 +108,6 @@ class _TransformInfo(NamedTuple):
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
-    # Optional mesh override (None means use the default device_mesh)
-    mesh: DeviceMesh | None = None
 
     def _comm_type_key(self) -> str | None:
         """
@@ -136,9 +134,6 @@ class _FlattenedTransformInfo(NamedTuple):
     """
     Represents a flattened transform that combines multiple mesh dimensions
     into a single collective operation using a flattened DeviceMesh.
-
-    Duck-type compatible with _TransformInfo: has mesh_dim=0 and mesh=flattened_mesh
-    so the main redistribute loop can handle both uniformly.
     """
 
     # Always 0 for flattened 1D mesh
@@ -1132,7 +1127,10 @@ def redistribute_local_tensor(
     with redistribute_context:
         for transform_info in optimized_transform_infos:
             # Determine which mesh to use: flattened transforms have their own mesh
-            mesh_to_use = transform_info.mesh if transform_info.mesh else device_mesh
+            if isinstance(transform_info, _FlattenedTransformInfo):
+                mesh_to_use = transform_info.mesh
+            else:
+                mesh_to_use = device_mesh
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
             num_chunks = mesh_to_use.size(mesh_dim=i)
@@ -1176,7 +1174,7 @@ def redistribute_local_tensor(
                 elif current.is_replicate():
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
-                        local_tensor, mesh_to_use, i, device_mesh._sym_get_coordinate(i)
+                        local_tensor, mesh_to_use, i, mesh_to_use._sym_get_coordinate(i)
                     )
                 else:
                     assert current.is_shard(), (
