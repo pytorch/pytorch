@@ -19,7 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .descriptors import AOTInput, BackwardTokenAOTInput
+from .descriptors import AOTInput, BackwardTokenAOTInput, OpaqueRefAOTInput
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -127,11 +127,18 @@ def _create_graph(
 
             i = 0
             j = 0
+            k = 0
             for n in fx_g.graph.nodes:
                 if n.op == "placeholder":
                     if n.name.startswith("tangents_token"):
                         n.meta["desc"] = BackwardTokenAOTInput(j)
                         j += 1
+                    elif n.meta.get("is_opaque_ref", False):
+                        # store actual reference in descriptor for runtime
+                        n.meta["desc"] = OpaqueRefAOTInput(
+                            k, n.meta.get("opaque_ref_obj")
+                        )
+                        k += 1
                     else:
                         assert i < len(flat_args_descs), (
                             (fn_wrappers(inner_f)),
@@ -322,9 +329,9 @@ def aot_dispatch_base_graph(
                 include_stride=True,
                 include_device=True,
                 colored=True,
-                # For more expanded output (but can't default to this because it
-                # affects tests):
-                # expanded_def=True
+                # For more expanded output set this to True (but can't default
+                # to this because it affects tests):
+                expanded_def=False,
             ),
         )
 

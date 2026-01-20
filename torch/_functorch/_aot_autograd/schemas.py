@@ -16,6 +16,7 @@ from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Uni
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
+from torch._library.opaque_object import OpaqueType
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
@@ -484,6 +485,15 @@ class ViewAndMutationMeta:
     # Number of tokens used in backward, appended at the end of backward outputs.
     # Filled after tracing joint function.
     num_backward_tokens: int = 0
+
+    # Opaque reference objects discovered during backward tracing.
+    # These are reference types (like ReduceOp) that appear in the backward function
+    # but aren't saved from forward. They're lifted to graph inputs and passed at runtime.
+    bw_opaque_refs: list[Any] = field(default_factory=list)
+
+    # Opaque reference objects that appear in the forward function.
+    # These are reference types (like ReduceOp) that are lifted to graph inputs.
+    fw_opaque_refs: list[Any] = field(default_factory=list)
 
     # Number of rng states that will get thread into the forward and backward for
     # cudagraph compatible run_and_save_rng
@@ -1134,7 +1144,7 @@ class AOTState:
     fake_mode: FakeTensorMode
 
 
-FxValue = Union[Tensor, int, SymInt, BackwardState]
+FxValue = Tensor | int | SymInt | BackwardState | OpaqueType
 
 
 class CompilerWrapper:
