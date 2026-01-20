@@ -4,9 +4,6 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <c10/core/QScheme.h>
-
-#include <structmember.h>
 #include <cstring>
 #include <string>
 

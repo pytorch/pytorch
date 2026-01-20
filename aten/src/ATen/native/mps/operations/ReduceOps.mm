@@ -269,17 +269,22 @@ static void reduction_out_mps(const Tensor& input_t,
                                                                      name:nil];
         castOutputTensor = [mpsGraph reductionSumWithTensor:bandPartWithTensor axes:@[ @0, @1 ] name:nil];
       } else if (reduction_type == MPSReductionType::NANSUM) {
-        // Create a 0 tensor of the same shape as inputTensor
-        MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:castInputTensor.dataType];
-        // Find NaNs
-        MPSGraphTensor* nanMask = [mpsGraph isNaNWithTensor:castInputTensor name:nil];
-        // Replace NaNs with 0
-        MPSGraphTensor* nanReplaced = [mpsGraph selectWithPredicateTensor:nanMask
-                                                      truePredicateTensor:zeros
-                                                     falsePredicateTensor:castInputTensor
-                                                                     name:nil];
-        // Sum
-        castOutputTensor = [mpsGraph reductionSumWithTensor:nanReplaced axes:wrappedAxes name:nil];
+        // Integral types cannot contain NaN, so just do regular sum
+        if (([castInputTensor dataType] & MPSDataTypeFloatBit) == 0) {
+          castOutputTensor = [mpsGraph reductionSumWithTensor:castInputTensor axes:wrappedAxes name:nil];
+        } else {
+          // Create a 0 tensor of the same shape as inputTensor
+          auto zeros = [mpsGraph constantWithScalar:0.0 dataType:castInputTensor.dataType];
+          // Find NaNs
+          auto nanMask = [mpsGraph isNaNWithTensor:castInputTensor name:nil];
+          // Replace NaNs with 0
+          auto nanReplaced = [mpsGraph selectWithPredicateTensor:nanMask
+                                             truePredicateTensor:zeros
+                                            falsePredicateTensor:castInputTensor
+                                                            name:nil];
+          // Sum
+          castOutputTensor = [mpsGraph reductionSumWithTensor:nanReplaced axes:wrappedAxes name:nil];
+        }
       }
 
       MPSGraphTensor* outputTensor = castOutputTensor;
@@ -442,6 +447,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
                                       const std::optional<Scalar>& correction,
                                       bool keepdim,
                                       StdVarType stdVarType) {
+  TORCH_CHECK_NOT_IMPLEMENTED(input_t.scalar_type() != kLong, "Not implemented for MPS");
   using CachedGraph = MPSUnaryCachedGraph;
 
   IntArrayRef input_shape = input_t.sizes();

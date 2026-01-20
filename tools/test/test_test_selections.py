@@ -374,7 +374,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),
@@ -404,7 +404,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),
@@ -422,7 +422,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),
@@ -473,6 +473,7 @@ class TestCalculateShards(unittest.TestCase):
                     self.assertTrue(sharded_tests[0].time is None)
                 else:
                     # x.time is not None because of the above check
+                    # pyrefly: ignore [no-matching-overload]
                     self.assertAlmostEqual(
                         random_times[test],
                         sum(x.time for x in sharded_tests),  # type: ignore[misc]

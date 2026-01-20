@@ -6,13 +6,9 @@
 
 #include <torch/library.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/ATen.h>
 #include <ATen/native/TensorShape.h>
 
-#include <ATen/NestedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
-#include <ATen/functorch/TensorWrapper.h>
-#include <ATen/functorch/BatchingMetaprogramming.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>

@@ -47,6 +47,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
     std::string group_name;
+    std::string group_desc;
     std::vector<uint64_t> global_ranks_in_group;
   };
 

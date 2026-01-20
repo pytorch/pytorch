@@ -13,6 +13,7 @@ behavior, including:
 import getpass
 import os
 import sys
+import sysconfig
 import tempfile
 from collections.abc import Callable
 from os.path import abspath, dirname
@@ -38,6 +39,18 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
+# Override backend for specific graphs (for debugging/bisecting).
+# Format: "filter1:backend1;filter2:backend2;..." where filter can be:
+#   - Individual IDs: "0,5,10"
+#   - Ranges: "10-20" (inclusive)
+#   - Comparisons: ">10", ">=10", "<5", "<=5"
+# Backends can be: "eager", "aot_eager", "inductor", "inductor:reduce-overhead", etc.
+# Examples:
+#   ">10:eager"                    - Run graphs with frame_id > 10 in dynamo eager backend
+#   "<=5:aot_eager;>5:inductor"    - First 6 graphs use aot_eager, rest use inductor
+# [@compile_ignored: debug]
+debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
@@ -52,10 +65,12 @@ dead_code_elimination = True
 replay_side_effects = True
 
 # Configure side effect warning level
-# If `silent`, we silently allow side effects
-# If `warn`, we warn side effects
+# If `info` (default): allow side effects and log to TORCH_LOGS="side_effects" and tlparse
+# If `silent`, we allow side effects, no logs are made.
+# If `warn`, we allow side effects but issue warnings
 # If `error`, we error on side effects
-side_effect_replay_policy = "silent"
+# NOTE: it is NOT safe to change this config during compilation!
+side_effect_replay_policy = "info"
 
 # disable (for a function) when cache reaches this size
 
@@ -120,7 +135,9 @@ assume_static_by_default = True
 # with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = True
+automatic_dynamic_shapes = (
+    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_SHAPES", "1") == "1"
+)
 
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
@@ -423,6 +440,11 @@ error_on_nested_jit_trace = True
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
 
+# If true, force dynamo compilation even when inside FX symbolic tracing.
+# This allows nested compilation where the outer tracer (e.g., make_fx) can
+# trace over dynamo-compiled functions. Use with error_on_nested_fx_trace=False.
+force_compile_during_fx_trace = False
+
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
@@ -445,6 +467,9 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
+
+# Trace through torch.autograd.grad or graphbreak
+trace_autograd_ops = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
@@ -577,6 +602,12 @@ capture_autograd_function = True
 # This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
+# Enable capturing torch.profiler.record_function ops in the graph
+# When True, profiler ops are emitted to the graph and preserved through
+# compilation (make_fx, functionalization). When False, profiler ops
+# are treated as nullcontext.
+capture_profiler_record_function: bool = False
+
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
@@ -586,11 +617,22 @@ log_compilation_metrics = True
 # mutated after the print statement.
 reorderable_logging_functions: set[Callable[[Any], None]] = set()
 
-# A set of methods that will be ignored while tracing,
-# to prevent graph breaks.
-# Add logging.Logger.<method> to ignore all calls for method,
-# or logger.<method> to ignore calls for method from this logger instance only.
-ignore_logger_methods: set[Callable[..., Any]] = set()
+# A set of functions that will be ignored during Dynamo tracing.
+# These functions will NOT run, will NOT be reordered, and will NOT
+# cause graph breaks. They act as full no-ops.
+# Ignored functions can take any arguments, but MUST return None.
+# Functions should either be module-level functions,
+# `logging.Logger.<method>` (ignores all method for all logging.Logger instances)
+# or `logger_obj.<method>` (ignores method only for logger_obj logging.Logger instance).
+# Other functions may or may not be ignored due to implementation details. If you want to ignore a function
+# that `ignore_logging_functions` is failing to ignore, please submit an issue.
+ignore_logging_functions: set[Callable[..., Any]] = set()
+
+# Backwards compat: `ignore_logger_methods` now aliases `ignore_logging_functions`.
+# Existing code that used `ignore_logger_methods` will continue to work.
+ignore_logger_methods: set[Callable[..., Any]] = Config(
+    alias="torch._dynamo.config.ignore_logging_functions"
+)
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
@@ -640,12 +682,28 @@ strict_precompile = os.environ.get("TORCH_STRICT_PRECOMPILE", "0") == "1"
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
 
+# We have small decompositions for some optimizer ops such as
+# addcmul and foreach_addcmul which avoid item() graph breaks by decomposing
+# into their constituent ops. This flag controls whether we use these decompositions
+# This can affect numerics for non-inductor backends.
+enable_dynamo_decompositions = True
+
 
 # Checks if we should graph break when seeing nn parameter constructors
 # in dynamo; this is so that we clearly fail and ask users to move outside
 # the function as opposed to trying to support the ctor with unclear semantics
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
+
+# If True, enable calling torch.compile inside __torch_dispatch__ handlers.
+# When enabled:
+# 1. __torch_dispatch__ methods are automatically wrapped with torch._dynamo.disable
+# 2. torch.compile is skipped when active TorchDispatchModes are on the stack
+#    (unless they have ignore_compile_internals=True)
+# This allows torch.compile to work inside dispatch mode handlers once all
+# ambient modes have been "consumed".
+# See https://github.com/pytorch/pytorch/issues/155331 for more context.
+inline_torch_dispatch_torch_compile = True
 
 # Eager AC/SAC reapplies the mutations (like global dict mutations) in the
 # backward during the recomputation of forward. torch.compile has no easy way to
@@ -730,7 +788,8 @@ pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", N
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
-    default=True,
+    # Disable by default on free-threaded builds since they always do a full collection, which can be slow
+    default=sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
@@ -753,8 +812,9 @@ enable_aot_compile = False
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
-# Deprecated! Please use the config in torch/fx/experimental/_config instead.
-enrich_profiler_metadata: bool = False
+# Experimental flag to enable regional compile on invoke_subgraph HOP.
+# For testing only!
+enable_invoke_subgraph_regional_compile: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

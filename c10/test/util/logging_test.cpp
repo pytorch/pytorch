@@ -98,7 +98,7 @@ struct Noncopyable {
 };
 
 std::ostream& operator<<(std::ostream& out, const Noncopyable& nc) {
-  out << "Noncopyable(" << nc.x << ")";
+  out << "Noncopyable(" << nc.x << ')';
   return out;
 }
 } // namespace

@@ -593,6 +593,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/nccl_extension.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -1044,6 +1045,8 @@ elseif(USE_CUDA)
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/NVSHMEMSymmetricMemory.cu"
         "${TORCH_SRC_DIR}/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.cpp"
     )
+    # Add torch_cpu as a dependency to ensure ATen headers are available
+    target_link_libraries(torch_nvshmem PRIVATE torch_cpu)
     set_target_properties(torch_nvshmem PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(torch_nvshmem PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
     target_compile_options(torch_nvshmem PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
@@ -1658,9 +1661,9 @@ if(USE_CUDA)
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
   target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-  if(USE_FBGEMM_GENAI)
-    # Link fbgemm_genai to torch_cuda (only for (1) CUDA build for SM100).
-    target_link_libraries(torch_cuda PRIVATE fbgemm_genai)
+  if(USE_MSLK)
+    # Link mslk to torch_cuda (only for (1) CUDA build for SM100).
+    target_link_libraries(torch_cuda PRIVATE mslk)
   endif()
 endif()
 
@@ -1782,9 +1785,9 @@ if(USE_ROCM)
   target_link_libraries(torch_hip PUBLIC torch_cpu_library ${Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS})
   target_link_libraries(torch_hip PRIVATE ${Caffe2_HIP_DEPENDENCY_LIBS})
 
-  if(USE_FBGEMM_GENAI)
+  if(USE_MSLK)
     if(USE_ROCM)
-      target_link_libraries(torch_hip PRIVATE fbgemm_genai)
+      target_link_libraries(torch_hip PRIVATE mslk)
     endif()
   endif()
   # Since PyTorch files contain HIP headers, this is also needed to capture the includes.

@@ -181,7 +181,7 @@ def build_collectives(
     mismatch = {_groups[g].id: 0 for g in _groups}
 
     # For best effort partial analysis.
-    dumps_ranks = {int(key) for key in all_entries.keys()}
+    dumps_ranks = {int(key) for key in all_entries}
     """
     - it doesn't matter what order I put collectives/ncclops into their table. we can later on re-sort it by start time
     - there could be multiple options for the "first" collective to pair up (rank 0,1 might do a bcast while rank 2,3 do a bcast)

@@ -6,7 +6,7 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from filelock import FileLock, Timeout
 
@@ -154,7 +154,7 @@ def parse_xml_and_upload_json() -> None:
     uploading the same file from multiple processes.
     """
     try:
-        job_id: Optional[int] = int(os.environ.get("JOB_ID", 0))
+        job_id: int | None = int(os.environ.get("JOB_ID", 0))
         if job_id == 0:
             job_id = None
     except (ValueError, TypeError):

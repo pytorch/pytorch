@@ -246,7 +246,13 @@ def _allowed_types_are_sequence_types(allowed_types: Iterable[ir.TypeProtocol]) 
 def _get_or_create_constant(
     constant_farm: dict[
         tuple[
-            bool | int | float | str | tuple[int] | tuple[float],
+            bool
+            | int
+            | float
+            | str
+            | tuple[int, ...]
+            | tuple[float, ...]
+            | tuple[bool, ...],
             ir.DataType,
         ],
         ir.Value,
@@ -255,9 +261,9 @@ def _get_or_create_constant(
     | int
     | float
     | str
-    | tuple[int]
-    | tuple[float]
-    | tuple[bool]
+    | tuple[int, ...]
+    | tuple[float, ...]
+    | tuple[bool, ...]
     | list[int]
     | list[float]
     | list[bool],
@@ -272,14 +278,14 @@ def _get_or_create_constant(
 
     if isinstance(arg, list):
         # Make the arg hashable
-        arg = tuple(arg)  # type: ignore[assignment]
+        arg = tuple(arg)
 
     constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
     if constant_value is None:
-        constant_tensor = ir.tensor(value=arg, dtype=dtype)  # type: ignore[arg-type]
+        constant_tensor = ir.tensor(value=arg, dtype=dtype)
         constant_value = opset.Constant(value=constant_tensor)
         constant_farm[(arg, dtype)] = constant_value  # type: ignore[arg-type,index]
-    return constant_value
+    return constant_value  # type: ignore[return-value]
 
 
 def _process_python_constants(
@@ -288,7 +294,7 @@ def _process_python_constants(
     type_binding: Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol],
     constant_farm: dict[
         tuple[
-            bool | int | float | str | tuple[int] | tuple[float],
+            bool | int | float | str | tuple[int, ...] | tuple[float, ...],
             ir.DataType,
         ],
         ir.Value,
@@ -370,7 +376,14 @@ def _process_python_sequences(
     type_binding: Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol],
     constant_farm: dict[
         tuple[
-            bool | int | float | str | ir.TensorProtocol | tuple[int] | tuple[float],
+            bool
+            | int
+            | float
+            | str
+            | ir.TensorProtocol
+            | tuple[bool, ...]
+            | tuple[int, ...]
+            | tuple[float, ...],
             ir.DataType,
         ],
         ir.Value,
