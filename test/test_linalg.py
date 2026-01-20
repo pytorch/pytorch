@@ -2978,8 +2978,6 @@ class TestLinalg(TestCase):
         backends = ["default"]
 
         if torch.device(device).type == 'cuda':
-            if torch.cuda.has_magma:
-                backends.append("magma")
             if has_cusolver() or has_hipsolver():
                 backends.append("cusolver")
 
