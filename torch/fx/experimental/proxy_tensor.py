@@ -41,7 +41,11 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value, OpaqueType
+from torch._library.opaque_object import (
+    is_opaque_reference_type,
+    is_opaque_value,
+    OpaqueType,
+)
 from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_impls import fast_detach
@@ -872,6 +876,11 @@ def track_tensor_tree(
             assert isinstance(proxy, Proxy)
             set_proxy_slot(e, tracer, proxy)
             set_meta(proxy, e)
+            # For opaque reference types, mark them so they're lifted to graph
+            # inputs during partitioning instead of being stored as module attributes
+            if is_opaque_reference_type(type(e)):
+                proxy.node.meta["is_opaque_ref"] = True
+                proxy.node.meta["opaque_ref_obj"] = e
         elif isinstance(e, (tuple, list)):
             # example use case: allreduce_ returns ([tensor], work)
             if isinstance(proxy, fx.Proxy):
@@ -1350,6 +1359,23 @@ class PythonKeyTracer(Tracer):
         elif isinstance(a, py_sym_types):
             assert a.node.constant is not None
             return a.node.constant
+        elif is_opaque_reference_type(type(a)):
+            # opaque refs should be lifted to graph inputs
+            # instead of being stored as module attributes.
+            # this avoids serialization issues during graph
+            # deepcopy since refs by defn. aren't serializable.
+            proxy = get_proxy_slot(a, self, None)  # type: ignore[arg-type]
+            if proxy is not None:
+                return proxy.node
+            node = self.create_node(
+                "placeholder", "opaque_ref", (), {}, name="opaque_ref"
+            )
+            node.meta["is_opaque_ref"] = True
+            node.meta["opaque_ref_obj"] = a
+            node.meta["val"] = a
+            proxy = Proxy(node, self)
+            set_proxy_slot(a, self, proxy)  # type: ignore[arg-type]
+            return node
         return super().create_arg(a)  # type: ignore[return-value]
 
     @overload
@@ -1369,7 +1395,27 @@ class PythonKeyTracer(Tracer):
         elif isinstance(e, py_sym_types):
             return get_proxy_slot(e, self, e, lambda e: e.force())
         elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
-            return get_proxy_slot(e, self, e)
+            proxy = get_proxy_slot(e, self, None)
+            if proxy is not None:
+                return proxy
+            # For opaque reference types without a proxy slot, lift them to graph inputs
+            # instead of storing them as module attributes. This avoids deepcopy issues
+            # since reference types should maintain identity across graph copies.
+            if is_opaque_reference_type(type(e)):
+                # Create a placeholder for this opaque reference
+                # The graph will automatically handle name uniqueness
+                proxy = self.create_proxy(
+                    "placeholder", "opaque_ref", (), {}, name="opaque_ref"
+                )
+                set_proxy_slot(e, self, proxy)
+                # Mark this as an opaque reference placeholder and store the object
+                # The object reference survives deepcopy because node.meta is shallow copied
+                proxy.node.meta["is_opaque_ref"] = True
+                proxy.node.meta["opaque_ref_obj"] = e
+                proxy.node.meta["val"] = e  # Set val metadata for downstream processing
+                return proxy
+            # Fall back to returning the object itself for non-reference types
+            return e
         else:
             return e
 
