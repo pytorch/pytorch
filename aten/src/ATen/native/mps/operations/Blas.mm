@@ -119,7 +119,6 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
 }
 
 Tensor vdot_mps(const Tensor& self, const Tensor& other) {
-
   // For real dtypes, vdot is identical to dot
   if (!self.is_complex()) {
     return dot_mps(self, other);
