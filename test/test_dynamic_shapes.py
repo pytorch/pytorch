@@ -4768,9 +4768,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertRaises(GuardOnDataDependentSymNode, lambda: func(torch.tensor([33])))
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_duck_shape_id_unifies_unbacked_symbols(self):
+    def test_shape_id_unifies_unbacked_symbols(self):
         """
-        Test that duck_shape_id parameter in mark_unbacked causes tensors to share
+        Test that shape_id parameter in mark_unbacked causes tensors to share
         the same unbacked symbol, allowing equality comparisons without DDE.
         """
 
@@ -4780,7 +4780,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             else:
                 return x - y
 
-        # Test 1: Without duck_shape_id, comparing unbacked symbols raises DDE
+        # Test 1: Without shape_id, comparing unbacked symbols raises DDE
         x1 = torch.rand(4, 3)
         y1 = torch.rand(4, 3)
         torch._dynamo.decorators.mark_unbacked(x1, 0)
@@ -4791,7 +4791,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             compiled_func = torch.compile(func, fullgraph=True, backend="eager")
             compiled_func(x1, y1)
 
-        # Test 2: With duck_shape_id, same symbol is used - no DDE, fullgraph succeeds
+        # Test 2: With shape_id, same symbol is used - no DDE, fullgraph succeeds
         x2 = torch.rand(4, 3)
         y2 = torch.rand(4, 3)
 
@@ -4802,9 +4802,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertTrue(torch.allclose(result, x2 + y2))
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_duck_shape_id_runtime_assertion_on_mismatch(self):
+    def test_shape_id_runtime_assertion_on_mismatch(self):
         """
-        Test that duck_shape_id with different actual sizes at runtime
+        Test that shape_id with different actual sizes at runtime
         raises an assertion error during tracing. This ensures that duck shaping
         violations are caught rather than silently producing incorrect results.
         """
@@ -4818,27 +4818,27 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         # First, compile with valid inputs (same batch size)
         x1 = torch.rand(4, 3)
         y1 = torch.rand(4, 3)
-        torch._dynamo.decorators.mark_unbacked(x1, 0, duck_shape_id="batch")
-        torch._dynamo.decorators.mark_unbacked(y1, 0, duck_shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(y1, 0, shape_id="batch")
         result = compiled_func(x1, y1)
         self.assertTrue(torch.allclose(result, x1 + y1))
 
-        # Now pass tensors with different batch sizes but same duck_shape_id
+        # Now pass tensors with different batch sizes but same shape_id
         # This triggers recompilation, and during tracing the torch._check
         # equality assertion will fail because the sizes don't match
         x2 = torch.rand(4, 3)
         y2 = torch.rand(5, 3)  # Different batch size!
-        torch._dynamo.decorators.mark_unbacked(x2, 0, duck_shape_id="batch")
-        torch._dynamo.decorators.mark_unbacked(y2, 0, duck_shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(y2, 0, shape_id="batch")
 
         # Should raise an AssertionError during guard building because batch sizes don't match
         with self.assertRaises(AssertionError):
             compiled_func(x2, y2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_duck_shape_id_recompilation(self):
+    def test_shape_id_recompilation(self):
         """
-        Test that changing _dynamo_duck_shape_ids triggers recompilation.
+        Test that changing _dynamo_shape_ids triggers recompilation.
         """
         counter = CompileCounter()
 
@@ -4847,30 +4847,30 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         compiled_func = torch.compile(func, backend=counter)
 
-        # First call with duck_shape_id
+        # First call with shape_id
         x1 = torch.rand(4, 3)
-        torch._dynamo.decorators.mark_unbacked(x1, 0, duck_shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
         compiled_func(x1)
         self.assertEqual(counter.frame_count, 1)
 
-        # Second call with same duck_shape_id - no recompilation
+        # Second call with same shape_id - no recompilation
         x2 = torch.rand(4, 3)
-        torch._dynamo.decorators.mark_unbacked(x2, 0, duck_shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="batch")
         compiled_func(x2)
         self.assertEqual(counter.frame_count, 1)
 
-        # Third call without duck_shape_id - should recompile
+        # Third call without shape_id - should recompile
         x3 = torch.rand(4, 3)
         torch._dynamo.decorators.mark_unbacked(x3, 0)
         compiled_func(x3)
         self.assertEqual(counter.frame_count, 2)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_duck_shape_id_no_recompile_without_dynamic_indices(self):
+    def test_shape_id_no_recompile_without_dynamic_indices(self):
         """
         Test that passing a tensor without _dynamo_dynamic_indices after
-        compiling with duck_shape_ids does NOT trigger recompilation.
-        The guard on duck_shape_ids only applies when the runtime tensor
+        compiling with shape_ids does NOT trigger recompilation.
+        The guard on shape_ids only applies when the runtime tensor
         also has _dynamo_dynamic_indices.
         """
         counter = CompileCounter()
@@ -4880,9 +4880,9 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         compiled_func = torch.compile(func, backend=counter)
 
-        # First call with duck_shape_id (has _dynamo_dynamic_indices)
+        # First call with shape_id (has _dynamo_dynamic_indices)
         x1 = torch.rand(4, 3)
-        torch._dynamo.decorators.mark_unbacked(x1, 0, duck_shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
         compiled_func(x1)
         self.assertEqual(counter.frame_count, 1)
 
@@ -4893,10 +4893,10 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(counter.frame_count, 1)
 
     @skipIfTorchDynamo("mark_unbacked is not traceable")
-    def test_duck_shape_id_recompile_with_different_id(self):
+    def test_shape_id_recompile_with_different_id(self):
         """
         Test that passing a tensor with same _dynamo_dynamic_indices but
-        different duck_shape_id DOES trigger recompilation.
+        different shape_id DOES trigger recompilation.
         """
         counter = CompileCounter()
 
@@ -4905,15 +4905,15 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         compiled_func = torch.compile(func, backend=counter)
 
-        # First call with duck_shape_id="batch"
+        # First call with shape_id="batch"
         x1 = torch.rand(4, 3)
-        torch._dynamo.decorators.mark_unbacked(x1, 0, duck_shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(x1, 0, shape_id="batch")
         compiled_func(x1)
         self.assertEqual(counter.frame_count, 1)
 
-        # Second call with different duck_shape_id - should recompile
+        # Second call with different shape_id - should recompile
         x2 = torch.rand(4, 3)
-        torch._dynamo.decorators.mark_unbacked(x2, 0, duck_shape_id="other")
+        torch._dynamo.decorators.mark_unbacked(x2, 0, shape_id="other")
         compiled_func(x2)
         self.assertEqual(counter.frame_count, 2)
 

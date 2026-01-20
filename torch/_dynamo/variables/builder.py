@@ -95,6 +95,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
+from .._constants import SHAPE_IDS_FIELD_NAME
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
@@ -3917,7 +3918,7 @@ def _automatic_dynamic(
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
-        duck_shape_ids=getattr(e, "_dynamo_duck_shape_ids", None),
+        shape_ids=getattr(e, SHAPE_IDS_FIELD_NAME, None),
     )
 
 
