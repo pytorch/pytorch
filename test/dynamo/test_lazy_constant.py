@@ -1069,6 +1069,18 @@ class LazyConstantVariableTests(TestCase):
             self.assertEqual(compiled2[3], True)  # 30 > 20 is True
             self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
+    @torch._dynamo.config.patch(rewrite_assert_with_torch_assert=True)
+    def test_rewrite_assert(self):
+        # This failure was triggered during LazyConstant implementation
+        # since it was possible for `l` to not be considered a constant.
+        def fn(x, l):
+            assert l
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False, fullgraph=True)
+        inps = (torch.ones(3), [1, 2, 3])
+        self.assertEqual(fn(*inps), opt_fn(*inps))
+
 
 if __name__ == "__main__":
     run_tests()
