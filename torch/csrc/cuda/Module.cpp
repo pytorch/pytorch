@@ -723,13 +723,13 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
     Py_ssize_t size = PyTuple_Size(arg);
 
     if (size == 2) {
-      // Legacy format: (int, int) - mempool_id only
+      // (int, int) - mempool_id only
       auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
       auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
       TORCH_CHECK(THPUtils_checkLong(id1) && THPUtils_checkLong(id2), "mempool_id elements must be integers");
       mempool_id = c10::cuda::MempoolId_t(THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
     } else if (size == 3) {
-      // New format: (int, int, bool) - mempool_id + include_traces
+      // (int, int, bool) - mempool_id + include_traces
       auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
       auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
       auto traces = THPObjectPtr(PyTuple_GetItem(arg, 2));
