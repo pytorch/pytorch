@@ -894,6 +894,7 @@ aten::kthvalue
 aten::kthvalue.values
 aten::lift_fresh_copy
 aten::lift_fresh_copy.out
+aten::linalg__powsum
 aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_eig
@@ -919,7 +920,6 @@ aten::linalg_matrix_exp
 aten::linalg_matrix_exp.out
 aten::linalg_pinv.atol_rtol_tensor
 aten::linalg_pinv.atol_rtol_tensor_out
-aten::linalg__powsum
 aten::linalg_qr
 aten::linalg_qr.out
 aten::linalg_solve_triangular
