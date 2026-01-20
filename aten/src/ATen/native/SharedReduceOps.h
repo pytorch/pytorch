@@ -283,7 +283,7 @@ struct NormOps {
 };
 
 // Like NormOps but skips the final root - returns sum(|x|^p) instead of (sum(|x|^p))^(1/p)
-// Used by linalg_powsum for distributed norm computation
+// Used by linalg__powsum for distributed norm computation
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct NormNoRootOps {
   acc_t norm_;
@@ -423,7 +423,7 @@ struct NormTwoOps {
 };
 
 // Like NormTwoOps but skips the final sqrt - returns sum(|x|^2) instead of sqrt(sum(|x|^2))
-// Used by linalg_powsum for distributed L2 norm computation
+// Used by linalg__powsum for distributed L2 norm computation
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = acc_t>
 struct NormTwoNoRootOps {
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
