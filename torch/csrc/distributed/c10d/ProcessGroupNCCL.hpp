@@ -199,7 +199,7 @@ struct DumpPipe {
     std::string fileStem =
         getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
     if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
+        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 2000) <= 0) {
       return;
     }
     TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
