@@ -361,10 +361,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   bool disable_addmm_cuda_lt = persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
   // NOTE: See https://github.com/pytorch/pytorch/issues/172231
   const auto preferred_cublas_backend = at::globalContext().blasPreferredBackend();
-  disable_addmm_cuda_lt = !(
-      preferred_cublas_backend == BlasBackend::Cublaslt
-      || preferred_cublas_backend == BlasBackend::Default // Lt is default
-  ) || disable_addmm_cuda_lt;
+  //disable_addmm_cuda_lt = !(
+  //    preferred_cublas_backend == BlasBackend::Cublaslt
+  //    || preferred_cublas_backend == BlasBackend::Default // Lt is default
+  //) || disable_addmm_cuda_lt;
   #ifdef USE_ROCM
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
