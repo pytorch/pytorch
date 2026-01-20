@@ -769,7 +769,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
         if _skip_rocm_blas_accuracy_regression(input_dtype, M, N, K, batch_size):
-            raise unittest.SkipTest(_ROCM_BLA_REGRESSION_MSG)
+            raise unittest.SkipTest(_ROCM_BLAS_REGRESSION_MSG)
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
@@ -827,7 +827,7 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
         if _skip_rocm_blas_accuracy_regression(input_dtype, M, N, K, batch_size):
-            raise unittest.SkipTest(_ROCM_BLA_REGRESSION_MSG)
+            raise unittest.SkipTest(_ROCM_BLAS_REGRESSION_MSG)
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
