@@ -18,9 +18,9 @@
 #include <limits>
 #include <type_traits>
 
-#if AT_MKL_ENABLED()
+// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
+#if AT_MKL_ENABLED() && defined(FBCODE_CAFFE2)
 #include <mkl.h>
-#include <ATen/mklrng/MKLGeneratorImpl.h>
 #include <cpuinfo.h>
 #endif
 
@@ -37,7 +37,8 @@ void bernoulli_tensor_kernel(const TensorBase &self, const TensorBase &p_, std::
   templates::cpu::bernoulli_kernel(self, p_, generator);
 }
 
-#if !AT_MKL_ENABLED()
+// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
+#if !AT_MKL_ENABLED() || (AT_MKL_ENABLED() && !defined(FBCODE_CAFFE2))
 void bernoulli_scalar_kernel_default(const TensorBase &self, double p, std::optional<Generator> gen) {
   CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
   templates::cpu::bernoulli_kernel(self, p, generator);
@@ -48,6 +49,13 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
 }
 #else
 void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Generator> gen) {
+  CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+  int64_t seed;
+  {
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    seed = generator->random();
+  }
   int64_t n = self.numel();
   bool contig = self.is_contiguous();
 
@@ -63,28 +71,15 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
     scalar_t *self_ptr = self.data_ptr<scalar_t>();
     int *sample_int_ptr = tmp_int_tensor.data_ptr<int>();
 
-    auto mklGenerator = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
-    VSLStreamStatePtr main_stream;
-
-    // Get a local copy of the global stream and immediately advance the global
-    // state before the generation step to avoid multiple threads using the same state.
-    {
-      // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-      mklGenerator->get_stream_copy(main_stream);
-      mklGenerator->skip_ahead(n);
-    }
-
     auto sample = [&](int64_t begin, int64_t end) {
       int64_t len = end - begin;
       if (len > 0) {
-        VSLStreamStatePtr sample_stream;
-        vslCopyStream(&sample_stream, main_stream);
-        vslSkipAheadStream(sample_stream, begin);
-
-        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, sample_stream, len,
+        VSLStreamStatePtr stream;
+        vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+        vslSkipAheadStream(stream, begin);
+        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
           sample_int_ptr + begin, p);
-        vslDeleteStream(&sample_stream);
+        vslDeleteStream(&stream);
 
         // vectorized copy if using buffer and contiguous, i.e., being non-int
         // type and contiguous
@@ -97,7 +92,6 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
     };
 
     parallel_for(0, n, /* grain_size= */ 800, sample);
-    vslDeleteStream(&main_stream);
 
     // copy_ if using buffer and non contiguous
     if (!contig) {
@@ -112,15 +106,27 @@ void exponential_kernel_default(TensorIteratorBase& iter, double lambda, std::op
   templates::cpu::exponential_kernel(iter, lambda, generator);
 }
 
-#if (!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2))
+// Disable MKL rng until https://github.com/pytorch/pytorch/issues/132395 is addressed
+#if (!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2) || 1)
 void exponential_kernel(TensorIteratorBase& iter, double lambda, std::optional<Generator> gen) {
   exponential_kernel_default(iter, lambda, gen);
 }
 #else
 void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<Generator> gen) {
   TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
+
   Tensor self = iter.tensor(0);
   if (lambda > 0 && !std::isinf(lambda) && !std::isnan(lambda)) {
+    CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
+    int64_t seed;
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(generator->mutex_);
+      if (self.scalar_type() == at::kDouble)
+        seed = generator->random64();
+      else
+        seed = generator->random();
+    }
     int64_t n = self.numel();
     bool contig = self.is_contiguous();
 
@@ -152,35 +158,23 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<G
       // Variance:    V[X+eps] = 1/lambda**2
       auto eps = std::numeric_limits<tmp_scalar_t>::min();
 
-      auto mklGenerator = check_generator<MKLGeneratorImpl>(detail::getDefaultMKLGenerator());
-      VSLStreamStatePtr main_stream;
-
-      // Get a local copy of the global stream and immediately advance the global
-      // state before the generation step to avoid multiple threads using the same state.
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(mklGenerator->mutex_);
-        mklGenerator->get_stream_copy(main_stream);
-        mklGenerator->skip_ahead(n);
-      }
-
       auto sample = [&](int64_t begin, int64_t end) {
         int64_t len = end - begin;
         if (len > 0) {
-          VSLStreamStatePtr sample_stream;
-          vslCopyStream(&sample_stream, main_stream);
-          vslSkipAheadStream(sample_stream, begin);
-
+          VSLStreamStatePtr stream;
           if constexpr (std::is_same_v<scalar_t, double>) {
-            vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, sample_stream, len,
+            vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+            vslSkipAheadStream(stream, begin);
+            vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
               (double *)(sample_ptr + begin), eps, 1./lambda);
-            vslDeleteStream(&sample_stream);
+            vslDeleteStream(&stream);
           } else {
-            vsRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, sample_stream, len,
+            vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+            vslSkipAheadStream(stream, begin);
+            vsRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,
               (float *) (sample_ptr + begin), eps, 1./lambda);
-            vslDeleteStream(&sample_stream);
+            vslDeleteStream(&stream);
           }
-
           // vectorized copy if using buffer and contiguous
           if (!is_df && contig) {
             scalar_t *self_seg = self_ptr + begin;
@@ -191,7 +185,6 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<G
       };
 
       parallel_for(0, n, /* grain_size= */ 800, sample);
-      vslDeleteStream(&main_stream);
 
       // copy_ if using buffer and non contiguous
       if (!contig) {
