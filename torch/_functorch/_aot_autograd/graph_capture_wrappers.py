@@ -91,6 +91,7 @@ from .subclass_utils import (
     wrap_tensor_subclasses_maybe_joint,
 )
 from .utils import (
+    _is_tangent,
     call_and_expect_output_descs,
     maybe_to_fresh_input,
     simple_wraps,
@@ -299,7 +300,10 @@ def create_joint(
         mode = get_proxy_mode()
         assert mode is not None, "Expected non-None proxy mode"
         for node in mode.tracer.graph.nodes:
-            node.meta["partitioner_tag"] = "is_forward"
+            if _is_tangent(node):
+                node.meta["partitioner_tag"] = "is_backward"
+            else:
+                node.meta["partitioner_tag"] = "is_forward"
 
         # TODO: I think this hook can also be eliminated now
         if joint_fn_handle and joint_fn_handle.post_forward:

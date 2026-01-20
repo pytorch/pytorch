@@ -61,7 +61,13 @@ from ._aot_autograd.descriptors import (
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.logging_utils import get_aot_graph_name
-from ._aot_autograd.utils import get_cuda_generator_meta_val
+from ._aot_autograd.utils import (
+    _is_bwd_seed_offset,
+    _is_fwd_seed_offset,
+    _is_primal,
+    _is_tangent,
+    get_cuda_generator_meta_val,
+)
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
@@ -278,35 +284,10 @@ def _extract_graph_with_inputs_outputs(
     return new_graph
 
 
-def _is_primal(node: fx.Node) -> bool:
-    return (
-        node.op == "placeholder"
-        and "tangents" not in str(node.target)
-        and not _is_bwd_seed_offset(node)
-        and not _is_fwd_seed_offset(node)
-    )
-
-
-def _is_tangent(node: fx.Node) -> bool:
-    return node.op == "placeholder" and "tangents" in str(node.target)
-
-
 def is_non_builtin_to_include(node: fx.Node) -> bool:
     return config.is_non_builtin_to_include and (
         (isinstance(node.target, torch._ops.OpOverload) and not is_builtin(node.target))
         or node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
-    )
-
-
-def _is_bwd_seed_offset(node: fx.Node) -> bool:
-    return node.op == "placeholder" and (
-        "bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target)
-    )
-
-
-def _is_fwd_seed_offset(node: fx.Node) -> bool:
-    return node.op == "placeholder" and (
-        "fwd_seed" in str(node.target) or "fwd_base_offset" in str(node.target)
     )
 
 
