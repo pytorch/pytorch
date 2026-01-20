@@ -47,6 +47,11 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
+      timeout-minutes:
+        required: false
+        default: 480
+        type: number
+        description: timeout for the job
       selected-test-configs:
         description: |
           A comma-separated list of test configurations from the test matrix to keep,
@@ -131,7 +136,7 @@ jobs:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner_prefix}}${{ inputs.runner }}
-    timeout-minutes: 480
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}

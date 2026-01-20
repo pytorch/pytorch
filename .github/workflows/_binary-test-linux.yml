@@ -64,6 +64,11 @@ on:
         required: true
         type: string
         description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.arm64.2xlarge, and linux.rocm.gpu
+      timeout-minutes:
+        required: false
+        default: 240
+        type: number
+        description: timeout for the job
     secrets:
       github-token:
         required: true
@@ -75,7 +80,7 @@ permissions:
 jobs:
   test:
     runs-on: ${{ inputs.runner_prefix}}${{ inputs.runs_on }}
-    timeout-minutes: 240
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}

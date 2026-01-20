@@ -44,6 +44,7 @@ jobs:
       build-environment: linux-s390x-binary-manywheel
       docker-image-name: manylinuxs390x-builder:cpu-s390x
       runner: linux.s390x
+      timeout-minutes: 660
       test-matrix: |
         { include: [
           { config: "default", shard: 1,  num_shards: 10, runner: "linux.s390x" },
