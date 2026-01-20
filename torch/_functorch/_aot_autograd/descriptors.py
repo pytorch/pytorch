@@ -441,23 +441,6 @@ class PlainAOTInput(DifferentiableAOTInput):
 
 
 @dataclasses.dataclass(frozen=True)
-class ComplexWrappedAOTInput(DifferentiableAOTInput):
-    original_input: AOTInput
-
-    def expr(self) -> str:
-        return f"__wrapped_complex({self.original_input.expr()})"
-
-    def is_param(self) -> bool:
-        return self.original_input.is_param()
-
-    def is_buffer(self) -> bool:
-        return self.original_input.is_buffer()
-
-    def is_tangent(self) -> bool:
-        return self.original_input.is_tangent()
-
-
-@dataclasses.dataclass(frozen=True)
 class SubclassGetAttrAOTInput(AOTInput):
     """Subclass inputs get unpacked into their constituent pieces before going into an FX
     graph.  This tells you which particular attribute of the subclass this particular
@@ -619,14 +602,6 @@ class PlainAOTOutput(DifferentiableAOTOutput):
 
     def expr(self) -> str:
         return f"output[{self.idx}]"
-
-
-@dataclasses.dataclass(frozen=True)
-class ComplexWrappedAOTOutput(DifferentiableAOTOutput):
-    original_output: PlainAOTOutput
-
-    def expr(self) -> str:
-        return f"__complex_wrapped({self.original_output.expr()})"
 
 
 @dataclasses.dataclass(frozen=True)
