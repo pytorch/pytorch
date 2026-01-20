@@ -1039,7 +1039,7 @@ class LazyConstantVariableTests(TestCase):
         opt_fn = torch.compile(fn, backend="eager", dynamic=False, fullgraph=True)
         inps = (torch.ones(3), [1, 2, 3])
         self.assertEqual(fn(*inps), opt_fn(*inps))
-        
+
     def test_returning_lazy_constant_plus_one_no_recompile(self):
         """Test that returning LazyConstantVariable + 1 does not recompile.
 

@@ -5355,7 +5355,7 @@ class <lambda>(torch.nn.Module):
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
-        """,  # noqa: B950
+""",  # noqa: B950
         )
 
         self.assertExpectedInline(
@@ -5429,7 +5429,7 @@ class <lambda>(torch.nn.Module):
             sum_1,  # PlainAOTOutput(idx=0)
             detach,  # PlainAOTOutput(idx=1)
         )
-        """,  # noqa: B950
+""",  # noqa: B950
         )
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
