@@ -281,12 +281,15 @@ def _optimize_transform_infos(
             i += 1
             continue
 
-        # Collect consecutive same-type transforms
+        # Collect consecutive transforms with same src_dst_placements
+        # (not just same comm type - e.g., Partial->Shard(0) vs Partial->Shard(1) can't merge)
+        current_placements = info.src_dst_placements
         group: list[_TransformInfo] = [info]
         j = i + 1
         while (
             j < len(transform_infos)
-            and transform_infos[j]._comm_type_key() == current_key
+            and is_mergeable(transform_infos[j]._comm_type_key())
+            and transform_infos[j].src_dst_placements == current_placements
         ):
             group.append(transform_infos[j])
             j += 1

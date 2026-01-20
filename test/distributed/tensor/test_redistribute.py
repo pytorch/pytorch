@@ -1704,43 +1704,60 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
         - dst_placements: target placements
         - expected_comm_counts: dict of {collective_op: count} for verification
         """
-        # Define test cases
+        # Pre-create meshes to avoid repeated init_device_mesh overhead
+        mesh_2d = init_device_mesh(
+            self.device_type, (4, 2), mesh_dim_names=("A", "B")
+        )
+        mesh_2d["A", "B"]._flatten("A_B")
+
+        mesh_3d = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("A", "B", "C")
+        )
+        mesh_3d["A", "B"]._flatten("A_B")
+        mesh_3d["A", "C"]._flatten("A_C")
+        mesh_3d["A", "B", "C"]._flatten("A_B_C")
+
+        # Define test cases: (mesh, src_placements, dst_placements, expected_comm_counts, desc)
         test_cases = [
-            # ===== (Partial, Partial) -> (Replicate, Replicate) with flattened mesh =====
-            # Should merge 2 allreduces into 1
+            # ===== 2D mesh cases =====
             (
-                (4, 2),
-                [("A", "B")],
+                mesh_2d,
                 (Partial("sum"), Partial("sum")),
                 (Replicate(), Replicate()),
                 {funcol.all_reduce: 1},
                 "2 allreduces merged to 1",
             ),
-            # ===== (Partial, Partial) -> (Shard(0), Shard(0)) nested sharding =====
-            # Two reduce_scatters to same tensor dim (nested) - merged
             (
-                (4, 2),
-                [("A", "B")],
+                mesh_2d,
                 (Partial("sum"), Partial("sum")),
                 (Shard(0), Shard(0)),
                 {funcol.reduce_scatter_tensor: 1},
                 "nested reduce_scatter",
             ),
-            # ===== (Partial, Partial) -> (Shard(0), Shard(1)) different tensor dims =====
-            # Two reduce_scatters to different tensor dims - not merged
             (
-                (4, 2),
-                [("A", "B")],
+                mesh_2d,
                 (Partial("sum"), Partial("sum")),
                 (Shard(0), Shard(1)),
                 {funcol.reduce_scatter_tensor: 2},
                 "reduce_scatter to different dims",
             ),
-            # ===== 3D mesh: (Partial, Partial, Shard) -> (Shard, Shard, Shard) =====
-            # Complex case: reduce_scatter + allreduce + allgather
             (
-                (2, 2, 2),
-                [("A", "B")],
+                mesh_2d,
+                (Shard(0), Shard(0)),
+                (Replicate(), Replicate()),
+                {funcol.all_gather_into_tensor: 1},
+                "2 allgathers nested",
+            ),
+            (
+                mesh_2d,
+                (Shard(0), Shard(1)),
+                (Replicate(), Replicate()),
+                {funcol.all_gather_into_tensor: 2},
+                "2 separate allgathers",
+            ),
+            # ===== 3D mesh cases =====
+            (
+                mesh_3d,
                 (Partial("sum"), Partial("sum"), Shard(0)),
                 (Shard(0), Shard(0), Shard(0)),
                 {
@@ -1750,91 +1767,47 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
                 },
                 "Partial,Partial,Shard -> Shard,Shard,Shard",
             ),
-            # ===== 3D mesh: (Partial, Partial, Partial) -> (Replicate, Replicate, Replicate) =====
-            # Three allreduces - can merge all with full flattened mesh
             (
-                (2, 2, 2),
-                [("A", "B", "C")],
+                mesh_3d,
                 (Partial("sum"), Partial("sum"), Partial("sum")),
                 (Replicate(), Replicate(), Replicate()),
                 {funcol.all_reduce: 1},
                 "3 allreduces merged to 1",
             ),
-            # ===== 3D mesh: (Partial, Shard, Partial) -> (Replicate, Replicate, Replicate) =====
-            # Non-consecutive allreduces with allgather in between - cannot merge allreduces
             (
-                (2, 2, 2),
-                [("A", "C")],
+                mesh_3d,
                 (Partial("sum"), Shard(0), Partial("sum")),
                 (Replicate(), Replicate(), Replicate()),
                 {funcol.all_reduce: 2, funcol.all_gather_into_tensor: 1},
                 "non-consecutive allreduces with shard in between",
             ),
-            # ===== 3D mesh: (Partial, Replicate, Partial) -> (Replicate, Replicate, Replicate) =====
-            # Non-consecutive allreduces with no op in between - merged
             (
-                (2, 2, 2),
-                [("A", "C")],
+                mesh_3d,
                 (Partial("sum"), Replicate(), Partial("sum")),
                 (Replicate(), Replicate(), Replicate()),
                 {funcol.all_reduce: 1},
                 "non-consecutive allreduces with replica in between",
             ),
-            # ===== 2D mesh: (Shard, Shard) -> (Replicate, Replicate) =====
-            # Two allgathers on same tensor dim (nested) - merged
             (
-                (4, 2),
-                [("A", "B")],
-                (Shard(0), Shard(0)),
-                (Replicate(), Replicate()),
-                {funcol.all_gather_into_tensor: 1},
-                "2 allgathers nested",
-            ),
-            # ===== 2D mesh: (Shard0, Shard1) -> (Replicate, Replicate) =====
-            # Two allgathers on different tensor dim not merged
-            (
-                (4, 2),
-                [("A", "B")],
-                (Shard(0), Shard(1)),
-                (Replicate(), Replicate()),
-                {funcol.all_gather_into_tensor: 2},
-                "2 separate allgathers",
-            ),
-            # ===== 3D mesh: (Partial, Partial, Replicate) -> (Shard(0), Shard(1), Replicate) =====
-            # Two reduce_scatters to different tensor dims - not merged
-            (
-                (2, 2, 2),
-                [("A", "B")],
+                mesh_3d,
                 (Partial("sum"), Partial("sum"), Replicate()),
                 (Shard(0), Shard(1), Replicate()),
                 {funcol.reduce_scatter_tensor: 2},
                 "reduce_scatter with Replicate unchanged",
             ),
+            (
+                mesh_3d,
+                (Partial("sum"), Partial("sum"), Partial("sum")),
+                (Shard(0), Shard(0), Shard(1)),
+                {funcol.reduce_scatter_tensor: 2},
+                "3 partials: 2 merged reduce_scatter + 1 separate",
+            ),
         ]
 
-        for (
-            mesh_shape,
-            flattened_dims,
-            src_placements,
-            dst_placements,
-            expected_counts,
-            desc,
-        ) in test_cases:
+        for mesh, src_placements, dst_placements, expected_counts, desc in test_cases:
             with self.subTest(desc=desc):
-                # Create mesh with dim names
-                dim_names = tuple(chr(ord("A") + i) for i in range(len(mesh_shape)))
-                mesh = init_device_mesh(
-                    self.device_type, mesh_shape, mesh_dim_names=dim_names
-                )
-
-                # Flatten specified dimensions
-                if flattened_dims:
-                    for dims_to_flatten in flattened_dims:
-                        flat_name = "_".join(dims_to_flatten)
-                        mesh[dims_to_flatten]._flatten(flat_name)
-
                 # Create global tensor - size must be divisible by mesh for sharding
-                global_shape = tuple(16 for _ in range(max(3, len(mesh_shape))))
+                global_shape = tuple(16 for _ in range(max(3, mesh.ndim)))
                 global_tensor = torch.randn(global_shape, device=self.device_type)
 
                 # Create source DTensor
