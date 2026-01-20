@@ -98,6 +98,7 @@ def _get_total_norm(
             foreach and _device_has_foreach_support(device)
         ):
             if use_powsum:
+                # pyrefly: ignore[missing-attribute]
                 norms.extend(torch._foreach_powsum(device_tensors, norm_type))
             else:
                 norms.extend(torch._foreach_norm(device_tensors, norm_type))
@@ -108,6 +109,7 @@ def _get_total_norm(
         else:
             if use_powsum:
                 norms.extend(
+                    # pyrefly: ignore[missing-attribute]
                     [torch.linalg.powsum(g, norm_type) for g in device_tensors]
                 )
             else:
