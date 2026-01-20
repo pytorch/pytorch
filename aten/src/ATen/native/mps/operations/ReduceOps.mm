@@ -1134,21 +1134,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out_mps)
  OptionalIntArrayRef opt_dim,
  bool keepdim,
  std::optional<ScalarType> opt_dtype,
- bool skip_root,
  const Tensor& result) {
-  auto ord = scalar_ord.toDouble();
-  // For skip_root=True with p-norms (p != inf, -inf, 0, 1), decompose to
-  // abs().pow(p).sum() directly to avoid sqrt -> pow -> sqrt cycle
-  if (skip_root && std::abs(ord) != std::numeric_limits<double>::infinity() && ord != 0.0 && ord != 1.0) {
-    Tensor self_;
-    if (opt_dtype.has_value()) {
-      self_ = self.to(*opt_dtype);
-    } else {
-      self_ = self;
-    }
-    at::sum_out(const_cast<Tensor&>(result), self_.abs().pow(ord), opt_dim.value_or(IntArrayRef{}), keepdim);
-    return;
-  }
   impl_func_norm_mps(
       self, self, scalar_ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype, result, /*cdist=*/false);
 }
