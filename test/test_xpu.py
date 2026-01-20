@@ -1292,13 +1292,11 @@ if __name__ == "__main__":
             with torch.xpu.stream(s):
                 g.capture_begin()
                 g.capture_end()
-        self.assertTrue(
-            any("The XPU Graph is empty" in str(w.message) for w in caught)
-        )
+        self.assertTrue(any("The XPU Graph is empty" in str(w.message) for w in caught))
 
     @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
     def test_graph_capture_oom(self):
-        oom_regex = ("out of memory")
+        oom_regex = "out of memory"
         with self.assertRaisesRegex(RuntimeError, oom_regex):
             with torch.xpu.graph(torch.xpu.XPUGraph()):
                 torch.zeros(2**40, device="xpu")
@@ -1524,6 +1522,7 @@ if __name__ == "__main__":
         for meth_with_args in tensor_with_args:
             # Adds an empty dict for kwargs, which none of the Tensor methods use
             run("Tensor", *(meth_with_args + ({},)))
+
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):

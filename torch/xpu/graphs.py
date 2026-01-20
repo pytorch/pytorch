@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Optional, overload, TYPE_CHECKING, TypeAlias, Union
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import Optional, TYPE_CHECKING, Union
+from typing_extensions import Self
 
 import torch
-from torch import Tensor
+
 
 if TYPE_CHECKING:
     from torch.xpu import _POOL_HANDLE
 
 from .._utils import _dummy_type
+
 
 __all__ = [
     "graph_pool_handle",
@@ -23,16 +24,13 @@ if not hasattr(torch._C, "_XpuStreamBase"):
     torch._C.__dict__["_XPUGraph"] = _dummy_type("_XPUGraph")
     torch._C.__dict__["_xpu_graph_pool_handle"] = _dummy_type("_xpu_graph_pool_handle")
 
-from torch._C import (  # noqa: F401
-    _XPUGraph,
-    _xpu_graph_pool_handle,
-)
+from torch._C import _xpu_graph_pool_handle, _XPUGraph  # noqa: F401
+
 
 def graph_pool_handle() -> _POOL_HANDLE:
-    r"""Return an opaque token representing the id of a graph memory pool.
-
-    """
+    r"""Return an opaque token representing the id of a graph memory pool."""
     return torch.xpu._POOL_HANDLE(_xpu_graph_pool_handle())
+
 
 class XPUGraph(torch._C._XPUGraph):
     r"""Wrapper around a XPU graph.
@@ -54,8 +52,7 @@ class XPUGraph(torch._C._XPUGraph):
     def __new__(cls, keep_graph: bool = False) -> Self:
         return super().__new__(cls, keep_graph)
 
-    def capture_begin(
-        self, pool: Optional[_POOL_HANDLE] = None) -> None:
+    def capture_begin(self, pool: Optional[_POOL_HANDLE] = None) -> None:
         r"""Begin capturing XPU work on the current xpu stream.
 
         Typically, you shouldn't call ``capture_begin`` yourself.
@@ -95,6 +92,7 @@ class XPUGraph(torch._C._XPUGraph):
         r"""Delete the graph currently held by this instance."""
         super().reset()
 
+
 class graph:
     r"""Context-manager that captures XPU work into a :class:`torch.xpu.XPUGraph` object for later replay.
 
@@ -132,7 +130,8 @@ class graph:
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
-        assert self.capture_stream is not None
+        if self.capture_stream is None:
+            raise AssertionError("capture_stream must not be None")
         self.stream_ctx = torch.xpu.stream(self.capture_stream)
         self.xpu_graph = xpu_graph
 
