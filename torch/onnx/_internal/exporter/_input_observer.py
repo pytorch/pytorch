@@ -265,3 +265,6 @@ class InputObserver:
 
     def infer_dynamic_shapes(self):
         return self.info.infer_dynamic_shapes()
+
+    def infer_export_inputs(self):
+        raise NotImplementedError("not implemented yet")
