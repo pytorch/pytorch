@@ -26,6 +26,7 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import (
@@ -1322,15 +1323,29 @@ class TestMixedPartialTypes(TestCase):
         tensor = torch.randn(8, 8)
         mixed = [Partial("sum"), Partial("max")]
 
+        # Test distribute_tensor and from_local APIs
         for api in [
             lambda: distribute_tensor(tensor, mesh, mixed),
             lambda: DTensor.from_local(tensor, mesh, mixed),
-            lambda: DTensor.from_local(
-                tensor, mesh, [Replicate(), Replicate()]
-            ).redistribute(mesh, mixed),
         ]:
             with self.assertRaisesRegex(ValueError, "Mixed Partial reduce types"):
                 api()
+
+        # Test redistribute_local_tensor separately (different call pattern)
+        # Note: public DTensor.redistribute() doesn't allow Partial targets at all,
+        # so we test the internal redistribute_local_tensor directly
+        current_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
+        )
+        target_spec = DTensorSpec(
+            mesh,
+            tuple(mixed),
+            tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
+        )
+        with self.assertRaisesRegex(ValueError, "Mixed Partial reduce types"):
+            redistribute_local_tensor(tensor, current_spec, target_spec)
 
 
 if __name__ == "__main__":
