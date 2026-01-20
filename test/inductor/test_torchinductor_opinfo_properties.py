@@ -405,14 +405,12 @@ BATCH_INVARIANCE_XFAILS = {
     },
     "inductor_default": {
         "matmul": {ALL},
-        "bmm": {fp32},
         "nn.functional.linear": {ALL},
         "div": {fp32},
         "pow": {fp32},
     },
     "inductor_numerics": {
         "matmul": {ALL},
-        "bmm": {fp32},
         "nn.functional.linear": {ALL},
         "pow": {fp32},
     },
