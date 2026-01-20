@@ -1146,7 +1146,6 @@ class InstructionTranslatorBase(
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    current_comprehension_speculation: Optional[SpeculationEntry]
     dispatch_table: list[Any]
     exn_vt_stack: ExceptionStack
     exec_recorder: Optional[ExecutionRecorder]
@@ -1359,22 +1358,6 @@ class InstructionTranslatorBase(
         except (ReturnValueOp, YieldValueOp):
             return False
         except (Unsupported, StepUnsupported) as e:
-            # Check if we're in a comprehension - if so, fail the comprehension speculation
-            has_comp_speculation = (
-                hasattr(self, "current_comprehension_speculation")
-                and self.current_comprehension_speculation is not None
-            )
-            log.debug(
-                "step() caught exception, has_comprehension_speculation=%s, exception=%s",
-                has_comp_speculation,
-                type(e).__name__,
-            )
-            if has_comp_speculation:
-                speculation = self.current_comprehension_speculation
-                self.current_comprehension_speculation = None
-                log.debug("Failing comprehension speculation and restarting analysis")
-                speculation.fail_and_restart_analysis(self.error_on_graph_break)
-
             # More restrictive condition than should_compile_partial_graph:
             # if this condition is true, then we SHOULD NOT attempt to find
             # a previous checkpoint to resume from and try to resume - we should
@@ -3365,7 +3348,7 @@ class InstructionTranslatorBase(
                 )
                 # Create speculation checkpoint for comprehension
                 if can_speculate:
-                    speculation = self.speculate_comprehension()
+                    speculation = self.speculate()
                     if speculation.failed(self):
                         log.debug(
                             "BUILD_LIST: speculation failed, handling comprehension graph break"
@@ -3375,7 +3358,7 @@ class InstructionTranslatorBase(
                         return
                     # Store speculation for later graph break handling
                     log.debug("BUILD_LIST: storing comprehension speculation")
-                    self.current_comprehension_speculation = speculation
+                    self.current_speculation = speculation
         # Normal BUILD_LIST handling
         items = self.popn(inst.argval)
         self.push(ListVariable(items, mutation_type=ValueMutationNew()))
@@ -3437,7 +3420,7 @@ class InstructionTranslatorBase(
                 )
                 # Create speculation checkpoint for comprehension
                 if can_speculate:
-                    speculation = self.speculate_comprehension()
+                    speculation = self.speculate()
                     if speculation.failed(self):
                         log.debug(
                             "BUILD_MAP: speculation failed, handling comprehension graph break"
@@ -3447,7 +3430,7 @@ class InstructionTranslatorBase(
                         return
                     # Store speculation for later graph break handling
                     log.debug("BUILD_MAP: storing comprehension speculation")
-                    self.current_comprehension_speculation = speculation
+                    self.current_speculation = speculation
         # Normal BUILD_MAP handling
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
@@ -4360,16 +4343,24 @@ class InstructionTranslatorBase(
         )
 
     def _is_comprehension_start(self) -> bool:
-        """Detect if we're at the start of a list/dict comprehension in 3.12+."""
+        """Detect if we're at the start of a list/dict comprehension in 3.12+.
+
+        In Python 3.12+, comprehensions are inlined with this bytecode pattern:
+            LOAD_FAST_AND_CLEAR i    # Save original value of iterator var
+            SWAP 2
+            BUILD_LIST 0             # <- Current instruction (or BUILD_MAP 0)
+            SWAP 2
+            FOR_ITER ...
+        """
         if sys.version_info < (3, 12):
             return False
-        # Check for LOAD_FAST_AND_CLEAR in preceding instructions
-        # This is the marker for comprehension variable saving in 3.12+
-        ip = self.instruction_pointer - 2  # -1 is current, check before that
-        while ip >= 0 and (self.instruction_pointer - 1 - ip) < 5:
-            if self.instructions[ip].opname == "LOAD_FAST_AND_CLEAR":
+        ip = self.instruction_pointer - 1  # Current instruction index
+        # Check for the exact pattern: LOAD_FAST_AND_CLEAR, SWAP, BUILD_LIST/BUILD_MAP
+        if ip >= 2:
+            prev1 = self.instructions[ip - 1]
+            prev2 = self.instructions[ip - 2]
+            if prev1.opname == "SWAP" and prev2.opname == "LOAD_FAST_AND_CLEAR":
                 return True
-            ip -= 1
         return False
 
     def _find_comprehension_end(self) -> int:
@@ -4397,15 +4388,6 @@ class InstructionTranslatorBase(
             else:
                 ip += 1
         return -1
-
-    def speculate_comprehension(self) -> SpeculationEntry:
-        """Create a speculation entry for comprehension graph break."""
-        return self.speculation_log.next(
-            self.f_code.co_filename,
-            self.lineno,
-            self.instruction_pointer - 1,
-            self.current_instruction,
-        )
 
     def _handle_comprehension_graph_break(
         self, inst: Instruction, is_dict: bool
@@ -4513,7 +4495,6 @@ class InstructionTranslatorBase(
         # 2. Add it to symbolic_locals so it's included in argnames
         # 3. Generate bytecode to load the local and append it to the frame values list
 
-        from .source import LocalSource
         from .variables.misc import UnknownVariable
 
         for var_name in needed_vars:
@@ -4802,7 +4783,6 @@ class InstructionTranslatorBase(
         self.is_tracing_resume_prologue = False
 
         self.current_speculation = None
-        self.current_comprehension_speculation = None
 
         self.strict_checks_fn = None
 
