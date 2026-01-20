@@ -102,15 +102,13 @@ void XPUGraph::capture_end() {
   c10::xpu::XPUCachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
   at::getHostAllocator(at::kXPU)->end_allocate_to_pool(mempool_id_);
 
-  TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
-
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {
     wholegraph_increments = generator_state->capture_epilogue();
   }
 
-  size_t numXPUGraphNodes = graph_->get_nodes().size();
-  if (numXPUGraphNodes == 0) {
+  size_t num_xpu_graph_nodes = graph_->get_nodes().size();
+  if (num_xpu_graph_nodes == 0) {
     TORCH_WARN(
         "The XPU Graph is empty. This usually means that the graph was ",
         "attempted to be captured on wrong device or stream.");
