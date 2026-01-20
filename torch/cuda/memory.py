@@ -621,7 +621,10 @@ def memory_snapshot(mempool_id=None, include_traces=True):
     if mempool_id is None:
         return torch._C._cuda_memorySnapshot((0, 0, include_traces))["segments"]
     else:
-        return torch._C._cuda_memorySnapshot((mempool_id[0], mempool_id[1], include_traces))["segments"]
+        return torch._C._cuda_memorySnapshot(
+            (mempool_id[0], mempool_id[1], include_traces)
+        )["segments"]
+
 
 def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
     r"""Return a human-readable printout of the current memory allocator statistics for a given device.

@@ -717,11 +717,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   c10::cuda::MempoolId_t mempool_id = {0, 0};
   bool include_traces = true;
-  
+
   if (arg && arg != Py_None) {
     TORCH_CHECK(PyTuple_Check(arg), "Expected tuple or None");
     Py_ssize_t size = PyTuple_Size(arg);
-    
+
     if (size == 2) {
       // Legacy format: (int, int) - mempool_id only
       auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));

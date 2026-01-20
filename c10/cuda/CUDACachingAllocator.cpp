@@ -4150,9 +4150,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[block->device]->recordStream(block, stream);
   }
 
-  SnapshotInfo snapshot(
-      MempoolId_t mempool_id,
-      bool include_traces) override {
+  SnapshotInfo snapshot(MempoolId_t mempool_id, bool include_traces) override {
     SnapshotInfo result;
 
     if (include_traces) {

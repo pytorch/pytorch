@@ -6326,16 +6326,16 @@ class TestMemPool(TestCase):
     def test_snapshot_include_traces(self):
         """Test that snapshot() include_traces parameter works correctly"""
         import time
-         
+
         torch.cuda.empty_cache()
         torch.cuda.memory._record_memory_history()
-        
+
         pool = torch.cuda.MemPool()
-        
+
         # Generate trace entries
         with torch.cuda.use_mem_pool(pool):
             tensors = []
-            for i in range(100000):
+            for i in range(1000):
                 tensors.append(torch.randn(1024, device="cuda"))
             del tensors
 
@@ -6347,11 +6347,17 @@ class TestMemPool(TestCase):
 
         # Measure mempool snapshot without traces
         for _ in range(NUM_RUNS):
+            # warmup
+            snapshot = pool.snapshot(include_traces=False)
+        for _ in range(NUM_RUNS):
             start = time.perf_counter()
             snapshot = pool.snapshot(include_traces=False)
             times_pool_notrace.append((time.perf_counter() - start) * 1000)
 
         # Measure global snapshot without traces
+        for _ in range(NUM_RUNS):
+            # warmup
+            snapshot = torch.cuda.memory_snapshot(include_traces=False)
         for _ in range(NUM_RUNS):
             start = time.perf_counter()
             snapshot = torch.cuda.memory_snapshot(include_traces=False)
@@ -6359,28 +6365,76 @@ class TestMemPool(TestCase):
 
         # Measure mempool snapshot with traces
         for _ in range(NUM_RUNS):
+            # warmup
+            snapshot = pool.snapshot()
+        for _ in range(NUM_RUNS):
             start = time.perf_counter()
             snapshot = pool.snapshot()
             times_pool_full.append((time.perf_counter() - start) * 1000)
-                
+
         # Measure global snapshot with traces
+        for _ in range(NUM_RUNS):
+            # warmup
+            snapshot = torch.cuda.memory_snapshot()
         for _ in range(NUM_RUNS):
             start = time.perf_counter()
             snapshot = torch.cuda.memory_snapshot()
             times_global_full.append((time.perf_counter() - start) * 1000)
-                    
+
         self.assertTrue(len(snapshot) > 0)
-        
-        print(f"Mempool with traces:    {sum(times_pool_full)/NUM_RUNS:.1f} ms")
-        print(f"Mempool without traces: {sum(times_pool_notrace)/NUM_RUNS:.1f} ms")
-        print(f"Global with traces:     {sum(times_global_full)/NUM_RUNS:.1f} ms")
-        print(f"Global without traces:  {sum(times_global_notrace)/NUM_RUNS:.1f} ms")
+
+        print(f"Mempool with traces:    {sum(times_pool_full) / NUM_RUNS:.1f} ms")
+        print(f"Mempool without traces: {sum(times_pool_notrace) / NUM_RUNS:.1f} ms")
+        print(f"Global with traces:     {sum(times_global_full) / NUM_RUNS:.1f} ms")
+        print(f"Global without traces:  {sum(times_global_notrace) / NUM_RUNS:.1f} ms")
         print()
-        print(f"Mempool speedup: {sum(times_pool_full)/sum(times_pool_notrace):.1f}x")
-        print(f"Global speedup: {sum(times_global_full)/sum(times_global_notrace):.1f}x")
-        
+        print(f"Mempool speedup: {sum(times_pool_full) / sum(times_pool_notrace):.1f}x")
+        print(
+            f"Global speedup: {sum(times_global_full) / sum(times_global_notrace):.1f}x"
+        )
+
         torch.cuda.memory._record_memory_history(enabled=None)
 
+    def test_snapshot_include_traces_correctness(self):
+        """Test that snapshot with include_traces=False still returns correct memory state"""
+        torch.cuda.empty_cache()
+
+        tensor_size = 1024 * 1024
+        dtype = torch.uint8
+        t1 = torch.ones(tensor_size, device="cuda", dtype=dtype)
+        t2 = torch.ones(tensor_size, device="cuda", dtype=dtype)
+        t3 = torch.ones(tensor_size, device="cuda", dtype=dtype)
+
+        snapshot_with_traces = torch.cuda.memory_snapshot(include_traces=True)
+        snapshot_without_traces = torch.cuda.memory_snapshot(include_traces=False)
+
+        # Both should have segment information
+        self.assertTrue(
+            len(snapshot_with_traces) > 0, "Snapshot with traces should have segments"
+        )
+        self.assertTrue(
+            len(snapshot_without_traces) > 0,
+            "Snapshot without traces should have segments",
+        )
+
+        # Count total allocated memory in each snapshot
+        def get_total_allocated(segments):
+            total = 0
+            for segment in segments:
+                for block in segment.get("blocks", []):
+                    if block.get("state") == "active_allocated":
+                        total += block.get("size", 0)
+            return total
+
+        allocated_with_traces = get_total_allocated(snapshot_with_traces)
+        allocated_without_traces = get_total_allocated(snapshot_without_traces)
+
+        # Allocated memory should match between both snapshots
+        self.assertEqual(
+            allocated_with_traces,
+            allocated_without_traces,
+            "Allocated memory should be the same with or without traces",
+        )
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
