@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import torch
-from torch.autograd.graph import GradientEdge, Node
+from torch.autograd.graph import GradientEdge, make_gradient_edge, Node
 from torch.nn import Parameter
 
 from ._debug import map_debug_info
@@ -96,10 +96,8 @@ def get_param_groups(
 
     The returned list of parameter groups is a list of dictionaries, where each
     dictionary contains the following keys:
-    - "params": a set of parameters
-    - "intermediates": a set of intermediates
-
-    The returned list of parameter groups is a list of dictionaries,
+    - "params": a list of GradientEdges for parameters
+    - "intermediates": a list of GradientEdges for intermediates
     """
     # reverse graph that starts with inputs, and goes up to the dOutput or the loss,
     # but omits weights and any subgraphs connecting weights to this closure
@@ -127,11 +125,17 @@ def get_param_groups(
     # Sanity check: union of all param_groups params should be equal to all params
     union_params: set[Node] = set()
     seen_ids: set[int] = set()
-    unique_param_groups = []
+    unique_param_groups: list[dict[str, Any]] = []
     for param_group in param_groups.values():
         if id(param_group) not in seen_ids:
             seen_ids.add(id(param_group))
-            unique_param_groups.append(param_group)
+            # Convert Node sets to GradientEdge lists with ownership tokens.
+            # This must happen now (before stage_outputs are detached) to keep
+            # the underlying C++ nodes alive for use in stage_backward_weight.
+            unique_param_groups.append({
+                "params": [make_gradient_edge(node) for node in param_group["params"]],
+                "intermediates": [make_gradient_edge(node) for node in param_group["intermediates"]],
+            })
             union_params = union_params.union(param_group["params"])
 
     # The assert will only be true if the input tensor requires gradients,
@@ -173,7 +177,7 @@ def stage_backward_input(
 
     handles = []
     for param_group in param_groups:
-        for i, intermediate in enumerate(param_group["intermediates"]):
+        for i, intermediate_edge in enumerate(param_group["intermediates"]):
 
             def get_hook(param_group, i):
                 def hook(grad_inputs):
@@ -187,7 +191,7 @@ def stage_backward_input(
 
             # These are always "split" nodes that we need to recompute, so
             # save their inputs.
-            handle = intermediate.register_prehook(get_hook(param_group, i))
+            handle = intermediate_edge.node.register_prehook(get_hook(param_group, i))
             handles.append(handle)
 
     if output_grads is None:
@@ -235,16 +239,16 @@ def stage_backward_weight(
         weight_grads.append(weight.grad)
 
     for param_group in param_groups:
-        valid_edges = []
+        valid_edges: list[GradientEdge] = []
         valid_grad_outputs: list[torch.Tensor] = []
 
-        for grads_tuple, intermediate in zip(
+        for grads_tuple, intermediate_edge in zip(
             param_group["grads"], param_group["intermediates"]
         ):
             non_none_grads = [g for g in grads_tuple if g is not None]
             if non_none_grads:
                 summed_grad = sum(non_none_grads)
-                valid_edges.append(GradientEdge(intermediate, 0))
+                valid_edges.append(intermediate_edge)
                 # pyrefly: ignore [bad-argument-type]
                 valid_grad_outputs.append(summed_grad)
 
@@ -256,8 +260,7 @@ def stage_backward_weight(
         del param_group["intermediates"]
 
         if valid_edges:  # Only call autograd.grad if we have valid gradients
-            # [NEW!] Able to pass a GradientEdge to autograd.grad as output
-            weights_edges = tuple(GradientEdge(w, 0) for w in param_group["params"])
+            weights_edges = tuple(param_group["params"])
             dweights = torch.autograd.grad(
                 valid_edges,
                 weights_edges,
@@ -268,8 +271,8 @@ def stage_backward_weight(
             # release grad memory early after use
             del param_group["grads"]
 
-            for grad_acc, dw in zip(param_group["params"], dweights):
-                weight, index = grad_acc_to_weight[grad_acc]
+            for param_edge, dw in zip(param_group["params"], dweights):
+                weight, index = grad_acc_to_weight[param_edge.node]
                 if weight.grad is None:
                     weight.grad = dw
                 else:

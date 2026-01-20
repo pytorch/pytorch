@@ -1237,6 +1237,57 @@ class TestAutograd(TestCase):
         del out
         torch.autograd.backward(edge)
 
+    def test_create_ownership_token(self):
+        import weakref
+
+        def inner_scope():
+            class MyFunc(Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO
+
+            inp = torch.rand(1, requires_grad=True)
+            out = MyFunc.apply(inp)
+            grad_fn = out.grad_fn
+
+            # Store something in metadata to track if cdata stays alive
+            class Marker:
+                pass
+
+            marker = Marker()
+            marker_ref = weakref.ref(marker)
+            grad_fn.metadata["marker"] = marker
+
+            # Create ownership token - this keeps the C++ PyNode alive
+            token = torch._C._autograd._create_ownership_token(grad_fn)
+
+            return token, grad_fn, marker_ref
+
+        token, grad_fn, marker_ref = inner_scope()
+
+        # Token keeps cdata alive, so we can still access metadata
+        # and marker should still be alive (held by metadata dict)
+        self.assertIsNotNone(marker_ref())
+        self.assertIsNotNone(grad_fn.metadata.get("marker"))
+
+        # Delete the token - cdata can now be freed
+        del token
+
+        # Now cdata should be gone, and marker with it
+        self.assertIsNone(marker_ref())
+
+        # Accessing metadata on a dead grad_fn should raise
+        with self.assertRaisesRegex(
+            RuntimeError, "underlying PyNode has already been deallocated"
+        ):
+            grad_fn.metadata
+
+
+
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init

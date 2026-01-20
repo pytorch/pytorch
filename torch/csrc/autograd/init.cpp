@@ -454,6 +454,36 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
   m.def("_clear_callbacks", []() { at::clearCallbacks(); });
   m.def(
+      "_create_ownership_token",
+      [](py::handle grad_fn) -> py::object {
+        if (!THPFunction_Check(grad_fn.ptr())) {
+          return py::none();
+        }
+
+        auto* thp_fn = (THPFunction*)grad_fn.ptr();
+        auto cdata = thp_fn->cdata.lock();
+
+        TORCH_CHECK(
+            cdata,
+            "Cannot create ownership token: the underlying PyNode has already been deallocated");
+
+        // Use capsule to own the shared_ptr - destructor runs when Python GCs it
+        return py::capsule(
+            new std::shared_ptr<torch::autograd::PyNode>(std::move(cdata)),
+            [](void* ptr) {
+              delete static_cast<std::shared_ptr<torch::autograd::PyNode>*>(ptr);
+            });
+      },
+      py::arg("grad_fn"),
+      R"(Create an ownership token for a grad_fn that keeps its cdata alive.
+
+Args:
+    grad_fn: The grad_fn (autograd.Function) to create an ownership token for.
+
+Returns:
+    A capsule object that keeps the underlying C++ Node alive.
+)");
+  m.def(
       "_saved_tensors_hooks_is_enabled",
       at::SavedTensorDefaultHooks::is_enabled);
   m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
