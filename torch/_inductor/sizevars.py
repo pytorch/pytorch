@@ -705,6 +705,10 @@ class SizeVarAllocator:
         stride of -10 because the index wraps around after the first element
 
         """
+        # Replace PallasStride markers with their stride values
+        from .ir import PallasViewTracker
+        index = PallasViewTracker.strip_markers(index)
+
         strides = []
         index = self.simplify(index)
         # remove any offset
@@ -940,6 +944,10 @@ class SizeVarAllocator:
 
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
+        # Replace PallasStride markers with their stride values
+        from .ir import PallasViewTracker
+
+        index = PallasViewTracker.strip_markers(index)
         index = self.simplify(index)
         return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
 

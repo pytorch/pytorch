@@ -1990,6 +1990,8 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         dtype: Optional[torch.dtype] = None,
         shape: BlockShapeType = None,
     ) -> CSEVariableType:
+        from ..ir import PallasViewTracker  # Local import to avoid circular dependency
+
         if isinstance(expr, OpsValue):
             expr = expr.value
 
@@ -2000,6 +2002,8 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
             expr.bounds = expr.bounds.tighten(bounds)
             expr.use_count += 1
+            # PALLAS: Propagate view_id for CSEVariable inputs used in index context
+            PallasViewTracker.propagate_view_id_to_var(expr, overwrite=False)
             return cast(CSEVariableType, expr)
         elif isinstance(expr, IndentedBuffer):
             cache_key = expr.getvalue()
@@ -2016,6 +2020,8 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         if not var:
             var = self.newvar(bounds, dtype, shape)
             self.put(cache_key, var)
+            # PALLAS: Propagate index_source_view_id from context if set
+            PallasViewTracker.propagate_view_id_to_var(var)
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
@@ -2053,6 +2059,8 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
         else:
             var.bounds = var.bounds.tighten(bounds)
             var.use_count += 1
+            # PALLAS: Propagate view_id for cached variables used in index context
+            PallasViewTracker.propagate_view_id_to_var(var, overwrite=False)
 
         return var
 
@@ -2603,16 +2611,44 @@ class CSEProxy(DefaultHandler):
         if name == "masked" and backend == "triton":
             output_dtype = value.dtype
             output_shape = value.shape
+        elif name == "masked" and backend == "pallas":
+            # For Pallas, compute shape from iteration space
+            # masked returns jnp.where(mask, body_result, other) which has iteration space shape
+            dtype_op = getattr(dtype_handler, name)
+            output_dtype = dtype_op(*args, **kwargs)
+            numel = V.kernel._get_numel()
+            rnumel = V.kernel._get_rnumel()
+            if rnumel > 1:
+                if V.kernel.inside_reduction:
+                    output_shape = (numel, rnumel)
+                else:
+                    output_shape = (numel, 1)
+            else:
+                output_shape = (numel,)
         elif name == "masked" and backend == "cpp":
             output_dtype = V.interpreter.current_node.meta.get(
                 OptimizationContext.key, None
             ).dtype
             # TODO: fix me
             output_shape = None
-        elif backend in ("triton", "cpp", "mps"):
+        elif backend in ("triton", "cpp", "mps", "pallas"):
             dtype_op = getattr(dtype_handler, name)
             output_dtype = dtype_op(*args, **kwargs)
             output_shape = shape_op(*args, **kwargs)
+
+            # PALLAS: index_expr returns the iteration space shape, not None
+            # This enables proper shape propagation through operations that use index expressions.
+            if backend == "pallas" and name == "index_expr" and output_shape is None:
+                # Get iteration space shape from kernel
+                numel = V.kernel._get_numel()
+                rnumel = V.kernel._get_rnumel()
+                if rnumel > 1:
+                    if V.kernel.inside_reduction:
+                        output_shape = (numel, rnumel)
+                    else:
+                        output_shape = (numel, 1)
+                else:
+                    output_shape = (numel,)
 
         if backend in ("triton", "cpp"):
             # maybe there are some exceptions on mps?
@@ -2653,6 +2689,17 @@ class CSEProxy(DefaultHandler):
             )
 
             csevar.update_on_args(name, args, kwargs)
+
+            # PALLAS: Propagate index_source_view_id through arithmetic operations
+            # If any input arg has index_source_view_id, the output should inherit it
+            # This ensures operations like (index_tensor + 1) preserve index semantics
+            if backend == "pallas":
+                for arg in args:
+                    if isinstance(arg, CSEVariable):
+                        view_id = getattr(arg, 'index_source_view_id', None)
+                        if view_id is not None:
+                            csevar.index_source_view_id = view_id
+                            break
 
             if (
                 config.test_configs.runtime_triton_dtype_assert
@@ -2727,10 +2774,15 @@ class CSEProxy(DefaultHandler):
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
+        from ..ir import PallasViewTracker  # Local import to avoid circular dependency
+
         if isinstance(size, int):
             size = sympy.Integer(size)
         assert isinstance(size, sympy.Expr), (type(size), size)
         # Skip CSE since this doesn't return an expression
+
+        # PALLAS: Propagate view_id from context if var doesn't have one yet
+        PallasViewTracker.propagate_view_id_to_var(var, overwrite=False)
 
         if var.bounds.lower < 0:
             if wrap_neg:
@@ -2757,6 +2809,9 @@ class CSEProxy(DefaultHandler):
                     pos = var.bounds & ValueRanges(0, int_oo)
                     new_bounds = new_bounds | pos
 
+            # Save attributes from old var before creating new one
+            old_index_source_view_id = getattr(var, 'index_source_view_id', None)
+
             var = self.kernel.cse.generate(
                 self.kernel.compute,
                 stm,
@@ -2765,7 +2820,22 @@ class CSEProxy(DefaultHandler):
                 shape=var.shape,
             )
 
+            # Propagate index_source_view_id for Pallas gather shape tracking
+            if old_index_source_view_id is not None:
+                var.index_source_view_id = old_index_source_view_id
+
         sympy_var = self.parent_handler.indirect_indexing(var, size, check)
+
+        # PALLAS: Track mapping from sympy symbol name to view_id for explicit tracking
+        # This enables _load_gather to look up indexed_dim via view_id without stride matching
+        view_id = getattr(var, 'index_source_view_id', None)
+        if view_id is not None and hasattr(self.kernel, '_index_source_vars'):
+            sympy_var_name = str(sympy_var)
+            # Store the mapping: sympy_symbol_name -> {view_id, ...}
+            if sympy_var_name not in self.kernel._index_source_vars:
+                self.kernel._index_source_vars[sympy_var_name] = {}
+            self.kernel._index_source_vars[sympy_var_name]["view_id"] = view_id
+
         if generate_assert(check):
             assert_lower = not (var.bounds.lower >= 0)
             # value ranges cannot x < s when x and s are symbols
