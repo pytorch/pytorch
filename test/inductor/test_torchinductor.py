@@ -7705,6 +7705,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([2, 4, 37, 38]),))
 
+    def test_upsample_nearest2d_neg(self):
+        def fn(a):
+            return (
+                aten.upsample_nearest2d(
+                    a, output_size=[37, 38], scales_h=-1, scales_w=-1
+                ),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 37, 38]),))
+
     def test_upsample_nearest3d(self):
         def fn(a):
             return (
