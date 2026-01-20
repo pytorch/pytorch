@@ -1880,9 +1880,6 @@ class CommonTemplate:
             elif is_mps_backend(self.device):
                 _, codes = run_and_get_code(fn_opt, *inps)
                 # MPS generates Metal shader code
-                import pdb
-
-                pdb.set_trace()
                 code = "\n".join(codes)
                 # Check for error reporting in MPS kernels
                 self.assertTrue(("TORCH_REPORT_ERROR" in code) is has_assert)
