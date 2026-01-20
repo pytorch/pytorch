@@ -271,10 +271,15 @@ def get_kernel_launch() -> str:
 def clone_preserve_strides_offset(x, device=None):
     if not isinstance(x, torch.Tensor):
         return x
+    device = device or x.device
+    # For 0-element tensors, create a new tensor with correct strides directly
+    # since as_strided from an empty buffer can't preserve non-zero strides
+    if x.numel() == 0:
+        return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=device)
     buffer = torch.as_strided(
         x, (x.untyped_storage().size() // x.element_size(),), (1,), 0
     )
-    if not device:
+    if device == x.device:
         buffer = buffer.clone()
     else:
         buffer = buffer.to(device, copy=True)

@@ -1027,8 +1027,6 @@ inductor_skip_exact_stride = {
     "tensordot",
     "tril_indices",
     "triu_indices",
-    "unbind",
-    "unbind_copy",
 }
 
 # Custom replacements for assertEquals, in cases where a difference in value

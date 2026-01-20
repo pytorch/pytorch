@@ -2025,26 +2025,17 @@ def select(x, dim, idx):
         actual_index = idx
 
     if actual_index is not None:
-        if has_free_unbacked_symbols(idx):
-            # Inductor could generate incorrect views for tensors with unbacked symbols here;
-            # Squeeze operations are translated to views, resulting in incorrect strides.
-            # Additionally, we want to avoid accidental unbacked unsqueeze semantics. To resolve this,
-            # we use as_strided instead.
-            # Removing this branch will cause test_unbacked_select_index_with_check to fail.
+        # Use as_strided to preserve correct strides. Using slice_ + squeeze
+        # would lose stride information because squeeze calls view, which
+        # creates contiguous strides.
+        x.realize()
+        new_size = list(x.get_size())
+        new_stride = list(x.get_stride())
+        new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
 
-            # before accessing size, stride, and offset we need to realize.
-            x.realize()
-            new_size = x.get_size()
-            new_stride = x.get_stride()
-            new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
-
-            del new_size[dim]
-            del new_stride[dim]
-            return as_strided(x, new_size, new_stride, new_storage_offset)
-        else:
-            # no need to clamp, this function handles negative indexing itself
-            slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
-            return squeeze(slice_result, dim)
+        del new_size[dim]
+        del new_stride[dim]
+        return as_strided(x, new_size, new_stride, new_storage_offset)
 
     # Unbacked Semantics:
     # When the index idx is unbacked (e.g., u0), we compute the index dynamically
