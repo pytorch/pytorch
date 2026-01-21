@@ -335,16 +335,21 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 kwargs = kwargs or {}
                 return func(*args, **kwargs)
 
-        torch._dynamo.reset()
+        for inline in (True, False):
+            torch._dynamo.reset()
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def g(x):
-            return x.sin().cos()
+            with torch._dynamo.config.patch(inline_torch_dispatch_torch_compile=inline):
 
-        x = torch.randn(3)
-        with PassthroughMode():
-            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "fullgraph=True"):
-                g(x)
+                @torch.compile(backend="eager", fullgraph=True)
+                def g(x):
+                    return x.sin().cos()
+
+                x = torch.randn(3)
+                with PassthroughMode():
+                    with self.assertRaisesRegex(
+                        torch._dynamo.exc.FullGraphCompileError, "fullgraph=True"
+                    ):
+                        g(x)
 
     def test_dynamo_inside_custom_op(self):
         cnt = torch._dynamo.testing.InductorAndRecordGraphs()
