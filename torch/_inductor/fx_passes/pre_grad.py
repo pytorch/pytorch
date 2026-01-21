@@ -319,7 +319,9 @@ def pre_grad_passes(
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
-            group_batch_fusion_passes(gm.graph, pre_grad=True)
+            GraphTransformObserver(gm, "group_batch_fusion_passes").apply_graph_pass(
+                lambda graph: group_batch_fusion_passes(graph, pre_grad=True)
+            )
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
                 if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
@@ -344,8 +346,12 @@ def pre_grad_passes(
                         ),
                     )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
-            efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
-            apply_gumbel_max_trick_pass.apply(gm.graph)
+            GraphTransformObserver(gm, "efficient_conv_bn_eval_pass").apply_graph_pass(
+                efficient_conv_bn_eval_pass.apply
+            )
+            GraphTransformObserver(gm, "apply_gumbel_max_trick_pass").apply_graph_pass(
+                apply_gumbel_max_trick_pass.apply
+            )
 
     if config.pre_grad_custom_pass is not None:
         GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(

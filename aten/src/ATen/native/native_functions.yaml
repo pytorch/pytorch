@@ -2317,6 +2317,7 @@
   dispatch:
     CPU: vdot
     CUDA: vdot_cuda
+    MPS: vdot_mps
 
 - func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -13646,7 +13647,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_erfcx_out
+    CPU, CUDA, MPS: special_erfcx_out
   tags: pointwise
 
 - func: special_erfinv(Tensor self) -> Tensor
