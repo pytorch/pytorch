@@ -78,7 +78,7 @@ def flatten_unflatten_for_dynamic_shapes(
 
 
 def infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]:
-    """Returns the list dynamic dimensions given a list of shapes
+    """Returns the list of dynamic dimensions given a list of shapes
     corresponding to the same tensor.
 
     Args:
@@ -109,7 +109,7 @@ class InputObserverInfo:
         self.flat_inputs: list[list[torch.Tensor | None]] = []
         # pyrefly: ignore
         self.outputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
-        self.flat_outputs: list[torch.Tensor | list[torch.Tensor]] = []
+        self.flat_outputs: list[list[torch.Tensor]] = []
         self.signature = signature
 
         self._max_args: tuple[Any, torch.Tensor] | None = None
@@ -182,7 +182,7 @@ class InputObserverInfo:
                     if k in captured_inputs and captured_inputs[k] != len(ts):
                         raise RuntimeError(
                             f"Named argument {k!r} has {len(ts)} tensors "
-                            f"but previously got {captured_inputs[k]} tensors."
+                            f"but previously got {captured_inputs[k]} tensors. "
                             f"Inference is impossible in that case."
                         )
                     captured_inputs[k] = len(ts)
