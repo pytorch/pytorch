@@ -34,6 +34,7 @@
 #include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_put.h>
+#include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
 #include <ATen/ops/masked_scatter_native.h>
@@ -975,6 +976,166 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Scalar& source) {
   return self.index_fill_(dim, index, mps::wrapped_scalar_tensor_mps(source, self.device()));
+}
+
+TORCH_IMPL_FUNC(index_reduce_mps_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool include_input,
+ const Tensor& result) {
+  using namespace mps;
+
+  TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
+
+  MPSStream* stream = getCurrentMPSStream();
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  if (index.numel() == 0) {
+    return;
+  }
+
+  // Determine scatter mode based on reduce operation
+  MPSGraphScatterMode scatter_mode;
+  bool is_mean = false;
+  if (reduce == "prod") {
+    scatter_mode = MPSGraphScatterModeMul;
+  } else if (reduce == "mean") {
+    scatter_mode = MPSGraphScatterModeAdd;
+    is_mean = true;
+  } else if (reduce == "amax") {
+    scatter_mode = MPSGraphScatterModeMax;
+  } else if (reduce == "amin") {
+    scatter_mode = MPSGraphScatterModeMin;
+  } else {
+    TORCH_CHECK(false, "index_reduce(): unknown reduction operation: ", reduce);
+  }
+
+  // For determinism or complex types, fall back to serial implementation
+  bool use_deterministic = globalContext().deterministicAlgorithms();
+  use_deterministic |= source.scalar_type() == ScalarType::Long;
+  use_deterministic |= c10::isComplexType(source.scalar_type());
+
+  if (use_deterministic) {
+    // Fallback to CPU for unsupported types
+    auto cpu_result = self.to("cpu").index_reduce(dim, index.to("cpu"), source.to("cpu"), std::string(reduce), include_input);
+    result.copy_(cpu_result);
+    return;
+  }
+
+  auto casted_type = isFloatingType(source.scalar_type()) ? ScalarType::Float : ScalarType::Int;
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* indexTensor_ = nil;
+    MPSGraphTensor* sourceTensor_ = nil;
+    MPSGraphTensor* countTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  @autoreleasepool {
+    std::string key = "index_reduce_mps_out:" + getTensorsStringKey({self, index, source}) + ":" +
+        std::to_string(dim) + ":" + std::string(reduce) + ":" + std::to_string(include_input);
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
+      MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
+
+      MPSGraphTensor* castedInputTensor = inputTensor;
+      MPSGraphTensor* castedSourceTensor = sourceTensor;
+      if (source.scalar_type() != casted_type) {
+        castedInputTensor = castMPSTensor(mpsGraph, castedInputTensor, casted_type);
+        castedSourceTensor = castMPSTensor(mpsGraph, castedSourceTensor, casted_type);
+      }
+
+      MPSGraphTensor* outputTensor = nil;
+
+      if (!include_input) {
+        // Initialize result with identity value based on reduction type
+        float identity_value = 0.0f;
+        if (reduce == "prod") {
+          identity_value = 1.0f;
+        } else if (reduce == "amax") {
+          identity_value = -std::numeric_limits<float>::infinity();
+        } else if (reduce == "amin") {
+          identity_value = std::numeric_limits<float>::infinity();
+        }
+
+        // Create identity tensor with same shape as input
+        castedInputTensor = [mpsGraph constantWithScalar:identity_value
+                                                   shape:getMPSShape(self)
+                                                dataType:getMPSDataType(casted_type)];
+      }
+
+      // Perform the scatter reduction
+      outputTensor = [mpsGraph scatterWithDataTensor:castedInputTensor
+                                       updatesTensor:castedSourceTensor
+                                       indicesTensor:indexTensor
+                                                axis:dim
+                                                mode:scatter_mode
+                                                name:nil];
+
+      // For mean, we need to divide by the count of elements at each position
+      if (is_mean) {
+        // Create a ones tensor with the same shape as source
+        MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1.0f
+                                                            shape:getMPSShape(source)
+                                                         dataType:getMPSDataType(casted_type)];
+
+        // Initialize count tensor (either zeros or ones depending on include_input)
+        MPSGraphTensor* countInit = nil;
+        if (include_input) {
+          countInit = [mpsGraph constantWithScalar:1.0f
+                                             shape:getMPSShape(self)
+                                          dataType:getMPSDataType(casted_type)];
+        } else {
+          countInit = [mpsGraph constantWithScalar:0.0f
+                                             shape:getMPSShape(self)
+                                          dataType:getMPSDataType(casted_type)];
+        }
+
+        // Count elements at each position
+        MPSGraphTensor* countTensor = [mpsGraph scatterWithDataTensor:countInit
+                                                        updatesTensor:onesTensor
+                                                        indicesTensor:indexTensor
+                                                                 axis:dim
+                                                                 mode:MPSGraphScatterModeAdd
+                                                                 name:nil];
+
+        // Avoid division by zero - clamp count to minimum of 1
+        MPSGraphTensor* minCountTensor = [mpsGraph constantWithScalar:1.0f dataType:getMPSDataType(casted_type)];
+        countTensor = [mpsGraph maximumWithPrimaryTensor:countTensor
+                                         secondaryTensor:minCountTensor
+                                                    name:nil];
+
+        // Divide sum by count to get mean
+        outputTensor = [mpsGraph divisionWithPrimaryTensor:outputTensor
+                                           secondaryTensor:countTensor
+                                                      name:nil];
+      }
+
+      if (source.scalar_type() != casted_type) {
+        outputTensor = castMPSTensor(mpsGraph, outputTensor, source.scalar_type());
+      }
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->indexTensor_ = indexTensor;
+      newCachedGraph->sourceTensor_ = sourceTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
+    Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder, sourcePlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
 }
 
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
