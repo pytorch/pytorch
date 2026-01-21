@@ -15,6 +15,7 @@ __all__ = [
     "preferred_linalg_library",
     "preferred_blas_library",
     "preferred_rocm_fa_library",
+    "is_ck_sdpa_available",
     "cufft_plan_cache",
     "matmul",
     "SDPAParams",
@@ -384,6 +385,15 @@ def preferred_rocm_fa_library(
 SDPAParams.__module__ = "torch.backends.cuda"
 SDPAParams.__name__ = "SDPAParams"
 
+
+def is_ck_sdpa_available() -> bool:
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether composable_kernel may be used as the backend for
+    scaled-dot-product-attention.
+    """
+    return torch._C._is_ck_sdpa_available()
 
 def flash_sdp_enabled():
     r"""
