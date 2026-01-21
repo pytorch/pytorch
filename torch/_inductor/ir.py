@@ -8893,7 +8893,7 @@ class FallbackKernel(ExternKernelAlloc):
                         add_alias_if_graph_buffer(optional_tensor_arg)
             else:
                 assert library_utils.is_tensor_like_type(info.type)
-
+                
                 add_alias_if_graph_buffer(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
