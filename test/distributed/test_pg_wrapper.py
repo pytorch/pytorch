@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-import unittest
 import sys
+import unittest
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -20,15 +20,21 @@ from test_c10d_common import LOOPBACK
 from torch.testing._internal.common_distributed import (
     create_device,
     MultiProcessTestCase,
-    requires_gloo,
     requires_accelerator_dist_backend,
+    requires_gloo,
     skip_if_lt_x_gpu,
     with_dist_debug_levels,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN, TEST_XPU
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TEST_XPU,
+)
+
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = c10d.get_default_backend_for_device(device_type)
+
 
 class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
     def setUp(self):
@@ -49,7 +55,8 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
             # For CUDA, only assert on device type, not index
             if device_type in str(tensor.device):
                 self.assertTrue(
-                    device_type in err, f"Did not find {device_type} device in error {err}"
+                    device_type in err,
+                    f"Did not find {device_type} device in error {err}",
                 )
             else:
                 self.assertTrue(
