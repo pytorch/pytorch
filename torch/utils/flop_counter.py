@@ -22,6 +22,14 @@ _P = ParamSpec("_P")
 log = logging.getLogger(__name__)
 
 
+try:
+    from triton.runtime.jit import JITFunction as _JITFunction
+except ImportError:
+    if any(x is not None for x in [torch.version.cuda, torch.version.hip, torch.version.xpu]):
+        log.warning("triton not found; flop counting will not work for triton kernels")
+    _JITFunction = NoneType
+
+
 aten = torch.ops.aten
 
 def get_shape(i):
@@ -39,18 +47,13 @@ def shape_wrapper(f):
     return nf
 
 def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    try:
-        from triton.runtime.jit import JITFunction
-    except ImportError:
-        log.warning("triton not found; flop counting will not work for triton kernels")
-        JITFunction = NoneType
 
     def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
         def register(target) -> None:
-            if not (isinstance(target, (torch._ops.OpOverloadPacket, JITFunction))):
+            if not (isinstance(target, (torch._ops.OpOverloadPacket, _JITFunction))):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
                     f"OpOverloadPacket (i.e. torch.ops.mylib.foo), or JitFunction"
