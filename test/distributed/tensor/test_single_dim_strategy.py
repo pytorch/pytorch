@@ -30,10 +30,13 @@ from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _fill_single_dim_strategy_placeholders,
+    _get_num_tensor_inputs,
+    _get_unique_placements,
     _insert_single_dim_replication_strategy,
     _ShardingPlaceholder,
     register_single_dim_strategy,
 )
+from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -259,7 +262,8 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            (Partial("sum"), Partial("sum"), Partial("sum")),
+            # P(avg) -> P(sum) is currently not supported, but could be in principle
+            (Partial("sum"), Partial("sum"), Replicate()),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
@@ -534,17 +538,19 @@ class TestExpandPlaceholder(TestCase):
         # Test Case 2: (_Strided)Shard-only inputs - only (_Strided)Shard expansion
         # Expected: 3 strategies with placeholders filled using (_Strided)Shard + implicit replicate
         expected_shard = [
+            [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
             [Shard(0), Shard(0), Replicate()],
             [Shard(1), Replicate(), Shard(1)],
-            [Replicate(), Replicate(), Replicate()],
         ]
 
         expanded_shard = _fill_single_dim_strategy_placeholders(
             {Replicate(), Shard(0), Shard(1)}, single_dim_strategies
         )
+        self.assertEqual(expanded_shard, expected_shard)
 
         expected_strided_shard = [
+            [Replicate(), Replicate(), Replicate()],
             [
                 Partial(),
                 _StridedShard(1, split_factor=2),
@@ -575,7 +581,6 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(dim=1, split_factor=4),
             ],
-            [Replicate(), Replicate(), Replicate()],
         ]
         expanded_strided_shard = _fill_single_dim_strategy_placeholders(
             {
@@ -586,11 +591,10 @@ class TestExpandPlaceholder(TestCase):
         )
         self.assertEqual(expanded_strided_shard, expected_strided_shard)
 
-        self.assertEqual(expanded_shard, expected_shard)
-
         # Test Case 3: Mixed Shard and _StridedShard inputs - both types of expansion
         # Expected: 3 strategies * 2 shard types (Shard and _StridedShard) + implicit replicate
         expected_mixed = [
+            [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
             [
                 Partial(),
@@ -609,7 +613,6 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(1, split_factor=2),
             ],
-            [Replicate(), Replicate(), Replicate()],
         ]
 
         expanded_mixed = _fill_single_dim_strategy_placeholders(
@@ -647,6 +650,119 @@ class TestExpandPlaceholder(TestCase):
             torch.ops.aten.add.Tensor, (OpStrategy([OpSpec(spec3)]),), {}
         )
         self.assertNotEqual(hash(schema1), hash(schema3))
+
+    def test_get_unique_placements_includes_kwargs(self):
+        """Test that _get_unique_placements includes placements from kwargs (e.g., out tensor).
+
+        This is a regression test for the fix where out-variant ops like torch.mul(..., out=...)
+        were failing because the 'out' kwarg tensor placements weren't being counted.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Create specs with different placements for args and kwargs
+        arg_spec = DTensorSpec(mesh, (Shard(0),), meta)
+        kwarg_spec = DTensorSpec(mesh, (Shard(1),), meta)
+
+        # Create OpSchema with both args and kwargs tensors
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(arg_spec)]),
+                OpStrategy([OpSpec(arg_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(kwarg_spec)])},
+        )
+
+        # _get_unique_placements should include both arg and kwarg placements
+        unique_placements = _get_unique_placements(op_schema)
+        self.assertIn(Shard(0), unique_placements)
+        self.assertIn(Shard(1), unique_placements)
+
+    def test_get_num_tensor_inputs_includes_kwargs(self):
+        """Test that _get_num_tensor_inputs counts tensor kwargs (e.g., out tensor).
+
+        This is a regression test for the fix where out-variant ops like torch.mul(..., out=...)
+        were failing with 'input_specs(N) != strategies(M)' because the 'out' kwarg wasn't counted.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+        spec = DTensorSpec(mesh, (Shard(0),), meta)
+
+        # Create OpSchema with 2 arg tensors and 1 kwarg tensor
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(spec)]),
+                OpStrategy([OpSpec(spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(spec)])},
+        )
+
+        # _get_num_tensor_inputs should count both args and kwargs tensors
+        num_inputs = _get_num_tensor_inputs(op_schema)
+        self.assertEqual(num_inputs, 3)  # 2 args + 1 out kwarg
+
+    def test_expand_strategy_handles_symbolic_shapes(self):
+        """Test that _create_expanded_strategy handles symbolic shapes (SymInts).
+        When using dynamic shapes with torch.compile, TensorMeta may contain SymInts
+        which are not hashable. This test verifies that the caching logic gracefully
+        falls back to uncached execution instead of raising TypeError.
+        """
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymNode
+
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+
+        # Create a ShapeEnv and symbolic size
+        shape_env = ShapeEnv()
+        from torch._dynamo.source import ConstantSource
+
+        sym_size = 8
+        symbol = shape_env.create_symbol(
+            sym_size, source=ConstantSource("test_sym_size")
+        )
+        sym_int = torch.SymInt(SymNode(symbol, shape_env, int, hint=sym_size))
+
+        # Create TensorMeta with symbolic shape - this contains unhashable SymInts
+        symbolic_shape = torch.Size([sym_int, 4])
+        symbolic_meta = TensorMeta(symbolic_shape, (4, 1), torch.float32)
+
+        # Verify that the symbolic TensorMeta is indeed unhashable
+        with self.assertRaises(TypeError):
+            hash(symbolic_meta)
+
+        # Create a regular (hashable) TensorMeta and spec
+        regular_meta = TensorMeta(torch.Size([8, 4]), (4, 1), torch.float32)
+        regular_spec = DTensorSpec(mesh, (Shard(0),), regular_meta)
+
+        # Create OpSchema with regular (hashable) specs but symbolic output_tensor_meta
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.Tensor,
+            args_schema=(
+                OpStrategy([OpSpec(regular_spec)]),
+                OpStrategy([OpSpec(regular_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        single_mesh_dim_strategies = [
+            [Shard(0), Shard(0), Shard(0)],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+
+        # This should work without raising TypeError because the caching
+        # gracefully falls back to uncached execution when output_tensor_meta
+        # contains unhashable SymInts
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=symbolic_meta,
+        )
+
+        # Verify result is valid
+        self.assertIsInstance(result, OpStrategy)
+        self.assertGreater(len(result.strategies), 0)
 
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
