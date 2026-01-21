@@ -146,9 +146,11 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         subgraph_decomp_table = _extract_nested_region_config(subgraph)
-        gm: torch.fx.GraphModule = materialize_as_graph(
-            subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
-        )
+        # See NB: annotation in invoke_subgraph
+        with torch.fx.traceback.reset_current_scope_annotation():
+            gm: torch.fx.GraphModule = materialize_as_graph(
+                subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
+            )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)
@@ -892,9 +894,11 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
 
         with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
             subgraph_decomp_table = _extract_nested_region_config(subgraph)
-            graph = reenter_make_fx(
-                subgraph, subgraph_decomp_table=subgraph_decomp_table
-            )(*operands)
+            # See NB: annotation in invoke_subgraph
+            with torch.fx.traceback.reset_current_scope_annotation():
+                graph = reenter_make_fx(
+                    subgraph, subgraph_decomp_table=subgraph_decomp_table
+                )(*operands)
 
         from torch._guards import detect_fake_mode
 

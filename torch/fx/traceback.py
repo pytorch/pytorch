@@ -32,6 +32,7 @@ __all__ = [
     "get_graph_provenance_json",
     "set_current_replay_node",
     "get_current_replay_node",
+    "reset_current_scope_annotation",
 ]
 
 current_meta: dict[str, Any] = {}
@@ -386,6 +387,21 @@ def reset_grad_fn_seq_nr():
         else:
             current_meta["in_grad_fn"] = current_level - 1
             current_meta["grad_fn_seq_nr"] = current_meta["grad_fn_seq_nr"][:-1]
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def reset_current_scope_annotation():
+    global current_meta
+    saved_scope = current_meta.get(SCOPE_ANNOTATION_KEY)
+    try:
+        if SCOPE_ANNOTATION_KEY in current_meta:
+            del current_meta[SCOPE_ANNOTATION_KEY]
+
+        yield
+    finally:
+        if saved_scope:
+            current_meta[SCOPE_ANNOTATION_KEY] = saved_scope
+
 
 
 @compatibility(is_backward_compatible=False)
