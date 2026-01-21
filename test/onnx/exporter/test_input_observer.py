@@ -4,7 +4,7 @@ import itertools
 
 import torch
 from torch.onnx import InputObserver
-from torch.onnx._internal._input_observer import infer_dynamic_dimensions
+from torch.onnx._internal.exporter._input_observer import infer_dynamic_dimensions
 from torch.testing._internal import common_utils
 
 
