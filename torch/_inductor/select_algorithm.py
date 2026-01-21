@@ -802,6 +802,8 @@ class TritonTemplateKernel(TritonKernel):
         """
         Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
+        Automatically wraps with tl.full([], ..., dtype=INDEX_DTYPE) when
+        int64 indexing is needed to prevent overflow in size arithmetic.
         """
         assert isinstance(index, int)
         if name is None:
@@ -809,7 +811,10 @@ class TritonTemplateKernel(TritonKernel):
         else:
             assert isinstance(name, str)
             val = self.named_input_nodes[name].get_size()[index]
-        return texpr(self.rename_indexing(val))
+        result = texpr(self.rename_indexing(val))
+        if self.index_dtype == "tl.int64":
+            return f"tl.full([], {result}, dtype=INDEX_DTYPE)"
+        return result
 
     def stride(self, name, index=None):
         """
