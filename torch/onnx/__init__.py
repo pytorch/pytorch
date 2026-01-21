@@ -10,10 +10,10 @@ __all__ = [
     "export",
     "is_in_onnx_export",
     # Base error
-    "InputObserver",
     "OnnxExporterError",
     "ONNXProgram",
     "ExportableModule",
+    "InputObserver",
 ]
 
 from typing import Any, TYPE_CHECKING

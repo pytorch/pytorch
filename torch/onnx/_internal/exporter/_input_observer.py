@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+
+__all__ = ["InputObserver"]
+
 import contextlib
 import inspect
-from typing import Any
 from collections.abc import Callable, Sequence
+from typing import Any
 
 import torch
 

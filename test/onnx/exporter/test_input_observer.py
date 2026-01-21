@@ -453,7 +453,6 @@ class TestInputObserver(common_utils.TestCase):
         self.assertEqual(expected, observer.infer_dynamic_shapes())
 
     def test_io_captured_custom_class(self):
-
         class TestCustomClass:
             def __init__(self, keys, values):
                 self.data = list(zip(keys, values))
