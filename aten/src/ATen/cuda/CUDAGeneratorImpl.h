@@ -4,7 +4,10 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/PhiloxCudaState.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/util/flat_hash_map.h>
 #include <atomic>
+#include <mutex>
 #include <memory>
 #include <unordered_set>
 namespace at {
@@ -96,30 +99,30 @@ struct CUDAGraph;
 struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   uint64_t seed_;
   uint64_t philox_offset_per_thread_;
-  uint64_t offset_intragraph_;
-  bool capturing_{};
-  std::unordered_set<cuda::CUDAGraph*> registered_graphs_;
-  at::TensorBase seed_extragraph_;
-  at::TensorBase offset_extragraph_;
+  // std::unordered_set<cuda::CUDAGraph*> registered_graphs_;
+  // at::TensorBase seed_extragraph_;
+  // at::TensorBase offset_extragraph_;
 
   CUDAGeneratorState(
-      uint64_t seed = default_rng_seed_val,
-      uint64_t philox_offset_per_thread = 0,
-      uint64_t offset_intragraph = 0)
-      : seed_(seed),
-        philox_offset_per_thread_(philox_offset_per_thread),
-        offset_intragraph_(offset_intragraph) {}
+      uint64_t seed = default_rng_seed_val, uint64_t philox_offset_per_thread = 0)
+      : seed_(seed), philox_offset_per_thread_(philox_offset_per_thread) {}
 
   void increase(uint64_t increment);
 
-  void register_graph(cuda::CUDAGraph* graph);
-  void unregister_graph(cuda::CUDAGraph* graph);
+  c10::intrusive_ptr<CUDAGeneratorState> clone();
+};
 
-  void capture_prologue();
+struct CUDAGeneratorCaptureState : public c10::intrusive_ptr_target {
+  uint64_t offset_intragraph_{0};
+  // TODO: Do we need this? Yes.
+  at::TensorBase seed_extragraph_;
+  at::TensorBase offset_extragraph_;
+
+  void capture_prologue(const CUDAGeneratorState& base_state);
   // capture_epilogue returns the wholegraph_increment
   uint64_t capture_epilogue();
-  void replay_prologue(uint64_t wholegraph_increment);
-  c10::intrusive_ptr<CUDAGeneratorState> clone();
+  void replay_prologue(CUDAGeneratorState& base_state, uint64_t wholegraph_increment);
+  void increase(uint64_t increment);
 };
 
 struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
@@ -146,8 +149,15 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;
 
-  void register_graph(cuda::CUDAGraph* graph);
-  void unregister_graph(cuda::CUDAGraph* graph);
+  c10::intrusive_ptr<CUDAGeneratorState> get_state_object() const {
+    return state_;
+  }
+  c10::intrusive_ptr<CUDAGeneratorCaptureState> create_capture_state() const;
+  void record_capture_state(
+      CaptureId_t capture_id,
+      const c10::intrusive_ptr<CUDAGeneratorCaptureState>& capture_state);
+  uint64_t release_capture_state(CaptureId_t capture_id);
+  void clear_capture_state(CaptureId_t capture_id);
 
   // Generates a PhiloxCudaState with a specified increment, and increment
   // current state
@@ -168,6 +178,9 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
 
   c10::intrusive_ptr<CUDAGeneratorState> state_;
   std::atomic_flag no_reset_rnn_state_;
+  ska::flat_hash_map<CaptureId_t, c10::intrusive_ptr<CUDAGeneratorCaptureState>>
+      capture_states_;
+  mutable std::mutex capture_states_mutex_;
 };
 
 namespace cuda::detail {

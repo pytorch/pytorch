@@ -12,6 +12,7 @@ namespace at {
 struct Generator;
 struct CUDAGeneratorImpl;
 struct CUDAGeneratorState;
+struct CUDAGeneratorCaptureState;
 
 namespace cuda {
 
@@ -24,7 +25,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   ~CUDAGraph();
 
   // See Note [Explicit Registration of Generators to the CUDA Graph]
-  void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
   void capture_begin(
       MempoolId_t pool = {0, 0},
@@ -77,7 +77,12 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   // multiple generator states and their wholegraph_increments in this graph
   // that are managed by the CUDA Graph
-  ska::flat_hash_map<c10::intrusive_ptr<at::CUDAGeneratorState>, uint64_t>
+  struct CapturedGeneratorState {
+    c10::intrusive_ptr<at::CUDAGeneratorImpl> generator;
+    c10::intrusive_ptr<at::CUDAGeneratorCaptureState> capture_state;
+    uint64_t wholegraph_increment = 0;
+  };
+  ska::flat_hash_map<c10::intrusive_ptr<at::CUDAGeneratorState>, CapturedGeneratorState>
       captured_generator_states_;
 
   // Device where capture occurred. Right now, for simplicity, we require all ops

@@ -5,6 +5,7 @@
 #include <ATen/cuda/MemPool.h>
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/ScopeExit.h>
 
 #include <cstddef>
 
@@ -45,16 +46,25 @@ CUDAGraph::CUDAGraph(bool keep_graph)
     keep_graph_(keep_graph) {
 }
 
-void CUDAGraph::register_generator_state(
-    c10::intrusive_ptr<at::CUDAGeneratorState> state) {
-  captured_generator_states_[std::move(state)] = 0;
-}
-
 void CUDAGraph::register_generator_state(const at::Generator& generator) {
   c10::intrusive_ptr<CUDAGeneratorImpl> cuda_gen =
       dynamic_intrusive_pointer_cast<CUDAGeneratorImpl>(
           generator.getIntrusivePtr());
-  cuda_gen->register_graph(this);
+  auto state = cuda_gen->get_state_object();
+  if (captured_generator_states_.count(state)) {
+    // while registering the same generator twice could be disallowed,
+    // the existing behavior has been to allow it (see
+    // test_graphsafe_set_get_rng_state in test/test_cuda.py), so we
+    // retain that behavior here.
+    return;
+  }
+  // wholegraph_increment field is initialized in capture_end. 0 is
+  // used as a place holder
+
+  captured_generator_states_.emplace(
+      state,
+      CapturedGeneratorState{
+          cuda_gen, cuda_gen->create_capture_state(), 0});
 }
 
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
@@ -63,14 +73,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
               "To capture a new graph, create a new instance.");
 
   // default generator is always registered
-  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      std::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  gen->register_graph(this);
-
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->capture_prologue();
-  }
+  register_generator_state(cuda::detail::getDefaultCUDAGenerator());
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -121,6 +124,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
 
+  // why is this not being called?
+  for (auto&& [state, captured_state] : captured_generator_states_) {
+    captured_state.generator->record_capture_state(
+        capture_id_, captured_state.capture_state);
+  }
 }
 
 void CUDAGraph::capture_end() {
@@ -129,6 +137,12 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream.stream() == capture_stream_.stream(),
               "Capture must end on the same stream it began on.");
 
+  auto capture_state_cleanup = c10::make_scope_exit([&] {
+    for (auto&& [state, captured_state] : captured_generator_states_) {
+      captured_state.generator->clear_capture_state(capture_id_);
+    }
+  });
+
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
@@ -136,10 +150,13 @@ void CUDAGraph::capture_end() {
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    wholegraph_increments = generator_state->capture_epilogue();
+  for (auto& kv : captured_generator_states_) {
+    auto& captured_state = kv.second;
+    captured_state.wholegraph_increment =
+        captured_state.generator->release_capture_state(capture_id_);
   }
+
+  capture_state_cleanup.release();
 
   size_t numCUDAGraphNodes = 0;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, nullptr, &numCUDAGraphNodes));
@@ -200,9 +217,8 @@ void CUDAGraph::replay() {
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->replay_prologue(wholegraph_increments);
+  for (auto&& [state, captured_state] : captured_generator_states_) {
+    captured_state.capture_state->replay_prologue(*state, captured_state.wholegraph_increment);
   }
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
@@ -268,13 +284,16 @@ void CUDAGraph::reset() {
     capture_ended_ = false;
   }
   if (has_graph_) {
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
     has_graph_ = false;
   }
   if (has_graph_exec_) {
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
     has_graph_exec_ = false;
   }
+  captured_generator_states_.clear();
 }
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
@@ -285,10 +304,10 @@ TORCH_CHECK(capture_ended_,
 }
 
 CUDAGraph::~CUDAGraph() {
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->unregister_graph(this);
-  }
+  // should this run in reset()? Probably
+  // for (auto& kv : captured_generator_states_) {
+  //   kv.second.generator->unregister_graph(this);
+  // }
   reset();
 
 // There are recent HIP changes where hipGraphExecDestroy doesn't immediately free memory.
