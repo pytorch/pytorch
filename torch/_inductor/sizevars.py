@@ -77,7 +77,7 @@ class SizeVarAllocator:
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
-        self.var_to_val = self.shape_env.var_to_val
+        self.backed_var_to_val = self.shape_env.backed_var_to_val
         self.var_to_hint_override = self.shape_env.var_to_hint_override
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
@@ -590,7 +590,7 @@ class SizeVarAllocator:
         if use_user_provided_hint_override:
             expr = sympy_subs(expr, self.var_to_hint_override)
 
-        return sympy_subs(expr, self.var_to_val)
+        return sympy_subs(expr, self.backed_var_to_val)
 
     def size_hint(
         self,
@@ -983,7 +983,9 @@ class SizeVarAllocator:
         return self.precomputed_replacements[expr]
 
     def free_symbols(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet(self.var_to_val.keys()) - OrderedSet(self.replacements.keys())
+        return OrderedSet(self.backed_var_to_val.keys()) - OrderedSet(
+            self.replacements.keys()
+        )
 
     def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
         """
