@@ -107,6 +107,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._library.opaque_object import OpaqueType
     from torch.utils._pytree import TreeSpec
 
 
@@ -276,7 +277,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
     grad_fns: set[torch.autograd.graph.Node] = set()
 
-    plain_tensors: list[torch.SymInt | torch.Tensor | int] = []
+    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueType] = []
     # Get all plain tensors (handles nested subclasses)
     if is_traceable_wrapper_subclass(tensor):
         get_plain_tensors(tensor, out=plain_tensors)
@@ -1393,7 +1394,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
-        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
+        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
         ) -> VariableTracker | None:
@@ -1401,7 +1402,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
-                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(
+                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(  # type: ignore[deprecated]
                         expr.sym_num
                     )
                 )
@@ -2798,6 +2799,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False  # type: ignore[union-attr]
+
+        # Register this parameter as a leaf tensor for backward() auto-detection.
+        # When backward() is called without inputs, we need to find all leaf tensors,
+        # including those created in-graph like nn.Parameter.
+        tx.output.leaf_var_creation_order.append(result)
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.

@@ -142,7 +142,7 @@
       "Context": "str(value)",
       "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
       "Hints": [
-        "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+        "Set torch._dynamo.config.allow_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     },
@@ -161,7 +161,7 @@
       "Context": "",
       "Explanation": "torch.compile does not support sparse Tensors",
       "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+        "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
       ]
     }
   ],
@@ -250,6 +250,24 @@
       "Explanation": "User-inserted graph break. Message: {graph_break_msg}",
       "Hints": [
         "Remove the `torch._dynamo.graph_break()` call."
+      ]
+    }
+  ],
+  "GB7054": [
+    {
+      "Gb_type": "backward() with non-leaf tensor",
+      "Context": "backward(inputs=[...]) with non-leaf tensor: {var}",
+      "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
+      "Hints": [
+        "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
+      ]
+    },
+    {
+      "Gb_type": "backward() with non-leaf tensor",
+      "Context": "backward(inputs=[...]) with non-leaf tensor",
+      "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
+      "Hints": [
+        "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
       ]
     }
   ],
@@ -1389,7 +1407,15 @@
   "GB0123": [
     {
       "Gb_type": "Unsupported Tensor.backward() call",
-      "Context": "call_method {self} backward {args} {kwargs}",
+      "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
+      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
+      "Hints": [
+        "Set torch._dynamo.trace_autograd_ops=True"
+      ]
+    },
+    {
+      "Gb_type": "Unsupported Tensor.backward() call",
+      "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
@@ -2192,6 +2218,16 @@
       ]
     }
   ],
+  "GB1042": [
+    {
+      "Gb_type": "backward() with in-graph created tensor",
+      "Context": "backward(inputs=[...]) with in-graph created tensor: {var}",
+      "Explanation": "backward(inputs=[...]) with tensors created inside the compiled function is not yet supported.",
+      "Hints": [
+        "Only pass tensors that are inputs to the compiled function or captured from outside"
+      ]
+    }
+  ],
   "GB0192": [
     {
       "Gb_type": "input iterator to itertools.cycle has too many items",
@@ -2338,6 +2374,16 @@
       "Explanation": "Dynamo requires the autograd.Function context to be initialized with a proxy.",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB9198": [
+    {
+      "Gb_type": "Attempted to call repr() method implemented in C/C++",
+      "Context": "",
+      "Explanation": "{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+      "Hints": [
+        "Write the repr method in Python"
       ]
     }
   ],
@@ -3086,6 +3132,14 @@
     {
       "Gb_type": "Forced graph break on leaf function",
       "Context": "",
+      "Explanation": "Forced graph break on non-inlining function for nested graph break testing purposes",
+      "Hints": [
+        "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
+      ]
+    },
+    {
+      "Gb_type": "Forced graph break on leaf function",
+      "Context": "",
       "Explanation": "Forced graph break for nested graph break testing purposes",
       "Hints": [
         "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
@@ -3174,7 +3228,7 @@
       "Context": "str(example_value)",
       "Explanation": "torch.compile does not support sparse Tensors with VariableTracker",
       "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+        "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
       ]
     }
   ],
@@ -3215,6 +3269,27 @@
       "Explanation": "Dynamo does not support calling method `{name}` of ``nn.Module`` {module} with a non-constant or non-(str, int) key.",
       "Hints": [
         "Use constant arguments of type str or int for __getitem__"
+      ]
+    }
+  ],
+  "GB7685": [
+    {
+      "Gb_type": "Attribute not found on opaque class",
+      "Context": "class={self.value}, attr={name}",
+      "Explanation": "The attribute '{name}' does not exist on opaque class {self.value}.",
+      "Hints": [
+        "Ensure '{name}' is a valid attribute of {type(self.value)}."
+      ]
+    }
+  ],
+  "GB9567": [
+    {
+      "Gb_type": "Unsupported descriptor on opaque class",
+      "Context": "class={self.value}, attr={name}, descriptor={type_name}",
+      "Explanation": "The attribute '{name}' is a descriptor of type '{type_name}' which is not supported.",
+      "Hints": [
+        "Only staticmethod, property, and pybind11_static_property are supported.",
+        "Consider accessing this attribute outside of the compiled region."
       ]
     }
   ],
@@ -3682,6 +3757,14 @@
       ]
     }
   ],
+  "GB1501": [
+    {
+      "Gb_type": "sparse_grad_accumulate_grad",
+      "Context": "accumulate_grad_ with sparse gradient",
+      "Explanation": "Sparse gradients are not supported in compiled autograd",
+      "Hints": []
+    }
+  ],
   "GB0323": [
     {
       "Gb_type": "torch.scan: improper additional_inputs",
@@ -3854,14 +3937,6 @@
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
-    }
-  ],
-  "GB2750": [
-    {
-      "Gb_type": "sparse_grad_accumulate_grad",
-      "Context": "accumulate_grad_ with sparse gradient",
-      "Explanation": "Sparse gradients are not supported in compiled autograd",
-      "Hints": []
     }
   ],
   "GB0341": [
@@ -4133,6 +4208,16 @@
       ]
     }
   ],
+  "GB0442": [
+    {
+      "Gb_type": "backward() with empty inputs",
+      "Context": "backward(inputs=[...]) resulted in no valid leaf tensors",
+      "Explanation": "backward(inputs=[...]) requires at least one valid leaf tensor.",
+      "Hints": [
+        "Ensure at least one tensor in inputs is a leaf (requires_grad=True, no grad_fn)"
+      ]
+    }
+  ],
   "GB0367": [
     {
       "Gb_type": "Dynamo cannot determine the equality comparison of an object",
@@ -4246,11 +4331,21 @@
     },
     {
       "Gb_type": "autograd.grad with compiled autograd",
-      "Context": "",
+      "Context": "torch.autograd.grad()",
       "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.",
       "Hints": [
         "Disable compiled autograd by removing the compiled_autograd context manager.",
         "Or move the autograd.grad() call outside the torch.compile region."
+      ]
+    }
+  ],
+  "GB0374": [
+    {
+      "Gb_type": "Sparse tensor creation not supported",
+      "Context": "function: {fn_name}",
+      "Explanation": "torch.compile does not support sparse tensor creation functions like {fn_name}. Sparse tensors require specialized handling that is not yet implemented in the compiler.",
+      "Hints": [
+        "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
       ]
     }
   ]

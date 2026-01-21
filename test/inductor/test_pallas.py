@@ -53,10 +53,24 @@ except ImportError:
 test_classes = {}
 
 
-def make_pallas(cls):
-    """Create a test class variant that uses Pallas backend."""
-    suffix = "_pallas"
-    cls_prefix = "Pallas"
+def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
+    """Create a test class variant that uses Pallas backend.
+
+    Args:
+        cls: The test class to create a Pallas variant of.
+        _debug_cpu_to_tpu_pallas: If True, route CPU operations to TPU.
+    """
+    patches = [
+        (config, "cpu_backend", "pallas"),
+        (config, "cuda_backend", "pallas"),
+    ]
+    if _debug_cpu_to_tpu_pallas:
+        cls_prefix = "PallasTpu"
+        suffix = "_pallas_tpu"
+        patches.append((config, "_debug_cpu_to_tpu_pallas", True))
+    else:
+        cls_prefix = "Pallas"
+        suffix = "_pallas"
 
     # Mark tests based on sentinel files in pallas_expected_failures/ and pallas_skip_tests/
     for name in cls.__dict__:
@@ -78,8 +92,7 @@ def make_pallas(cls):
         cls,
         cls_prefix,
         suffix,
-        (config, "cpu_backend", "pallas"),
-        (config, "cuda_backend", "pallas"),
+        *patches,
         xfail_prop="_expected_failure_pallas",
         decorator=skip_decorator,
     )
@@ -693,16 +706,11 @@ class PallasTestsMixin:
         self.assertEqual(compiled_bcast(x, y, s), x + y * s)
 
     def test_non_power_of_2_sizes(self):
-        """Test that non-power-of-2 tensor sizes work with masked ops on GPU.
+        """Test that non-power-of-2 tensor sizes work correctly.
 
-        On GPU (Mosaic backend), Pallas requires power-of-2 sizes. We use masked
-        loads/stores to handle non-power-of-2 tensors by allocating power-of-2
-        blocks and masking out invalid elements.
+        On GPU (Mosaic backend), TMA automatically handles OOB masking for
+        non-power-of-2 sizes. On CPU/TPU, masked loads/stores are used.
         """
-        if self.DEVICE == "cuda":
-            self.skipTest(
-                "non-power-of-2 sizes not supported in Pallas GPU (Mosaic) backend"
-            )
 
         def fn(a, b):
             return a + b
@@ -718,10 +726,6 @@ class PallasTestsMixin:
 
     def test_non_power_of_2_multiple_ops(self):
         """Test non-power-of-2 sizes with multiple operations."""
-        if self.DEVICE == "cuda":
-            self.skipTest(
-                "non-power-of-2 sizes not supported in Pallas GPU (Mosaic) backend"
-            )
 
         def fn(x, y):
             return x.sin() + y.cos() - (x * y)
@@ -1432,6 +1436,8 @@ if test_torchinductor.RUN_TPU and has_tpu_pallas():
                 torch.compile(
                     fn, backend="inductor", options={"cpu_backend": "pallas"}
                 )(torch.randn(16), torch.randn(16))
+
+    make_pallas(test_torchinductor.SweepInputsTpuTest, _debug_cpu_to_tpu_pallas=True)
 
 
 if __name__ == "__main__":
