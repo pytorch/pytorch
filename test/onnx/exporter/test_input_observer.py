@@ -65,7 +65,9 @@ class TestInputObserver(common_utils.TestCase):
             torch.testing.assert_close(expected[i], observer.info.flat_outputs[i][0])
 
         cst = torch.export.Dim.DYNAMIC
-        self.assertEqual(dict(x={0: cst, 1: cst}, y={1: cst}), observer.infer_dynamic_shapes())
+        self.assertEqual(
+            dict(x={0: cst, 1: cst}, y={1: cst}), observer.infer_dynamic_shapes()
+        )
         args = observer.infer_arguments()
         self.assertIsInstance(args, dict)
         self.assertEqual(2, len(args))
@@ -96,7 +98,9 @@ class TestInputObserver(common_utils.TestCase):
             torch.testing.assert_close(expected[i], observer.info.flat_outputs[i][0])
 
         cst = torch.export.Dim.DYNAMIC
-        self.assertEqual(dict(x={0: cst, 1: cst}, y={1: cst}), observer.infer_dynamic_shapes())
+        self.assertEqual(
+            dict(x={0: cst, 1: cst}, y={1: cst}), observer.infer_dynamic_shapes()
+        )
         args = observer.infer_arguments()
         self.assertIsInstance(args, dict)
         self.assertEqual(2, len(args))
@@ -204,7 +208,9 @@ class TestInputObserver(common_utils.TestCase):
             torch.testing.assert_close(expected[i], observer.info.flat_outputs[i][0])
 
         cst = torch.export.Dim.DYNAMIC
-        self.assertEqual(dict(x={0: cst, 1: cst}, y={1: cst}), observer.infer_dynamic_shapes())
+        self.assertEqual(
+            dict(x={0: cst, 1: cst}, y={1: cst}), observer.infer_dynamic_shapes()
+        )
 
     def test_io_captured_optional_args_kwargs(self):
         class Model(torch.nn.Module):
@@ -273,7 +279,9 @@ class TestInputObserver(common_utils.TestCase):
         with observer(model):
             for kwargs in inputs:
                 model(**kwargs)
-        with self.assertRaisesRegex(RuntimeError, "At least one call to the observed model"):
+        with self.assertRaisesRegex(
+            RuntimeError, "At least one call to the observed model"
+        ):
             observer.infer_dynamic_shapes()
 
     def test_io_captured_incompatible_number_of_flattened_kwargs(self):
@@ -401,7 +409,8 @@ class TestInputObserver(common_utils.TestCase):
             self.assertEqual(len(observer.info.flat_outputs[i]), 1)
 
         self.assertEqual(
-            ({0: cst, 1: cst}, dict(x={1: cst}, y={1: cst})), observer.infer_dynamic_shapes()
+            ({0: cst, 1: cst}, dict(x={1: cst}, y={1: cst})),
+            observer.infer_dynamic_shapes(),
         )
 
     def test_io_captured_args_dict_args_kwargs(self):
@@ -502,7 +511,10 @@ class TestInputObserver(common_utils.TestCase):
         ]
 
         cst = torch.export.Dim.DYNAMIC
-        expected = ({0: cst, 1: cst}, [{0: cst, 1: cst}, {1: cst}, {1: cst}, {0: cst, 1: cst}])
+        expected = (
+            {0: cst, 1: cst},
+            [{0: cst, 1: cst}, {1: cst}, {1: cst}, {0: cst, 1: cst}],
+        )
         flat = torch.utils._pytree.tree_flatten(inputs[-1])[0]
         self.assertEqual(len(flat), 5)
 

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import contextlib
 import inspect
-from typing import Any, Callable, Sequence
+from typing import Any
+from collections.abc import Callable, Sequence
 
 import torch
 
@@ -38,7 +39,9 @@ def flatten_unflatten_for_dynamic_shapes(
     start = 0
     end = 0
     subtrees = []
-    for subspec in (spec.children() if hasattr(spec, "children") else spec.children_specs):
+    for subspec in (
+        spec.children() if hasattr(spec, "children") else spec.children_specs
+    ):
         end += subspec.num_leaves
         value = subspec.unflatten(flat[start:end])
         value = flatten_unflatten_for_dynamic_shapes(
@@ -83,7 +86,8 @@ def infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]
     """
     unique_ranks = {len(shape) for shape in shape_list}
     torch._check(
-        len(unique_ranks) == 1, lambda: "all shapes in shape_list must have the the same rank"
+        len(unique_ranks) == 1,
+        lambda: "all shapes in shape_list must have the the same rank",
     )
     rank = unique_ranks.pop()
     dynamic = []
@@ -136,9 +140,12 @@ class InputObserverInfo:
         # Let's compute the sizes of each independently.
         if not self.flat_inputs or self._max_args is None or self._max_kwargs is None:
             raise RuntimeError("No inputs were captured.")
-        arg_sizes = [len(torch.utils._pytree.tree_flatten(a)[0]) for a in self._max_args]
+        arg_sizes = [
+            len(torch.utils._pytree.tree_flatten(a)[0]) for a in self._max_args
+        ]
         kwarg_sizes = {
-            k: len(torch.utils._pytree.tree_flatten(v)[0]) for k, v in self._max_kwargs.items()
+            k: len(torch.utils._pytree.tree_flatten(v)[0])
+            for k, v in self._max_kwargs.items()
         }
 
         # Let's reprocess everything.
@@ -181,7 +188,9 @@ class InputObserverInfo:
             new_flat_inputs.append(flat)
         return new_flat_inputs
 
-    def infer_dynamic_shapes(self) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
+    def infer_dynamic_shapes(
+        self,
+    ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
         flat_inputs = self.build_inputs_completed_with_none_values()
         # This is already checked by build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
@@ -192,7 +201,8 @@ class InputObserverInfo:
                 "when the number of input tensors are not the same."
             )
         shape_lists = [
-            [(None if t is None else t.shape) for t in tensors] for tensors in flat_inputs
+            [(None if t is None else t.shape) for t in tensors]
+            for tensors in flat_inputs
         ]
         n_tensors = len(shape_lists[0])
         dynamic_shapes = [
@@ -253,9 +263,13 @@ class InputObserverInfo:
         assert self._max_args is not None and self._max_kwargs is not None
         candidate = None
         if index is None:
-            for i, (args_kwargs, spec) in enumerate(zip(self.flat_inputs, self.inputs_specs)):
+            for i, (args_kwargs, spec) in enumerate(
+                zip(self.flat_inputs, self.inputs_specs)
+            ):
                 args, kwargs = torch.utils._pytree.tree_unflatten(args_kwargs, spec)
-                if len(args) == len(self._max_args) and len(kwargs) == len(self._max_kwargs):
+                if len(args) == len(self._max_args) and len(kwargs) == len(
+                    self._max_kwargs
+                ):
                     index = i
                     candidate = args, kwargs
                     break
@@ -303,7 +317,9 @@ class InputObserver:
         self.info = InputObserverInfo(signature=inspect.signature(model.forward))
         forward_method = model.forward
         model.forward = (
-            lambda *args, _captured_forward=forward_method, **kwargs: self._forward_captured(
+            lambda *args,
+            _captured_forward=forward_method,
+            **kwargs: self._forward_captured(
                 *args, _captured_forward=_captured_forward, **kwargs
             )
         )
@@ -316,7 +332,9 @@ class InputObserver:
         if self.info is None:
             raise RuntimeError("No inputs were captured.")
 
-    def infer_dynamic_shapes(self) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
+    def infer_dynamic_shapes(
+        self,
+    ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
         self._check_captured()
         assert self.info is not None  # missed by type checking
         return self.info.infer_dynamic_shapes()
