@@ -36,6 +36,14 @@ static void entr_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "entr");
 }
 
+static void log_ndtr_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "log_ndtr");
+}
+
+static void ndtri_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "ndtri");
+}
+
 static void bessel_j0_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "bessel_j0_forward");
 }
@@ -92,4 +100,6 @@ REGISTER_DISPATCH(special_bessel_y0_stub, &bessel_y0_kernel_mps)
 REGISTER_DISPATCH(special_bessel_y1_stub, &bessel_y1_kernel_mps)
 REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_mps)
 REGISTER_DISPATCH(special_entr_stub, &entr_kernel_mps)
+REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_mps)
+REGISTER_DISPATCH(special_ndtri_stub, &ndtri_kernel_mps)
 } // namespace at::native
