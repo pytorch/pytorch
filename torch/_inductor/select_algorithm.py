@@ -798,10 +798,19 @@ class TritonTemplateKernel(TritonKernel):
 
         return self._register_hook("<DEF_KERNEL>", hook)
 
-    def size(self, name: Optional[str], index: int):
+    def size(self, name: Optional[str], index: int, dtype: Optional[str] = None):
         """
         Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
+
+        Args:
+            name: Name of the input tensor, or None for the output tensor.
+            index: Dimension index to get the size of.
+            dtype: Optional dtype to wrap the size in (e.g., "INDEX_DTYPE").
+                   When specified, returns tl.full([], size, dtype=dtype) to
+                   ensure the size has the correct type for arithmetic operations.
+                   If not specified and INDEX_DTYPE is int64, automatically wraps
+                   to prevent int32 overflow in size arithmetic.
         """
         assert isinstance(index, int)
         if name is None:
@@ -809,7 +818,12 @@ class TritonTemplateKernel(TritonKernel):
         else:
             assert isinstance(name, str)
             val = self.named_input_nodes[name].get_size()[index]
-        return texpr(self.rename_indexing(val))
+        result = texpr(self.rename_indexing(val))
+        if dtype:
+            return f"tl.full([], {result}, dtype={dtype})"
+        if self.index_dtype == "tl.int64":
+            return f"tl.full([], {result}, dtype=INDEX_DTYPE)"
+        return result
 
     def stride(self, name, index=None):
         """
