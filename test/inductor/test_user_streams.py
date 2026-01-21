@@ -364,11 +364,14 @@ class TestUserStreamCompile(InductorTestCase):
         # Verify correctness
         self.assertEqual(result, expected)
 
-        # The generated code should handle the stream context
-        # (exact verification depends on how streams are traced through)
+        # Verify generated code contains stream handling
+        self.assertIn("torch.cuda.Stream", code)
+        self.assertIn("torch.cuda.stream", code)
 
     def test_compile_preserves_stream_semantics(self):
         """Test that compiled code preserves stream execution semantics."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s = torch.cuda.Stream()
             # Work on default stream
@@ -383,12 +386,17 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify stream context is present in generated code
+        self.assertIn("torch.cuda.stream", code)
+
     def test_multiple_stream_contexts(self):
         """Test compilation with multiple stream context switches."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -409,12 +417,18 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify multiple stream contexts in generated code
+        # Should have at least 2 stream context usages
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 2)
+
     def test_nested_stream_contexts(self):
         """Test compilation with nested stream contexts."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -433,12 +447,17 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify nested stream contexts
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 2)
+
     def test_stream_context_with_data_dependency(self):
         """Test stream contexts with data flowing between streams."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s = torch.cuda.Stream()
 
@@ -456,12 +475,17 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify stream context is present
+        self.assertIn("torch.cuda.stream", code)
+
     def test_event_record_and_wait(self):
         """Test compilation with explicit event record and wait."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s = torch.cuda.Stream()
             event = torch.cuda.Event()
@@ -483,12 +507,19 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify event operations in generated code
+        self.assertIn("torch.cuda.Event", code)
+        self.assertIn(".record(", code)
+        self.assertIn(".wait(", code)
+
     def test_event_record_on_stream(self):
         """Test event recording on a specific stream."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -512,12 +543,18 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify event record/wait with explicit stream args
+        self.assertIn(".record(", code)
+        self.assertIn(".wait(", code)
+
     def test_multiple_events_multiple_streams(self):
         """Test multiple events synchronizing multiple streams."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -547,12 +584,19 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify multiple events and streams
+        self.assertGreaterEqual(code.count("torch.cuda.Event"), 2)
+        self.assertGreaterEqual(code.count(".record("), 2)
+        self.assertGreaterEqual(code.count(".wait("), 2)
+
     def test_event_wait_without_record(self):
         """Test that waiting on unrecorded event works (no-op)."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s = torch.cuda.Stream()
             event = torch.cuda.Event()
@@ -572,12 +616,18 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify event operations
+        self.assertIn(".record(", code)
+        self.assertIn(".wait(", code)
+
     def test_stream_wait_event(self):
         """Test stream.wait_event() method."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s = torch.cuda.Stream()
             event = torch.cuda.Event()
@@ -597,12 +647,17 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify stream.wait_event is present
+        self.assertIn("wait_event", code)
+
     def test_bidirectional_stream_sync(self):
         """Test bidirectional synchronization between streams."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -633,12 +688,18 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify bidirectional sync - multiple records and waits
+        self.assertGreaterEqual(code.count(".record("), 2)
+        self.assertGreaterEqual(code.count(".wait("), 2)
+
     def test_three_streams_pipeline(self):
         """Test pipeline pattern with three streams."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -671,12 +732,18 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify three-stage pipeline with 3 streams
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count(".record("), 2)
+
     def test_parallel_streams_join(self):
         """Test parallel work on multiple streams joining at the end."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -713,12 +780,19 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify parallel streams joining
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count(".record("), 3)
+        self.assertGreaterEqual(code.count(".wait("), 3)
+
     def test_fan_out_fan_in(self):
         """Test fan-out from one stream to multiple, then fan-in."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -754,12 +828,18 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify fan-out/fan-in pattern
+        self.assertGreaterEqual(code.count(".record("), 3)
+        self.assertGreaterEqual(code.count(".wait("), 4)
+
     def test_four_streams_diamond(self):
         """Test diamond pattern: one start, two parallel, one end."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s1 = torch.cuda.Stream()
             s2 = torch.cuda.Stream()
@@ -798,12 +878,19 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
 
+        # Verify diamond pattern
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 3)
+        self.assertGreaterEqual(code.count(".record("), 3)
+        self.assertGreaterEqual(code.count(".wait("), 4)
+
     def test_stream_reuse_across_iterations(self):
         """Test that streams can be reused across loop iterations."""
+        from torch._inductor.utils import run_and_get_code
+
         def fn(x):
             s = torch.cuda.Stream()
             event = torch.cuda.Event()
@@ -822,9 +909,139 @@ class TestUserStreamCompile(InductorTestCase):
 
         expected = fn(x)
         compiled_fn = torch.compile(fn)
-        result = compiled_fn(x)
+        result, (code,) = run_and_get_code(compiled_fn, x)
 
         self.assertEqual(result, expected)
+
+        # Verify stream reuse in loop
+        self.assertIn("torch.cuda.stream", code)
+        self.assertIn(".record(", code)
+        self.assertIn(".wait(", code)
+
+    def test_no_fusion_across_streams(self):
+        """Test that operations on different streams are not fused together."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s1 = torch.cuda.Stream()
+            s2 = torch.cuda.Stream()
+            e1 = torch.cuda.Event()
+            e2 = torch.cuda.Event()
+
+            # These could be fused if on same stream, but should NOT be fused
+            # since they're on different streams
+            with torch.cuda.stream(s1):
+                # Multiple pointwise ops that would normally fuse
+                a = x * 2
+                b = a + 1
+                c = b * 3
+                e1.record(s1)
+
+            with torch.cuda.stream(s2):
+                # Another set of pointwise ops
+                d = x * 4
+                e = d + 2
+                f = e * 5
+                e2.record(s2)
+
+            e1.wait()
+            e2.wait()
+            return c + f
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Verify we have separate stream contexts (not fused into one)
+        self.assertGreaterEqual(code.count("torch.cuda.stream"), 2)
+
+        # Count triton kernel calls - should have at least 2 separate kernels
+        # (one for each stream's work)
+        triton_kernel_count = code.count("triton_") + code.count(".run(")
+        self.assertGreaterEqual(
+            triton_kernel_count,
+            2,
+            "Expected at least 2 separate kernels for different streams",
+        )
+
+    def test_no_fusion_across_streams_with_dependency(self):
+        """Test no fusion when there's a data dependency across streams."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+            event = torch.cuda.Event()
+
+            # Work on default stream
+            a = x * 2
+            b = a + 1
+            event.record()
+
+            # Work on side stream - depends on default stream
+            with torch.cuda.stream(s):
+                event.wait()
+                c = b * 3  # depends on b from default stream
+                d = c + 1
+
+            s.synchronize()
+            return d
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Verify stream context and event sync are present
+        self.assertIn("torch.cuda.stream", code)
+        self.assertIn(".record(", code)
+        self.assertIn(".wait(", code)
+
+        # The operations should not be fused across stream boundary
+        # even though there's a data dependency
+        triton_kernel_count = code.count("triton_") + code.count(".run(")
+        self.assertGreaterEqual(
+            triton_kernel_count,
+            2,
+            "Expected separate kernels before and after stream switch",
+        )
+
+    def test_fusion_within_same_stream(self):
+        """Test that fusion still works for operations within the same stream."""
+        from torch._inductor.utils import run_and_get_code
+
+        def fn(x):
+            s = torch.cuda.Stream()
+
+            with torch.cuda.stream(s):
+                # Multiple pointwise ops on same stream - should fuse
+                a = x * 2
+                b = a + 1
+                c = b * 3
+                d = c + 2
+
+            s.synchronize()
+            return d
+
+        x = torch.randn(1024, device="cuda")
+
+        expected = fn(x)
+        compiled_fn = torch.compile(fn)
+        result, (code,) = run_and_get_code(compiled_fn, x)
+
+        self.assertEqual(result, expected)
+
+        # Verify stream context is present
+        self.assertIn("torch.cuda.stream", code)
+
+        # These ops should be fused into a single kernel since they're
+        # all on the same stream and are pointwise operations
 
 
 instantiate_parametrized_tests(TestStreamUtils)
