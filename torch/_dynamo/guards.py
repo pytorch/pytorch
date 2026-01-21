@@ -3070,6 +3070,18 @@ class GuardBuilder(GuardBuilderBase):
                         get_verbose_code_parts(code_part, guard),
                         guard.user_stack,
                     )
+                # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
+                # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
+                else:
+                    code_part = (
+                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+                    )
+                    code.append(code_part)
+                    self.get_guard_manager(guard).add_no_hasattr_guard(
+                        "_dynamo_dynamic_indices",
+                        get_verbose_code_parts(code_part, guard),
+                        guard.user_stack,
+                    )
                 # Guard on shape_ids when tensor has unbacked indices.
                 # shape_id is only set via mark_unbacked, which sets _dynamo_unbacked_indices.
                 # Empty dict is treated the same as not having the attribute.
@@ -3087,20 +3099,8 @@ class GuardBuilder(GuardBuilderBase):
                         get_verbose_code_parts(code_part, guard),
                         guard.user_stack,
                     )
-                # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
-                # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
-                if not hasattr(value, "_dynamo_dynamic_indices") and not hasattr(
-                    value, "_dynamo_unbacked_indices"
-                ):
-                    code_part = (
-                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
-                    )
-                    code.append(code_part)
-                    self.get_guard_manager(guard).add_no_hasattr_guard(
-                        "_dynamo_dynamic_indices",
-                        get_verbose_code_parts(code_part, guard),
-                        guard.user_stack,
-                    )
+                    # TODO we dont have guards on _dynamo_unbacked_indices like those of _dynamo_dynamic_indices this seems wrong!!
+
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
 
