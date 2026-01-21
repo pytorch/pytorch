@@ -17,7 +17,15 @@
 #include <ATen/ops/_embedding_bag_forward_only_native.h>
 #include <ATen/ops/_embedding_bag_native.h>
 #include <ATen/ops/_embedding_bag_per_sample_weights_backward_native.h>
+#include <ATen/ops/embedding_renorm_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/index_copy.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/linalg_vector_norm.h>
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/sort.h>
+#include <ATen/ops/unique_consecutive.h>
+#include <ATen/ops/where.h>
 #endif
 
 namespace at::native {
@@ -293,6 +301,59 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
   });
 
   return std::move(per_sample_weights_grad);
+}
+
+Tensor& embedding_renorm_mps_(
+    Tensor& self,
+    const Tensor& indices,
+    double max_norm,
+    double norm_type) {
+  // Check input dimensions
+  auto self_arg = TensorArg(self, "self", 1);
+  auto indices_arg = TensorArg(indices, "indices", 2);
+  checkDim("embedding_renorm_", self_arg, 2);
+  checkScalarTypes("embedding_renorm_", indices_arg, {kLong, kInt});
+
+  if (indices.numel() == 0) {
+    return self;
+  }
+
+  // Get unique sorted indices to avoid processing the same row multiple times
+  auto indices_contig = indices.contiguous();
+  auto unique_result = at::unique_consecutive(indices_contig.flatten().sort().values);
+  auto unique_indices = std::get<0>(unique_result);
+
+  if (unique_indices.numel() == 0) {
+    return self;
+  }
+
+  // Select the rows we need to potentially renormalize
+  // unique_indices is 1D, so we can use index_select on dim 0
+  auto selected_rows = at::index_select(self, 0, unique_indices);
+
+  // Compute the norm of each row: shape [num_unique_indices]
+  auto norms = at::linalg_vector_norm(selected_rows, norm_type, /*dim=*/1, /*keepdim=*/false);
+
+  // Create mask for rows that exceed max_norm
+  auto exceed_mask = norms.gt(max_norm);
+
+  // If no rows exceed max_norm, we're done
+  if (!exceed_mask.any().item<bool>()) {
+    return self;
+  }
+
+  // Compute scale factors: max_norm / (norm + epsilon) for rows that exceed
+  // For rows that don't exceed, scale is 1.0
+  auto epsilon = 1e-7;
+  auto scale = at::where(exceed_mask, max_norm / (norms + epsilon), at::ones_like(norms));
+
+  // Apply scale to selected rows: scale needs to be [num_unique_indices, 1] for broadcasting
+  auto scaled_rows = selected_rows * scale.unsqueeze(1);
+
+  // Update self in-place using index_copy_
+  self.index_copy_(0, unique_indices, scaled_rows);
+
+  return self;
 }
 
 } // namespace at::native
