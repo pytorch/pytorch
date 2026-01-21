@@ -2086,7 +2086,11 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             # some python events seem to go a little past record end probably because
             # of some clock inaccuracies so just compare events ending to RECORD_END
             tid = traceEvent.get("tid", "")
-            if "dur" in traceEvent and isinstance(tid, str) and "__xpu_profiler__" not in tid:
+            if (
+                "dur" in traceEvent
+                and isinstance(tid, str)
+                and "__xpu_profiler__" not in tid
+            ):
                 self.assertLessEqual(
                     traceEvent["ts"] + traceEvent["dur"],
                     RECORDS_END_TS,
