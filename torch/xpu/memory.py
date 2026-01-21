@@ -484,7 +484,7 @@ class XPUPluggableAllocator(_XPUAllocator):
 
     This lets users provide custom allocation and free functions implemented
     in a separate shared library. The allocator is registered and could become
-    available for use via :func:`~torch.xpu.memory.change_current_allocator``.
+    available for use via :func:`~torch.xpu.memory.change_current_allocator`.
 
     Arguments:
         path_to_lib_file (str):
