@@ -1048,7 +1048,6 @@ elseif(USE_CUDA)
     # Add torch_cpu as a dependency to ensure ATen headers are available
     # torch::cudart provides CUDA include directories for .cpp files that include cuda_runtime.h
     target_link_libraries(torch_nvshmem PRIVATE torch_cpu torch::cudart)
-    target_include_directories(torch_nvshmem PRIVATE ${Caffe2_GPU_INCLUDE})
     set_target_properties(torch_nvshmem PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     target_compile_options(torch_nvshmem PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-rdc=true>)
     target_compile_options(torch_nvshmem PRIVATE "-U__CUDA_NO_HALF_OPERATORS__")
