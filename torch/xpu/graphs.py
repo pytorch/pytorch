@@ -24,7 +24,7 @@ if not hasattr(torch._C, "_XpuStreamBase"):
     torch._C.__dict__["_XPUGraph"] = _dummy_type("_XPUGraph")
     torch._C.__dict__["_xpu_graph_pool_handle"] = _dummy_type("_xpu_graph_pool_handle")
 
-from torch._C import _XPUGraph, _xpu_graph_pool_handle
+from torch._C import _xpu_graph_pool_handle, _XPUGraph
 
 
 def graph_pool_handle() -> _POOL_HANDLE:
