@@ -5494,6 +5494,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: logit_
+    MPS: logit_mps_
   tags: pointwise
 
 - func: logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)

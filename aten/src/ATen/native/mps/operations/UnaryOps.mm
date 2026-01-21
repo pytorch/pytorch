@@ -257,6 +257,10 @@ Tensor logit_mps(const Tensor& self, std::optional<double> eps) {
   return result;
 }
 
+Tensor& logit_mps_(Tensor& self, std::optional<double> eps) {
+  return logit_out_mps(self, eps, self);
+}
+
 TORCH_IMPL_FUNC(logit_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, std::optional<double> eps, const Tensor& grad_input) {
   using namespace mps;
