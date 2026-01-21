@@ -3299,13 +3299,13 @@ class TestInvokeSubgraphDTensor(TestCase):
             return torch.sin(x)
 
         def fn(x):
-            return gn(x)
+            return gn(x) + gn(x)
 
         mesh = DeviceMesh("cpu", torch.arange(2))
         local_tensor = torch.randn(4, 4)
         x = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
 
-        ref = torch.sin(x)
+        ref = fn(x)
         res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
 
         self.assertEqual(ref.to_local(), res.to_local())
