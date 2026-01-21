@@ -1911,7 +1911,7 @@ def _backward_prologue_functional(
 
     bw_tokens = [None] * metadata.num_backward_tokens
 
-    # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors) showing up first
+    # - note: donated buffer logic requires (*ctx.symints, *ctx.saved_tensors, *ctx.opaques) showing up first
     #   in the bw output order.
 
     # Every dereference of ctx.saved_tensors incurs saved_tensors_hooks calls

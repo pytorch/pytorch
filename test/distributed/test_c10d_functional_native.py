@@ -410,6 +410,68 @@ class TestWithNCCL(DistributedTestBase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    def test_all_to_all_single_process_group_overload(self) -> None:
+        """Test all_to_all_single with ProcessGroup argument (new overload)."""
+        self._init_process_group()
+        torch.accelerator.set_device_index(self.rank)
+
+        torch.manual_seed(42)
+        send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
+
+        input_split_sizes = send_sz_matrix[self.rank].tolist()
+        output_split_sizes = send_sz_matrix[:, self.rank].tolist()
+        input = torch.full((sum(input_split_sizes),), float(self.rank)).to(
+            self.device.type
+        )
+
+        # Test with string (existing behavior)
+        output_str = torch.ops._c10d_functional.all_to_all_single(
+            input.clone(),
+            output_split_sizes,
+            input_split_sizes,
+            "default",
+        )
+        output_str = torch.ops._c10d_functional.wait_tensor(output_str)
+
+        # Test with ProcessGroup (new overload)
+        pg = dist.group.WORLD
+        output_pg = torch.ops._c10d_functional.all_to_all_single(
+            input.clone(),
+            output_split_sizes,
+            input_split_sizes,
+            pg,
+        )
+        output_pg = torch.ops._c10d_functional.wait_tensor(output_pg)
+
+        # Both should produce identical results
+        assert output_str.eq(output_pg).all(), (
+            "String and ProcessGroup overloads should produce identical results"
+        )
+
+        # Verify correctness
+        expect = torch.cat(
+            [
+                torch.full((sz,), float(rank)).to(self.device.type)
+                for rank, sz in enumerate(output_split_sizes)
+            ]
+        )
+        assert output_pg.eq(expect).all()
+
+        # Test autograd version with ProcessGroup
+        input_grad = torch.full(
+            (sum(input_split_sizes),), float(self.rank), requires_grad=True
+        ).to(self.device.type)
+        output_grad = torch.ops._c10d_functional_autograd.all_to_all_single(
+            input_grad,
+            output_split_sizes,
+            input_split_sizes,
+            pg,
+        )
+        # Verify it runs without error
+        output_grad = torch.ops._c10d_functional.wait_tensor(output_grad)
+        assert output_grad.eq(expect).all()
+
+    @skip_if_lt_x_gpu(2)
     def test_broadcast(self) -> None:
         self._init_process_group()
 
