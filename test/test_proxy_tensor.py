@@ -845,6 +845,31 @@ class TestRealProxyTensor(TestCase):
         make_fx(f, _error_on_data_dependent_ops=False)()
         make_fx(f, pre_dispatch=True, _error_on_data_dependent_ops=False)()
 
+    def test_disable_torch_fn_metadata_mode(self):
+        class MyModule(nn.Module):
+            def forward(self, x):
+                return torch.sin(x) + torch.cos(x)
+
+        mod = MyModule()
+
+        def fn(x):
+            return mod(x)
+        fn._orig_mod = mod
+
+        # With TorchFunctionMetadataMode enabled (default), torch_fn should be present
+        gm_with = make_fx(fn, record_module_stack=True)(torch.randn(3))
+        torch_fn_present = any(
+            "torch_fn" in n.meta for n in gm_with.graph.nodes if n.op == "call_function"
+        )
+        self.assertTrue(torch_fn_present, "torch_fn metadata should be present by default")
+
+        # With TorchFunctionMetadataMode disabled, torch_fn should be absent
+        gm_without = make_fx(fn, record_module_stack=True, _disable_torch_fn_metadata_mode=True)(torch.randn(3))
+        torch_fn_absent = all(
+            "torch_fn" not in n.meta for n in gm_without.graph.nodes if n.op == "call_function"
+        )
+        self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
+
 class TestFakeProxyTensor(TestCase):
     def test_issue82547(self):
         x = nn.Parameter(torch.randn(3, 3))

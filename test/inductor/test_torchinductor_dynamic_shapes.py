@@ -68,7 +68,6 @@ test_failures = {
     "test_argmax_argmin_with_duplicates_dynamic_shapes": TestFailure(("mps",)),
     "test_batch_norm_2d_2_dynamic_shapes": TestFailure(("mps",)),
     "test_buffer_batch_norm_dynamic_shapes": TestFailure(("mps",)),
-    "test_convolution4_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
@@ -84,7 +83,6 @@ test_failures = {
     "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
-    "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),

@@ -195,6 +195,9 @@ test_failures = {
     "test_unsafe_chunk_empty_tensor_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_max_unpool_empty_output_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     "test_bucketize_nd_tiling_False_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_nd_tiling_True_dynamic_shapes": TestFailure(("cpu",)),
     "test_bucketize_default_kwargs_dynamic_shapes": TestFailure(("cpu",)),
@@ -211,6 +214,12 @@ test_failures = {
     "test_linspace4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
     "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
+    "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
+    "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu")
+    ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
