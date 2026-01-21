@@ -412,6 +412,7 @@ def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
 
 def _collect_fake_inputs(inputs):
     from torch._subclasses.fake_tensor import FakeTensor
+    from torch.distributed.tensor import DTensor
 
     # Get the example values of the inputs.
     inputs_fake: list[Union[FakeTensor, torch.Tensor, int]] = []
@@ -430,6 +431,13 @@ def _collect_fake_inputs(inputs):
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
+                        if not isinstance(val, FakeTensor):
+                            raise AssertionError(
+                                f"Expected FakeTensor after unwrapping, got {type(val)}"
+                            )
+                        inputs_fake.append(val)
+                    elif isinstance(val, DTensor):
+                        val = val._local_tensor
                         if not isinstance(val, FakeTensor):
                             raise AssertionError(
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"

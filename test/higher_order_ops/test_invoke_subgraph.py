@@ -12,6 +12,7 @@ import torch._dynamo
 import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
+import torch.distributed as dist
 import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
@@ -29,6 +30,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -36,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 
@@ -3273,6 +3276,39 @@ class NegativeTesting(TestCase):
             r"Higher Order Operator: torch\.ops\.higher_order\.invoke_subgraph",
         ):
             torch.compile(fn, backend="eager")(x)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphDTensor(TestCase):
+    """Tests for invoke_subgraph with DTensor inputs."""
+
+    def setUp(self):
+        super().setUp()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=0, world_size=2)
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_simple_dtensor_input(self):
+        """Test nested_compile_region with DTensor input."""
+
+        @nested_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x)
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        local_tensor = torch.randn(4, 4)
+        x = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        ref = torch.sin(x)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref.to_local(), res.to_local())
 
 
 if __name__ == "__main__":
