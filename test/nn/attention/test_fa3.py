@@ -16,6 +16,10 @@ from torch.nn.attention import (
     restore_flash_attention_impl,
     sdpa_kernel,
 )
+from torch.nn.attention.experimental._scaled_dot_product_attention_quantized import (
+    _scaled_dot_product_attention_quantized,
+    DescaleType,
+)
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
@@ -547,7 +551,7 @@ class TestFlashAttentionFA3(TestCase):
 
         with torch.no_grad():
             with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-                out = F._scaled_dot_product_attention_fp8(
+                out = _scaled_dot_product_attention_quantized(
                     q,
                     k,
                     v,
@@ -555,6 +559,9 @@ class TestFlashAttentionFA3(TestCase):
                     q_descale=descale_q,
                     k_descale=descale_k,
                     v_descale=descale_v,
+                    q_descale_type=DescaleType.PER_HEAD,
+                    k_descale_type=DescaleType.PER_HEAD,
+                    v_descale_type=DescaleType.PER_HEAD,
                 )
 
         # Check output properties
@@ -588,7 +595,7 @@ class TestFlashAttentionFA3(TestCase):
         with torch.no_grad():
             # FP8 forward
             with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-                out_fp8 = F._scaled_dot_product_attention_fp8(
+                out_fp8 = _scaled_dot_product_attention_quantized(
                     q_fp8,
                     k_fp8,
                     v_fp8,
@@ -596,6 +603,9 @@ class TestFlashAttentionFA3(TestCase):
                     q_descale=descale_q,
                     k_descale=descale_k,
                     v_descale=descale_v,
+                    q_descale_type=DescaleType.PER_HEAD,
+                    k_descale_type=DescaleType.PER_HEAD,
+                    v_descale_type=DescaleType.PER_HEAD,
                 )
 
             # bf16 reference via FA3
@@ -648,7 +658,7 @@ class TestFlashAttentionFA3(TestCase):
 
         with torch.no_grad():
             with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-                out = F._scaled_dot_product_attention_fp8(
+                out = _scaled_dot_product_attention_quantized(
                     q_fp8,
                     k_fp8,
                     v_fp8,
@@ -656,6 +666,9 @@ class TestFlashAttentionFA3(TestCase):
                     q_descale=descale_q,
                     k_descale=descale_k,
                     v_descale=descale_v,
+                    q_descale_type=DescaleType.PER_HEAD,
+                    k_descale_type=DescaleType.PER_HEAD,
+                    v_descale_type=DescaleType.PER_HEAD,
                 )
 
         # Output should be valid
@@ -692,7 +705,7 @@ class TestFlashAttentionFA3(TestCase):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-                _ = F._scaled_dot_product_attention_fp8(
+                _ = _scaled_dot_product_attention_quantized(
                     q,
                     k,
                     v,
@@ -700,6 +713,9 @@ class TestFlashAttentionFA3(TestCase):
                     q_descale=descale_q,
                     k_descale=descale_k,
                     v_descale=descale_v,
+                    q_descale_type=DescaleType.PER_HEAD,
+                    k_descale_type=DescaleType.PER_HEAD,
+                    v_descale_type=DescaleType.PER_HEAD,
                 )
 
             # Check that the backward warning was issued
@@ -731,8 +747,17 @@ class TestFlashAttentionFA3(TestCase):
         descale_v = torch.ones(batch, heads, dtype=torch.float32, device=device)
 
         def fp8_sdpa(q, k, v, dq, dk, dv):
-            return F._scaled_dot_product_attention_fp8(
-                q, k, v, is_causal=is_causal, q_descale=dq, k_descale=dk, v_descale=dv
+            return _scaled_dot_product_attention_quantized(
+                q,
+                k,
+                v,
+                is_causal=is_causal,
+                q_descale=dq,
+                k_descale=dk,
+                v_descale=dv,
+                q_descale_type=DescaleType.PER_HEAD,
+                k_descale_type=DescaleType.PER_HEAD,
+                v_descale_type=DescaleType.PER_HEAD,
             )
 
         with torch.no_grad():

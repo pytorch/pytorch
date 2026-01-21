@@ -827,7 +827,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda_low_p(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda_quantized(
   const Tensor& query,
   const Tensor& key,
   const Tensor& value,
@@ -1286,7 +1286,7 @@ _flash_attention_forward(
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
-_flash_attention_forward_low_p(
+_flash_attention_forward_quantized(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
