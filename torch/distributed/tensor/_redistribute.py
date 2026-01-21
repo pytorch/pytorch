@@ -111,12 +111,6 @@ class _TransformInfo:
     # logical_shape on this mesh dimension
     logical_shape: list[int]
 
-    def __post_init__(self):
-        assert self.mesh_dim >= 0
-        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
-            "TransformInfo should only be created if it is an op with some effect, not a no-op"
-        )
-
     def _comm_type_key(self) -> str | None:
         """
         Return a key for grouping transforms by communication type.
