@@ -712,8 +712,16 @@ def propagate_shape_and_sharding(
                         # The shard will propagate to a different split dim
                         return None
                     else:
-                        # Split factor matches - check if uneven sharding would cause view to fail
-                        if strict_view and out_size % mesh_sizes[shard_mesh_dim] != 0:
+                        # Split factor matches - sharding propagates to this output dim
+                        # Check for uneven sharding, but only if this is NOT the last
+                        # split dimension. Uneven sharding on the last split dim is OK
+                        # because it becomes _StridedShard in the output.
+                        is_last_split_dim = cmd.split_id == len(cmd.group_shape) - 1
+                        if (
+                            strict_view
+                            and not is_last_split_dim
+                            and out_size % mesh_sizes[shard_mesh_dim] != 0
+                        ):
                             raise RuntimeError(
                                 f"Cannot unflatten unevenly sharded tensor: "
                                 f"output dimension {cmd.split_id} (size {out_size}) "
@@ -740,7 +748,9 @@ def propagate_shape_and_sharding(
                     out_size % mesh_dim_size == 0
                     or (
                         is_last_split_dim
-                        and _is_last_shard_on_tensor_dim_plus(mesh_dim, input_src_placements)
+                        and _is_last_shard_on_tensor_dim_plus(
+                            mesh_dim, input_src_placements
+                        )
                     )
                     for (mesh_dim, mesh_dim_size) in enumerate(mesh_sizes)
                 ]
