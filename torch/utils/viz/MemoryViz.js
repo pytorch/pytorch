@@ -1,10 +1,10 @@
 'use strict';
 
-import * as d3 from "https://cdn.jsdelivr.net/npm/d3@5/+esm";
-import {axisLeft} from "https://cdn.jsdelivr.net/npm/d3-axis@1/+esm";
-import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@1/+esm";
-import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@1/+esm";
-import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@1/+esm";
+import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+import {axisLeft} from "https://cdn.jsdelivr.net/npm/d3-axis@3/+esm";
+import {scaleLinear} from "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm";
+import {zoom, zoomIdentity} from "https://cdn.jsdelivr.net/npm/d3-zoom@3/+esm";
+import {brushX} from "https://cdn.jsdelivr.net/npm/d3-brush@3/+esm";
 
 const schemeTableau10 = [
   '#4e79a7',
