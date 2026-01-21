@@ -78,6 +78,34 @@ def _permute_strides(out: torch.Tensor, query_strides: tuple[int, ...]) -> torch
     return new_out
 
 
+def _has_varlen_offsets(block_mask: tuple) -> bool:
+    """Check if BlockMask contains varlen offsets."""
+    kv_offsets = block_mask[10]
+    q_offsets = block_mask[12]
+    return kv_offsets is not None and q_offsets is not None
+
+
+def _extract_varlen_params(
+    block_mask: tuple,
+) -> tuple[int, int, Tensor, Tensor, Tensor, Tensor, int, int]:
+    """Extract varlen parameters from block_mask tuple.
+
+    Returns:
+        (logical_q_len, logical_kv_len, q_offsets, kv_offsets,
+         q_limits, kv_limits, Q_BLOCK_SIZE, KV_BLOCK_SIZE)
+    """
+    return (
+        block_mask[0],  # logical_q_len
+        block_mask[1],  # logical_kv_len
+        block_mask[12],  # q_offsets
+        block_mask[10],  # kv_offsets
+        block_mask[13],  # q_limits
+        block_mask[11],  # kv_limits
+        block_mask[14],  # Q_BLOCK_SIZE
+        block_mask[15],  # KV_BLOCK_SIZE
+    )
+
+
 class FlexAttentionHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flex_attention", cacheable=True)
@@ -806,6 +834,10 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            kv_offsets,
+            kv_limits,
+            q_offsets,
+            q_limits,
             Q_BLOCK_SIZE,
             KV_BLOCK_SIZE,
             *other_buffers,
@@ -850,6 +882,10 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
                 q_indices,
                 full_q_num_blocks,
                 full_q_indices,
+                kv_offsets,
+                kv_limits,
+                q_offsets,
+                q_limits,
                 Q_BLOCK_SIZE,
                 KV_BLOCK_SIZE,
                 mask_graph,
