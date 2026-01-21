@@ -84,12 +84,6 @@ THPObjectPtr _unicode_dispatch(PyObject* str) {
     return THPObjectPtr();
   }
 
-  // Remove this when we're 3.10+
-  if (PyUnicode_READY(str) != 0) {
-    // Returns -1 with an exception set on failure
-    return THPObjectPtr();
-  }
-
   auto length = PyUnicode_GET_LENGTH(str);
 
   switch (PyUnicode_KIND(str)) {

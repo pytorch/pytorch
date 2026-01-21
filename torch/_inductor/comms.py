@@ -205,126 +205,6 @@ def _temp_group_visit_leaves(snode: BaseSchedulerNode, fn):
         fn(snode)
 
 
-def wait_exposed_communication_time(
-    snodes_to_wait: list[BaseSchedulerNode], runtimes: dict[BaseSchedulerNode, float]
-) -> tuple[float, float, str]:
-    """
-    Calculate exposed communication time for a wait operation by finding its corresponding
-    collective and accumulating overlapping compute time between them.
-
-    The Wait node must be the last in snodes_to_wait.
-    Compute time between corresponding Collective and Wait is accumulated.
-    If there is another pair of Collective and Wait inside,
-    Only compute before first such Wait' is considered as overlapping.
-
-    Multiple process groups are not modeled so far.
-    """
-    wait_snode = snodes_to_wait[-1]
-    assert is_wait(wait_snode.node)
-    assert len(snodes_to_wait) > 1
-    idx = len(snodes_to_wait) - 2
-    comm_time = 0.0
-    comp_time = 0.0
-    overlap_info = ""
-    waits_found = []
-    for i in range(idx, -1, -1):
-        c = snodes_to_wait[i]
-        if contains_wait(c):
-            waits_found.append(c)
-        if contains_collective(c):
-            if is_corresponding_collective_wait(c, wait_snode):
-                comm_time = runtimes[c]
-                overlap_info += f"->C[{c.get_name()}]"
-                break
-
-            if not contains_async_collective(c):
-                # Sync Collective
-                comp_time = 0.0
-                continue
-            else:
-                for w in waits_found:
-                    if is_corresponding_collective_wait(c, w):
-                        # Similar to Sync Collective
-                        # If after our Collective exist another Collective-Wait,
-                        # All compute after it will not be overlapping
-                        comp_time = 0.0
-                        continue
-
-        comp_time_before = comp_time
-
-        def accumulate_time(_snode: BaseSchedulerNode) -> None:
-            nonlocal comp_time
-            comp_time += runtimes[_snode]
-
-        _temp_group_visit_leaves(c, accumulate_time)
-        comp_time_after = comp_time
-        overlap_info += f"+{c.get_name()}[{comp_time_after - comp_time_before}]"
-
-    return comm_time, comp_time, overlap_info
-
-
-def coll_exposed_communication_time(
-    snodes: list[BaseSchedulerNode],
-    runtimes: dict[BaseSchedulerNode, float],
-) -> tuple[float, float, str]:
-    """
-    Calculate exposed communication time for a collective operation by finding its corresponding
-    wait and accumulating compute time that can overlap with communication.
-
-    The Collective node must be the first in snodes.
-    Compute time between corresponding Collective and Wait is accumulated.
-    If there is another pair of Collective and Wait inside,
-    Only compute before first such Wait' is considered as overlapping.
-
-    Multiple process groups are not modeled so far.
-    """
-    collective_snode = snodes[0]
-    comm_time = runtimes[collective_snode]
-    comp_time = 0.0
-    collective_outs: OrderedSet[str] = OrderedSet(
-        o.get_name() for o in collective_snode.get_outputs()
-    )
-    overlap_info = ""
-    collectives_found: list[BaseSchedulerNode] = []
-    for snode in snodes[1:]:
-        # We may have some ops without Wait,
-        # e.g. DTensor torch.ops._dtensor.shard_dim_alltoall
-        unmet_deps = OrderedSet(
-            d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
-        )
-
-        if unmet_deps & collective_outs:
-            overlap_info += f"->W[{snode.get_name()}]"
-            break
-
-        if contains_collective(snode):
-            if not contains_async_collective(snode):
-                break
-            else:
-                collectives_found.append(snode)
-                continue
-        if contains_wait(snode):
-            has_wait_for_collectives_found = False
-            for _coll in collectives_found:
-                if is_corresponding_collective_wait(collective_snode, snode):
-                    has_wait_for_collectives_found = True
-                    break
-            if has_wait_for_collectives_found:
-                # Any compute after not overlapping original Collective
-                break
-
-        comp_time_before = comp_time
-
-        def accumulate_time(_snode: BaseSchedulerNode) -> None:
-            nonlocal comp_time
-            comp_time += runtimes[_snode]
-
-        _temp_group_visit_leaves(snode, accumulate_time)
-        comp_time_after = comp_time
-        overlap_info += f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
-    return comm_time, comp_time, overlap_info
-
-
 def _group_name(snode, with_bufs=False) -> str:
     ret = ""
     for n in snode.snodes:
@@ -426,18 +306,6 @@ def _precompute_node_output_sets(
     }
 
 
-def is_corresponding_collective_wait(
-    collective_snode: BaseSchedulerNode, wait_snode: BaseSchedulerNode
-) -> bool:
-    """
-    Check if a wait node corresponds to a given collective node by verifying if the wait
-    depends on outputs from the collective.
-    """
-    collective_outs = OrderedSet(o.get_name() for o in collective_snode.get_outputs())
-    unmet_deps = OrderedSet(d.name for d in wait_snode.unmet_dependencies)
-    return bool(unmet_deps & collective_outs)
-
-
 def _op_runtime_estimate_mult(snode):
     # Apply multipliers for faster experimentation.
     # TODO(ivankobzarev): Remove after confirmation that runtime estimations are correct.
@@ -489,6 +357,141 @@ def _group_nodes_from_linked_list(
             break
         n = next_dict[n]  # type: ignore[index]
     return ret
+
+
+def _is_corresponding_collective_wait(
+    collective_snode: BaseSchedulerNode,
+    wait_snode: BaseSchedulerNode,
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]],
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]],
+) -> bool:
+    """
+    Check if a wait node corresponds to a given collective node.
+    Uses pre-computed sets for O(1) lookup.
+    """
+    collective_outs = node_output_sets[collective_snode]
+    unmet_deps = node_dep_sets[wait_snode]
+    return bool(unmet_deps & collective_outs)
+
+
+def _coll_exposed_communication_time(
+    collective_snode: BaseSchedulerNode,
+    next_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    runtimes: dict[BaseSchedulerNode, float],
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]],
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]],
+) -> tuple[float, float, str]:
+    """
+    Calculate exposed communication time by iterating directly over linked list.
+    Avoids O(N) list construction for each call.
+
+    The collective_snode is the starting point, iteration continues via next_dict.
+    """
+    comm_time = runtimes[collective_snode]
+    comp_time = 0.0
+    collective_outs = node_output_sets[collective_snode]
+    overlap_info = ""
+    collectives_found: list[BaseSchedulerNode] = []
+
+    snode = next_dict[collective_snode]
+    while snode is not None:
+        unmet_deps = node_dep_sets[snode]
+
+        if unmet_deps & collective_outs:
+            overlap_info += f"->W[{snode.get_name()}]"
+            break
+
+        if contains_collective(snode):
+            if not contains_async_collective(snode):
+                break
+            else:
+                collectives_found.append(snode)
+                snode = next_dict[snode]
+                continue
+        if contains_wait(snode):
+            has_wait_for_collectives_found = False
+            for _coll in collectives_found:
+                if _is_corresponding_collective_wait(
+                    collective_snode, snode, node_output_sets, node_dep_sets
+                ):
+                    has_wait_for_collectives_found = True
+                    break
+            if has_wait_for_collectives_found:
+                break
+
+        comp_time_before = comp_time
+
+        def accumulate_time(_snode: BaseSchedulerNode) -> None:
+            nonlocal comp_time
+            comp_time += runtimes[_snode]
+
+        _temp_group_visit_leaves(snode, accumulate_time)
+        comp_time_after = comp_time
+        overlap_info += f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
+
+        snode = next_dict[snode]
+
+    return comm_time, comp_time, overlap_info
+
+
+def _wait_exposed_communication_time(
+    wait_snode: BaseSchedulerNode,
+    head: BaseSchedulerNode,
+    prev_dict: dict[BaseSchedulerNode, Optional[BaseSchedulerNode]],
+    runtimes: dict[BaseSchedulerNode, float],
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]],
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]],
+) -> tuple[float, float, str]:
+    """
+    Calculate exposed communication time for a wait operation by iterating
+    directly over linked list backwards. Avoids O(N) list construction.
+
+    Iterates from wait_snode backwards using prev_dict to find corresponding collective.
+    """
+    comm_time = 0.0
+    comp_time = 0.0
+    overlap_info = ""
+    waits_found: list[BaseSchedulerNode] = []
+
+    snode = prev_dict[wait_snode]
+    while snode is not None:
+        if contains_wait(snode):
+            waits_found.append(snode)
+        if contains_collective(snode):
+            if _is_corresponding_collective_wait(
+                snode, wait_snode, node_output_sets, node_dep_sets
+            ):
+                comm_time = runtimes[snode]
+                overlap_info += f"->C[{snode.get_name()}]"
+                break
+
+            if not contains_async_collective(snode):
+                comp_time = 0.0
+                snode = prev_dict[snode]
+                continue
+            else:
+                for w in waits_found:
+                    if _is_corresponding_collective_wait(
+                        snode, w, node_output_sets, node_dep_sets
+                    ):
+                        comp_time = 0.0
+                        break  # inner loop break
+                snode = prev_dict[snode]
+                continue
+
+        comp_time_before = comp_time
+
+        def accumulate_time(_snode: BaseSchedulerNode) -> None:
+            nonlocal comp_time
+            comp_time += runtimes[_snode]
+
+        _temp_group_visit_leaves(snode, accumulate_time)
+        comp_time_after = comp_time
+        overlap_info += f"+{snode.get_name()}[{comp_time_after - comp_time_before}]"
+
+        snode = prev_dict[snode]
+
+    return comm_time, comp_time, overlap_info
 
 
 def _perform_double_linked_list_swap(
@@ -820,7 +823,6 @@ def _format_and_log_reordering_stats(
         for snode, node_info in node_stats.items()
     ]
     if importlib.util.find_spec("tabulate"):
-        # pyrefly: ignore[import-error]
         from tabulate import tabulate
 
         reorder_log_str += tabulate(
@@ -889,6 +891,18 @@ def _reorder_communication_preserving_peak_memory_internal(
         snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
         for snode in snodes
     }
+
+    # Pre-compute output and dependency sets for O(1) lookup instead of O(N) creation per iteration
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(o.get_name() for o in snode.get_outputs()) for snode in snodes
+    }
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(
+            d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
+        )
+        for snode in snodes
+    }
+
     # debug stats
     stats: dict[BaseSchedulerNode, ReorderInfo] = {}
 
@@ -911,7 +925,7 @@ def _reorder_communication_preserving_peak_memory_internal(
         _next_curr = _next[curr]
         if iterative_recompute_error:
             break
-        # pyrefly: ignore [bad-argument-type]
+
         if not contains_async_collective(curr):
             curr = _next_curr
             continue
@@ -923,8 +937,8 @@ def _reorder_communication_preserving_peak_memory_internal(
         num_processed_collectives += 1
 
         info = stats[curr] = ReorderInfo()
-        comm_time, comp_time, overlap_info = coll_exposed_communication_time(
-            _group_nodes_from_linked_list(curr, None, _next), runtimes
+        comm_time, comp_time, overlap_info = _coll_exposed_communication_time(
+            curr, _next, runtimes, node_output_sets, node_dep_sets
         )
         info.comm_time = comm_time
         info.comp_time = comp_time
@@ -938,11 +952,9 @@ def _reorder_communication_preserving_peak_memory_internal(
         group_runtime = 0.0
         group_peak_memory = _curr_memory[curr][0]  # post_alloc memory
 
-        # Track group dependencies incrementally
-        group_unmet_deps_names = OrderedSet(
-            d.name for d in curr.unmet_dependencies if not _is_fake_dep(d)
-        )
-        group_output_names = OrderedSet(o.get_name() for o in curr.get_outputs())
+        # Track group dependencies incrementally - initialize from pre-computed sets
+        group_unmet_deps_names = OrderedSet(node_dep_sets[curr])
+        group_output_names = OrderedSet(node_output_sets[curr])
 
         while candidate is not None:
             if config_comms.reorder_iterative_use_runtime_estimations and (
@@ -966,9 +978,8 @@ def _reorder_communication_preserving_peak_memory_internal(
                 data_dep = False
             else:
                 # Calculate effective dependencies (not satisfied within group)
-                candidate_out_names = OrderedSet(
-                    o.get_name() for o in candidate.get_outputs()
-                )
+                # Use pre-computed set for O(1) lookup
+                candidate_out_names = node_output_sets[candidate]
                 data_dep = bool(candidate_out_names & data_deps_names)
 
             if data_dep:
@@ -978,22 +989,19 @@ def _reorder_communication_preserving_peak_memory_internal(
                 if is_groupable_result:
                     group_head = candidate
 
-                    # Update incremental dependency tracking
-                    group_unmet_deps_names.update(
-                        d.name
-                        for d in candidate.unmet_dependencies
-                        if not _is_fake_dep(d)
-                    )
-                    group_output_names.update(
-                        o.get_name() for o in candidate.get_outputs()
-                    )
+                    # Update incremental dependency tracking using pre-computed sets
+                    group_unmet_deps_names.update(node_dep_sets[candidate])
+                    group_output_names.update(node_output_sets[candidate])
 
-                    # pyrefly: ignore[unbound-name]
                     if config_comms.reorder_iterative_use_runtime_estimations:
                         if contains_wait(candidate):
-                            comm_time, comp_time, _ = wait_exposed_communication_time(
-                                _group_nodes_from_linked_list(_head, candidate, _next),
+                            comm_time, comp_time, _ = _wait_exposed_communication_time(
+                                candidate,
+                                _head,
+                                _prev,
                                 runtimes,
+                                node_output_sets,
+                                node_dep_sets,
                             )
                             group_waits[candidate] = comm_time, comp_time
                         if not contains_async_collective(candidate):
@@ -1014,7 +1022,6 @@ def _reorder_communication_preserving_peak_memory_internal(
                     info.limiting_factor = msg
                     break
 
-            # pyrefly: ignore[unbound-name]
             if config_comms.reorder_iterative_use_runtime_estimations:
                 # Check if candidate has sync runtime
                 if not contains_async_collective(candidate):
@@ -1059,9 +1066,8 @@ def _reorder_communication_preserving_peak_memory_internal(
                     # Cj -> [...group_runtime..., Ci] -> Wj
                     # Checking that we are not increasing exposed time of Cj
                     if group_runtime > 0:
-                        comm_time, comp_time, _ = coll_exposed_communication_time(
-                            _group_nodes_from_linked_list(candidate, None, _next),
-                            runtimes,
+                        comm_time, comp_time, _ = _coll_exposed_communication_time(
+                            candidate, _next, runtimes, node_output_sets, node_dep_sets
                         )
                         # pyrefly: ignore[no-matching-overload]
                         exposed_before = max(0, comm_time - comp_time)
@@ -1118,7 +1124,6 @@ def _reorder_communication_preserving_peak_memory_internal(
 
             if (
                 potential_peak - peak_memory
-                # pyrefly: ignore[unbound-name]
                 > peak_memory * config_comms.reorder_iterative_peak_memory_budget
             ):
                 info.limiting_factor = (
@@ -1132,8 +1137,8 @@ def _reorder_communication_preserving_peak_memory_internal(
                 candidate, group_head, group_tail, _prev, _next, _head
             )
 
-            comm_time, comp_time, overlap_info = coll_exposed_communication_time(
-                _group_nodes_from_linked_list(curr, None, _next), runtimes
+            comm_time, comp_time, overlap_info = _coll_exposed_communication_time(
+                curr, _next, runtimes, node_output_sets, node_dep_sets
             )
             info.comm_time = comm_time
             info.comp_time = comp_time
@@ -1417,7 +1422,6 @@ def _is_node_groupable_for_sink_waits(
             f"candidate contains_async_collective {candidate.get_name()}",
         )
 
-    # pyrefly: ignore[unbound-name]
     if not config_comms.sink_iterative_use_runtime_estimations:
         # Heuristics pre-use_runtime_estimations:
         # TODO(ivankobzarev): Remove them after confirming,
@@ -1669,7 +1673,6 @@ def _format_and_log_sink_waits_stats(
     ]
     log_str = ""
     if importlib.util.find_spec("tabulate"):
-        # pyrefly: ignore[import-error]
         from tabulate import tabulate
 
         log_str += tabulate(
@@ -1780,6 +1783,17 @@ def _sink_waits_iterative_internal(
         for snode in snodes
     }
 
+    # Pre-compute output and dependency sets for O(1) lookup instead of O(N) creation per iteration
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(o.get_name() for o in snode.get_outputs()) for snode in snodes
+    }
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(
+            d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
+        )
+        for snode in snodes
+    }
+
     curr: Optional[BaseSchedulerNode] = snodes[-1]
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
@@ -1801,15 +1815,14 @@ def _sink_waits_iterative_internal(
         ):
             break
 
-        # pyrefly: ignore [bad-argument-type]
         if not (contains_wait(curr) and curr not in processed_waits):
             curr = _prev_curr
             continue
 
         processed_waits.add(curr)
         info = stats[curr] = SinkWaitInfo()
-        comm_time, comp_time, overlap_info = wait_exposed_communication_time(
-            _group_nodes_from_linked_list(_head, curr, _next), runtimes
+        comm_time, comp_time, overlap_info = _wait_exposed_communication_time(
+            curr, _head, _prev, runtimes, node_output_sets, node_dep_sets
         )
         info.initial_exposed = info.final_exposed = comm_time - comp_time
         info.comm_time = comm_time
@@ -1823,8 +1836,8 @@ def _sink_waits_iterative_internal(
         group_runtime = 0.0
         group_peak_memory = _curr_memory[curr][0]
 
-        # Track group outputs and check collective status incrementally
-        group_output_names = OrderedSet(o.get_name() for o in curr.get_outputs())
+        # Track group outputs and check collective status incrementally - initialize from pre-computed set
+        group_output_names = OrderedSet(node_output_sets[curr])
         group_contains_collective = contains_collective(curr)
 
         while candidate is not None:
@@ -1839,16 +1852,14 @@ def _sink_waits_iterative_internal(
             if not group_output_names:
                 data_dep = False
             else:
-                # Calculate candidate dependencies
-                candidate_dep_names = OrderedSet(
-                    d.name for d in candidate.unmet_dependencies if not _is_fake_dep(d)
-                )
+                # Calculate candidate dependencies using pre-computed set
+                candidate_dep_names = node_dep_sets[candidate]
                 data_dep = bool(candidate_dep_names & group_output_names)
 
             # Conservative sink wait, limiting by space before next collective.
             # The global strategy is that bucketing should create space.
             # For 2D we can experiment with allowing to sink Wait beyond non current group collective.
-            # pyrefly: ignore[unbound-name]
+
             if not config_comms.sink_waits_iterative_swap_with_collectives:
                 if contains_async_collective(candidate):
                     info.limiting_factor = (
@@ -1868,22 +1879,18 @@ def _sink_waits_iterative_internal(
                 if _is_groupable:
                     group_tail = candidate
 
-                    # Update incremental tracking
-                    group_output_names.update(
-                        o.get_name() for o in candidate.get_outputs()
-                    )
+                    # Update incremental tracking using pre-computed set
+                    group_output_names.update(node_output_sets[candidate])
                     group_contains_collective = (
                         group_contains_collective or contains_collective(candidate)
                     )
 
                     if (
-                        # pyrefly: ignore[unbound-name]
                         config_comms.sink_iterative_use_runtime_estimations
                         and contains_collective(candidate)
                     ):
-                        comm_time, comp_time, _ = coll_exposed_communication_time(
-                            _group_nodes_from_linked_list(candidate, None, _next),
-                            runtimes,
+                        comm_time, comp_time, _ = _coll_exposed_communication_time(
+                            candidate, _next, runtimes, node_output_sets, node_dep_sets
                         )
                         group_colls[candidate] = (comm_time, comp_time)
                         if not contains_async_collective(candidate):
@@ -1897,7 +1904,6 @@ def _sink_waits_iterative_internal(
                     continue
                 elif not data_dep:
                     if (
-                        # pyrefly: ignore[unbound-name]
                         not config_comms.sink_waits_iterative_unsafe_collectives_reorder
                         and both_contain_comms
                     ):
@@ -1914,13 +1920,17 @@ def _sink_waits_iterative_internal(
                     )
                     break
 
-            # pyrefly: ignore[unbound-name]
             if config_comms.sink_iterative_use_runtime_estimations:
                 if is_wait(candidate.node):
                     # Corresponding collective is before the group,
                     # Swap can increase exposed time of corresponding collective
-                    comm_time, comp_time, _ = wait_exposed_communication_time(
-                        _group_nodes_from_linked_list(_head, candidate, _next), runtimes
+                    comm_time, comp_time, _ = _wait_exposed_communication_time(
+                        candidate,
+                        _head,
+                        _prev,
+                        runtimes,
+                        node_output_sets,
+                        node_dep_sets,
                     )
                     # pyrefly: ignore[no-matching-overload]
                     exposed_before = max(0, comm_time - comp_time)
@@ -2008,7 +2018,6 @@ def _sink_waits_iterative_internal(
             )
             if (
                 potential_peak - peak_memory
-                # pyrefly: ignore[unbound-name]
                 > peak_memory * config_comms.sink_iterative_peak_memory_budget
             ):
                 info.limiting_factor = (
@@ -2023,8 +2032,8 @@ def _sink_waits_iterative_internal(
                 candidate, group_head, group_tail, _prev, _next, _head
             )
 
-            comm_time, comp_time, overlap_info = wait_exposed_communication_time(
-                _group_nodes_from_linked_list(_head, curr, _next), runtimes
+            comm_time, comp_time, overlap_info = _wait_exposed_communication_time(
+                curr, _head, _prev, runtimes, node_output_sets, node_dep_sets
             )
             info.comm_time = comm_time
             info.comp_time = comp_time
@@ -2195,6 +2204,7 @@ def reorder_compute_and_comm_for_overlap(
     order = snodes
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
     graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+    # pyrefly: ignore [bad-assignment]
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass

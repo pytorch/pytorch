@@ -31,6 +31,11 @@ from .graph_view import get_subgraph_by_path, GraphView, make_graph_view
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
     """
@@ -103,6 +108,8 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 "bucket non all_gather/reduce_scatter node is not supported"
             )
 
+        logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
+
         # Identify the new wait and start
         new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
         assert len(new_waits) == 1, f"Expected exactly one new wait, got {new_waits}"
@@ -143,10 +150,13 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 node, "placeholder", self.node_ancestors
             ):
                 continue
-            if is_reduce_scatter(node) and not self._check_recursive_dep(
-                self.collective_info[node].wait_node, "output", self.node_users
-            ):
-                continue
+            if is_reduce_scatter(node):
+                wait_node = self.collective_info[node].wait_node
+                if not (
+                    len(wait_node.users) == 1
+                    and self._check_recursive_dep(wait_node, "output", self.node_users)
+                ):
+                    continue
             if key is not None:
                 grouped_collectives[key].add(node)
 
@@ -164,7 +174,7 @@ class ManualOverlapScheduler(OverlapScheduler):
         gm: fx.GraphModule,
         module_bucket_plans: list[list[str] | str],
         insert_overlap_deps: bool,
-        module_stack_fn: None | Callable[[fx.Node], list[tuple[str, type[Any]]]] = None,
+        module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
     ):
         super().__init__(
             gm,
@@ -209,6 +219,10 @@ class ManualOverlapScheduler(OverlapScheduler):
                 self.wait_to_start[node] = start
                 self.unscheduled_collectives.add(start)
 
+    def _add_to_ready_queue(self, node: fx.Node) -> None:
+        """Manual scheduling uses single queue ordered by original node index."""
+        heapq.heappush(self.on_path_ready, (self.node_idx[node], node))
+
     def run(self) -> torch.fx.GraphModule:
         """Entry point to run the manual bucket algorithm"""
         # Bucket collectives in each bucket_module
@@ -230,9 +244,17 @@ class ManualOverlapScheduler(OverlapScheduler):
         delayed_rs_nodes: list[fx.Node] = []
         overlap_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
 
+        # Re-initialize after graph modification in _manual_bucket_collectives
+        self.node_idx = {n: i for i, n in enumerate(self.nodes)}
+        self.on_path_ready = []
+        self.scheduled = OrderedSet()
+        for node in self.nodes:
+            if self.in_degree[node] == 0:
+                self._add_to_ready_queue(node)
+
         # schedule reduce scatter normally in self._schedule
-        while self.ready:
-            _, node = heapq.heappop(self.ready)
+        while self.on_path_ready:
+            _, node = heapq.heappop(self.on_path_ready)
             node_type = node.meta.get("manual_bucket_node_type", "")
 
             if node in self.scheduled:
@@ -317,7 +339,7 @@ class ManualOverlapScheduler(OverlapScheduler):
         for user in node.users:
             self.in_degree[user] -= 1
             if self.in_degree[user] == 0:
-                heapq.heappush(self.ready, ((), user))
+                self._add_to_ready_queue(user)
 
     def _obtain_nodes_in_subgraph(self) -> None:
         """
@@ -346,7 +368,7 @@ def manual_overlap_bucketing(
     gm: torch.fx.GraphModule,
     module_bucket_plans: list[list[str] | str],
     insert_overlap_deps: bool = False,
-    module_stack_fn: None | Callable[[fx.Node], list[tuple[str, type[Any]]]] = None,
+    module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes based on user specifications in module_bucket_plans
     The manual overlapping consists of two steps:

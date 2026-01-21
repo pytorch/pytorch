@@ -118,7 +118,8 @@ class Importer(ABC):
             return module_name, name
 
         def get_obj_info(obj):
-            assert name is not None
+            if name is None:
+                raise AssertionError("name must not be None")
             module_name = self.whichmodule(obj, name)
             is_mangled_ = is_mangled(module_name)
             location = (

@@ -410,18 +410,6 @@ struct ConvParams {
       return false;
     }
     static long cudnn_version = detail::getCUDAHooks().versionRuntimeCuDNN();
-    // broken on cuDNN 9.8 - 9.14
-    if (cudnn_version >= 90800 && cudnn_version < 91500) {
-      if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous &&
-          (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) &&
-          weight.dim() == 5) {
-        for (int i = 2; i < weight.dim(); i++) {
-          if (weight.size(i) != 1) {
-            return false;
-          }
-        }
-      }
-    }
     if (needs_64bit_indexing_no_split(input, weight)) {
       if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
         TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
@@ -493,9 +481,8 @@ struct ConvParams {
   }
 
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const  {
-    if (needs_64bit_indexing_no_split(input, weight)) {
-      return false;
-    }
+    // MIOpen supports 64-bit indexing via miopenSetTensorDescriptorV2 API
+    // Reference: https://github.com/ROCm/MIOpen/pull/2838
     return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
            && cudnn_enabled
            && input.is_cuda()

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -24,7 +24,7 @@ class FSDPExtensions(ABC):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> tuple[torch.Tensor, Optional[Any]]:
+    ) -> tuple[torch.Tensor, Any | None]:
         """E.g. converting ``DistributedTensor`` to local tensor."""
         ...
 
@@ -45,7 +45,7 @@ class FSDPExtensions(ABC):
         world_size: int,
         num_devices_per_node: int,
         pg: dist.ProcessGroup,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ) -> torch.Tensor:
         """Shards a tensor to chunks and returns the local chunk."""
         ...
@@ -75,7 +75,7 @@ class FSDPExtensions(ABC):
     def all_gather_dtensor(
         self,
         tensor: DTensor,
-        parent_mesh: Optional[DeviceMesh],
+        parent_mesh: DeviceMesh | None,
     ) -> torch.Tensor:
         """
         This is to be called before loading a *sharded* DTensor state dict.
@@ -85,7 +85,7 @@ class FSDPExtensions(ABC):
         ...
 
 
-_extensions: Optional[FSDPExtensions] = None
+_extensions: FSDPExtensions | None = None
 
 
 def _set_fsdp_extensions(flattener: FSDPExtensions) -> None:
@@ -95,8 +95,8 @@ def _set_fsdp_extensions(flattener: FSDPExtensions) -> None:
 
 def _ext_pre_flatten_transform(
     tensor: torch.Tensor,
-    fsdp_extension: Optional[FSDPExtensions] = None,
-) -> tuple[torch.Tensor, Optional[Any]]:
+    fsdp_extension: FSDPExtensions | None = None,
+) -> tuple[torch.Tensor, Any | None]:
     if fsdp_extension is not None:
         new_tensor, param_extension = fsdp_extension.pre_flatten_transform(tensor)
         if param_extension is not None:
@@ -107,7 +107,7 @@ def _ext_pre_flatten_transform(
 def _ext_post_unflatten_transform(
     tensor: torch.Tensor,
     param_extension: Any,
-    fsdp_extension: Optional[FSDPExtensions] = None,
+    fsdp_extension: FSDPExtensions | None = None,
 ) -> torch.Tensor:
     if fsdp_extension is not None and param_extension is not None:
         return fsdp_extension.post_unflatten_transform(tensor, param_extension)
@@ -120,7 +120,7 @@ def _ext_chunk_tensor(
     world_size: int,
     num_devices_per_node: int,
     pg: dist.ProcessGroup,
-    fsdp_extension: Optional[FSDPExtensions] = None,
+    fsdp_extension: FSDPExtensions | None = None,
 ) -> torch.Tensor:
     chunk_tensor_fn = (
         fsdp_extension.chunk_tensor
@@ -140,7 +140,7 @@ def _ext_chunk_dtensor(
     tensor: torch.Tensor,
     rank: int,
     device_mesh: DeviceMesh,
-    fsdp_extension: Optional[FSDPExtensions] = None,
+    fsdp_extension: FSDPExtensions | None = None,
 ) -> torch.Tensor:
     chunk_dtensor_fn = (
         fsdp_extension.chunk_dtensor
@@ -156,7 +156,7 @@ def _ext_chunk_dtensor(
 
 def _ext_pre_load_state_dict_transform(
     tensor: torch.Tensor,
-    fsdp_extension: Optional[FSDPExtensions] = None,
+    fsdp_extension: FSDPExtensions | None = None,
 ) -> tuple[torch.Tensor, list[Shard]]:
     if fsdp_extension is not None:
         return fsdp_extension.pre_load_state_dict_transform(tensor)
@@ -169,8 +169,8 @@ def _ext_pre_load_state_dict_transform(
 
 def _ext_all_gather_dtensor(
     tensor: DTensor,
-    parent_mesh: Optional[DeviceMesh],
-    fsdp_extension: Optional[FSDPExtensions] = None,
+    parent_mesh: DeviceMesh | None,
+    fsdp_extension: FSDPExtensions | None = None,
 ) -> torch.Tensor:
     all_gather_dtensor_fn = (
         fsdp_extension.all_gather_dtensor

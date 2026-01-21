@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch
@@ -92,6 +92,7 @@ from torch._inductor.utils import (
     determine_aoti_mmap_flags,
     is_linux,
     is_windows,
+    XPU_KERNEL_FORMAT,
 )
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
@@ -108,7 +109,7 @@ from torch.compiler._cache import (
 )
 from torch.export.pt2_archive._package_weights import TensorProperties, Weights
 from torch.export.pt2_archive.constants import CUSTOM_OBJ_FILENAME_PREFIX
-from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+from torch.fx.experimental.symbolic_shapes import has_hint, ShapeEnv, size_hint
 from torch.utils._ordered_set import OrderedSet
 
 from .output_code import CompiledFxGraph
@@ -167,7 +168,7 @@ def get_kernel_bin_format(device: str) -> str:
     if device == "cuda":
         return "cubin" if torch.version.hip is None else "hsaco"
     elif device == "xpu":
-        return "spv"
+        return XPU_KERNEL_FORMAT
     else:
         return ""
 
@@ -369,7 +370,7 @@ def get_path(
 def get_hash(content: str | bytes, extra: str = "", hash_type: str = "code") -> str:
     if hash_type in {"amdgcn", "code", "ptx", "spv"}:
         return code_hash(content, extra)
-    if hash_type in {"cubin", "hsaco", "spv"}:
+    if hash_type in {"cubin", "hsaco", XPU_KERNEL_FORMAT}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -1022,12 +1023,23 @@ class GuardedCache(Generic[T]):
         raise NotImplementedError("Implement _get_tmp_dir_for_key on parent class")
 
     @classmethod
+    def _record_result(
+        cls: type[GuardedCache[T]],
+        key: str,
+        local_hit: bool,
+        local_miss: bool,
+        remote_hit: bool,
+        remote_miss: bool,
+    ) -> None:
+        raise NotImplementedError("Implement _record_result on parent class")
+
+    @classmethod
     def iterate_over_candidates(
         cls: type[GuardedCache[T]],
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
         key: str,
-    ) -> Generator[tuple[T, bytes], None, None]:
+    ) -> Generator[tuple[T, bytes, bool], None, None]:
         if local:
             subdir = cls._get_tmp_dir_for_key(key)
             if os.path.exists(subdir):
@@ -1035,7 +1047,7 @@ class GuardedCache(Generic[T]):
                     try:
                         with open(os.path.join(subdir, path), "rb") as f:
                             content = f.read()
-                            yield pickle.loads(content), content
+                            yield pickle.loads(content), content, True
                     except Exception:
                         log.warning(
                             "fx graph cache unable to load compiled graph",
@@ -1049,7 +1061,7 @@ class GuardedCache(Generic[T]):
                     data = cache_data["data"]
                     assert isinstance(data, (str, bytes))
                     content = base64.b64decode(data)
-                    yield pickle.loads(content), content
+                    yield pickle.loads(content), content, False
             except Exception:
                 log.warning(
                     "%s unable to load compiled graph", cls.__name__, exc_info=True
@@ -1082,11 +1094,14 @@ class GuardedCache(Generic[T]):
         pickled_content = None
         result_status = "full_miss"
         sample_guards_expr = None
+        in_local = False
 
         # Iterate over any entries in the subdir for this key and evaluate
         # guards to determine whether there's a hit.
 
-        for candidate, content in cls.iterate_over_candidates(local, remote_cache, key):
+        for candidate, content, in_local in cls.iterate_over_candidates(
+            local, remote_cache, key
+        ):
             assert hasattr(candidate, "guards_expr")
             if not candidate.guards_expr:  # type: ignore[attr-defined]
                 # No guards to evaluate, so this is a hit.
@@ -1114,6 +1129,21 @@ class GuardedCache(Generic[T]):
         info = {"cache_status_detailed": result_status}
         if sample_guards_expr is not None:
             info["cache_status_guard_expr"] = sample_guards_expr
+
+        # Record hits/misses for compilation event logging. The tricky part is that a
+        # remote hit would imply a local miss (if local caching is enabled).
+        local_hit = graph is not None and in_local
+        remote_hit = graph is not None and not in_local
+        local_miss = (graph is None or remote_hit) and local
+        remote_miss = graph is None and remote_cache is not None
+        cls._record_result(
+            key,
+            local_hit=local_hit,
+            local_miss=local_miss,
+            remote_hit=remote_hit,
+            remote_miss=remote_miss,
+        )
+
         return graph, pickled_content, info
 
     @classmethod
@@ -1192,6 +1222,49 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Return the disk location for a given cache key.
         """
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
+
+    @classmethod
+    def _record_result(
+        cls: type[FxGraphCache],
+        key: str,
+        local_hit: bool,
+        local_miss: bool,
+        remote_hit: bool,
+        remote_miss: bool,
+    ) -> None:
+        """
+        Called by GuardedCache to record hit/miss statistics.
+        """
+        if local_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "inductor_fx_local_cache_hit_count",
+            )
+        if remote_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "inductor_fx_remote_cache_hit_count",
+            )
+            CompileEventLogger.try_(
+                CompileEventLogger.add_to_set_toplevel,
+                "inductor_fx_remote_cache_hit_keys",
+                key,
+            )
+        if local_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "inductor_fx_local_cache_miss_count",
+            )
+        if remote_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "inductor_fx_remote_cache_miss_count",
+            )
+            CompileEventLogger.try_(
+                CompileEventLogger.add_to_set_toplevel,
+                "inductor_fx_remote_cache_miss_keys",
+                key,
+            )
 
     @staticmethod
     def cache_hit_post_compile(
@@ -1318,7 +1391,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         assert shape_env is not None
 
         symints = FxGraphCache._filter_backed_symints(example_inputs)
-        hints = [hint_int(s) for s in symints]
+        hints = [size_hint(s) for s in symints]
 
         # If this config is turned on, everything is a guard hit and we check nothing
         if config.unsafe_skip_cache_dynamic_shape_guards:
@@ -1574,17 +1647,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
-            if remote_cache:
-                # Count remote cache hit stats
-                CompileEventLogger.try_(
-                    CompileEventLogger.increment_toplevel,
-                    "inductor_fx_remote_cache_hit_count",
-                )
-                CompileEventLogger.try_(
-                    CompileEventLogger.add_to_set_toplevel,
-                    "inductor_fx_remote_cache_hit_keys",
-                    key,
-                )
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
@@ -1599,17 +1661,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
-            if remote_cache:
-                # Count remote cache miss stats
-                CompileEventLogger.try_(
-                    CompileEventLogger.increment_toplevel,
-                    "inductor_fx_remote_cache_miss_count",
-                )
-                CompileEventLogger.try_(
-                    CompileEventLogger.add_to_set_toplevel,
-                    "inductor_fx_remote_cache_miss_keys",
-                    key,
-                )
             log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
@@ -1680,7 +1731,11 @@ class CudaKernelParamCache:
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
         if config.aot_inductor.emit_multi_arch_kernel:
-            bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv", "hsaco": ".hsaco"}
+            bin_type_to_ext = {
+                "cubin": ".fatbin",
+                "spv": f".{XPU_KERNEL_FORMAT}",
+                "hsaco": ".hsaco",
+            }
             assert bin_type in bin_type_to_ext, (
                 "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             )
@@ -2986,6 +3041,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         #include <Python.h>
         #include <sstream>
         #include <cstdlib>
+        #include <cerrno>
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
@@ -3057,9 +3113,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
                 return nullptr;
             }}
-            std::istringstream iss(str_addr);
-            uintptr_t addr = 0;
-            iss >> addr;
+
+            char* endptr = nullptr;
+            errno = 0;
+            uintptr_t addr = std::strtoull(str_addr, &endptr, 10);
+            if(errno != 0 || endptr == str_addr || addr == 0) {{
+                PyErr_SetString(PyExc_RuntimeError, "Failed to parse _TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
+                return nullptr;
+            }}
             _torchinductor_pyobject_tensor_data_ptr =
                 reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
             PyObject* module = PyModule_Create(&py_module);
@@ -3742,7 +3803,7 @@ def _load_triton_kernel_from_source(
     return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
-def _cuda_compiler() -> Optional[str]:
+def _cuda_compiler() -> str | None:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if config.is_fbcode():
@@ -3760,7 +3821,7 @@ def _cutlass_path() -> str:
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        return config.cutlass.cutlass_dir
+        return config.cuda.cutlass_dir
 
 
 def _cutlass_paths() -> list[str]:
@@ -3808,7 +3869,7 @@ def cutlass_key() -> bytes:
             return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
-    build_code_hash([config.cutlass.cutlass_dir], "", combined_hash)
+    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
     return combined_hash.digest()
 
 
@@ -3861,6 +3922,8 @@ def _nvcc_arch_as_compile_option() -> str:
     if arch == "90":
         # Required by cutlass compilation.
         return "90a"
+    if arch == "103":
+        return "100f"
     if arch == "100":
         return "100a"
     return arch
@@ -3878,14 +3941,14 @@ def _nvcc_compiler_options() -> list[str]:
         "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
-        config.cutlass.compile_opt_level,
+        config.cuda.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
     if config.is_fbcode():
         options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
-    if config.cutlass.enable_debug_info:
+    if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
     if config.cuda.enable_ptxas_info:
         options.extend(
@@ -3897,7 +3960,7 @@ def _nvcc_compiler_options() -> list[str]:
                 "--source-in-ptx",
             ]
         )  # Annotate the ptx file with source information
-    if config.cutlass.use_fast_math:
+    if config.cuda.use_fast_math:
         options.extend(
             [
                 "--use_fast_math",
@@ -4101,7 +4164,7 @@ class CUDACodeCache:
         Returns the hash key of source code, and the path to the file.
         """
 
-        if config.cutlass.cutlass_hash_with_compile_cmd:
+        if config.cuda.cutlass_hash_with_compile_cmd:
             cuda_command = repr(
                 cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
             )
@@ -4152,7 +4215,7 @@ class CUDACodeCache:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 error_path = binary_error_path(output_path)
                 binary_remote_cache = cls.get_kernel_binary_remote_cache(
-                    caching_enabled=config.cutlass.use_binary_remote_cache
+                    caching_enabled=config.cuda.use_binary_remote_cache
                     and not config.force_disable_caches,
                     caching_available=config.is_fbcode(),
                 )
@@ -4167,13 +4230,13 @@ class CUDACodeCache:
                     cmd_parts, error_output = json.loads(error_json)
                     if (
                         binary_remote_cache is not None
-                        and config.cutlass.upload_to_binary_remote_cache
+                        and config.cuda.upload_to_binary_remote_cache
                     ):
                         # This ensures that a local error is uploaded to the remote cache,
                         # as we make no assumptions about the remote cache having the same
                         # information as the local cache
                         binary_remote_cache.put(
-                            error_path, config.cutlass.binary_remote_cache_force_write
+                            error_path, config.cuda.binary_remote_cache_force_write
                         )
                     cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                         input_path, output_path, error_json
@@ -4237,11 +4300,11 @@ class CUDACodeCache:
                 # Upload to remote cache if enabled
                 if (
                     binary_remote_cache is not None
-                    and config.cutlass.upload_to_binary_remote_cache
+                    and config.cuda.upload_to_binary_remote_cache
                 ):
                     # will log on errors, but not fail out
                     binary_remote_cache.put(
-                        output_path, config.cutlass.binary_remote_cache_force_write
+                        output_path, config.cuda.binary_remote_cache_force_write
                     )
                 cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                     input_path, output_path, None
@@ -4294,10 +4357,10 @@ class CUDACodeCache:
         # Upload to remote cache directly from memory if enabled
         if (
             binary_remote_cache is not None
-            and config.cutlass.upload_to_binary_remote_cache
+            and config.cuda.upload_to_binary_remote_cache
         ):
             binary_remote_cache.put(
-                error_path, config.cutlass.binary_remote_cache_force_write
+                error_path, config.cuda.binary_remote_cache_force_write
             )
 
 

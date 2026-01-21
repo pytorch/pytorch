@@ -181,8 +181,7 @@ try:
             return x if x.is_int() else z3.ToInt(x)
 
         def sym_sum(self, args: z3.ArithRef) -> z3.ArithRef:
-            # pyrefly: ignore
-            return sum(args)
+            return sum(args)  # pyrefly: ignore [no-matching-overload]
 
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
