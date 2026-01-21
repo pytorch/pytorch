@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includes
 input/output types, metadata, config, function signatures etc.
@@ -12,11 +11,13 @@ import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._subclasses import FakeTensor
+from torch._library.opaque_object import OpaqueType
+from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -34,11 +35,13 @@ if TYPE_CHECKING:
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+    from torch.types import IntLikeType
 
     from .descriptors import AOTInput, AOTOutput
     from .graph_capture_wrappers import JointFnHandle
 
-
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 zip = strict_zip
 
 
@@ -133,7 +136,7 @@ class InputAliasInfo:
     requires_grad: bool
     keep_input_mutations: bool
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.mutates_storage_metadata:
             # For convenience, we guarantee that this is always true.
             # In practice, If we call .set_(), then at runtime there is no need
@@ -242,9 +245,9 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, Union[SubclassCreationMeta, PlainTensorMeta]]
-    outer_size: Iterable[Union[None, int, torch.SymInt]]
-    outer_stride: Iterable[Union[None, int, torch.SymInt]]
+    attrs: dict[str, SubclassCreationMeta | PlainTensorMeta]
+    outer_size: Iterable[IntLikeType | None]
+    outer_stride: Iterable[IntLikeType | None]
     meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
@@ -259,13 +262,18 @@ class SubclassCreationMeta:
 
     def compute_outer_size_and_stride(
         self,
-        all_args,
+        all_args: Sequence[torch.Tensor | IntLikeType],
         *,
         curr_start_idx: int,
-    ):
+    ) -> tuple[
+        Iterable[IntLikeType | None],
+        Iterable[IntLikeType | None],
+    ]:
         from .subclass_utils import compute_symint_placeholders
 
-        def compute(outer, start_idx):
+        def compute(
+            outer: Iterable[IntLikeType | None], start_idx: int
+        ) -> tuple[Any, int | Any]:
             placeholders = compute_symint_placeholders(outer)
             has_symbolic = any(placeholders)
 
@@ -286,10 +294,10 @@ class SubclassCreationMeta:
 
     def creation_fn(
         self,
-        all_args,
+        all_args: Sequence[torch.Tensor | IntLikeType],
         *,
         is_runtime: bool,
-    ):
+    ) -> torch.Tensor:
         inner_tensors = {}
 
         curr_start_idx = self.flat_tensor_start_idx
@@ -332,7 +340,7 @@ class SubclassCreationMeta:
 
         return rebuilt
 
-    def make_runtime_safe(self):
+    def make_runtime_safe(self) -> None:
         def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:
             dummy = -1
             if isinstance(x, torch.SymInt):
@@ -358,7 +366,7 @@ class SubclassCreationMeta:
             if isinstance(creation_meta, SubclassCreationMeta):
                 creation_meta.make_runtime_safe()
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # sanity assert to make sure we don't leak memory
         assert is_fake(self.original_subclass)
 
@@ -436,6 +444,15 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
+    # See Note [Activations with no version counter checks in eager]
+    # Number of tensors saved for backward that were stashed on ctx (e.g., ctx.x = x)
+    # rather than via save_for_backward in an autograd.Function.
+    # These tensors are placed at the end of the saved tensors and should skip
+    # version counter checks at runtime.
+    num_tensors_saved_with_no_vc_check: Optional[int] = None
+
+    # Number of opaque objects saved for backward
+    num_opaque_objects_saved_for_bw: Optional[int] = None
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
@@ -482,7 +499,14 @@ class ViewAndMutationMeta:
 
     graphsafe_rng_state_index: Optional[int] = None
 
-    def __post_init__(self):
+    # Stream indices for mutated inputs in the epilogue
+    # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
+    # the storage of the tensor that will be copied back into the original input
+    # None means use the current/default stream
+    # This is populated during graph compilation when stream assignments are made
+    mutated_inp_stream_indices: Optional[list[Optional[int]]] = None
+
+    def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
@@ -625,7 +649,7 @@ class ViewAndMutationMeta:
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
-    def make_runtime_safe(self):
+    def make_runtime_safe(self) -> None:
         """
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
         is completed to simplify certain fields in the metadata so that they can be safely cached.
@@ -637,7 +661,7 @@ class ViewAndMutationMeta:
         # SubclassCreationMeta is cache safe.
         assert self.traced_tangent_metas is None
 
-        def extract_metadata(t):
+        def extract_metadata(t: object) -> tuple[list[object], object | None] | None:
             if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
                 (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
                 # Technically, we only need the flatten_spec, not the inner tensors.
@@ -663,22 +687,80 @@ class ViewAndMutationMeta:
                 inp_meta.make_runtime_safe()
 
     @property
-    def tensors_saved_for_backwards_slice(self):
+    def tensors_saved_for_backwards_slice(self) -> slice:
         assert self.num_symints_saved_for_bw is not None
-        if self.num_symints_saved_for_bw > 0:
-            return slice(self.num_forward, -self.num_symints_saved_for_bw)
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        # Fast-path: if no tensors without VC check, just return the VC check slice
+        if self.num_tensors_saved_with_no_vc_check == 0:
+            return self.tensors_saved_for_backwards_with_vc_check_slice
+        # Invariant: total tensors activations = (acts_with_vc_check, acts_no_vc_check)
+        vc_slice = self.tensors_saved_for_backwards_with_vc_check_slice
+        no_vc_slice = self.tensors_saved_for_backwards_no_vc_check_slice
+        # Start should be the same (self.num_forward)
+        assert vc_slice.start == self.num_forward
+        # End is the end of the no_vc_check slice
+        return slice(vc_slice.start, no_vc_slice.stop)
+
+    @property
+    def tensors_saved_for_backwards_with_vc_check_slice(self) -> slice:
+        """
+        Slice of forward outputs that are tensors saved for backward that
+        require version counter checks (i.e., were saved via save_for_backward).
+        """
+        # See Note [Activations with no version counter checks in eager]
+        assert self.num_symints_saved_for_bw is not None
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        # The tensors with VC check come first, followed by tensors without VC check
+        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw
+        num_trailing = num_no_vc_check + num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(self.num_forward, -num_trailing if num_trailing != 0 else None)
         else:
             return slice(self.num_forward, None)
 
     @property
-    def symints_saved_for_backwards_slice(self):
+    def tensors_saved_for_backwards_no_vc_check_slice(self) -> slice:
+        """
+        Slice of forward outputs that are tensors saved for backward that
+        do NOT require version counter checks (i.e., were stashed on ctx
+        rather than via save_for_backward in an autograd.Function).
+        """
+        assert self.num_symints_saved_for_bw is not None
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw
+        if num_no_vc_check == 0:
+            return slice(0, 0)  # empty slice
+        num_trailing = num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(-num_no_vc_check - num_trailing, -num_trailing)
+        else:
+            return slice(-num_no_vc_check, None)
+
+    @property
+    def opaque_objects_saved_for_backwards_slice(self) -> slice:
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw or 0
+        if num_opaque > 0:
+            if num_symints > 0:
+                return slice(-num_opaque - num_symints, -num_symints)
+            else:
+                return slice(-num_opaque, None)
+        else:
+            return slice(0, 0)  # empty slice
+
+    @property
+    def symints_saved_for_backwards_slice(self) -> slice:
         assert self.num_symints_saved_for_bw is not None
         if self.num_symints_saved_for_bw > 0:
             return slice(-self.num_symints_saved_for_bw, None)
         else:
             return slice(0, 0)  # empty slice
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, ViewAndMutationMeta):
             return NotImplemented
         return (
@@ -974,8 +1056,12 @@ class AOTConfig:
     # mutating input with req_grad in export joint tracing.
     export_trace_joint: bool = False
     disable_functionalization: bool = False
+    # If True, disable TorchFunctionMetadataMode during make_fx tracing.
+    # This mode is used to track torch_fn metadata but can interfere with
+    # certain tracing scenarios.
+    _disable_torch_fn_metadata_mode: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.pre_dispatch:
             assert self.is_export, "Can only have pre_dispatch IR for export."
 
@@ -1050,8 +1136,13 @@ class AOTState:
     # can cancel it and reenable it later when you need it.
     stack: contextlib.ExitStack
 
+    # The fake tensor mode used during tracing.  This is useful for later
+    # operations that need to create new fake tensors consistent with the
+    # original trace.
+    fake_mode: FakeTensorMode
 
-FxValue = Union[Tensor, int, SymInt, BackwardState]
+
+FxValue = Tensor | int | SymInt | BackwardState | OpaqueType
 
 
 class CompilerWrapper:
@@ -1083,13 +1174,13 @@ class CompilerWrapper:
 
     def pre_compile(
         self,
-        flat_fn,
+        flat_fn: TraceFn,
         flat_args: list[FxValue],
         flat_args_descs: list[AOTInput],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[Callable, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
+    ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -1100,7 +1191,13 @@ class CompilerWrapper:
         """
         return flat_fn, flat_args, flat_args_descs, fw_metadata
 
-    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
+    def post_compile(
+        self,
+        compiled_fn: Callable[_P, _R],
+        aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ) -> Callable[_P, _R]:
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
@@ -1155,7 +1252,13 @@ class InductorWrapper:
         """
         return
 
-    def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
+    def post_compile(
+        self,
+        compiled_fn: Callable[_P, _R],
+        aot_config: AOTConfig,
+        *,
+        runtime_metadata: ViewAndMutationMeta,
+    ) -> Callable[_P, _R]:
         """
         Given an output of the compiler, wrap it with information received from prologue.
         Args:
@@ -1235,7 +1338,7 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         self,
         output_code_ty: type[TOutputCode],
         compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
-    ):
+    ) -> None:
         # pyrefly: ignore [invalid-type-var]
         self.output_code_ty = output_code_ty
         # pyrefly: ignore [invalid-type-var]
@@ -1246,7 +1349,8 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
     ) -> OutputCode:
-        return self.compiler_fn(gm, example_inputs)
+        output_code = self.compiler_fn(gm, example_inputs)
+        return output_code
 
 
 class FlatFn(Protocol):
@@ -1289,9 +1393,23 @@ class JointWithDescriptors:
     out_spec: pytree.TreeSpec
 
     @property
-    def graph_module(self):
+    def graph_module(self) -> torch.fx.GraphModule:
         return self._aot_graph_capture.graph_module
 
     @graph_module.setter
-    def graph_module(self, value):
+    def graph_module(self, value: torch.fx.GraphModule) -> None:
         self._aot_graph_capture.graph_module = value
+
+    @property
+    def fake_mode(self) -> FakeTensorMode:
+        return self._aot_state.fake_mode
+
+    def cache_hash(self) -> str:
+        """
+        Return a hash string suitable for use as a cache key. This method
+        exists to decouple cache key generation from __str__/__repr__, so
+        that display-oriented changes don't accidentally affect caching.
+        """
+        from hashlib import sha256
+
+        return sha256(str(self).encode("utf-8")).hexdigest()

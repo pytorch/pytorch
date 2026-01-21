@@ -24,6 +24,25 @@ const at::cuda::NVRTC& get_nvrtc() {
 
 namespace torch::nativert {
 
+// CUDA/HIP-specific launch parameters
+class CudaLaunchParams : public LaunchParams {
+ public:
+  int num_warps = 4;
+  int shared_memory_bytes = 0;
+
+  void parseAttributes(const Node* node) {
+    parseCommonAttributes(node);
+    for (const auto& attr : node->attributes()) {
+      set_from_variant<int64_t>(
+          num_warps, "num_warps", attr, [](auto v) { return v > 0; });
+      set_from_variant<int64_t>(
+          shared_memory_bytes, "shared_memory_bytes", attr, [](auto v) {
+            return v > 0;
+          });
+    }
+  }
+};
+
 // cuda kernels require an extra level of indirection
 // for who knows what reason.
 class CudaKernelInputs final : public KernelInputs {
@@ -58,9 +77,18 @@ class CudaTritonKernelManager final : public TritonKernelManager {
   CudaTritonKernelManager(CudaTritonKernelManager&& other) noexcept;
   CudaTritonKernelManager& operator=(CudaTritonKernelManager&& other) noexcept;
 
+  std::unique_ptr<LaunchParams> createLaunchParams(
+      const Node* node) const override {
+    auto params = std::make_unique<CudaLaunchParams>();
+    params->parseAttributes(node);
+    return params;
+  }
+
   void launch(const LaunchParams& launch_params, void** args) final;
-  std::unique_ptr<KernelInputs> create_inputs(size_t num_args, size_t num_attrs)
-      const final {
+  std::unique_ptr<KernelInputs> create_inputs(
+      size_t num_args,
+      size_t num_attrs,
+      const KernelInputParams& /*params*/) const final {
     return std::unique_ptr<KernelInputs>(
         new CudaKernelInputs(num_args, num_attrs));
   }
@@ -121,6 +149,7 @@ CUfunction CudaTritonKernelManager::load() {
 void CudaTritonKernelManager::launch(
     const LaunchParams& launch_params,
     void** args /* { ...inputs, output }*/) {
+  const auto& cuda_params = static_cast<const CudaLaunchParams&>(launch_params);
   const constexpr int kThreadsPerWarp = 2 << 4;
 
   auto kernel_fn = load();
@@ -130,13 +159,13 @@ void CudaTritonKernelManager::launch(
 
   AT_CUDA_DRIVER_CHECK(get_nvrtc().cuLaunchKernel(
       kernel_fn,
-      launch_params.grid_dims.x,
-      launch_params.grid_dims.y,
-      launch_params.grid_dims.z,
-      /* blockDimX = */ kThreadsPerWarp * launch_params.num_warps,
+      cuda_params.grid_dims.x,
+      cuda_params.grid_dims.y,
+      cuda_params.grid_dims.z,
+      /* blockDimX = */ kThreadsPerWarp * cuda_params.num_warps,
       /* blockDimY = */ 1,
       /* blockDimZ = */ 1,
-      /* sharedMemBytes = */ launch_params.shared_memory_bytes,
+      /* sharedMemBytes = */ cuda_params.shared_memory_bytes,
       stream,
       args,
       nullptr));

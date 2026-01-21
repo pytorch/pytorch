@@ -1049,6 +1049,124 @@ def forward(self, args_0):
         test_inputs = (torch.randn(2, 3),)
         self.assertEqual(ep(*test_inputs), m(*test_inputs))
 
+    def test_restore_state_dict_basic(self):
+        """Test basic state dict restoration with a simple model."""
+        from torch.export import _restore_state_dict
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.register_buffer("buf", torch.randn(4))
+
+            def forward(self, x):
+                return self.linear(x) + self.buf
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 4))
+
+        # Before restoration, FQNs may be flattened
+        state_dict_before = dict(gm.named_parameters())
+        buffer_dict_before = dict(gm.named_buffers())
+
+        _restore_state_dict(model, gm)
+
+        # After restoration, FQNs should match original module
+        state_dict_after = dict(gm.named_parameters())
+        buffer_dict_after = dict(gm.named_buffers())
+
+        # Check that the parameter names match the original
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(state_dict_after.keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+        # Check that the buffer names match the original
+        original_buffer_names = set(dict(model.named_buffers()).keys())
+        restored_buffer_names = set(buffer_dict_after.keys())
+        self.assertEqual(original_buffer_names, restored_buffer_names)
+
+        # Verify the model still works correctly
+        test_input = torch.randn(2, 4)
+        expected = model(test_input)
+        actual = gm(test_input)
+        self.assertEqual(expected, actual)
+
+    def test_restore_state_dict_nested_modules(self):
+        """Test state dict restoration with nested modules."""
+        from torch.export import _restore_state_dict
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(8, 8)
+                self.register_buffer("scale", torch.tensor(2.0))
+
+            def forward(self, x):
+                return self.fc(x) * self.scale
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub1 = SubModule()
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub1(x) + self.sub2(x)
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 8))
+
+        _restore_state_dict(model, gm)
+
+        # Check that nested FQNs are properly restored
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(dict(gm.named_parameters()).keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+        # Check buffers too
+        original_buffer_names = set(dict(model.named_buffers()).keys())
+        restored_buffer_names = set(dict(gm.named_buffers()).keys())
+        self.assertEqual(original_buffer_names, restored_buffer_names)
+
+        # Verify functionality
+        test_input = torch.randn(2, 8)
+        expected = model(test_input)
+        actual = gm(test_input)
+        self.assertEqual(expected, actual)
+
+    def test_restore_state_dict_with_bound_method(self):
+        """Test state dict restoration when passing a bound method."""
+        from torch.export import _restore_state_dict
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model.forward)(torch.randn(2, 4))
+
+        # Pass bound method instead of module
+        _restore_state_dict(model.forward, gm)
+
+        # Verify FQNs match
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(dict(gm.named_parameters()).keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+    def test_restore_state_dict_type_error(self):
+        """Test that _restore_state_dict raises TypeError for invalid input."""
+        from torch.export import _restore_state_dict
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+
+        # Should raise TypeError when given a non-module, non-bound-method
+        with self.assertRaises(TypeError):
+            _restore_state_dict(lambda x: x, gm)
+
 
 if __name__ == "__main__":
     run_tests()

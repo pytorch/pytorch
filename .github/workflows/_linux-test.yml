@@ -448,7 +448,12 @@ jobs:
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
 
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
-            docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt"
+            # sometimes there are intermittent network errors, do a couple of retries
+            docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt || \
+              (sleep 15 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
+              (sleep 30 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
+              (sleep 60 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
+              (sleep 300 && python3 -m pip install -r .ci/docker/requirements-ci.txt)"
           fi
 
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
