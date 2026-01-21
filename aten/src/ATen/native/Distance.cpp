@@ -245,7 +245,7 @@ Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2
 Tensor _pdist_forward(const Tensor& self, const double p) {
   TORCH_CHECK(self.is_contiguous(), "_pdist_forward requires contiguous input");
   auto device = self.device().type();
-  TORCH_CHECK(device == kCPU || device == kCUDA || device == kXPU, "_pdist_forward only supports CPU, XPU and CUDA devices, got: ", device);
+  TORCH_CHECK(device == kCPU || device == kCUDA || device == kXPU || device == kMPS, "_pdist_forward only supports CPU, XPU, CUDA and MPS devices, got: ", device);
   Tensor result = at::empty({0}, self.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (self.size(0) <= 1) {
     result.resize_({0});
