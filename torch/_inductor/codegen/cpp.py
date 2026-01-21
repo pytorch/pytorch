@@ -3555,7 +3555,8 @@ class CppVecKernel(CppKernel):
             else:
                 expr = (
                     expr
-                    + f"<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})")
+                    + f"<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+                )
         return expr
 
 
