@@ -32,7 +32,7 @@ def flatten_unflatten_for_dynamic_shapes(
             in the dynamic shapes, these specifications seems to be different
             for the strict and non strict mode. It also preserves tuple.
         change_function:
-            to modifies the tensor in the structure itself,
+            to modify the tensor in the structure itself,
             like replace them by a shape
 
     Returns:
