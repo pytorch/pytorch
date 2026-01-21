@@ -162,3 +162,9 @@ matches = "torch/_subclasses/**"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/schemas.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
