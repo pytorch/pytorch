@@ -119,9 +119,9 @@ class TestHSDPCheckpoint(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
-    @parametrize("experimental_broadcast_replication", [False, True])
+    @parametrize("broadcast_replication", [False, True])
     def test_hsdp_checkpoint(
-        self, is_even_sharded_model, experimental_broadcast_replication
+        self, is_even_sharded_model, broadcast_replication
     ) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
@@ -161,11 +161,16 @@ class TestHSDPCheckpoint(DTensorTestBase):
             state_dict_to_save["optim"], optim.state_dict(), check_equal=False
         )
 
+        if broadcast_replication:
+            replicate_group = mesh_2d.get_group(mesh_dim=0)
+            loadplanner = DefaultLoadPlanner(replicate_group=replicate_group)
+        else:
+            loadplanner = DefaultLoadPlanner()
+
         dist_cp.load(
             state_dict=state_dict_to_save,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
-            planner=DefaultLoadPlanner(),
-            experimental_broadcast_replication=experimental_broadcast_replication,
+            planner=loadplanner,
         )
         model.load_state_dict(state_dict_to_save["model"])
         optim.load_state_dict(state_dict_to_save["optim"])

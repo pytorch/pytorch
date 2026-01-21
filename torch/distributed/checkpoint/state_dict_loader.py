@@ -12,7 +12,6 @@ import torch.distributed as dist
 from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.logger import _dcp_method_logger
 from torch.distributed.checkpoint.stateful import Stateful
-from torch.utils import _pytree as pytree
 
 from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
@@ -66,7 +65,6 @@ def load(
     planner: LoadPlanner | None = None,
     process_group: dist.ProcessGroup | None = None,
     no_dist: bool = False,
-    experimental_broadcast_replication: bool = False,
 ) -> None:
     """
     Load a checkpoint into a distributed state dict in SPMD style.
@@ -126,14 +124,6 @@ def load(
             (Default: ``None``)
         no_dist (bool): If ``True``, this function will assume the intent is to load
             a checkpoint without using cross-rank synchronization. (Default: ``False``)
-        experimental_broadcast_replication (bool): If ``True``, enables experimental
-            broadcast replication loading for HSDP (Hybrid Sharded Data Parallel)
-            models. When enabled, only rank 0 in each replicate group reads data
-            from storage, then broadcasts to other ranks in the same replicate group.
-            This reduces I/O overhead for replicated parameters. (Default: ``False``)
-
-            .. warning::
-                This feature is experimental and subject to change.
     Returns:
         None.
 
@@ -198,7 +188,6 @@ def load(
             process_group=process_group,
             no_dist=no_dist,
             planner=planner,
-            experimental_broadcast_replication=experimental_broadcast_replication,
         )
         for key in keys:
             if key not in state_dict:
@@ -220,7 +209,6 @@ def _load_state_dict(
     coordinator_rank: int = 0,
     no_dist: bool = False,
     planner: LoadPlanner | None = None,
-    experimental_broadcast_replication: bool = False,
 ) -> None:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
@@ -298,59 +286,6 @@ def _load_state_dict(
         global_plan: list[LoadPlan] = global_step([local_plan])
         central_plan = global_plan[0]
 
-    replicate_group: dist.ProcessGroup | None = None
-    tensors_to_broadcast: list[torch.Tensor | dist.tensor.DTensor] = []
-    tensor_fqns_to_broadcast: list[str] = []
-    if experimental_broadcast_replication:
-        try:
-            # TODO: Support mixed meshes
-            # Currently we assume all parameters in a model share the same Mesh topology
-            # Find the first DTensor to infer the DeviceMesh
-            def _path_to_fqn(path):
-                fqn: list[str] = []
-                for entry in path:
-                    if isinstance(entry, pytree.MappingKey):
-                        fqn.append(str(entry.key))
-                    elif isinstance(entry, pytree.SequenceKey):
-                        fqn.append(str(entry.idx))
-                    else:
-                        # Fallback for standard types or older pytree versions
-                        fqn.append(str(entry))
-                return ".".join(fqn)
-
-            flatten_state_with_path, _ = pytree.tree_flatten_with_path(state_dict)
-            for path, obj in flatten_state_with_path:
-                if (
-                    isinstance(obj, (torch.Tensor, dist.tensor.DTensor))
-                    and obj.device.type != "cpu"
-                ):
-                    tensors_to_broadcast.append(obj)
-                    tensor_fqns_to_broadcast.append(_path_to_fqn(path))
-
-            first_dtensor = next(
-                (t for t in tensors_to_broadcast if isinstance(t, dist.tensor.DTensor)),
-                None,
-            )
-            if first_dtensor is not None:
-                mesh = first_dtensor.device_mesh
-                if mesh.ndim >= 2:
-                    group = mesh.get_group(mesh_dim=0)
-                    if group.size() > 1:
-                        replicate_group = group
-                        logger.debug(
-                            "HSDP Broadcast Loading enabled. Rank %s is %s.",
-                            dist.get_rank(),
-                            "Loader" if dist.get_rank(group) == 0 else "Receiver",
-                        )
-        except Exception:
-            logger.debug("Failed to infer replicate group", exc_info=True)
-
-        if replicate_group is None:
-            logger.warning(
-                "experimental_broadcast_replication=True but no valid HSDP DeviceMesh found in state_dict. "
-                "Falling back to standard loading."
-            )
-
     @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
         if planner is None:
@@ -358,36 +293,11 @@ def _load_state_dict(
         if central_plan is None:
             raise AssertionError("central_plan is None")
         final_local_plan = planner.finish_plan(central_plan)
-
-        if experimental_broadcast_replication and replicate_group is not None:
-            if replicate_group.rank() != 0:
-                # filter broadcast tensors in final_local_plan
-                new_items = []
-                for item in final_local_plan.items:
-                    if item.dest_index.fqn not in tensor_fqns_to_broadcast:
-                        new_items.append(item)
-                final_local_plan.items = new_items
-        logger.debug(
-            "%s final_local_plan fqns: %s",
-            dist.get_rank(),
-            [t.dest_index.fqn for t in final_local_plan.items],
-        )
-
         all_reads = storage_reader.read_data(final_local_plan, planner)
 
         all_reads.wait()
 
-        if experimental_broadcast_replication and replicate_group is not None:
-            # hsdp broadcast the data to all ranks
-            dist.barrier(group=replicate_group)
-            for obj in tensors_to_broadcast:
-                target = obj.to_local() if isinstance(obj, dist.tensor.DTensor) else obj
-                dist.broadcast(
-                    target,
-                    src=dist.get_global_rank(replicate_group, 0),
-                    group=replicate_group,
-                )
-
+        planner.finish_load()
         return None
 
     if use_collectives:
