@@ -406,8 +406,26 @@ def wrap_sync_control_deps(gm: torch.fx.GraphModule, sync_node: Node) -> None:
     if not deps_before_sync:
         return
 
-    # Create subgraph that executes sync and passes through dependencies
-    subgraph_module = _create_subgraph_for_node(graph, sync_node, deps_before_sync)
+    # Determine which dependencies have uses after the sync node
+    # We only need to pass through and create getitem for those
+    deps_with_uses_after_sync: list[Node] = []
+    after_sync = False
+    for node in graph.nodes:
+        if node is sync_node:
+            after_sync = True
+            continue
+        if not after_sync:
+            continue
+        # Check if any dep is used by this node
+        for dep in deps_before_sync:
+            if dep in node.args or dep in node.kwargs.values():
+                if dep not in deps_with_uses_after_sync:
+                    deps_with_uses_after_sync.append(dep)
+
+    # Create subgraph that executes sync and passes through only used dependencies
+    subgraph_module = _create_subgraph_for_node(
+        graph, sync_node, deps_with_uses_after_sync
+    )
     subgraph_attr_name = get_subgraph_name(gm, sync_node.name)
     setattr(gm, subgraph_attr_name, subgraph_module)
 
@@ -426,19 +444,19 @@ def wrap_sync_control_deps(gm: torch.fx.GraphModule, sync_node: Node) -> None:
         control_deps_node = graph.call_function(
             control_deps,
             args=(
-                tuple(deps_before_sync),  # additional_deps
+                tuple(deps_before_sync),  # additional_deps (all deps for ordering)
                 get_subgraph,  # subgraph
                 *node_args,  # sync node's args
-                *deps_before_sync,  # pass deps through subgraph
+                *deps_with_uses_after_sync,  # only pass through deps that are used
             ),
             kwargs={},
         )
 
-    # The output is (sync_result, *deps_before_sync)
-    # Create getitem nodes to extract the pass-through dependencies
+    # The output is (sync_result, *deps_with_uses_after_sync)
+    # Create getitem nodes only for dependencies that have uses after sync
     replacements: dict[Node, Node] = {}
     with graph.inserting_after(control_deps_node):
-        for i, dep in enumerate(deps_before_sync):
+        for i, dep in enumerate(deps_with_uses_after_sync):
             getitem_node = graph.call_function(
                 operator.getitem,
                 args=(control_deps_node, i + 1),  # +1 because index 0 is sync result
@@ -447,7 +465,6 @@ def wrap_sync_control_deps(gm: torch.fx.GraphModule, sync_node: Node) -> None:
             replacements[dep] = getitem_node
 
     # Replace uses of dependencies that come after sync_node
-    # We need to update only uses that are after the sync node
     after_sync = False
     for node in list(graph.nodes):
         if node is sync_node:

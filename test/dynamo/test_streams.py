@@ -997,23 +997,20 @@ class <lambda>(torch.nn.Module):
         # No stacktrace found for following nodes
         subgraph_record_event = self.subgraph_record_event
         control_deps = torch.ops.higher_order.control_deps((add, mul), \
-subgraph_record_event, add, mul);  add = mul = subgraph_record_event = None
+subgraph_record_event, mul);  add = mul = subgraph_record_event = None
 
         #
-        getitem_1: "f32[2, 2]" = control_deps[2]
+        getitem: "f32[2, 2]" = control_deps[1];  control_deps = None
 
         #
-        getitem: "f32[2, 2]" = control_deps[1];  control_deps = getitem = None
-
-        #
-        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem_1, 3);  getitem_1 = None
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 3);  getitem = None
         return (add_1,)
 
     class subgraph_record_event(torch.nn.Module):
-        def forward(self, dep_0: "f32[2, 2]", dep_1: "f32[2, 2]"):
+        def forward(self, dep_0: "f32[2, 2]"):
             #
             record_event_default = torch.ops.streams.record_event.default(0, 1)
-            return (record_event_default, dep_0, dep_1)
+            return (record_event_default, dep_0)
 """,
         )
 
@@ -1029,6 +1026,7 @@ subgraph_record_event, add, mul);  add = mul = subgraph_record_event = None
         control_deps_node = control_deps_nodes[0]
 
         # Verify getitem nodes were created for pass-through dependencies
+        # Only mul is used after the sync, so only 1 getitem should be created
         getitem_nodes = [
             n
             for n in graph.nodes
@@ -1036,7 +1034,7 @@ subgraph_record_event, add, mul);  add = mul = subgraph_record_event = None
             and n.target == operator.getitem
             and n.args[0] is control_deps_node
         ]
-        self.assertEqual(len(getitem_nodes), 2)
+        self.assertEqual(len(getitem_nodes), 1)
 
         # Verify downstream nodes use the getitem outputs
         add_1_node = next(n for n in graph.nodes if n.name == "add_1")
