@@ -1352,11 +1352,21 @@ class TestViewOps(DTensorTestBase):
                     mesh, batch_size, seq_len, dim1, dim2
                 )
 
+        # Error case: uneven seq_len with (SS, SS) placements
         for seq_len in [2 * mesh.size(0) - 1, 2 * mesh.size(0) + 1]:
             for dim1 in [2 * mesh.size(1)]:
-                pass
-                # raise error
-                # self._test_dtensor_unflatten_2d(mesh, batch_size, seq_len, dim1, dim2)
+                global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(
+                    batch_size * seq_len * dim1, dim2
+                )
+                placements = (
+                    _StridedShard(dim=0, split_factor=batch_size),
+                    _StridedShard(dim=0, split_factor=batch_size * (seq_len // mesh.size(0))),
+                )
+                inps = distribute_tensor(global_inps, mesh, placements, src_data_rank=None)
+                with self.assertRaisesRegex(
+                    RuntimeError, "is not evenly divisible by mesh dimension"
+                ):
+                    inps.view(batch_size, seq_len, dim1, dim2)
 
     def _test_dtensor_unflatten_2d(self, mesh, batch_size, seq_len, dim1, dim2):
         # S1, S2
