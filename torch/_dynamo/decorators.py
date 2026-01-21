@@ -17,11 +17,6 @@ from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
-from ._constants import (
-    DYNAMIC_INDICES_FIELD_NAME,
-    SHAPE_IDS_FIELD_NAME,
-    UNBACKED_INDICES_FIELD_NAME,
-)
 from .comptime import comptime
 from .eval_frame import (
     _set_stance,
@@ -608,20 +603,20 @@ def mark_unbacked(
         if not hasattr(t, "_specialized_on"):
             t._specialize_on = {}
 
-        if not hasattr(t, UNBACKED_INDICES_FIELD_NAME):
-            setattr(t, UNBACKED_INDICES_FIELD_NAME, set())
+        if not hasattr(t, "_dynamo_unbacked_indices"):
+            t._dynamo_unbacked_indices = set()
 
         if not hasattr(t, "_dynamo_hint_overrides"):
             t._dynamo_hint_overrides = {}
 
-        if not hasattr(t, SHAPE_IDS_FIELD_NAME):
-            setattr(t, SHAPE_IDS_FIELD_NAME, {})
+        if not hasattr(t, "_dynamo_shape_ids"):
+            t._dynamo_shape_ids = {}
 
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
 
         if shape_id is not None:
-            getattr(t, SHAPE_IDS_FIELD_NAME)[index] = shape_id
+            t._dynamo_shape_ids[index] = shape_id
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -629,7 +624,7 @@ def mark_unbacked(
         if isinstance(t._specialize_on, dict):
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
-        getattr(t, UNBACKED_INDICES_FIELD_NAME).add(index)
+        t._dynamo_unbacked_indices.add(index)
         return
 
     assert isinstance(index, (list, tuple))
@@ -696,8 +691,8 @@ def mark_dynamic(
         )
 
     if isinstance(index, int):
-        if not hasattr(t, DYNAMIC_INDICES_FIELD_NAME):
-            setattr(t, DYNAMIC_INDICES_FIELD_NAME, set())
+        if not hasattr(t, "_dynamo_dynamic_indices"):
+            t._dynamo_dynamic_indices = set()
 
             t._dynamo_dynamic_range = set()
 
@@ -710,7 +705,7 @@ def mark_dynamic(
             t._dynamo_hint_overrides[index] = hint_override
         # TODO(voz): Should we bounds check?
 
-        getattr(t, DYNAMIC_INDICES_FIELD_NAME).add(index)
+        t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))  # type: ignore[arg-type]
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:

@@ -2158,9 +2158,7 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
     view_base_context: Optional[SymbolicContext] = None
-    # Maps dimension index to shape_id. If two unbacked dimensions have the
-    # same shape_id, a torch._check will ensure that shapenv knows they are
-    # always the same. And a runtime assertions will be added to verify that.
+    # Maps dimension index to shape_id.
     shape_ids: Optional[dict[int, Optional[str]]] = None
     # TODO: add storage offset and stride symbolic_context
 

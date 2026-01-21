@@ -115,11 +115,6 @@ from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
-from ._constants import (
-    DYNAMIC_INDICES_FIELD_NAME,
-    SHAPE_IDS_FIELD_NAME,
-    UNBACKED_INDICES_FIELD_NAME,
-)
 from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
@@ -3066,8 +3061,8 @@ class GuardBuilder(GuardBuilderBase):
             )
 
             if not static:
-                if hasattr(value, DYNAMIC_INDICES_FIELD_NAME):
-                    dynamic_indices = getattr(value, DYNAMIC_INDICES_FIELD_NAME)
+                if hasattr(value, "_dynamo_dynamic_indices"):
+                    dynamic_indices = value._dynamo_dynamic_indices
                     code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
                     code.append(code_part)
                     self.get_guard_manager(guard).add_dynamic_indices_guard(
@@ -3078,15 +3073,15 @@ class GuardBuilder(GuardBuilderBase):
                 # Guard on shape_ids when tensor has unbacked indices.
                 # shape_id is only set via mark_unbacked, which sets _dynamo_unbacked_indices.
                 # Empty dict is treated the same as not having the attribute.
-                if hasattr(value, UNBACKED_INDICES_FIELD_NAME):
-                    assert hasattr(value, SHAPE_IDS_FIELD_NAME)
-                    shape_ids = getattr(value, SHAPE_IDS_FIELD_NAME)
-                    code_part = f"((getattr({tensor_name}, {SHAPE_IDS_FIELD_NAME!r}, None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                if hasattr(value, "_dynamo_unbacked_indices"):
+                    assert hasattr(value, "_dynamo_shape_ids")
+                    shape_ids = value._dynamo_shape_ids
+                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
                     code.append(code_part)
                     self.get_guard_manager(guard).add_lambda_guard(
                         lambda x, expected=shape_ids: (
-                            getattr(x, SHAPE_IDS_FIELD_NAME, None) == expected
-                            if hasattr(x, UNBACKED_INDICES_FIELD_NAME)
+                            getattr(x, "_dynamo_shape_ids", None) == expected
+                            if hasattr(x, "_dynamo_unbacked_indices")
                             else True
                         ),
                         get_verbose_code_parts(code_part, guard),
@@ -3094,7 +3089,7 @@ class GuardBuilder(GuardBuilderBase):
                     )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
-                if not hasattr(value, DYNAMIC_INDICES_FIELD_NAME) and not hasattr(
+                if not hasattr(value, "_dynamo_dynamic_indices") and not hasattr(
                     value, "_dynamo_unbacked_indices"
                 ):
                     code_part = (
