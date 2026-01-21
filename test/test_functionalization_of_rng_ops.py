@@ -333,7 +333,6 @@ class TestFunctionalizationRngOps(TestCase):
         # and it gets eliminated from the backward graph by DCE.
         # But functionalize_rng_ops was assuming all recomputable RNG ops
         # exist in both forward and backward graphs.
-        from torch.utils.checkpoint import checkpoint
 
         def g(x):
             # rand used additively - NOT needed in backward
@@ -344,15 +343,26 @@ class TestFunctionalizationRngOps(TestCase):
             return x
 
         def fn(x):
-            return checkpoint(g, x, use_reentrant=False)
+            return torch.utils.checkpoint.checkpoint(g, x, use_reentrant=False)
 
         x = torch.ones(2, 4, device=device, dtype=dtype, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
 
         # Use torch.compile to trigger the same code path as the original error
+        ref_fn = torch.compile(g, backend="aot_eager")
+        torch.manual_seed(123)
+        ref = ref_fn(x_clone)
+        ref.sum().backward()
+
+        torch.manual_seed(123)
         compiled_fn = torch.compile(fn, backend="aot_eager")
         res = compiled_fn(x)
         # This should not raise KeyError: 'rand' in functionalize_rng_ops
         res.sum().backward()
+
+        # check results match the non-checkpoint case
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
 
 
 only_for = ("cuda",)
