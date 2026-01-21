@@ -20,7 +20,7 @@ _CopyBytesFunctionRegisterer::_CopyBytesFunctionRegisterer(
     // default to the sync function
     func_async = func_sync;
   }
-  CHECK(
+  C10_CHECK(
       g_copy_bytes[0][from][to] == nullptr &&
       g_copy_bytes[1][from][to] == nullptr)
       << "Duplicate registration for device type pair "

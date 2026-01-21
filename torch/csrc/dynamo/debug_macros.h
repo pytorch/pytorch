@@ -28,7 +28,7 @@ extern "C" {
 
 // CHECK might be previously declared
 #undef CHECK
-#define CHECK(cond)                                                     \
+#define TORCH_DYNAMO_CHECK(cond)                                                     \
   if (unlikely(!(cond))) {                                              \
     fprintf(stderr, "DEBUG CHECK FAILED: %s:%d\n", __FILE__, __LINE__); \
     abort();                                                            \
@@ -39,7 +39,7 @@ extern "C" {
 // #define TORCHDYNAMO_DEBUG 1
 #ifdef TORCHDYNAMO_DEBUG
 
-#define DEBUG_CHECK(cond) CHECK(cond)
+#define DEBUG_CHECK(cond) TORCH_DYNAMO_CHECK(cond)
 #define DEBUG_NULL_CHECK(val) NULL_CHECK(val)
 #define DEBUG_TRACE(msg, ...) \
   fprintf(stderr, "TRACE[%s:%d] " msg "\n", __func__, __LINE__, __VA_ARGS__)

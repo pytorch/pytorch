@@ -30,9 +30,9 @@ ExtraState::ExtraState(PyCodeObject* orig_code_arg)
     : orig_code(orig_code_arg) {}
 
 void ExtraState::move_to_front(CacheEntry* cache_entry) {
-  CHECK(cache_entry->_owner == this);
-  CHECK(!this->cache_entry_list.empty());
-  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  TORCH_DYNAMO_CHECK(cache_entry->_owner == this);
+  TORCH_DYNAMO_CHECK(!this->cache_entry_list.empty());
+  TORCH_DYNAMO_CHECK(cache_entry == &*cache_entry->_owner_loc);
   this->cache_entry_list.splice(
       this->cache_entry_list.begin(),
       this->cache_entry_list,
@@ -40,9 +40,9 @@ void ExtraState::move_to_front(CacheEntry* cache_entry) {
 }
 
 void ExtraState::move_to_back(CacheEntry* cache_entry) {
-  CHECK(cache_entry->_owner == this);
-  CHECK(!this->cache_entry_list.empty());
-  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  TORCH_DYNAMO_CHECK(cache_entry->_owner == this);
+  TORCH_DYNAMO_CHECK(!this->cache_entry_list.empty());
+  TORCH_DYNAMO_CHECK(cache_entry == &*cache_entry->_owner_loc);
   this->cache_entry_list.splice(
       this->cache_entry_list.end(),
       this->cache_entry_list,
@@ -60,9 +60,9 @@ void ExtraState::invalidate(
   // function is running.
   Py_INCREF(this->orig_code);
 
-  CHECK(cache_entry->_owner == this);
-  CHECK(!this->cache_entry_list.empty());
-  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  TORCH_DYNAMO_CHECK(cache_entry->_owner == this);
+  TORCH_DYNAMO_CHECK(!this->cache_entry_list.empty());
+  TORCH_DYNAMO_CHECK(cache_entry == &*cache_entry->_owner_loc);
   cache_entry->invalidate(std::move(deleted_guard_manager));
   // Move the cache entry to the end of the list because these will always
   // return False.
@@ -107,14 +107,14 @@ void destroy_extra_state(void* obj) {
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
-  CHECK(extra_state == nullptr || old_extra_state != extra_state);
+  TORCH_DYNAMO_CHECK(extra_state == nullptr || old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   // Invariant - Extra state should not have been set before, therefore it
   // should be nullptr.
-  CHECK(get_extra_state(code) == nullptr);
+  TORCH_DYNAMO_CHECK(get_extra_state(code) == nullptr);
   ExtraState* extra_state = new ExtraState(code);
   NULL_CHECK(extra_state);
   set_extra_state(code, extra_state);

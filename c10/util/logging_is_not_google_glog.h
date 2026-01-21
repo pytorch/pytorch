@@ -98,7 +98,7 @@ static_assert(
           ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL).stream()
 
 // Check for a given boolean condition.
-#define CHECK(condition) FATAL_IF(condition) << "Check failed: " #condition " "
+#define C10_CHECK(condition) FATAL_IF(condition) << "Check failed: " #condition " "
 
 #ifndef NDEBUG
 // Debug only version of CHECK
