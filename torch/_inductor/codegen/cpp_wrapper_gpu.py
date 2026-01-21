@@ -210,12 +210,12 @@ class DeferredTritonCallWrapper:
             self.arg_types,
             params["def_args"],
         )
-        arg_type_loookup = dict(zip(params["def_args"], self.arg_types))
+        arg_type_lookup = dict(zip(params["def_args"], self.arg_types))
         # difference between Python and C++ wrapper: C++ wrapper strips out equal_to_1 constants
         call_args = [
             name for name in params["call_args"] if name not in triton_meta["constants"]
         ]
-        arg_types = [arg_type_loookup[name] for name in call_args]
+        arg_types = [arg_type_lookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
         scratch_spaces = {
             name: params[name]
@@ -282,6 +282,7 @@ class DeferredTritonCallWrapper:
                     "i32": "int32_t",
                     "i64": "int64_t",
                     "fp32": "float",
+                    "fp64": "double",
                 }
 
                 def signature_is_tma_desc(sig):
@@ -643,6 +644,7 @@ class CppWrapperGpu(CppWrapperCpu):
             "i32": "int32_t",
             "i64": "int64_t",
             "fp32": "float",
+            "fp64": "double",
         }
 
         def signature_is_tma_desc(sig):
@@ -723,7 +725,11 @@ class CppWrapperGpu(CppWrapperCpu):
                 code.writeline(f"int {var_name} = {cexpr(arg)};")
                 new_args.append(f"&{var_name}")
             elif arg_type in (sympy.Float, float):
-                code.writeline(f"float {var_name} = {cexpr(arg)};")
+                # Use signature type if available, otherwise default to float
+                cpp_type = signature2dtype.get(  # pyrefly: ignore[no-matching-overload]
+                    arg_signature, "float"
+                )
+                code.writeline(f"{cpp_type} {var_name} = {cexpr(arg)};")
                 new_args.append(f"&{var_name}")
             elif arg_signature and arg_signature.startswith("tensordesc<"):
                 new_args.extend(
