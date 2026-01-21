@@ -437,13 +437,13 @@ if HAS_PYDOT:
                         )
                     current_graph = buf_name_to_subgraph.get(buf_name)  # type: ignore[assignment]
 
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 current_graph.add_node(dot_node)
 
                 def get_module_params_or_buffers():
                     for pname, ptensor in chain(
                         leaf_module.named_parameters(),
-                        # pyrefly: ignore  # bad-argument-type
+                        # pyrefly: ignore [bad-argument-type]
                         leaf_module.named_buffers(),
                     ):
                         pname1 = node.name + "." + pname

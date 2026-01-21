@@ -26,7 +26,8 @@ class DistributedDataParallelSingleProcessTest(TestCase):
     def setUp(self):
         self.rank = 0
         self.world_size = 1
-        self.file = tempfile.NamedTemporaryFile(delete=False)  # noqa: P201
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def tearDown(self):
         try:
@@ -195,7 +196,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 for i, t in enumerate(tensors):
                     self.assertEqual(t, torch.ones(5, 5, device=device) + i)
             elif self.rank == 0:
-                for i, t in enumerate(tensors):
+                for t in tensors:
                     zeros = torch.zeros(5, 5, device=device)
                     self.assertEqual(t, zeros)
             y = torch.sum(torch.stack(tensors), axis=0)

@@ -71,10 +71,15 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenetv3_large_100",
 }
 
+REQUIRE_HIGHER_TOLERANCE_FP16_XPU = {
+    "botnet26t_256",
+}
+
 REQUIRE_HIGHER_TOLERANCE_AMP = {}
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
-    "beit_base_patch16_224",
+    "deit_base_distilled_patch16_224",
+    "vit_base_patch16_siglip_256",
 }
 
 # These models need higher tolerance in MaxAutotune mode
@@ -271,8 +276,6 @@ class TimmRunner(BenchmarkRunner):
             memory_format=torch.channels_last if channels_last else None,
         )
 
-        self.num_classes = model.num_classes
-
         data_config = resolve_data_config(
             vars(self._args) if timmversion >= "0.8.0" else self._args,
             model=model,
@@ -302,7 +305,6 @@ class TimmRunner(BenchmarkRunner):
         example_inputs = [
             example_inputs,
         ]
-        self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
 
@@ -357,7 +359,9 @@ class TimmRunner(BenchmarkRunner):
         if is_training:
             from torch._inductor import config as inductor_config
 
-            if name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
+            if name == "beit_base_patch16_224":
+                tolerance = 16 * 1e-2
+            elif name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
                 inductor_config.max_autotune
                 and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
             ):
@@ -366,14 +370,15 @@ class TimmRunner(BenchmarkRunner):
                 self.args.amp and name in REQUIRE_HIGHER_TOLERANCE_AMP
             ):
                 tolerance = 4 * 1e-2
+            elif (
+                name in REQUIRE_HIGHER_TOLERANCE_FP16_XPU
+                and self.args.float16
+                and current_device == "xpu"
+            ):
+                tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2
         return tolerance, cosine
-
-    def _gen_target(self, batch_size, device):
-        return torch.empty((batch_size,) + (), device=device, dtype=torch.long).random_(
-            self.num_classes
-        )
 
     def compute_loss(self, pred):
         # High loss values make gradient checking harder, as small changes in

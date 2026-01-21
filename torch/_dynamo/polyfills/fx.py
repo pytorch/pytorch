@@ -1,4 +1,5 @@
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from torch._C import _fx_map_aggregate, _fx_map_arg
 from torch.fx.immutable_collections import immutable_dict, immutable_list

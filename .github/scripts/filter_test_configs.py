@@ -8,10 +8,11 @@ import re
 import subprocess
 import sys
 import warnings
+from collections.abc import Callable
 from enum import Enum
 from functools import cache
 from logging import info
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from urllib.request import Request, urlopen
 
 import yaml

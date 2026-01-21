@@ -7,9 +7,11 @@ from torch._dynamo import config as dynamo_config
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCPUIf,
+    skipCUDAIf,
     skipGPUIf,
 )
 from torch.testing._internal.common_utils import parametrize, skipIfXpu
@@ -38,10 +40,6 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipIfXpu(
-        msg="The OP aten.nonzero implemented by XPU has different memory layout with fake tensor."
-        " Remove this skip after #146883 fixed."
-    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
@@ -222,7 +220,7 @@ class TestUnbackedSymints(InductorTestCase):
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
@@ -502,6 +500,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
@@ -528,6 +527,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.compile(fn, fullgraph=True)(x)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @skipIfXpu(msg="scaled_dot_product_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
@@ -649,6 +649,43 @@ class TestUnbackedSymints(InductorTestCase):
 
         example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
         torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipIfXpu(
+        msg="Invalid SPIR-V module,https://github.com/intel/torch-xpu-ops/issues/2329"
+    )
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @inductor_config.patch({"max_autotune": True})
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_autotune_with_unbacked_stride(self, device):
+        def fn(x, y, a):
+            u0 = a.item()
+            torch._check(u0 != 1)
+            unbacked = x.expand(8, u0, *x.shape).clone()
+            unbacked = torch.permute(unbacked, [0, 2, 1])
+            y = y.expand(8, *y.shape)
+            bmm = torch.ops.aten.bmm(unbacked, y)
+            return bmm
+
+        example_inputs = (
+            torch.randn((32,), dtype=torch.bfloat16, device=device),
+            torch.randn((128, 64), dtype=torch.bfloat16, device=device),
+            torch.tensor(128, device=device),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_fmod_with_out_arg(self, device):
+        def fn(x):
+            nz = torch.nonzero(x).float()
+            return torch.fmod(nz, 2.0, out=nz)
+
+        example_inputs = (torch.randn(32, device=device),)
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)

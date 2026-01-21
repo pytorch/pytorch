@@ -45,7 +45,7 @@ dev = [
     "optree>=0.13.0",
     "psutil",
     "sympy>=1.13.3",
-    "typing-extensions>=4.13.2",
+    "typing-extensions>=4.15.0",
     "wheel",
 ]
 
@@ -115,6 +115,10 @@ multi_line_output = 3
 include_trailing_comma = true
 combine_as_imports = true
 
+[tool.usort]
+preserve_inline_comments = true
+collapse_blank_lines_in_category = false
+
 [tool.usort.known]
 first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
@@ -159,8 +163,6 @@ ignore = [
     "EXE001",
     "F405",
     "FURB122", # writelines
-    # these ignores are from flake8-logging-format; please fix!
-    "G101",
     # these ignores are from ruff NPY; please fix!
     "NPY002",
     # these ignores are from ruff PERF; please fix!
@@ -174,18 +176,16 @@ ignore = [
     "SIM102", "SIM103", "SIM112", # flake8-simplify code styles
     "SIM105", # these ignores are from flake8-simplify. please fix or ignore with commented reason
     "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
-    "SIM110",
+    "SIM110", # Checks for for loops that can be replaced with a builtin function, like any or all.
     "SIM114", # Combine `if` branches using logical `or` operator
-    "SIM115",
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
-    "SIM118",
+    "SIM300", # Yoda condition detected
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
     "TC006",
     # TODO: Remove Python-3.10 specific suppressions
     "B905",
-    "UP035",
 ]
 select = [
     "B",
@@ -195,8 +195,7 @@ select = [
     "E",
     "EXE",
     "F",
-    "SIM1",
-    "SIM911",
+    "SIM",
     "W",
     # Not included in flake8
     "FURB",
@@ -204,21 +203,19 @@ select = [
     "NPY",
     "PERF",
     "PGH004",
-    "PIE790",
-    "PIE794",
-    "PIE800",
-    "PIE804",
-    "PIE807",
-    "PIE810",
+    "PIE",
     "PLC0131", # type bivariance
     "PLC0132", # type param mismatch
+    "PLC1802", # len({expression}) used as condition without comparison
     "PLC0205", # string as __slots__
     "PLC3002", # unnecessary-direct-lambda-call
+    "PLC0414", # Import alias does not rename original package
     "PLE",
     "PLR0133", # constant comparison
     "PLR0206", # property with params
     "PLR1722", # use sys exit
     "PLR1736", # unnecessary list index
+    "PLW0127", # Self-assignment of variable
     "PLW0129", # assert on string literal
     "PLW0131", # named expr without context
     "PLW0133", # useless exception statement
@@ -265,6 +262,7 @@ select = [
     "TRY401", # verbose-log-message
     "UP",
     "YTT",
+    "S101",
 ]
 
 [tool.ruff.lint.pyupgrade]
@@ -344,6 +342,66 @@ keep-runtime-typing = true
 "tools/linter/**" = [
     "LOG015" # please fix
 ]
+"benchmarks/**" = [
+    "S101"
+]
+"test/**" = [
+    "S101"
+]
+"torchgen/**" = [
+    "S101"
+]
+"torch/_dynamo/**" = ["S101"]
+"torch/_export/**" = ["S101"]
+"torch/_functorch/**" = ["S101"]
+"torch/_higher_order_ops/associative_scan.py" = ["S101"]
+"torch/_higher_order_ops/base_hop.py" = ["S101"]
+"torch/_higher_order_ops/cond.py" = ["S101"]
+"torch/_higher_order_ops/effects.py" = ["S101"]
+"torch/_higher_order_ops/executorch_call_delegate.py" = ["S101"]
+"torch/_higher_order_ops/flat_apply.py" = ["S101"]
+"torch/_higher_order_ops/flex_attention.py" = ["S101"]
+"torch/_higher_order_ops/invoke_subgraph.py" = ["S101"]
+"torch/_higher_order_ops/partitioner.py" = ["S101"]
+"torch/_higher_order_ops/print.py" = ["S101"]
+"torch/_higher_order_ops/run_const_graph.py" = ["S101"]
+"torch/_higher_order_ops/scan.py" = ["S101"]
+"torch/_higher_order_ops/schema.py" = ["S101"]
+"torch/_higher_order_ops/strict_mode.py" = ["S101"]
+"torch/_higher_order_ops/torchbind.py" = ["S101"]
+"torch/_higher_order_ops/while_loop.py" = ["S101"]
+"torch/_higher_order_ops/wrap.py" = ["S101"]
+"torch/_inductor/**" = ["S101"]
+"torch/distributed/**" = ["S101"]
+"torch/fx/**" = ["S101"]
+"torch/jit/**" = ["S101"]
+"torch/onnx/_internal/**" = ["S101"]
+"torch/testing/**" = ["S101"]
+"tools/**" = [
+    "S101"
+]
+"functorch/**" = [
+    "S101"
+]
+"android/pytorch_android/generate_test_torchscripts.py" = ["S101"]
+".github/scripts/test_trymerge.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
+
+[tool.spin]
+package = 'torch'
+
+[tool.spin.commands]
+"Build" = [
+  ".spin/cmds.py:lint",
+  ".spin/cmds.py:fixlint",
+  ".spin/cmds.py:quicklint",
+  ".spin/cmds.py:quickfix",
+]
+"Regenerate" = [
+  ".spin/cmds.py:regenerate_version",
+  ".spin/cmds.py:regenerate_type_stubs",
+  ".spin/cmds.py:regenerate_clangtidy_files",
+  ".spin/cmds.py:regenerate_github_workflows",
+]

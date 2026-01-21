@@ -36,11 +36,7 @@ case ${DOCKER_TAG_PREFIX} in
     ;;
   rocm*)
     BASE_TARGET=rocm
-    PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
-    # add gfx950, gfx115x conditionally starting in ROCm 7.0
-    if [[ "$ROCM_VERSION" == *"7.0"* ]]; then
-        PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx950;gfx1150;gfx1151"
-    fi
+    PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx950;gfx1150;gfx1151"
     EXTRA_BUILD_ARGS="${EXTRA_BUILD_ARGS} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}"
     ;;
   *)
@@ -63,7 +59,7 @@ docker build \
   --target final \
   --progress plain \
   --build-arg "BASE_TARGET=${BASE_TARGET}" \
-  --build-arg "DEVTOOLSET_VERSION=11" \
+  --build-arg "DEVTOOLSET_VERSION=13" \
   ${EXTRA_BUILD_ARGS} \
   -t ${tmp_tag} \
   $@ \

@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <fstream>
 #include <iostream>
@@ -419,14 +418,14 @@ std::string AliasDb::getElementName(const Element* e) const {
   } else {
     std::ostringstream ss;
     if (e->values.size() == 1) {
-      ss << "%" << (*e->values.begin())->debugName();
+      ss << '%' << (*e->values.begin())->debugName();
       return ss.str();
     }
-    ss << "(";
+    ss << '(';
     for (const Value* v : e->values) {
-      ss << "%" << v->debugName() << ", ";
+      ss << '%' << v->debugName() << ", ";
     }
-    ss << ")";
+    ss << ')';
     return ss.str();
   }
 }
@@ -454,7 +453,7 @@ std::string AliasDb::toString() const {
         ++ct;
         ss << getElementName(memoryDAG_->fromIndex(pointedTo));
       }
-      ss << "\n";
+      ss << '\n';
     }
     ct = 0;
     if (!element->containedElements.empty()) {
@@ -466,7 +465,7 @@ std::string AliasDb::toString() const {
         }
         ++ct;
       }
-      ss << "\n";
+      ss << '\n';
     }
   }
 
@@ -479,9 +478,9 @@ std::string AliasDb::toString() const {
     for (const auto value : values) {
       ss << getElementName(memoryDAG_->fromIndex(value)) << ", ";
     }
-    ss << "\n";
+    ss << '\n';
   }
-  ss << "\n";
+  ss << '\n';
   return ss.str();
 }
 
@@ -511,7 +510,7 @@ std::string AliasDb::toGraphviz() const {
     } else {
       std::ostringstream ss;
       if (e->values.size() == 1) {
-        ss << "\"\\%" << (*e->values.begin())->debugName() << "\"";
+        ss << "\"\\%" << (*e->values.begin())->debugName() << '"';
         return ss.str();
       }
       ss << "\"(";
@@ -538,7 +537,7 @@ std::string AliasDb::toGraphviz() const {
     if (!element->pointsTo.empty()) {
       for (const auto pointedTo : element->pointsTo) {
         dot << "  " << name(element) << " -> "
-            << name(memoryDAG_->fromIndex(pointedTo)) << "\n";
+            << name(memoryDAG_->fromIndex(pointedTo)) << '\n';
       }
     }
     if (!element->containedElements.empty()) {

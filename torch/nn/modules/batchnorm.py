@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -29,7 +29,7 @@ class _NormBase(Module):
     __constants__ = ["track_running_stats", "momentum", "eps", "num_features", "affine"]
     num_features: int
     eps: float
-    momentum: Optional[float]
+    momentum: float | None
     affine: bool
     track_running_stats: bool
     # WARNING: weight and bias purposely not defined here.
@@ -39,7 +39,7 @@ class _NormBase(Module):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float | None = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
         device=None,
@@ -65,18 +65,18 @@ class _NormBase(Module):
             self.register_buffer(
                 "running_var", torch.ones(num_features, **factory_kwargs)
             )
-            self.running_mean: Optional[Tensor]
-            self.running_var: Optional[Tensor]
+            self.running_mean: Tensor | None
+            self.running_var: Tensor | None
             self.register_buffer(
                 "num_batches_tracked",
                 torch.tensor(
                     0,
                     dtype=torch.long,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     **{k: v for k, v in factory_kwargs.items() if k != "dtype"},
                 ),
             )
-            self.num_batches_tracked: Optional[Tensor]
+            self.num_batches_tracked: Tensor | None
         else:
             self.register_buffer("running_mean", None)
             self.register_buffer("running_var", None)
@@ -146,7 +146,7 @@ class _BatchNorm(_NormBase):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float | None = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
         device=None,
@@ -222,7 +222,7 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         dtype=None,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(
             # affine and track_running_stats are hardcoded to False to
             # avoid creating tensors that will soon be overwritten.
@@ -236,34 +236,38 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         self.affine = affine
         self.track_running_stats = track_running_stats
         if self.affine:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             self.weight = UninitializedParameter(**factory_kwargs)
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             self.bias = UninitializedParameter(**factory_kwargs)
         if self.track_running_stats:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             self.running_mean = UninitializedBuffer(**factory_kwargs)
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             self.running_var = UninitializedBuffer(**factory_kwargs)
             self.num_batches_tracked = torch.tensor(
                 0,
                 dtype=torch.long,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 **{k: v for k, v in factory_kwargs.items() if k != "dtype"},
             )
 
     def reset_parameters(self) -> None:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         if not self.has_uninitialized_params() and self.num_features != 0:
             super().reset_parameters()
 
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         if self.has_uninitialized_params():
             self.num_features = input.shape[1]
             if self.affine:
-                assert isinstance(self.weight, UninitializedParameter)
-                assert isinstance(self.bias, UninitializedParameter)
+                if not isinstance(self.weight, UninitializedParameter):
+                    raise AssertionError(
+                        "self.weight must be an UninitializedParameter"
+                    )
+                if not isinstance(self.bias, UninitializedParameter):
+                    raise AssertionError("self.bias must be an UninitializedParameter")
                 self.weight.materialize((self.num_features,))
                 self.bias.materialize((self.num_features,))
             if self.track_running_stats:
@@ -292,9 +296,9 @@ class BatchNorm1d(_BatchNorm):
     of size `C` (where `C` is the number of features or channels of the input). By default, the
     elements of :math:`\gamma` are set to 1 and the elements of :math:`\beta` are set to 0.
     At train time in the forward pass, the variance is calculated via the biased estimator,
-    equivalent to ``torch.var(input, unbiased=False)``. However, the value stored in the
+    equivalent to ``torch.var(input, correction=0)``. However, the value stored in the
     moving average of the variance is calculated via the unbiased  estimator, equivalent to
-    ``torch.var(input, unbiased=True)``.
+    ``torch.var(input, correction=1)``.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -403,9 +407,9 @@ class BatchNorm2d(_BatchNorm):
     of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
-    ``torch.var(input, unbiased=False)``. However, the value stored in the moving average of the
+    ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
     standard-deviation is calculated via the unbiased  estimator, equivalent to
-    ``torch.var(input, unbiased=True)``.
+    ``torch.var(input, correction=1)``.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -513,9 +517,9 @@ class BatchNorm3d(_BatchNorm):
     of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
-    ``torch.var(input, unbiased=False)``. However, the value stored in the moving average of the
+    ``torch.var(input, correction=0)``. However, the value stored in the moving average of the
     standard-deviation is calculated via the unbiased  estimator, equivalent to
-    ``torch.var(input, unbiased=True)``.
+    ``torch.var(input, correction=1)``.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -625,7 +629,7 @@ class SyncBatchNorm(_BatchNorm):
     By default, the elements of :math:`\gamma` are sampled from
     :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
     The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -715,10 +719,10 @@ class SyncBatchNorm(_BatchNorm):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float | None = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
-        process_group: Optional[Any] = None,
+        process_group: Any | None = None,
         device=None,
         dtype=None,
     ) -> None:
@@ -754,7 +758,8 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            assert self.num_batches_tracked is not None
+            if self.num_batches_tracked is None:
+                raise AssertionError("num_batches_tracked must not be None")
             self.num_batches_tracked.add_(1)
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
@@ -822,7 +827,8 @@ class SyncBatchNorm(_BatchNorm):
                 self.eps,
             )
         else:
-            assert bn_training
+            if not bn_training:
+                raise AssertionError("bn_training must be True")
             return sync_batch_norm.apply(
                 input,
                 self.weight,

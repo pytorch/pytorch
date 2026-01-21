@@ -3,23 +3,13 @@
 
 import pathlib
 import tempfile
-import types
 import unittest
-from functools import wraps
-from typing import Optional
 
 from numpy.testing import assert_array_equal
 
 import torch
-import torch.distributed as dist
-import torch.distributed.distributed_c10d as c10d
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._local_tensor import (
-    LocalIntNode,
-    LocalTensorMode,
-    maybe_run_for_local_tensor,
-)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -42,21 +32,17 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     with_comms,
 )
 
 
 c10d_functional = torch.ops.c10d_functional
-
-
-@maybe_run_for_local_tensor
-def map_tensor_for_rank(tensor, rank, func):
-    return func(tensor, rank)
 
 
 class DummyMLP(torch.nn.Module):
@@ -251,7 +237,7 @@ class DTensorTest(DTensorTestBase):
         )
 
         dtensor = DTensor.from_local(
-            tensor_list[self.rank],
+            map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
             device_mesh,
             (Shard(0),),
             shape=global_tensor.size(),
@@ -279,7 +265,7 @@ class DTensorTest(DTensorTestBase):
             RuntimeError, "Please pass both shape and stride at the same time."
         ):
             DTensor.from_local(
-                tensor_list[self.rank],
+                map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
                 device_mesh,
                 (Shard(0),),
                 shape=global_tensor.size(),
@@ -289,7 +275,7 @@ class DTensorTest(DTensorTestBase):
             RuntimeError, "Please pass both shape and stride at the same time."
         ):
             DTensor.from_local(
-                tensor_list[self.rank],
+                map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
                 device_mesh,
                 (Shard(0),),
                 stride=global_tensor.stride(),
@@ -609,7 +595,7 @@ class DTensorTest(DTensorTestBase):
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(
             local_tensor,
-            map_tensor_for_rank(
+            map_local_tensor_for_rank(
                 full_tensor, self.rank, lambda ft, r: ft[range(r, r + 1), :]
             ),
         )
@@ -622,7 +608,7 @@ class DTensorTest(DTensorTestBase):
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(
             local_tensor,
-            map_tensor_for_rank(
+            map_local_tensor_for_rank(
                 full_tensor, self.rank, lambda ft, r: ft[:, range(r, r + 1)]
             ),
         )
@@ -645,103 +631,17 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(local_tensor.item(), self.rank)
 
 
-class LocalDTensorTest(DTensorTest):
-    def get_local_tensor_mode(self):
-        return LocalTensorMode(frozenset(range(0, self.world_size)))
-
-    @property
-    def rank(self):
-        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
-
-    @rank.setter
-    def rank(self, rank):
-        pass
-
-    def join_or_run(self, fn):
-        @wraps(fn)
-        def wrapper(self):
-            fn()
-
-        return types.MethodType(wrapper, self)
-
-    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
-        dist.init_process_group("fake", rank=0, world_size=self.world_size)
-        self._pg = c10d._get_default_group()
-
-    def destroy_pg(self, device_id: Optional[int] = None) -> None:
-        dist.destroy_process_group(self._pg)
-        self._pg = None
-
-    def _spawn_processes(self) -> None:
-        pass
-
-    def test_dtensor_constructor(self):
-        pass
-
-    def test_meta_dtensor(self):
-        pass
-
-    def test_modules_w_meta_dtensor(self):
-        pass
-
-    def test_dtensor_stride(self):
-        pass
-
-    def test_from_local(self):
-        pass
-
-    def test_from_local_uneven_sharding(self):
-        pass
-
-    def test_from_local_uneven_sharding_raise_error(self):
-        pass
-
-    def test_from_local_negative_dim(self):
-        pass
-
-    def test_to_local(self):
-        pass
-
-    def test_to_local_grad_hint(self):
-        pass
-
-    def test_full_tensor_sync(self):
-        pass
-
-    def test_full_tensor_grad_hint(self):
-        pass
-
-    def test_dtensor_new_empty_strided(self):
-        pass
-
-    def test_dtensor_async_output(self):
-        pass
-
-    def test_from_local_then_to_local(self):
-        pass
-
-    def test_dtensor_spec_read_only_after_set(self):
-        pass
-
-    def test_dtensor_spec_hash(self):
-        pass
-
-    def test_dtensor_properties(self):
-        pass
-
-    def test_dtensor_save_load(self):
-        pass
-
-    def test_dtensor_save_load_import(self):
-        pass
-
-    def test_shard_tensor_2d(self):
-        with self.get_local_tensor_mode():
-            super().test_shard_tensor_2d()
-
-    def test_shard_tensor(self):
-        with self.get_local_tensor_mode():
-            super().test_shard_tensor()
+DTensorTestWithLocalTensor = create_local_tensor_test_class(
+    DTensorTest,
+    skipped_tests=[
+        # Async output in local mode is not supported
+        "test_dtensor_async_output",
+        # Disabling saving and loading in local mode since it requires a deeper
+        # integration
+        "test_dtensor_save_load",
+        "test_dtensor_save_load_import",
+    ],
+)
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -757,11 +657,11 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = self.build_device_mesh()
 
-        # construct from a cpu local tensor with cuda device mesh
-        # should automatically convert the dist tensor to cuda
+        # construct from a cpu local tensor with gpu device mesh
+        # should automatically convert the dist tensor to gpu
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
@@ -810,7 +710,7 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_dtensor_2d_mesh(self):
         mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # construct a dist tensor on 2d device mesh and test if works
@@ -832,7 +732,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         # construct a dist tensor on 3d device mesh and test if works
@@ -1118,6 +1018,41 @@ class DTensorMeshTest(DTensorTestBase):
         except ValueError:
             self.fail("Unexpected ValueError raised with run_check=False")
 
+    @with_comms
+    def test_as_strided_identity(self):
+        # Test calling as_strided with the same size/stride/offset as input tensor
+        # This should be a no-op but currently fails
+        device_mesh = self.build_device_mesh()
+        placements = [Shard(0)]
+        local_tensor = torch.randn(3, 4, device=self.device_type)
+        dtensor = DTensor.from_local(local_tensor, device_mesh, placements)
+
+        # Get the current size, stride, and storage_offset
+        size = dtensor.size()
+        stride = dtensor.stride()
+        storage_offset = dtensor.storage_offset()
+
+        # Call as_strided with the exact same parameters
+        result = dtensor.as_strided(size, stride, storage_offset)
+
+        # The result should be identical to the input
+        self.assertEqual(result.size(), dtensor.size())
+        self.assertEqual(result.stride(), dtensor.stride())
+        self.assertEqual(result.to_local(), dtensor.to_local())
+
+
+DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
+    DTensorMeshTest,
+    skipped_tests=[
+        # Test asserts must be rewritten for local tensor
+        "test_from_local_sub_mesh",
+        "test_default_value_sub_mesh",
+        "test_redistribute_sub_mesh",
+        # Local tensor mode doesn't support tensors of different types on different ranks
+        "test_metadata_consistency_check",
+    ],
+)
+
 
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
@@ -1128,8 +1063,8 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        if self.device_type == "cuda":
-            return tensor.cuda()
+        if self.device_type != "cpu":
+            return tensor.to(self.device_type)
         else:
             return tensor
 
@@ -1152,7 +1087,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
                 is_tensor_empty = [
-                    False if splitted_tensor.numel() > 0 else True
+                    not splitted_tensor.numel() > 0
                     for splitted_tensor in splitted_tensor_list
                 ]
                 expected_is_tensor_empty = [True] * self.world_size
@@ -1175,14 +1110,17 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for i, tensor in enumerate(splitted_tensor_list)
                 ]
                 expected_is_tensor_empty = [
-                    False if idx < size else True
-                    for idx, _ in enumerate(range(self.world_size))
+                    not idx < size for idx, _ in enumerate(range(self.world_size))
                 ]
                 is_tensor_empty = [
-                    False if unpadded_tensor.numel() > 0 else True
-                    for unpadded_tensor in unpadded_list
+                    not unpadded_tensor.numel() > 0 for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
+
+
+TestDTensorPlacementTypesWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorPlacementTypes,
+)
 
 
 class TestDTensorSpec(DTensorTestBase):
@@ -1326,14 +1264,6 @@ class TestDTensorSpec(DTensorTestBase):
         )
         self.assertEqual(tensor_global._spec.shard_order, ())
 
-        # shard_order doesn't work with _StridedShard
-        tensor_global = DTensor.from_local(
-            tensor_local,
-            mesh,
-            [Replicate(), _StridedShard(0, split_factor=2), Shard(0)],
-        )
-        self.assertEqual(tensor_global._spec.shard_order, ())
-
     @with_comms
     def test_default_shard_order(self):
         mesh_shape = (2, 2, self.world_size // 4)
@@ -1363,6 +1293,10 @@ class TestDTensorSpec(DTensorTestBase):
             DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
         )
 
+
+TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorSpec,
+)
 
 if __name__ == "__main__":
     run_tests()

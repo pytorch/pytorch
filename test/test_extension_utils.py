@@ -2,7 +2,7 @@
 import sys
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class DummyPrivateUse1Module:
@@ -60,6 +60,9 @@ class TestExtensionUtils(TestCase):
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module("privateuseone", DummyPrivateUse1Module)
 
+    @skipIfTorchDynamo(
+        "accelerator doesn't compose with privateuse1 : https://github.com/pytorch/pytorch/issues/166696"
+    )
     def test_external_module_register_with_renamed_backend(self):
         torch.utils.rename_privateuse1_backend("foo")
         with self.assertRaisesRegex(RuntimeError, "has already been set"):
