@@ -1590,6 +1590,11 @@ def functionalize_rng_ops(
             and hasattr(node.target, "tags")
             and torch.Tag.nondeterministic_seeded in node.target.tags
         ):
+            # Skip if the node doesn't exist in both forward and backward graphs.
+            # This can happen when the RNG op's output is not needed for gradient
+            # computation and gets eliminated by dead code elimination.
+            if node.name not in fw_graph_rng_ops or node.name not in bw_graph_rng_ops:
+                continue
             base_node = joint_graph_rng_ops[node.name]
             fw_node = fw_graph_rng_ops[node.name]
             bw_node = bw_graph_rng_ops[node.name]
