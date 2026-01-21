@@ -158,6 +158,7 @@ def set_flags(
     _deterministic=None,
     _allow_tf32=None,
     _fp32_precision="none",
+    _force=None,
 ):
     orig_flags = (
         torch._C._get_cudnn_enabled(),
@@ -166,6 +167,7 @@ def set_flags(
         torch._C._get_cudnn_deterministic(),
         torch._C._get_cudnn_allow_tf32(),
         torch._C._get_fp32_precision_getter("cuda", "all"),
+        torch._C._get_cudnn_force(),
     )
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
@@ -179,6 +181,8 @@ def set_flags(
         torch._C._set_cudnn_allow_tf32(_allow_tf32)
     if _fp32_precision is not None:
         torch._C._set_fp32_precision_setter("cuda", "all", _fp32_precision)
+    if _force is not None:
+        torch._C._set_cudnn_force(_force)
     return orig_flags
 
 
@@ -190,6 +194,7 @@ def flags(
     deterministic=False,
     allow_tf32=True,
     fp32_precision="none",
+    force="heuristic",
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
@@ -199,6 +204,7 @@ def flags(
             deterministic,
             allow_tf32,
             fp32_precision,
+            force,
         )
     try:
         yield
@@ -230,6 +236,7 @@ class CudnnModule(PropModule):
     allow_tf32 = ContextProp(
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
     )
+    force = ContextProp(torch._C._get_cudnn_force, torch._C._set_cudnn_force)
     conv = _FP32Precision("cuda", "conv")
     fp32_precision = ContextProp(
         _get_fp32_precision_getter("cuda", "all"),
@@ -247,3 +254,4 @@ deterministic: bool
 benchmark: bool
 allow_tf32: bool
 benchmark_limit: int
+force: str

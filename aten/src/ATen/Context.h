@@ -45,6 +45,7 @@ enum class CuBLASReductionOption : uint8_t {
   DisallowReducedPrecisionAllowSplitK = 1,
   DisallowReducedPrecisionDisallowSplitK = 2,
 };
+enum class TORCH_API CuDNNForce { HEURISTIC, ON, OFF };
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
@@ -53,6 +54,8 @@ TORCH_API Float32Backend str2backend(const std::string& name);
 TORCH_API Float32Op str2op(const std::string& name);
 TORCH_API Float32Precision str2precision(const std::string& name);
 TORCH_API std::string precision2str(Float32Precision prec);
+TORCH_API CuDNNForce str2cudnnforce(const std::string& name);
+TORCH_API std::string cudnnforce2str(CuDNNForce force);
 
 class TORCH_API Context {
  public:
@@ -246,6 +249,8 @@ class TORCH_API Context {
   void setDeterministicMkldnn(bool /*b*/);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
+  CuDNNForce userForceCuDNN() const;
+  void setUserForceCuDNN(CuDNNForce /*f*/);
 
   // Note [Disabling Fused SDP Kernels]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -455,6 +460,7 @@ class TORCH_API Context {
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
+  CuDNNForce force_cudnn = CuDNNForce::HEURISTIC;
   std::array<at::SDPBackend, at::num_sdp_backends> sdp_priority_order = {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
