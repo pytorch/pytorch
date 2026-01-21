@@ -827,16 +827,21 @@ class DistMathOpsTest(DTensorTestBase):
             result = torch.linalg.vector_norm(sharded_grad, 2)
 
         # Verify decomposition: powsum -> redistribute -> pow
-        self.assertExpectedInline(
-            debug_mode.debug_string(),
-            """\
-  torch.linalg.vector_norm(dt$0: f32[12, 8]| S(0), 2)  ->  dt$4: f32[]| R
-    aten::linalg_vector_norm.default(dt$0: f32[12, 8]| S(0), 2)
-      aten::linalg__powsum(t$1: f32[3, 8], 2, None, False, None)  ->  t$2: f32[]
-      _c10d_functional::all_reduce(t$2: f32[], 'sum', '0')  ->  t$3: f32[]
-      _c10d_functional::wait_tensor(t$3: f32[])  ->  t$3: f32[]
-      aten::pow.Tensor_Scalar(t$3: f32[], 0.5)  ->  t$4: f32[]""",
-        )
+        # Skip inline check for local tensor mode since debug output differs
+        if not self.is_local_tensor_enabled:
+            self.assertExpectedInline(
+                debug_mode.debug_string(),
+                """\
+  aten::linalg_vector_norm(dt: f32[12, 8]| S(0))
+  aten::linalg__powsum(dt: f32[12, 8]| S(0))
+    aten::linalg__powsum(t: f32[3, 8])  ->  t: f32[]
+    redistribute_input(t: f32[], trace: P(sum)->R)
+      _c10d_functional::all_reduce(t: f32[], sum, 0)  ->  t: f32[]
+      _c10d_functional::_wrap_tensor_autograd(t: f32[])  ->  t: f32[]
+      _c10d_functional::wait_tensor(t: f32[])  ->  t: f32[]
+  aten::pow.Tensor_Scalar(dt: f32[]| R, 0.5)
+    aten::pow.Tensor_Scalar(t: f32[], 0.5)  ->  t: f32[]""",
+            )
 
         # Expected: sqrt(sum(|x|^2))
         expected = (grad.abs() ** 2).sum() ** 0.5

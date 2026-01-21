@@ -337,7 +337,7 @@ def vector_norm_handler(
         # Decompose: vector_norm(x, p) = powsum(x, p) ** (1/p)
         # Step 1: Compute sum(|x|^p) with powsum -> Partial("sum")
         # pyrefly: ignore[missing-attribute]
-        partial_result = torch.linalg.powsum(
+        partial_result = torch.linalg._powsum(
             input_tensor,
             ord=norm_type,
             dim=dim,

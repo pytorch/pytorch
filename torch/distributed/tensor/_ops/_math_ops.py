@@ -388,6 +388,7 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
+    reduction_op, reduction_linear = _get_norm_reduction_params(norm_type)
     output_tuple_strategy_children: list[OpStrategy] = []
     for op_strategy in input_tuple_strategy.children:
         if not isinstance(op_strategy, OpStrategy):
@@ -396,8 +397,8 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=True,
-            reduction_op=_get_norm_reduction_op(norm_type),
+            reduction_linear=reduction_linear,
+            reduction_op=reduction_op,
         )
         output_tuple_strategy_children.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_children)
