@@ -8,6 +8,7 @@
 
 import copy
 import itertools
+import operator
 import unittest
 import warnings
 from collections.abc import Callable
@@ -6367,6 +6368,101 @@ def forward(self, primals_1, tangents_1):
                     1,
                     f"Quantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
+
+    def test_force_save_collectives_torchcomms(self):
+        """Test that force_save_collectives marks torchcomms with_effects outputs as MUST_SAVE.
+
+        This tests the fix where backward ops that depend on forward with_effects outputs
+        would have invalid dependencies because with_effects is marked must_be_in_forward.
+        The fix ensures tensor output getitems from torchcomms with_effects nodes are
+        marked as MUST_SAVE.
+        """
+        from torch._functorch.partitioners import force_save_collectives
+        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        mock_lib = torch.library.Library("torchcomms", "FRAGMENT")
+        try:
+            mock_lib.define("mock_collective(Tensor x) -> (Tensor, Tensor)")
+
+            @torch.library.impl(mock_lib, "mock_collective", "Meta")
+            def mock_collective_meta(x):
+                return x.clone(), x.clone()
+
+            @torch.library.impl(mock_lib, "mock_collective", "CPU")
+            def mock_collective_cpu(x):
+                return x.clone(), x.clone()
+
+            _register_effectful_op(
+                torch.ops.torchcomms.mock_collective.default,
+                _EffectType.ORDERED,
+            )
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    out1, out2 = torch.ops.torchcomms.mock_collective(x)
+                    return (out1 + out2,)
+
+            x = torch.randn(4, 4)
+            gm, _ = aot_export_module(M(), (x,), trace_joint=False)
+
+            with_effects_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == torch.ops.higher_order.with_effects
+            ]
+            self.assertGreater(
+                len(with_effects_nodes),
+                0,
+                "Should have with_effects node wrapping torchcomms op",
+            )
+
+            force_save_collectives(gm)
+
+            def get_tensor_getitems_from_with_effects(we_node):
+                """Find all tensor-producing getitems in the chain from a with_effects node."""
+                result = []
+                visited = set()
+
+                def visit(node):
+                    if node in visited:
+                        return
+                    visited.add(node)
+
+                    for user in node.users:
+                        if user.target == operator.getitem:
+                            val = user.meta.get("val")
+                            if isinstance(
+                                val, (torch.Tensor, torch._subclasses.FakeTensor)
+                            ):
+                                result.append(user)
+                            else:
+                                visit(user)
+
+                visit(we_node)
+                return result
+
+            tensor_getitems = []
+            for we_node in with_effects_nodes:
+                tensor_getitems.extend(get_tensor_getitems_from_with_effects(we_node))
+
+            self.assertGreater(
+                len(tensor_getitems),
+                0,
+                "Should have tensor getitem nodes from with_effects",
+            )
+
+            for node in tensor_getitems:
+                self.assertEqual(
+                    node.meta.get("recompute"),
+                    CheckpointPolicy.MUST_SAVE,
+                    f"Tensor getitem '{node.name}' from torchcomms with_effects "
+                    "should be marked MUST_SAVE",
+                )
+
+        finally:
+            del mock_lib
 
 
 class TestAOTDispatch(AOTTestCase):
