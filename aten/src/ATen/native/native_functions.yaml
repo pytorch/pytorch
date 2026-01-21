@@ -14364,7 +14364,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_matrix_exp
+    CPU, CUDA, MPS: linalg_matrix_exp
   autogen: linalg_matrix_exp.out
 
 - func: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
