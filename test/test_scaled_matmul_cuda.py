@@ -72,7 +72,7 @@ if TEST_CUDA:
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
-mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_FBGEMM_GENAI=1 on SM100+"
+mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -976,14 +976,20 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
-    def test_scaled_mm_vs_emulated(self, base_dtype, device="cuda"):
+    @parametrize("x_cm", [True, False])
+    @parametrize("y_cm", [True, False])
+    def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device="cuda"):
+        # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
+        if (x_cm, y_cm) != (True, False) and torch.cuda.get_device_properties(0).major != 10:
+            raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
         compare_type = torch.float32
 
-        x = torch.randn(16, 16, device=device, dtype=base_dtype)
-        y = torch.randn(32, 16, device=device, dtype=base_dtype).t()
+        M, N, K = 16, 32, 16
+        x = torch.randn(M, K, device=device, dtype=base_dtype) if x_cm else torch.randn(K, M, device=device, dtype=base_dtype).t()
+        y = torch.randn(K, N, device=device, dtype=base_dtype) if y_cm else torch.randn(N, K, device=device, dtype=base_dtype).t()
 
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
