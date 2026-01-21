@@ -5641,7 +5641,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // Match input strides if different.
   if (!input_grad.strides().equals(input_.strides())) {
     auto new_grad =
-        at::empty_strided(input_.sizes(), input_.strides(), input_grad.options());
+        input_grad.new_empty_strided(input_.sizes(), input_.strides());
     new_grad.copy_(input_grad);
     input_grad = std::move(new_grad);
   }
