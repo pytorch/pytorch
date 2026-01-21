@@ -9332,6 +9332,34 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
             torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
+    @onlyNativeDeviceTypes
+    def test_ReplicationPad_overflow(self, device):
+        """Test that extremely large padding values raise an error instead of crashing.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/169741
+        """
+        import sys
+
+        large_pad = sys.maxsize  # INT64_MAX equivalent in Python
+
+        # Test ReplicationPad1d
+        with self.assertRaisesRegex(RuntimeError, "would overflow"):
+            pad = torch.nn.ReplicationPad1d(large_pad)
+            inp = torch.randn(1, 3, 10, device=device)
+            pad(inp)
+
+        # Test ReplicationPad2d
+        with self.assertRaisesRegex(RuntimeError, "would overflow"):
+            pad = torch.nn.ReplicationPad2d(large_pad)
+            inp = torch.randn(1, 3, 10, 10, device=device)
+            pad(inp)
+
+        # Test ReplicationPad3d
+        with self.assertRaisesRegex(RuntimeError, "would overflow"):
+            pad = torch.nn.ReplicationPad3d(large_pad)
+            inp = torch.randn(1, 3, 10, 10, 10, device=device)
+            pad(inp)
+
     @expectedFailureMPS  # Correctness issue https://github.com/pytorch/pytorch/issues/135447
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
