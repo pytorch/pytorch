@@ -88,11 +88,14 @@ randn.__module__ = "torch.distributed.tensor"
 zeros.__module__ = "torch.distributed.tensor"
 
 
-
 # Register DTensor handlers for higher order operations
 # This is done after DTensor is fully defined to avoid circular imports
 def _register_dtensor_higher_order_ops() -> None:
-    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph, invoke_subgraph_dtensor
+    from torch._higher_order_ops.invoke_subgraph import (
+        invoke_subgraph,
+        invoke_subgraph_dtensor,
+    )
+
     invoke_subgraph.py_impl(DTensor)(invoke_subgraph_dtensor)
 
 

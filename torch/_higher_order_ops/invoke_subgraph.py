@@ -744,6 +744,60 @@ def _(subgraph, identifier, *operands):
     return autograd_fn_callable(*operands)
 
 
+def analyze_ouptut(subgraph: Callable[..., Any], operands: tuple[Any, ...]):
+    from torch.distributed.tensor import DTensor
+
+    result = subgraph(*operands)
+
+    if isinstance(result, DTensor):
+        return result._spec
+    elif isinstance(result, (tuple, list)):
+        specs = []
+        for item in result:
+            if isinstance(item, DTensor):
+                specs.append(item._spec)
+            else:
+                specs.append(None)  #
+        return specs
+    else:
+        return None  # Scalar or other non-DTensor result
+
+
+def wrap_with_unified_spec(result: Any, spec: Any) -> Any:
+    from torch.distributed.tensor import DTensor
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+    if isinstance(result, torch.Tensor) and isinstance(spec, DTensorSpec):
+        return DTensor(
+            result,
+            spec,
+            requires_grad=result.requires_grad
+            if hasattr(result, "requires_grad")
+            else False,
+        )
+    elif isinstance(result, (tuple, list)) and isinstance(spec, (tuple, list)):
+        # Handle multiple outputs
+        wrapped_results = []
+        for item, item_spec in zip(result, spec):
+            if isinstance(item, torch.Tensor) and isinstance(item_spec, DTensorSpec):
+                wrapped_results.append(
+                    DTensor(
+                        item,
+                        item_spec,
+                        requires_grad=item.requires_grad
+                        if hasattr(item, "requires_grad")
+                        else False,
+                    )
+                )
+            else:
+                wrapped_results.append(item)
+        return tuple(wrapped_results) if isinstance(result, tuple) else wrapped_results
+    else:
+        raise NotImplementedError(
+            f"Unsupported result type: {type(result)} and spec type: {type(spec)}"
+        )
+
+
 def invoke_subgraph_dtensor(subgraph, identifier, *operands):
     # This means that some of the inputs in the operands are DTensors.
     from torch.distributed.tensor import DTensor
@@ -762,13 +816,12 @@ def invoke_subgraph_dtensor(subgraph, identifier, *operands):
     assert mesh is not None, "No DTensor operands found in cond's inputs"
     local_operands = pytree.tree_map_only(DTensor, lambda x: x._local_tensor, operands)
 
-
     # Get the output spec
-    output = subgraph(*operands)
+    output_spec = analyze_ouptut(subgraph, operands)
 
-    breakpoint()
-    print(output)
+    local_result = invoke_subgraph(subgraph, identifier, *local_operands)
 
+    return wrap_with_unified_spec(local_result, output_spec)
 
 
 @invoke_subgraph.py_impl(DebugMode)
