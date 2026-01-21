@@ -802,11 +802,10 @@ class CachingAutotuner(KernelInterface):
                     "launch_pdl": compile_meta.get("launch_pdl", False),  # True
                 }
             )
-            if compile_meta.get("disable_ftz", False):
-                options["enable_reflect_ftz"] = False
             for k in tlx_only_cuda_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
+
         if self.device_props.type == "hip":
             if "waves_per_eu" in compile_meta:
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
@@ -2208,8 +2207,6 @@ def cached_autotune(
     filename=None,
     inductor_meta=None,
     custom_kernel=False,
-    caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
-    debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
@@ -2246,7 +2243,7 @@ def cached_autotune(
                     tconfig.kwargs.pop("XBLOCK")
 
         if inductor_meta.get("profile_bandwidth"):
-            return debug_autotuner_cls(
+            return DebugAutotuner(
                 fn,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
@@ -2265,7 +2262,7 @@ def cached_autotune(
                 filename=filename,
                 with_bandwidth_info=True,
             )
-        return caching_autotuner_cls(
+        return CachingAutotuner(
             fn,
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,

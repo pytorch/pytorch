@@ -58,7 +58,8 @@ def _addindent(s_, numSpaces):
     if len(s) == 1:
         return s_
     first = s.pop(0)
-    s = [(numSpaces * " ") + line for line in s]
+    # Only add indentation to non-blank lines; blank lines stay empty
+    s = [(numSpaces * " ") + line if line.strip() else "" for line in s]
     s = "\n".join(s)
     s = first + "\n" + s
     return s
