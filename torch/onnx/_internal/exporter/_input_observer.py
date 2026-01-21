@@ -233,7 +233,7 @@ class InputObserverInfo:
                 **dict(zip(list(self._max_kwargs), flat_dynamic_shapes[n_args:])),
             }
 
-        # nested types, here comes the fun part because the the shapes cannot be unflattened,
+        # nested types, here comes the fun part because the shapes cannot be unflattened,
         # custom classes must appear in their flattened shape.
         # This does not work in all cases but every time every available argument is flattened
         # with the same number of tensors. The function does not check
