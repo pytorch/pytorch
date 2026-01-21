@@ -107,10 +107,8 @@ if [[ "${CUDA_VERSION:-12.6}" == 13.* ]]; then
     fi
 fi
 
-if ! [[ "${CUDA_VERSION:-12.6}" == 13.* && "$(uname -m)" == "aarch64" ]]; then
-    sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version >= Version("12.3") and bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")/' \
-        "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
-fi
+sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version >= Version("12.3") and bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")/' \
+    "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
 
 BUILD_DATE=$(date +%Y%m%d)
 if [[ "${WHEEL_PLAT}" == "aarch64" ]]; then
