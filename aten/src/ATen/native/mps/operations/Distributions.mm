@@ -462,28 +462,28 @@ Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Gen
   TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
 
   mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
+    auto mpsGraph = cachedGraph->graph();
     // cauchy distwith inverse CDF: median + sigma * tan(pi * (U - 0.5))
-    MPSGraphTensor* halfTensor = [mpsGraph constantWithScalar:0.5 dataType:randomTensor.dataType];
-    MPSGraphTensor* piTensor = [mpsGraph constantWithScalar:M_PI dataType:randomTensor.dataType];
-    MPSGraphTensor* medianTensor = [mpsGraph constantWithScalar:median dataType:randomTensor.dataType];
-    MPSGraphTensor* sigmaTensor = [mpsGraph constantWithScalar:sigma dataType:randomTensor.dataType];
+    const auto halfTensor = [mpsGraph constantWithScalar:0.5 dataType:randomTensor.dataType];
+    const auto piTensor = [mpsGraph constantWithScalar:M_PI dataType:randomTensor.dataType];
+   const auto medianTensor = [mpsGraph constantWithScalar:median dataType:randomTensor.dataType];
+    const auto sigmaTensor = [mpsGraph constantWithScalar:sigma dataType:randomTensor.dataType];
 
     // (U - 0.5)
-    MPSGraphTensor* shiftedTensor = [mpsGraph subtractionWithPrimaryTensor:randomTensor
-                                                           secondaryTensor:halfTensor
-                                                                      name:nil];
+    const auto shiftedTensor = [mpsGraph subtractionWithPrimaryTensor:randomTensor
+                                                     secondaryTensor:halfTensor
+                                                                name:nil];
     // pi * (U - 0.5)
-    MPSGraphTensor* scaledTensor = [mpsGraph multiplicationWithPrimaryTensor:piTensor
-                                                             secondaryTensor:shiftedTensor
-                                                                        name:nil];
+    const auto scaledTensor = [mpsGraph multiplicationWithPrimaryTensor:piTensor
+                                                       secondaryTensor:shiftedTensor
+                                                                  name:nil];
     // tan(pi * (U - 0.5))
-    MPSGraphTensor* tanTensor = [mpsGraph tanWithTensor:scaledTensor name:nil];
+    const auto tanTensor = [mpsGraph tanWithTensor:scaledTensor name:nil];
 
     // sigma * tan(pi * (U - 0.5))
-    MPSGraphTensor* multipliedTensor = [mpsGraph multiplicationWithPrimaryTensor:sigmaTensor
-                                                                 secondaryTensor:tanTensor
-                                                                            name:nil];
+    const auto multipliedTensor = [mpsGraph multiplicationWithPrimaryTensor:sigmaTensor
+                                                           secondaryTensor:tanTensor
+                                                                      name:nil];
     // median + sigma * tan(pi * (U - 0.5))
     return [mpsGraph additionWithPrimaryTensor:medianTensor secondaryTensor:multipliedTensor name:nil];
   };
