@@ -37,10 +37,10 @@ class ReduceAdd {
       opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
     else
       fastAtomicAdd(self_data_start, index, numel, *src_data, true);
-  }
   #else
     fastAtomicAdd(self_data_start, index, numel, *src_data, true);
   #endif
+  }
 };
 
 static ReduceAdd reduce_add;
