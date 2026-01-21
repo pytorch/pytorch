@@ -1,3 +1,4 @@
+import operator
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias
 
 import torch.fx
@@ -343,8 +344,121 @@ def populate_fw_metadata_with_stream_indices(
     fw_metadata.mutated_inp_stream_indices = stream_indices
 
 
-def wrap_sync_control_deps(gm: torch.fx.GraphModule, node: Node) -> None:
-    stream = get_stream_or_current_stream(node)
+def wrap_sync_control_deps(gm: torch.fx.GraphModule, sync_node: Node) -> None:
+    """
+    Wrap a sync node (record_event/wait_event) in control_deps to prevent reordering.
 
-    for node in gm.graph.nodes:
-        pass
+    This function:
+    1. Finds all nodes before the sync node on the same stream
+    2. Wraps the sync node in a control_deps HOP with those nodes as dependencies
+    3. Passes through the dependency values so downstream nodes use them
+    4. This prevents the sync from being reordered around other ops on the same stream
+    """
+    from torch._inductor.fx_passes.control_dependencies import (
+        _create_subgraph_for_node,
+        control_deps,
+        get_subgraph_name,
+    )
+
+    graph = gm.graph
+
+    # For record_event/wait_event, the stream index is the second argument
+    # record_event(event_index, stream_index)
+    # wait_event(event_index, stream_index)
+    if sync_node.target in (
+        torch.ops.streams.record_event.default,
+        torch.ops.streams.wait_event.default,
+    ):
+        sync_stream = sync_node.args[1]  # stream_index is second arg
+    else:
+        sync_stream = get_stream_or_current_stream(sync_node)
+
+    # Collect all nodes before sync_node on the same stream
+    # Nodes without explicit stream annotation are on the "current" stream,
+    # which is the same stream the sync node operates on
+    deps_before_sync: list[Node] = []
+    for node in graph.nodes:
+        if node is sync_node:
+            break
+        if node.op != "call_function":
+            continue
+        # Skip nodes without tensor output (no val in meta)
+        if "val" not in node.meta:
+            continue
+        # Check if this node is on the same stream
+        node_stream = get_stream(node)
+        # Nodes without explicit stream annotation are on the current (sync) stream
+        if node_stream is None or node_stream == sync_stream:
+            deps_before_sync.append(node)
+
+    if not deps_before_sync:
+        return
+
+    # Create subgraph that executes sync and passes through dependencies
+    subgraph_module = _create_subgraph_for_node(graph, sync_node, deps_before_sync)
+    subgraph_attr_name = get_subgraph_name(gm, sync_node.name)
+    setattr(gm, subgraph_attr_name, subgraph_module)
+
+    # Collect node args for the control_deps call
+    node_args: list[Node] = []
+    for arg in sync_node.args:
+        if isinstance(arg, Node):
+            node_args.append(arg)
+    for value in sync_node.kwargs.values():
+        if isinstance(value, Node):
+            node_args.append(value)
+
+    # Create control_deps call
+    with graph.inserting_before(sync_node):
+        get_subgraph = graph.get_attr(subgraph_attr_name)
+        control_deps_node = graph.call_function(
+            control_deps,
+            args=(
+                tuple(deps_before_sync),  # additional_deps
+                get_subgraph,  # subgraph
+                *node_args,  # sync node's args
+                *deps_before_sync,  # pass deps through subgraph
+            ),
+            kwargs={},
+        )
+
+    # The output is (sync_result, *deps_before_sync)
+    # Create getitem nodes to extract the pass-through dependencies
+    replacements: dict[Node, Node] = {}
+    with graph.inserting_after(control_deps_node):
+        for i, dep in enumerate(deps_before_sync):
+            getitem_node = graph.call_function(
+                operator.getitem,
+                args=(control_deps_node, i + 1),  # +1 because index 0 is sync result
+            )
+            getitem_node.meta.update(dep.meta)
+            replacements[dep] = getitem_node
+
+    # Replace uses of dependencies that come after sync_node
+    # We need to update only uses that are after the sync node
+    after_sync = False
+    for node in list(graph.nodes):
+        if node is sync_node:
+            after_sync = True
+            continue
+        if not after_sync:
+            continue
+        if node is control_deps_node:
+            continue
+        if node.op == "call_function" and node.target == operator.getitem:
+            if node.args[0] is control_deps_node:
+                continue
+
+        # Update args
+        new_args = [replacements.get(arg, arg) for arg in node.args]
+        node.args = tuple(new_args)
+
+        # Update kwargs
+        new_kwargs = {}
+        for k, v in node.kwargs.items():
+            new_kwargs[k] = replacements.get(v, v)
+        node.kwargs = new_kwargs
+
+    # Remove original sync node
+    sync_node.replace_all_uses_with(control_deps_node)
+    graph.erase_node(sync_node)

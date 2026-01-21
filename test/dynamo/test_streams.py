@@ -13,10 +13,6 @@ from torch._dynamo.graph_bytecode_inputs import (
     store_user_object_weakrefs,
 )
 from torch._dynamo.testing import extract_graph, remove_trailing_space
-from torch._inductor.fx_passes.control_dependencies import (
-    _create_subgraph_for_node,
-    get_subgraph_name,
-)
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import requires_cuda
 
@@ -928,11 +924,16 @@ class <lambda>(torch.nn.Module):
             extract_graph(fn, *inp)
 
     def test_control_deps_wrapping(self) -> None:
-        def fn(x) -> None:
+        def fn(x) -> torch.Tensor:
+            # Operations before the sync
+            y = x + 1
+            z = y * 2
+            # Now record event - this should capture y and z as deps
             e = torch.Event()
             e.record()
-            x.add_(1)
-            return x
+            # Operations after the sync
+            w = z + 3
+            return w
 
         inp = (torch.ones(2, 2, device="cuda"),)
         (
@@ -942,34 +943,59 @@ class <lambda>(torch.nn.Module):
             _,
         ) = extract_graph(fn, *inp)
 
-        self.assertExpectedInline(
-            print_graph(fw_graphs[0]),
-            """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[2, 2]"):
-        #
-        record_event = torch.ops.streams.record_event.default(0, 1);  record_event = None
-
-        #
-        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1)
-        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
-        return (copy_,)
-""",
-        )
         gm = fw_graphs[0]
         graph = gm.graph
-        record_node = next(
-            iter(
-                graph.find_nodes(
-                    op="call_function", target=torch.ops.streams.record_event.default
-                )
+
+        record_nodes = list(
+            graph.find_nodes(
+                op="call_function", target=torch.ops.streams.record_event.default
             )
         )
-        arg0_1 = next(iter(n for n in graph.nodes if n.name == "arg0_1"))
-        subgraph_module = _create_subgraph_for_node(graph, record_node, [arg0_1])
-        subgraph_attr_name = get_subgraph_name(gm, record_node.name)
-        print(subgraph_module)
-        setattr(gm, subgraph_attr_name, subgraph_module)
+        self.assertEqual(len(record_nodes), 1)
+        record_node = record_nodes[0]
+
+        # Test wrap_sync_control_deps
+        from torch._functorch._aot_autograd.streams import wrap_sync_control_deps
+
+        wrap_sync_control_deps(gm, record_node)
+
+        # Verify the graph has been transformed
+        import operator
+
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        control_deps_nodes = list(
+            graph.find_nodes(op="call_function", target=control_deps)
+        )
+        self.assertEqual(len(control_deps_nodes), 1)
+        control_deps_node = control_deps_nodes[0]
+
+        # Verify the subgraph was created
+        subgraph_attr = control_deps_node.args[1]
+        self.assertEqual(subgraph_attr.op, "get_attr")
+        self.assertTrue(hasattr(gm, subgraph_attr.target))
+
+        # Verify getitem nodes were created for pass-through dependencies
+        getitem_nodes = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function"
+            and n.target == operator.getitem
+            and n.args[0] is control_deps_node
+        ]
+        # Should have 2 getitem nodes (for add and mul which come before record_event)
+        self.assertEqual(len(getitem_nodes), 2)
+
+        # Verify downstream nodes use the getitem outputs
+        add_1_node = next(n for n in graph.nodes if n.name == "add_1")
+        # add_1 should use a getitem node (the mul pass-through) as input
+        self.assertTrue(
+            any(
+                isinstance(arg, torch.fx.Node) and arg in getitem_nodes
+                for arg in add_1_node.args
+            ),
+            f"add_1 should use getitem output but has args: {add_1_node.args}",
+        )
 
     @requires_cuda
     def test_epilogue_copy_stream_tracking(self):
