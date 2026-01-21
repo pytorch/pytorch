@@ -293,7 +293,7 @@ def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
 
 
 def get_chunk_sizes(total_elems, chunk_size):
-    n_chunks = n_chunks = total_elems // chunk_size
+    n_chunks = total_elems // chunk_size
     chunk_sizes = [chunk_size] * n_chunks
     # remainder chunk
     remainder = total_elems % chunk_size

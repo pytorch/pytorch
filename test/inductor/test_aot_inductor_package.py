@@ -27,13 +27,12 @@ from torch.export.pt2_archive._package import (
     load_pt2,
     load_weights_to_pt2_contents,
 )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfRocm,
-    skipIfXpu,
-    TEST_CUDA,
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    requires_triton_ptxas_compat,
+    TRITON_PTXAS_VERSION,
 )
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -272,9 +271,9 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        TEST_CUDA and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
+        "Test is only supported on CUDA {}.{}+".format(*TRITON_PTXAS_VERSION),
     )
-    @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         self.check_package_cpp_only()
 
@@ -319,11 +318,8 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
+    @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
     def test_compile_after_package_multi_arch(self):
         if self.device != GPU_TYPE:
@@ -366,10 +362,8 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @requires_triton_ptxas_compat
     @skipIfXpu  # build system may be different
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_after_package_static(self):
@@ -429,6 +423,7 @@ class TestAOTInductorPackage(TestCase):
                 self.cmake_compile(model, example_inputs, options, "")
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @requires_triton_ptxas_compat
     @skipIfXpu  # build system may be different
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_standalone_cos(self):
@@ -461,11 +456,8 @@ class TestAOTInductorPackage(TestCase):
                 a_path = build_path / "libcos.a"
                 self.assertTrue(a_path.exists())
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # doesn't support multi-arch binary
+    @requires_triton_ptxas_compat
     @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter(self):
@@ -519,11 +511,8 @@ class TestAOTInductorPackage(TestCase):
                             " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
                         )
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
+    @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter_weights(self):
@@ -688,13 +677,13 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_duplicate_calls(self):
         options = {
             "aot_inductor.package": True,
         }
 
-        device = "cuda"
+        device = GPU_TYPE
 
         class Model1(torch.nn.Module):
             def __init__(self) -> None:

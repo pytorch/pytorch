@@ -1,7 +1,6 @@
 import functools
 import importlib.util
 from types import ModuleType
-from typing import Optional
 
 
 def _check_module_exists(name: str) -> bool:
@@ -24,7 +23,7 @@ def dill_available() -> bool:
 
 
 @functools.lru_cache
-def import_dill() -> Optional[ModuleType]:
+def import_dill() -> ModuleType | None:
     if not dill_available():
         return None
 

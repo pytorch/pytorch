@@ -9,6 +9,7 @@ import itertools
 import logging
 import operator
 import pathlib
+import sys
 import textwrap
 import traceback
 import typing
@@ -109,7 +110,7 @@ def torch_dtype_to_onnx_dtype(dtype: torch.dtype) -> ir.DataType:
 
 
 class TorchTensor(ir.Tensor):
-    def __init__(self, tensor: torch.Tensor, name: str | None = None):
+    def __init__(self, tensor: torch.Tensor, name: str | None = None) -> None:
         # Pass the tensor as the raw data to ir.Tensor's constructor
         if tensor.dtype == torch.float4_e2m1fn_x2:
             # Change the shape to the unpacked shape
@@ -132,10 +133,10 @@ class TorchTensor(ir.Tensor):
         # view the tensor as that dtype so that it is convertible to NumPy,
         # and then view it back to the proper dtype (using ml_dtypes obtained by
         # calling dtype.numpy()).
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         if self.dtype == ir.DataType.BFLOAT16:
             return (
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
             )
         if self.dtype in {
@@ -144,11 +145,11 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
         if self.dtype == ir.DataType.FLOAT4E2M1:
             return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 self.dtype.numpy()
             )
 
@@ -170,6 +171,7 @@ class TorchTensor(ir.Tensor):
 
         if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
+                # pyrefly: ignore [missing-attribute]
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
                 "or save the model without initializers by setting include_initializers=False."
@@ -181,6 +183,9 @@ class TorchTensor(ir.Tensor):
         ).from_address(tensor.data_ptr())
 
     def tobytes(self) -> bytes:
+        # On big-endian machines, call the super's tobytes() which returns a little-endian result.
+        if sys.byteorder == "big":
+            return super().tobytes()
         # Implement tobytes to support native PyTorch types so we can use types like bloat16
         # Reading from memory directly is also more efficient because
         # it avoids copying to a NumPy array
@@ -188,6 +193,9 @@ class TorchTensor(ir.Tensor):
         return bytes(data)
 
     def tofile(self, file) -> None:
+        # On big-endian machines, call the super's tofile() which returns a little-endian result.
+        if sys.byteorder == "big":
+            return super().tofile(file)
         _, data = self._get_cbytes()
         return file.write(data)
 
@@ -250,7 +258,7 @@ def _set_shape_type(
             if isinstance(dim, int):
                 dims.append(dim)
             else:
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 dims.append(str(dim.node))
 
         # If the dtype is set already (e.g. by the onnx_symbolic ops),
@@ -261,15 +269,10 @@ def _set_shape_type(
         # In this case, we don't change the dtype or the shape of the tensor.
         if value.dtype is None:
             value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
-            if complex_to_float:
-                if meta_val.dtype == torch.complex64:
-                    value.dtype = ir.DataType.FLOAT
-                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                    dims.append(2)
-                elif meta_val.dtype == torch.complex128:
-                    value.dtype = ir.DataType.DOUBLE
-                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                    dims.append(2)
+            if complex_to_float and meta_val.dtype.is_complex:
+                value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype.to_real())
+                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                dims.append(2)
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
@@ -391,7 +394,7 @@ def _handle_call_function_node(
         node: The FX node to translate.
         node_name_to_values: A mapping of FX node names to their produced ir.Value.
     """
-    if node.target == operator.getitem:
+    if node.target is operator.getitem:
         _handle_getitem_node(node, node_name_to_values)
     # Add op to the graph
     op = str(node.target)
@@ -401,7 +404,7 @@ def _handle_call_function_node(
         if input_ is None:
             inputs.append(None)
         elif hasattr(input_, "name"):
-            if isinstance(input_, torch.fx.Node) and input_.target == operator.getitem:
+            if isinstance(input_, torch.fx.Node) and input_.target is operator.getitem:
                 actual_input = _handle_getitem_node(input_, node_name_to_values)
                 inputs.append(actual_input)
             else:
@@ -455,7 +458,7 @@ def _convert_fx_arg_to_onnx_arg(
         # The actual dropping of a None attribute value is done by OpRecorder
         return None
     if hasattr(arg, "name"):
-        if isinstance(arg, torch.fx.Node) and arg.target == operator.getitem:
+        if isinstance(arg, torch.fx.Node) and arg.target is operator.getitem:
             source = arg.all_input_nodes[0]
             source_outputs = node_name_to_values[source.name]
             if isinstance(source_outputs, Sequence):
@@ -526,7 +529,7 @@ def _handle_call_function_node_with_lowering(
         opset: The ONNX Script opset object for constructing ONNX nodes.
         node_name_to_local_functions: A mapping of subgraph names to the corresponding ONNX functions.
     """
-    if node.target == operator.getitem:
+    if node.target is operator.getitem:
         source = node.all_input_nodes[0]
         source_outputs = node_name_to_values[source.name]
         if isinstance(source_outputs, Sequence):
@@ -987,16 +990,22 @@ def _prepare_exported_program_for_export(
 ) -> torch.export.ExportedProgram:
     """Decompose and apply pre-export transformations to the exported program."""
 
-    # Decompose the graph given the implemented torch ops in ONNX
-    exported_program = _fx_passes.decompose_with_registry(exported_program, registry)
+    with (
+        # Support the dynamism with 0/1 input dim
+        torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
+    ):
+        # Decompose the graph given the implemented torch ops in ONNX
+        exported_program = _fx_passes.decompose_with_registry(
+            exported_program, registry
+        )
 
-    graph_module = exported_program.graph_module
-    # Include explicit type promotion nodes
-    _fx_passes.insert_type_promotion_nodes(graph_module)
-    graph_module = _fx_passes.remove_assertion_nodes(graph_module)
-    # Reassign the graph module to save some runtime.
-    exported_program._graph_module = graph_module
-    return exported_program
+        graph_module = exported_program.graph_module
+        # Include explicit type promotion nodes
+        _fx_passes.insert_type_promotion_nodes(graph_module)
+        graph_module = _fx_passes.remove_assertion_nodes(graph_module)
+        # Reassign the graph module to save some runtime.
+        exported_program._graph_module = graph_module
+        return exported_program
 
 
 def _get_scope_name(scoped_name: str) -> tuple[str, str]:
@@ -1225,7 +1234,7 @@ def _exported_program_to_onnx_program(
     # so we need to get them from the name_* apis.
     for name, torch_tensor in itertools.chain(
         exported_program.named_parameters(),
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):
@@ -1238,18 +1247,22 @@ def _exported_program_to_onnx_program(
                 f"Tensor '{name}' should be a torch.Tensor. Actual type is '{type(torch_tensor)}': {torch_tensor!r}. "
                 "This is unexpected and not yet supported."
             )
+
+        # Turn complex tensors into float tensors when converting to ONNX
+        complex_to_float = lower != "none"
+        if complex_to_float:
+            if torch_tensor.dtype.is_complex:
+                torch_tensor = torch.view_as_real(torch_tensor)
+
         ir_tensor = TorchTensor(torch_tensor, name=name)
         initializer.const_value = ir_tensor
         _set_shape_type(
             initializer,
             torch_tensor,
-            complex_to_float=lower != "none",
+            complex_to_float=complex_to_float,
         )
 
     # TODO: Decide if we should keep mutated buffers as inputs/outputs
-
-    # TODO(justinchuby): Remove the hack
-    _ir_passes.add_torchlib_common_imports(model)
 
     # Collect and add opset imports to the model
     _ir_passes.add_opset_imports(model)
@@ -1261,6 +1274,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     """Prints messages based on `verbose`."""
     if verbose is False:
         return lambda *_, **__: None
+
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
@@ -1336,7 +1350,6 @@ def export(
     else:
         # Convert an nn.Module to an ExportedProgram
         # Try everything 🐰 (all paths for getting an ExportedProgram)
-        # When input is a JIT module, the last strategy will succeed so it is handled
         result: _capture_strategies.Result | None = None
         for strategy_class in _capture_strategies.CAPTURE_STRATEGIES:
             strategy = strategy_class(  # type: ignore[abstract]

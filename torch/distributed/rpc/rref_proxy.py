@@ -40,7 +40,7 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
 
     rref_fut = rref._get_type(timeout=timeout, blocking=False)
 
-    if rpc_api != rpc_async:
+    if rpc_api is not rpc_async:
         rref_fut.wait()
         return _rref_type_cont(rref_fut)
     else:

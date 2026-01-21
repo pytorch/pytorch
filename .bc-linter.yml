@@ -13,3 +13,4 @@ exclude:
   - "**/benchmarks/**"
   - "**/test_*.py"
   - "**/*_test.py"
+  - "tools/**"

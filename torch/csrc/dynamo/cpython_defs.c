@@ -2,7 +2,17 @@
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
-#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
+// Include CPython header files here (.c file) as MSVC C++ compiler cannot
+// compile pycore_stackref.h. See PyTorch issue #160647
+#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#define Py_BUILD_CORE
+#include <internal/pycore_stackref.h>
+#include <internal/pycore_genobject.h>
+#include <internal/pycore_interpframe.h>
+#undef Py_BUILD_CORE
+#endif
+
+#if IS_PYTHON_3_15_PLUS
 
 const uint8_t* THP_PyOpcode_Caches = NULL;
 int THP_PyOpcode_Caches_size = 0;
@@ -242,7 +252,7 @@ static void THP_take_ownership(PyFrameObject* f, _PyInterpreterFrame* frame) {
     PyErr_SetRaisedException(exc);
   }
   if (!_PyObject_GC_IS_TRACKED((PyObject*)f)) {
-    _PyObject_GC_TRACK((PyObject*)f);
+    PyObject_GC_Track((PyObject*)f);
   }
   Py_END_CRITICAL_SECTION();
 }

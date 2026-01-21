@@ -1,9 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/EmptyTensor.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/detail/XPUHooksInterface.h>
 #include <ATen/Context.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/safe_numerics.h>
 

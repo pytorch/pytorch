@@ -36,7 +36,7 @@ class THManagedMapAllocator : private THManagedMapAllocatorInit,
       const char* filename,
       int flags,
       size_t size);
-  static THManagedMapAllocator* fromDataPtr(const at::DataPtr&);
+  static THManagedMapAllocator* fromDataPtr(const at::DataPtr& /*dptr*/);
 
   const char* manager_handle() const {
     return manager_handle_.c_str();

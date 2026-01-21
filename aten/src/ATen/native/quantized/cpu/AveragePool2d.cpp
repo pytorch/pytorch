@@ -71,8 +71,8 @@ void avg_pool2d_out_frame(
           int64_t hend = std::min(hstart + kH, inputHeight + padH);
           int64_t wend = std::min(wstart + kW, inputWidth + padW);
           int64_t pool_size = (hend - hstart) * (wend - wstart);
-          hstart = std::max(hstart, (int64_t)0);
-          wstart = std::max(wstart, (int64_t)0);
+          hstart = std::max(hstart, static_cast<int64_t>(0));
+          wstart = std::max(wstart, static_cast<int64_t>(0));
           hend = std::min(hend, inputHeight);
           wend = std::min(wend, inputWidth);
 

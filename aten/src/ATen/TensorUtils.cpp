@@ -1,8 +1,5 @@
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
-#include <c10/util/irange.h>
 
 #include <ostream>
 #include <sstream>
@@ -13,9 +10,9 @@ std::ostream& operator<<(std::ostream & out, const TensorGeometryArg& t) {
   if (t.pos == 0) {
     // 0 is distinguished; it usually indicates 'self' or the return
     // tensor
-    out << "'" << t.name << "'";
+    out << '\'' << t.name << '\'';
   } else {
-    out << "argument #" << t.pos << " '" << t.name << "'";
+    out << "argument #" << t.pos << " '" << t.name << '\'';
   }
   return out;
 }
@@ -154,7 +151,7 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
       oss << "Tensor for " << t2 << " is on CPU, ";
     }
     oss << "but expected " << ((!t1->is_cpu() && !t2->is_cpu()) ? "them" : "it")
-        << " to be on GPU (while checking arguments for " << c << ")";
+        << " to be on GPU (while checking arguments for " << c << ')';
     TORCH_CHECK(false, oss.str());
   }
   TORCH_CHECK(
@@ -199,7 +196,7 @@ void checkScalarTypes(CheckedFrom c, const TensorArg& t,
         i++;
       }
       oss << "; but got " << t->toString()
-          << " instead (while checking arguments for " << c << ")";
+          << " instead (while checking arguments for " << c << ')';
       TORCH_CHECK(false, oss.str());
     }
 }

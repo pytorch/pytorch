@@ -24,7 +24,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.9'
+          python-version: '3.10'
           check-latest: false
           cache: pip
           architecture: x64
@@ -45,6 +45,7 @@ jobs:
           IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
           DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          HUD_API_TOKEN: ${{ secrets.HUD_API_TOKEN }}
         run: |
           set -x
           if [ -n "${REBASE}" ]; then
