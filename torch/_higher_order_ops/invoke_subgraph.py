@@ -813,6 +813,9 @@ def invoke_subgraph_dtensor(subgraph, identifier, *operands):
 
     # Call invoke_subgraph with the wrapper and local tensors
     # pyrefly: ignore [bad-argument-type]
+    # TODO: One issue is that wrapper_subgraph is just a rando function, and
+    # therfore fake tensor caching wont work, because it expects to hash the
+    # function.
     local_result = invoke_subgraph(wrapper_subgraph, identifier, *local_operands)
 
     # Wrap results back to DTensors using captured output specs
