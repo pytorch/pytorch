@@ -30,7 +30,7 @@ def distance(a, b, norm):
 
 
 @dataclass(frozen=True)
-class Norm(torch._opaque_base.OpaqueBase):
+class Norm:
     typ: str
 
     def __fx_repr__(self):
