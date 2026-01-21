@@ -384,10 +384,10 @@ def fn_var_getattr(
 
 class BaseUserFunctionVariable(VariableTracker):
     def get_filename(self) -> str:
-        return self.get_code().co_filename  # type: ignore[attr-defined]
+        return self.get_code().co_filename
 
     def get_name(self) -> str:
-        return self.get_code().co_name  # type: ignore[attr-defined]
+        return self.get_code().co_name
 
     def get_globals(self) -> dict[str, Any]:
         raise NotImplementedError
