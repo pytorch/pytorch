@@ -1,9 +1,3 @@
-# /// script
-# requires-python = ">=3.10"
-# dependencies = [
-#   "codespell[toml]==2.4.1",
-# ]
-# ///
 from __future__ import annotations
 
 import argparse
