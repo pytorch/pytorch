@@ -1530,8 +1530,6 @@ class GraphLowering(torch.fx.Interpreter):
             assert isinstance(value, TensorBox), (
                 f"Unsupported inductor graph input type: {type(value)}"
             )
-            if not isinstance(value, TensorBox):
-                continue
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data
