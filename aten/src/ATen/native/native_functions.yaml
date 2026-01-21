@@ -2317,6 +2317,7 @@
   dispatch:
     CPU: vdot
     CUDA: vdot_cuda
+    MPS: vdot_mps
 
 - func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
