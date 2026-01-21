@@ -122,7 +122,7 @@ class _InternalRPCPickler:
             p.dispatch_table[obj.__class__] = self._script_module_reducer  # type: ignore[index]
 
         # Install customized picklers.
-        for class_name in self._class_reducer_dict.keys():
+        for class_name in self._class_reducer_dict:
             p.dispatch_table[class_name] = self._class_reducer_dict[class_name]  # type: ignore[index]
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call

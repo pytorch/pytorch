@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import operator
+
 import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
@@ -441,7 +443,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     @parametrize(
         "factory_op",
         [
-            subtest(torch.ones_like, name="ones_like"),
+            # Skipping because of https://github.com/pytorch/pytorch/issues/170160
+            # subtest(torch.ones_like, name="ones_like"),
             subtest(torch.empty_like, name="empty_like"),
         ],
     )
@@ -475,6 +478,311 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         x = torch.randn(3, requires_grad=True, device=device)
         f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_with_effects_reinplace(self):
+        """Test that the reinplace pass correctly handles with_effects wrapped ops.
+
+        When an effectful op is wrapped with with_effects, the reinplace pass should:
+        1. Find the inner op in the inplaceable_ops registry
+        2. Correctly compute the mutated arg indices (offset by 2 for token and op)
+        3. Convert functional -> inplace when safe
+        4. Replace getitem nodes that extract results with input tensors
+        """
+        from torch._higher_order_ops.effects import with_effects
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define a simple effectful op pair (functional and inplace)
+        @torch.library.custom_op("_test_effects::my_add", mutates_args=())
+        def my_add_functional(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @my_add_functional.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        @torch.library.custom_op("_test_effects::my_add_", mutates_args={"x"})
+        def my_add_inplace(x: torch.Tensor, y: torch.Tensor) -> None:
+            x.add_(y)
+
+        @my_add_inplace.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> None:
+            pass
+
+        # Register the functional -> inplace mapping
+        inplaceable_ops[my_add_functional._opoverload] = InplaceableOp(
+            my_add_inplace._opoverload,
+            0,  # First tensor arg (x) is mutated
+        )
+
+        try:
+
+            def f(a, b):
+                # Create tensors from ops (not placeholders) so can_inplace works
+                x = a.clone()
+                y = b.clone()
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(token, my_add_functional._opoverload, x, y)
+                # with_effects returns (new_token, result_tensor)
+                return result[1]
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b)
+
+            # Find the with_effects node before reinplace
+            with_effects_nodes_before = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_before), 1)
+
+            # The inner op should be the functional version
+            inner_op_before = with_effects_nodes_before[0].args[1]
+            self.assertEqual(inner_op_before, my_add_functional._opoverload)
+
+            # Count getitem nodes before reinplace
+            getitem_nodes_before = [
+                n for n in gm.graph.nodes if n.target is operator.getitem
+            ]
+            self.assertGreater(len(getitem_nodes_before), 0)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # Find the with_effects node after reinplace
+            with_effects_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_after), 1)
+
+            # The inner op should now be the inplace version
+            inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertEqual(inner_op_after, my_add_inplace._opoverload)
+
+            # Verify getitem nodes for result extraction are cleaned up
+            # (getitem[i] for i >= 1 on with_effects should be removed or replaced)
+            getitem_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_after[0]
+                and n.args[1] >= 1
+            ]
+            self.assertEqual(
+                len(getitem_nodes_after),
+                0,
+                "getitem nodes extracting result should be cleaned up",
+            )
+
+        finally:
+            if my_add_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_add_functional._opoverload]
+
+    def test_with_effects_reinplace_multiple_mutated_args(self):
+        """Test reinplace pass with multiple mutated args in with_effects wrapped ops.
+
+        This tests the case where an effectful op mutates multiple tensors,
+        such as collective operations that update multiple output buffers.
+        """
+        from torch._higher_order_ops.effects import with_effects
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define an op that returns two tensors (functional version)
+        @torch.library.custom_op("_test_effects::my_swap", mutates_args=())
+        def my_swap_functional(
+            x: torch.Tensor, y: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            # Swap values between x and y
+            return y.clone(), x.clone()
+
+        @my_swap_functional.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(y)
+
+        # Define inplace version that mutates both x and y
+        @torch.library.custom_op("_test_effects::my_swap_", mutates_args={"x", "y"})
+        def my_swap_inplace(x: torch.Tensor, y: torch.Tensor) -> None:
+            tmp = x.clone()
+            x.copy_(y)
+            y.copy_(tmp)
+
+        @my_swap_inplace.register_fake
+        def _(x: torch.Tensor, y: torch.Tensor) -> None:
+            pass
+
+        # Register the functional -> inplace mapping with multiple mutated args
+        inplaceable_ops[my_swap_functional._opoverload] = InplaceableOp(
+            my_swap_inplace._opoverload,
+            (0, 1),  # Both x (arg 0) and y (arg 1) are mutated
+        )
+
+        try:
+
+            def f(a, b):
+                # Create tensors from ops (not placeholders) so can_inplace works
+                x = a.clone()
+                y = b.clone()
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(token, my_swap_functional._opoverload, x, y)
+                # with_effects returns (new_token, (tensor1, tensor2))
+                # Access both results
+                out = result[1]
+                return out[0], out[1]
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b)
+
+            # Find the with_effects node before reinplace
+            with_effects_nodes_before = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_before), 1)
+
+            # The inner op should be the functional version
+            inner_op_before = with_effects_nodes_before[0].args[1]
+            self.assertEqual(inner_op_before, my_swap_functional._opoverload)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # Find the with_effects node after reinplace
+            with_effects_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_after), 1)
+
+            # The inner op should now be the inplace version
+            inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertEqual(inner_op_after, my_swap_inplace._opoverload)
+
+            # Verify getitem nodes for result extraction are cleaned up
+            # (getitem[i] for i >= 1 on with_effects should be removed or replaced)
+            getitem_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_after[0]
+                and n.args[1] >= 1
+            ]
+            self.assertEqual(
+                len(getitem_nodes_after),
+                0,
+                "getitem nodes extracting result tuple should be cleaned up",
+            )
+
+        finally:
+            if my_swap_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_swap_functional._opoverload]
+
+    def test_with_effects_reinplace_list_arg(self):
+        """Test reinplace pass with list arguments in with_effects wrapped ops.
+
+        This tests the case where the mutated argument is a list of tensors,
+        similar to wait_tensors operations that take a list of tensors to wait on.
+        """
+        from torch._higher_order_ops.effects import with_effects
+        from torch._inductor.fx_passes.reinplace import inplaceable_ops, InplaceableOp
+
+        # Define an op that takes a list of tensors (functional version)
+        @torch.library.custom_op("_test_effects::my_wait", mutates_args=())
+        def my_wait_functional(
+            tensors: list[torch.Tensor],
+        ) -> list[torch.Tensor]:
+            return [t.clone() for t in tensors]
+
+        @my_wait_functional.register_fake
+        def _(tensors: list[torch.Tensor]) -> list[torch.Tensor]:
+            return [torch.empty_like(t) for t in tensors]
+
+        # Define inplace version that mutates the list of tensors
+        @torch.library.custom_op("_test_effects::my_wait_", mutates_args={"tensors"})
+        def my_wait_inplace(tensors: list[torch.Tensor]) -> None:
+            pass  # In reality would wait on async ops
+
+        @my_wait_inplace.register_fake
+        def _(tensors: list[torch.Tensor]) -> None:
+            pass
+
+        # Register the functional -> inplace mapping
+        inplaceable_ops[my_wait_functional._opoverload] = InplaceableOp(
+            my_wait_inplace._opoverload,
+            0,  # First arg (tensors list) is mutated
+        )
+
+        try:
+
+            def f(a, b, c):
+                # Create tensors from ops (not placeholders) so can_inplace works
+                x = a.clone()
+                y = b.clone()
+                z = c.clone()
+                token = torch.ops.aten._make_dep_token()
+                result = with_effects(token, my_wait_functional._opoverload, [x, y, z])
+                # Access individual results from the list
+                out = result[1]
+                return out[0], out[1], out[2]
+
+            a = torch.randn(3, device=device)
+            b = torch.randn(3, device=device)
+            c = torch.randn(3, device=device)
+
+            gm = make_fx(f, tracing_mode="fake")(a, b, c)
+
+            # Find the with_effects node before reinplace
+            with_effects_nodes_before = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_before), 1)
+
+            # The inner op should be the functional version
+            inner_op_before = with_effects_nodes_before[0].args[1]
+            self.assertEqual(inner_op_before, my_wait_functional._opoverload)
+
+            # Run reinplace pass
+            reinplace_inplaceable_ops_core(gm.graph)
+
+            # Find the with_effects node after reinplace
+            with_effects_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is torch.ops.higher_order.with_effects
+            ]
+            self.assertEqual(len(with_effects_nodes_after), 1)
+
+            # The inner op should now be the inplace version
+            inner_op_after = with_effects_nodes_after[0].args[1]
+            self.assertEqual(inner_op_after, my_wait_inplace._opoverload)
+
+            # Verify getitem nodes for result extraction are cleaned up
+            # (getitem[i] for i >= 1 on with_effects should be removed or replaced)
+            getitem_nodes_after = [
+                n
+                for n in gm.graph.nodes
+                if n.target is operator.getitem
+                and n.args[0] is with_effects_nodes_after[0]
+                and n.args[1] >= 1
+            ]
+            self.assertEqual(
+                len(getitem_nodes_after),
+                0,
+                "getitem nodes extracting result list should be cleaned up",
+            )
+
+        finally:
+            if my_wait_functional._opoverload in inplaceable_ops:
+                del inplaceable_ops[my_wait_functional._opoverload]
 
 
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)

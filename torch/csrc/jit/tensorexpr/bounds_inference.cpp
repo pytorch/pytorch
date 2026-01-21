@@ -5,8 +5,6 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/ir_visitor.h>
-#include <torch/csrc/jit/tensorexpr/stmt.h>
 
 #include <c10/util/irange.h>
 
@@ -128,10 +126,10 @@ void printBoundsInfo(const BoundsInfo& v) {
       if (!first) {
         std::cerr << ", ";
       }
-      std::cerr << ((b.kind == kLoad) ? "LOAD" : "STORE") << "(";
+      std::cerr << ((b.kind == kLoad) ? "LOAD" : "STORE") << '(';
       int i = 0;
       if (b.start.empty()) {
-        std::cerr << "0";
+        std::cerr << '0';
       }
       for (auto& s : b.start) {
         if (i != 0) {
@@ -143,7 +141,7 @@ void printBoundsInfo(const BoundsInfo& v) {
       std::cerr << "; ";
       i = 0;
       if (b.stop.empty()) {
-        std::cerr << "0";
+        std::cerr << '0';
       }
       for (auto& s : b.stop) {
         if (i != 0) {
@@ -152,7 +150,7 @@ void printBoundsInfo(const BoundsInfo& v) {
         std::cerr << *s;
         i++;
       }
-      std::cerr << ")";
+      std::cerr << ')';
       first = false;
     }
     std::cerr << "]\n";

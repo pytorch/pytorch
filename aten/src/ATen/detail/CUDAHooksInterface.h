@@ -174,8 +174,20 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual long versionRuntimeCuDNN() const {
+    TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual long versionCuDNNFrontend() const {
+    TORCH_CHECK(false, "Cannot query cuDNN Frontend version without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual long versionMIOpen() const {
     TORCH_CHECK(false, "Cannot query MIOpen version without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual long versionHipBLASLt() const {
+    TORCH_CHECK(false, "Cannot query HipBLASLt version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual long versionCUDART() const {

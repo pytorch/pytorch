@@ -2,6 +2,7 @@
 
 import contextlib
 import itertools
+import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
@@ -530,6 +531,7 @@ def create_aot_state(
     )
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+    from torch._library.opaque_object import is_opaque_type
 
     # Tracing may mutate the states the fake script object,
     # so we need to duplicate the fake script objects so that subsequent tracing
@@ -537,7 +539,7 @@ def create_aot_state(
     def _dup_fake_script_obj(fake_flat_args):
         return [
             maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-            if isinstance(arg, FakeScriptObject)
+            if isinstance(arg, FakeScriptObject) or is_opaque_type(type(arg))
             else arg
             for arg in fake_flat_args
         ]
@@ -573,7 +575,6 @@ def create_aot_state(
                     keep_input_mutations=aot_config.keep_inference_input_mutations,
                     is_train=needs_autograd,
                     pre_dispatch=aot_config.pre_dispatch,
-                    is_export=aot_config.is_export,
                 )(*_dup_fake_script_obj(fake_flat_args))
 
             req_subclass_dispatch = requires_subclass_dispatch(
@@ -707,6 +708,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
         # Packaging this just for later use
         aot_config=aot_config,
         stack=stack,
+        fake_mode=fake_mode,
     )
 
 
@@ -723,6 +725,7 @@ def aot_function(
     # Whether or not to trace with dynamic shapes
     dynamic=False,
     enable_log=True,
+    disable_functionalization=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -790,6 +793,7 @@ def aot_function(
         is_export=False,
         no_tangents=False,
         enable_log=enable_log,
+        disable_functionalization=disable_functionalization,
     )
     cached_res = None
 
@@ -902,6 +906,9 @@ def prepare_aot_module_simplified(
     flatten: bool,
     *,
     force_non_lazy_backward_lowering: bool = False,
+    disable_functionalization: bool = False,
+    _record_nn_module_stack: bool = False,
+    _disable_torch_fn_metadata_mode: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -928,7 +935,13 @@ def prepare_aot_module_simplified(
     # NB: This doesn't change the in/out convention, except adding the
     # parameters as explicit arguments
     functional_call = create_functional_call(
-        mod, params_buffers_spec, params_len + buffers_len, strict_out_tuple=not flatten
+        mod,
+        params_buffers_spec,
+        params_len + buffers_len,
+        strict_out_tuple=not flatten,
+        # We need this for export to run ModuleStackTracer
+        # instead of PythonKeyTracer
+        store_orig_mod=_record_nn_module_stack,
     )
 
     full_args = [*params_flat, *buffers_flat, *args]
@@ -966,7 +979,9 @@ def prepare_aot_module_simplified(
     (
         aot_autograd_arg_pos_to_source,
         static_input_indices,
-    ) = _try_get_metadata_from_dynamo(mod, params_buffers.keys(), len(full_args))
+    ) = _try_get_metadata_from_dynamo(
+        mod, params_buffers.keys(), len(full_args), full_args_descs
+    )
 
     dynamic_shapes = False
     for x in full_args:
@@ -992,6 +1007,8 @@ def prepare_aot_module_simplified(
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
+        disable_functionalization=False,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
@@ -1028,6 +1045,7 @@ def aot_module_simplified(
     cudagraphs: Optional[BoxedBool] = None,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     ignore_shape_env: bool = False,
+    disable_functionalization: bool = False,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1066,11 +1084,15 @@ def aot_module_simplified(
             ignore_shape_env,
             flatten=False,
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
+            disable_functionalization=disable_functionalization,
         )
 
         compiled_fn = None
 
-        if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+        if (
+            isinstance(fw_compiler, SerializableAOTDispatchCompiler)
+            or torch._functorch.config.force_autograd_cache
+        ):
             local = should_use_local_autograd_cache()
             remote = should_use_remote_autograd_cache()
             if local or remote:
@@ -1168,6 +1190,9 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
+    disable_functionalization=False,
+    _record_nn_module_stack=False,
+    _disable_torch_fn_metadata_mode=False,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1257,6 +1282,9 @@ def aot_export_joint_with_descriptors(
         # Metric(s) {'is_forward'} have already been set in the current
         # context.
         force_non_lazy_backward_lowering=True,
+        disable_functionalization=disable_functionalization,
+        _record_nn_module_stack=_record_nn_module_stack,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
@@ -1294,6 +1322,7 @@ def aot_compile_joint_with_descriptors(
     partition_fn: Callable = default_partition,
     fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
     bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    serializable: bool = False,
 ) -> callable:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
@@ -1303,15 +1332,66 @@ def aot_compile_joint_with_descriptors(
     Note: We do NOT instantiate the module; this gives you the flexibility to subclass it and
     customize its behavior without having to worry about FQN rebinding.
 
-    TODO: Consider if we should allow_in_graph the result by default.
+    Args:
+        serializable: If True, configures the compilation to produce a serializable
+            callable by leveraging AOTAutogradCache machinery. This sets up the
+            necessary cache_info and patches config options required for serialization.
+            When True, this function will always return a BundledAOTAutogradSerializableCallable.
     """
-    compiled_fn, _ = aot_stage2_compile(
-        jd._aot_state,
-        jd._aot_graph_capture,
-        partition_fn,
-        fw_compiler,
-        bw_compiler,
+    # TODO: Consider if we should allow_in_graph the result by default.
+    from torch._dynamo.aot_compile_types import (
+        BundledAOTAutogradSerializableCallable,
+        SerializableCallable,
     )
+    from torch._functorch._aot_autograd.schemas import AOTAutogradCacheInfo
+    from torch._guards import detect_fake_mode
+    from torch._inductor.output_code import OutputCode
+
+    fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
+
+    cache_ctx = nullcontext()
+    if serializable:
+        jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
+            jd.cache_hash(),
+            time.time_ns(),
+            forward_symints=[],
+        )
+        cache_ctx = torch._functorch.config.patch(
+            {
+                "strict_autograd_cache": True,
+                "bundled_autograd_cache": True,
+                "force_non_lazy_backward_lowering": True,
+                "bypass_autograd_cache_key": True,
+            }
+        )
+
+    # Set up a TracingContext if one isn't already available.
+    # This is needed for compilers (like regional_inductor) that call
+    # standalone_compile with dynamic_shapes="from_tracing_context".
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is None:
+        fake_mode = detect_fake_mode(jd._aot_state.flat_args)
+        if fake_mode is not None:
+            tracing_context = torch._guards.TracingContext(fake_mode)
+            tracing_ctx = torch._guards.tracing(tracing_context)
+        else:
+            tracing_ctx = nullcontext()
+    else:
+        tracing_ctx = nullcontext()
+
+    with cache_ctx, tracing_ctx:
+        compiled_fn, _ = aot_stage2_compile(
+            jd._aot_state,
+            jd._aot_graph_capture,
+            partition_fn,
+            fw_compiler,
+            bw_compiler,
+        )
+
+    if not isinstance(compiled_fn, SerializableCallable) and hasattr(
+        compiled_fn, "serialize"
+    ):
+        compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)
@@ -1574,7 +1654,7 @@ def aot_export_joint_simple(
             decompositions=decompositions,
             trace_joint=trace_joint,
         )
-        in_spec, _kw_in_spec = in_spec.children_specs
+        in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1601,7 +1681,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}"
         )
-    if not all(child.is_leaf() for child in in_spec.children_specs):
+    if not all(child.is_leaf() for child in in_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}"
         )
@@ -1609,7 +1689,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}"
         )
-    if not all(child.is_leaf() for child in out_spec.children_specs):
+    if not all(child.is_leaf() for child in out_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}"
         )

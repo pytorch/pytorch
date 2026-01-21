@@ -707,6 +707,73 @@ class TestConstFold(TestCase):
         fold_result = mod_folded(in_x, in_y)
         self.assertTrue(torch.equal(fold_result, base_result))
 
+    def test_fold_pure_subgraph(self):
+        class SubModule(torch.nn.Module):
+            def forward(self):
+                return torch.full((5, 10), 2.0) + 1
+
+        # Create a parent graph with this module as a subgraph and output
+        ep = torch.export.export(SubModule(), ())
+        parent_graph = torch.fx.Graph()
+        call_mod = parent_graph.call_module("sub", args=())
+        get_item = parent_graph.call_function(
+            operator.getitem, args=(call_mod, slice(None))
+        )
+        parent_graph.output((get_item,))
+        parent = torch.fx.GraphModule({"sub": ep.module()}, parent_graph)
+
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(
+            parent, device_for_folded_attrs="cpu"
+        )
+        self._verify_const_fold_mod(mod_folded)
+
+    def test_do_not_fold_impure_subgraph(self):
+        """
+        Skip folding any subgraph containing impure ops.
+        """
+
+        class SubModule(torch.nn.Module):
+            def forward(self):
+                return torch.randn(5, 10) + 1
+
+        # Create a parent graph with this module as a subgraph and output
+        ep = torch.export.export(SubModule(), ())
+        parent_graph = torch.fx.Graph()
+        call_mod = parent_graph.call_module("sub", args=())
+        get_item = parent_graph.call_function(
+            operator.getitem, args=(call_mod, slice(None))
+        )
+        parent_graph.output((get_item,))
+        parent = torch.fx.GraphModule({"sub": ep.module()}, parent_graph)
+
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(
+            parent, device_for_folded_attrs="cpu"
+        )
+        self.assertIsNone(mod_folded.const_subgraph_module)
+
+    def test_const_fold_partial_graph(self):
+        """
+        If a model graph is partially const folded,
+        the non-const subgraph should be inlined back and erased.
+        """
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, p):
+                super().__init__()
+                self.p = p
+
+            def forward(self, x):
+                probs = torch.empty_permuted(x.shape, [0, 1])
+                mask = torch.bernoulli(probs, 1 - self.p)
+                return x * mask / (1 - self.p)
+
+        ep = torch.export.export(TestModule(0.4), (torch.randn(5, 10),))
+
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(
+            ep.module(), device_for_folded_attrs="cpu"
+        )
+        self._verify_const_fold_mod(mod_folded)
+
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_fx.py")

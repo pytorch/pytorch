@@ -13,7 +13,6 @@ It is lazily initialized, so you can always import it, and use
 
 import importlib
 import os
-import sys
 import threading
 import traceback
 import warnings
@@ -23,8 +22,8 @@ from typing import Any, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
-from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker, classproperty
+from torch.types import Device
 
 from . import _device_limits, gds
 from ._utils import _get_device_index
@@ -35,11 +34,9 @@ from .graphs import (
     is_current_stream_capturing,
     make_graphed_callables,
 )
+from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
 
-
-if TYPE_CHECKING:
-    from torch.types import Device
 
 try:
     from torch._C import _cudart  # type: ignore[attr-defined]
@@ -91,7 +88,7 @@ try:
                     self.paths: list[str] = paths
 
                 def hooked_CDLL(
-                    self, name: Union[str, Path, None], *args: Any, **kwargs: Any
+                    self, name: str | Path | None, *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
                     if name and Path(name).name == "libamd_smi.so":
                         for path in self.paths:
@@ -210,7 +207,7 @@ def is_bf16_supported(including_emulation: bool = True):
 
 
 @lru_cache(maxsize=16)
-def _check_bf16_tensor_supported(device: "Device"):
+def _check_bf16_tensor_supported(device: Device):
     try:
         torch.tensor([1.0], dtype=torch.bfloat16, device=device)
         return True
@@ -244,65 +241,136 @@ def _extract_arch_version(arch_string: str) -> int:
     return int(base)
 
 
+class _CompatInterval:
+    """
+    Defines a range of compute capabilities starting at a given
+    version and going up to the end of that major version. This
+    also allows excluding specific versions from the range.
+    """
+
+    def __init__(self, start, exclude: Optional[set[int]] = None):
+        self.major, self.minor = start // 10, start % 10
+        self.exclude = set() if exclude is None else exclude
+
+    def __contains__(self, x):
+        if x in self.exclude:
+            return False
+        x_major, x_minor = x // 10, x % 10
+        return x_major == self.major and x_minor >= self.minor
+
+    def __str__(self):
+        result = f">={self.major}.{self.minor},<{self.major + 1}.0"
+        if len(self.exclude) > 0:
+            exceptions = ", ".join(f"{x // 10}.{x % 10}" for x in self.exclude)
+            result += f" except {{{exceptions}}}"
+        return result
+
+
+class _CompatSet:
+    """
+    A set of compute capabilities. It exists primarily to support custom
+    printing logic and is otherwise equivalent to a plain python set().
+    """
+
+    def __init__(self, values: set[int]):
+        self.values = values
+
+    def __contains__(self, x):
+        return x in self.values
+
+    def __str__(self):
+        return "{" + ", ".join(f"{v // 10}.{v % 10}" for v in self.values) + "}"
+
+
+# (code SM)->(device SM required to execute the code)
+#
+# Developer Notes:
+# - This dict should be kept up to date with keys corresponding
+#   to SM versions that PyTorch can be built for. An out of date
+#   mapping will lead to false warnings.
+# - The keys in dict correspond to known sm versions but the values
+#   are merely rules based on sm compatibility guarantees for NVIDIA
+#   devices while accounting for incompatibility of iGPU and dGPU.
+DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
+    50: _CompatInterval(start=50, exclude={53}),
+    52: _CompatInterval(start=52, exclude={53}),
+    53: _CompatSet({53}),
+    60: _CompatInterval(start=60, exclude={62}),
+    61: _CompatInterval(start=61, exclude={62}),
+    62: _CompatSet({62}),
+    70: _CompatInterval(start=70, exclude={72}),
+    72: _CompatSet({72}),
+    75: _CompatInterval(start=75),
+    80: _CompatInterval(start=80, exclude={87}),
+    86: _CompatInterval(start=86, exclude={87}),
+    87: _CompatSet({87}),
+    89: _CompatInterval(start=89),
+    90: _CompatInterval(start=90),
+    100: _CompatInterval(start=100, exclude={101}),
+    101: _CompatSet({101, 110}),
+    103: _CompatInterval(start=103),
+    110: _CompatInterval(start=110),
+    120: _CompatInterval(start=120),
+}
+
+
+# TORCH_CUDA_ARCH_LIST for PyTorch releases
+PYTORCH_RELEASES_CODE_CC: dict[str, set[int]] = {
+    "12.6": {50, 60, 70, 80, 86, 90},
+    "12.8": {70, 80, 86, 90, 100, 120},
+    "13.0": {75, 80, 86, 90, 100, 110, 120},
+}
+
+
+def _code_compatible_with_device(device_cc: int, code_cc: int):
+    if code_cc not in DEVICE_REQUIREMENT:
+        warnings.warn(
+            f"PyTorch was compiled with an unknown compute capability {code_cc // 10}.{code_cc % 10}. "
+            + " Please create an issue on Github if this is a valid compute capability.",
+            stacklevel=2,
+        )
+        return device_cc in _CompatInterval(start=code_cc)
+    return device_cc in DEVICE_REQUIREMENT[code_cc]
+
+
+def _warn_unsupported_code(device_index: int, device_cc: int, code_ccs: list[int]):
+    name = get_device_name(device_index)
+
+    compatible_releases: list[str] = []
+    for cuda, build_ccs in PYTORCH_RELEASES_CODE_CC.items():
+        if any(_code_compatible_with_device(device_cc, cc) for cc in build_ccs):
+            compatible_releases.append(cuda)
+
+    lines = [
+        f"Found GPU{device_index} {name} which is of compute capability (CC) {device_cc // 10}.{device_cc % 10}.",
+        "The following list shows the CCs this version of PyTorch was built for and the hardware CCs it supports:",
+    ] + [
+        f"- {cc // 10}.{cc % 10} which supports hardware CC {DEVICE_REQUIREMENT[cc]}"
+        for cc in code_ccs
+    ]
+
+    if len(compatible_releases) > 0:
+        releases_str = ", ".join(compatible_releases)
+        lines.append(
+            "Please follow the instructions at https://pytorch.org/get-started/locally/ to "
+            + f"install a PyTorch release that supports one of these CUDA versions: {releases_str}"
+        )
+
+    warnings.warn("\n".join(lines), stacklevel=2)
+
+
 def _check_capability():
-    incompatible_gpu_warn = """
-    Found GPU%d %s which is of cuda capability %d.%d.
-    Minimum and Maximum cuda capability supported by this version of PyTorch is
-    (%d.%d) - (%d.%d)
-    """
-    matched_cuda_warn = """
-    Please install PyTorch with a following CUDA
-    configurations: {} following instructions at
-    https://pytorch.org/get-started/locally/
-    """
+    if torch.version.cuda is None:  # on ROCm we don't want this check
+        return
 
-    # Binary CUDA_ARCHES SUPPORTED by PyTorch
-    CUDA_ARCHES_SUPPORTED = {
-        "12.6": {"min": 50, "max": 90},
-        "12.8": {"min": 70, "max": 120},
-        "13.0": {"min": 75, "max": 120},
-    }
-
-    if (
-        torch.version.cuda is not None and torch.cuda.get_arch_list()
-    ):  # on ROCm we don't want this check
-        for d in range(device_count()):
-            capability = get_device_capability(d)
-            major = capability[0]
-            minor = capability[1]
-            name = get_device_name(d)
-            current_arch = major * 10 + minor
-            min_arch = min(
-                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
-                default=50,
-            )
-            max_arch = max(
-                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
-                default=50,
-            )
-            if current_arch < min_arch or current_arch > max_arch:
-                warnings.warn(
-                    incompatible_gpu_warn
-                    % (
-                        d,
-                        name,
-                        major,
-                        minor,
-                        min_arch // 10,
-                        min_arch % 10,
-                        max_arch // 10,
-                        max_arch % 10,
-                    )
-                )
-                matched_arches = ""
-                for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
-                    if (
-                        current_arch >= arch_info["min"]
-                        and current_arch <= arch_info["max"]
-                    ):
-                        matched_arches += f" {arch}"
-                if matched_arches != "":
-                    warnings.warn(matched_cuda_warn.format(matched_arches))
+    code_ccs = [_extract_arch_version(cc) for cc in get_arch_list()]
+    for d in range(device_count()):
+        major, minor = get_device_capability(d)
+        device_cc = 10 * major + minor
+        if not any(
+            _code_compatible_with_device(device_cc, code_cc) for code_cc in code_ccs
+        ):
+            _warn_unsupported_code(d, device_cc, code_ccs)
 
 
 def _check_cubins():
@@ -327,7 +395,8 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
             warnings.warn(
                 incompatible_device_warn.format(
                     device_name, capability, " ".join(arch_list), device_name
-                )
+                ),
+                stacklevel=2,
             )
 
 
@@ -496,14 +565,14 @@ class cudaStatus:
 
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         msg = _cudart.cudaGetErrorString(_cudart.cudaError(code))
         super().__init__(f"{msg} ({code})")
 
 
 def check_error(res: int) -> None:
     r"""Raise an error if the result of a CUDA runtime API call is not success."""
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     if res != _cudart.cudaError.success:
         raise CudaError(res)
 
@@ -556,7 +625,7 @@ class device_of(device):
         super().__init__(idx)
 
 
-def set_device(device: "Device") -> None:
+def set_device(device: Device) -> None:
     r"""Set the current device.
 
     Usage of this function is discouraged in favor of :any:`device`. In most
@@ -571,7 +640,7 @@ def set_device(device: "Device") -> None:
         torch._C._cuda_setDevice(device)
 
 
-def get_device_name(device: "Device" = None) -> str:
+def get_device_name(device: Device = None) -> str:
     r"""Get the name of a device.
 
     Args:
@@ -586,7 +655,7 @@ def get_device_name(device: "Device" = None) -> str:
     return get_device_properties(device).name
 
 
-def get_device_capability(device: "Device" = None) -> tuple[int, int]:
+def get_device_capability(device: Device = None) -> tuple[int, int]:
     r"""Get the cuda capability of a device.
 
     Args:
@@ -603,8 +672,8 @@ def get_device_capability(device: "Device" = None) -> tuple[int, int]:
     return prop.major, prop.minor
 
 
-# pyrefly: ignore  # not-a-type
-def get_device_properties(device: "Device" = None) -> _CudaDeviceProperties:
+# pyrefly: ignore [not-a-type]
+def get_device_properties(device: Device = None) -> _CudaDeviceProperties:
     r"""Get the properties of a device.
 
     Args:
@@ -623,7 +692,7 @@ def get_device_properties(device: "Device" = None) -> _CudaDeviceProperties:
     return _get_device_properties(device)  # type: ignore[name-defined]
 
 
-def can_device_access_peer(device: "Device", peer_device: "Device") -> bool:
+def can_device_access_peer(device: Device, peer_device: Device) -> bool:
     r"""Check if peer access between two devices is possible."""
     _lazy_init()
     device = _get_device_index(device, optional=True)
@@ -654,7 +723,7 @@ class StreamContext:
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
             if self.idx is None:
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self.idx = -1
 
         self.src_prev_stream = (
@@ -722,7 +791,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
 
 
 def set_stream(stream: Stream):
-    r"""Set the current stream.This is a wrapper API to set the stream.
+    r"""Set the current stream. This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 
@@ -739,7 +808,7 @@ def set_stream(stream: Stream):
     )
 
 
-def _parse_visible_devices() -> Union[list[int], list[str]]:
+def _parse_visible_devices() -> list[int] | list[str]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
 
@@ -817,7 +886,9 @@ def _raw_device_count_amdsmi() -> int:
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
-        warnings.warn(f"Can't initialize amdsmi - Error code: {e.err_code}")
+        warnings.warn(
+            f"Can't initialize amdsmi - Error code: {e.err_code}", stacklevel=2
+        )
         return -1
     socket_handles = amdsmi.amdsmi_get_processor_handles()
     return len(socket_handles)
@@ -830,18 +901,18 @@ def _raw_device_count_nvml() -> int:
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
     if rc != 0:
-        warnings.warn("Can't initialize NVML")
+        warnings.warn("Can't initialize NVML", stacklevel=2)
         return -1
     dev_count = c_int(-1)
     rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
     if rc != 0:
-        warnings.warn("Can't get nvml device count")
+        warnings.warn("Can't get nvml device count", stacklevel=2)
         return -1
     del nvml_h
     return dev_count.value
 
 
-def _raw_device_uuid_amdsmi() -> Optional[list[str]]:
+def _raw_device_uuid_amdsmi() -> list[str] | None:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
     if not _HAS_PYNVML:  # If amdsmi is not available
@@ -849,27 +920,27 @@ def _raw_device_uuid_amdsmi() -> Optional[list[str]]:
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException:
-        warnings.warn("Can't initialize amdsmi")
+        warnings.warn("Can't initialize amdsmi", stacklevel=2)
         return None
     try:
         socket_handles = amdsmi.amdsmi_get_processor_handles()
         dev_count = len(socket_handles)
     except amdsmi.AmdSmiException:
-        warnings.warn("Can't get amdsmi device count")
+        warnings.warn("Can't get amdsmi device count", stacklevel=2)
         return None
     uuids: list[str] = []
     for idx in range(dev_count):
         try:
             handler = amdsmi.amdsmi_get_processor_handles()[idx]
         except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get amd device handler")
+            warnings.warn("Cannot get amd device handler", stacklevel=2)
             return None
         try:
             uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
                 2:
             ]  # Removes 0x prefix from serial
         except amdsmi.AmdSmiException:
-            warnings.warn("Cannot get uuid for amd device")
+            warnings.warn("Cannot get uuid for amd device", stacklevel=2)
             return None
         uuids.append(
             str(uuid).lower()
@@ -877,32 +948,32 @@ def _raw_device_uuid_amdsmi() -> Optional[list[str]]:
     return uuids
 
 
-def _raw_device_uuid_nvml() -> Optional[list[str]]:
+def _raw_device_uuid_nvml() -> list[str] | None:
     r"""Return list of device UUID as reported by NVML or None if NVM discovery/initialization failed."""
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
     if rc != 0:
-        warnings.warn("Can't initialize NVML")
+        warnings.warn("Can't initialize NVML", stacklevel=2)
         return None
     dev_count = c_int(-1)
     rc = nvml_h.nvmlDeviceGetCount_v2(byref(dev_count))
     if rc != 0:
-        warnings.warn("Can't get nvml device count")
+        warnings.warn("Can't get nvml device count", stacklevel=2)
         return None
     uuids: list[str] = []
     for idx in range(dev_count.value):
         dev_id = c_void_p()
         rc = nvml_h.nvmlDeviceGetHandleByIndex_v2(idx, byref(dev_id))
         if rc != 0:
-            warnings.warn("Can't get device handle")
+            warnings.warn("Can't get device handle", stacklevel=2)
             return None
         buf_len = 96
         buf = create_string_buffer(buf_len)
         rc = nvml_h.nvmlDeviceGetUUID(dev_id, buf, buf_len)
         if rc != 0:
-            warnings.warn("Can't get device UUID")
+            warnings.warn("Can't get device UUID", stacklevel=2)
             return None
         uuids.append(buf.raw.decode("ascii").strip("\0"))
     del nvml_h
@@ -957,9 +1028,9 @@ def _device_count_amdsmi() -> int:
             if raw_cnt <= 0:
                 return raw_cnt
             # Trim the list up to a maximum available device
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             for idx, val in enumerate(visible_devices):
-                # pyrefly: ignore  # redundant-cast
+                # pyrefly: ignore [redundant-cast]
                 if cast(int, val) >= raw_cnt:
                     return idx
     except OSError:
@@ -993,9 +1064,9 @@ def _device_count_nvml() -> int:
             if raw_cnt <= 0:
                 return raw_cnt
             # Trim the list up to a maximum available device
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             for idx, val in enumerate(visible_devices):
-                # pyrefly: ignore  # redundant-cast
+                # pyrefly: ignore [redundant-cast]
                 if cast(int, val) >= raw_cnt:
                     return idx
     except OSError:
@@ -1005,7 +1076,7 @@ def _device_count_nvml() -> int:
     return len(visible_devices)
 
 
-def _get_nvml_device_index(device: "Device") -> int:
+def _get_nvml_device_index(device: Device) -> int:
     r"""Return the NVML index of the device, taking CUDA_VISIBLE_DEVICES into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
@@ -1024,7 +1095,7 @@ def _get_nvml_device_index(device: "Device") -> int:
     return visible_devices[idx]
 
 
-_cached_device_count: Optional[int] = None
+_cached_device_count: int | None = None
 
 
 def device_count() -> int:
@@ -1080,7 +1151,7 @@ def current_device() -> int:
     return torch._C._cuda_getDevice()
 
 
-def synchronize(device: "Device" = None) -> None:
+def synchronize(device: Device = None) -> None:
     r"""Wait for all kernels in all streams on a CUDA device to complete.
 
     Args:
@@ -1106,7 +1177,7 @@ def ipc_collect():
     return torch._C._cuda_ipc_collect()
 
 
-def current_stream(device: "Device" = None) -> Stream:
+def current_stream(device: Device = None) -> Stream:
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -1124,7 +1195,7 @@ def current_stream(device: "Device" = None) -> Stream:
     )
 
 
-def default_stream(device: "Device" = None) -> Stream:
+def default_stream(device: Device = None) -> Stream:
     r"""Return the default :class:`Stream` for a given device.
 
     Args:
@@ -1142,7 +1213,7 @@ def default_stream(device: "Device" = None) -> Stream:
     )
 
 
-def get_stream_from_external(data_ptr: int, device: "Device" = None) -> Stream:
+def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
     r"""Return a :class:`Stream` from an externally allocated CUDA stream.
 
     This function is used to wrap streams allocated in other libraries in order
@@ -1174,7 +1245,7 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
-def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
+def set_sync_debug_mode(debug_mode: int | str) -> None:
     r"""Set the debug mode for cuda synchronizing operations.
 
     Args:
@@ -1207,13 +1278,13 @@ def get_sync_debug_mode() -> int:
     return torch._C._cuda_get_sync_debug_mode()
 
 
-def _get_pynvml_handler(device: "Device" = None):
+def _get_pynvml_handler(device: Device = None):
     if not _HAS_PYNVML:
         raise ModuleNotFoundError(
             "nvidia-ml-py does not seem to be installed or it can't be imported."
-            # pyrefly: ignore  # invalid-inheritance
+            # pyrefly: ignore [invalid-inheritance]
         ) from _PYNVML_ERR
-    # pyrefly: ignore  # import-error
+    # pyrefly: ignore [import-error, missing-import, missing-module-attribute]
     from pynvml import NVMLError_DriverNotLoaded
 
     try:
@@ -1226,24 +1297,24 @@ def _get_pynvml_handler(device: "Device" = None):
     return handle
 
 
-def _get_amdsmi_handler(device: "Device" = None):
+def _get_amdsmi_handler(device: Device = None):
     if not _HAS_PYNVML:
         raise ModuleNotFoundError(
             "amdsmi does not seem to be installed or it can't be imported."
-            # pyrefly: ignore  # invalid-inheritance
+            # pyrefly: ignore [invalid-inheritance]
         ) from _PYNVML_ERR
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
         raise RuntimeError(
-            "amdsmi driver can't be loaded, requires >=ROCm5.6 installation"
+            "amdsmi driver can't be loaded, requires >=ROCm6.0 installation"
         ) from e
     device = _get_amdsmi_device_index(device)
     handle = amdsmi.amdsmi_get_processor_handles()[device]
     return handle
 
 
-def _get_amdsmi_device_index(device: "Device") -> int:
+def _get_amdsmi_device_index(device: Device) -> int:
     r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
@@ -1263,7 +1334,7 @@ def _get_amdsmi_device_index(device: "Device") -> int:
     return idx_map[idx]
 
 
-def _get_amdsmi_device_memory_used(device: "Device" = None) -> int:
+def _get_amdsmi_device_memory_used(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
     mem_mega_bytes = amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
@@ -1271,17 +1342,17 @@ def _get_amdsmi_device_memory_used(device: "Device" = None) -> int:
     return mem_bytes
 
 
-def _get_amdsmi_memory_usage(device: "Device" = None) -> int:
+def _get_amdsmi_memory_usage(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
 
 
-def _get_amdsmi_utilization(device: "Device" = None) -> int:
+def _get_amdsmi_utilization(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
 
 
-def _get_amdsmi_temperature(device: "Device" = None) -> int:
+def _get_amdsmi_temperature(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     return amdsmi.amdsmi_get_temp_metric(
         handle,
@@ -1290,7 +1361,7 @@ def _get_amdsmi_temperature(device: "Device" = None) -> int:
     )
 
 
-def _get_amdsmi_power_draw(device: "Device" = None) -> int:
+def _get_amdsmi_power_draw(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
     if socket_power != "N/A":
@@ -1303,7 +1374,7 @@ def _get_amdsmi_power_draw(device: "Device" = None) -> int:
             return 0
 
 
-def _get_amdsmi_clock_rate(device: "Device" = None) -> int:
+def _get_amdsmi_clock_rate(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
     if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
@@ -1316,7 +1387,7 @@ def _get_amdsmi_clock_rate(device: "Device" = None) -> int:
         return 0
 
 
-def device_memory_used(device: "Device" = None) -> int:
+def device_memory_used(device: Device = None) -> int:
     r"""Return used global (device) memory in bytes as given by `nvidia-smi` or `amd-smi`.
 
     Args:
@@ -1334,7 +1405,7 @@ def device_memory_used(device: "Device" = None) -> int:
         return _get_amdsmi_device_memory_used(device)
 
 
-def memory_usage(device: "Device" = None) -> int:
+def memory_usage(device: Device = None) -> int:
     r"""Return the percent of time over the past sample period during which global (device)
     memory was being read or written as given by `nvidia-smi`.
 
@@ -1355,7 +1426,7 @@ def memory_usage(device: "Device" = None) -> int:
         return _get_amdsmi_memory_usage(device)
 
 
-def utilization(device: "Device" = None) -> int:
+def utilization(device: Device = None) -> int:
     r"""Return the percent of time over the past sample period during which one or
     more kernels was executing on the GPU as given by `nvidia-smi`.
 
@@ -1376,7 +1447,7 @@ def utilization(device: "Device" = None) -> int:
         return _get_amdsmi_utilization(device)
 
 
-def temperature(device: "Device" = None) -> int:
+def temperature(device: Device = None) -> int:
     r"""Return the average temperature of the GPU sensor in Degrees C (Centigrades).
 
     The average temperature is computed based on past sample period as given by `nvidia-smi`.
@@ -1397,7 +1468,7 @@ def temperature(device: "Device" = None) -> int:
         return _get_amdsmi_temperature(device)
 
 
-def power_draw(device: "Device" = None) -> int:
+def power_draw(device: Device = None) -> int:
     r"""Return the average power draw of the GPU sensor in mW (MilliWatts)
         over the past sample period as given by `nvidia-smi` for Fermi or newer fully supported devices.
 
@@ -1416,7 +1487,7 @@ def power_draw(device: "Device" = None) -> int:
         return _get_amdsmi_power_draw(device)
 
 
-def clock_rate(device: "Device" = None) -> int:
+def clock_rate(device: Device = None) -> int:
     r"""Return the clock speed of the GPU SM in MHz (megahertz) over the past sample period as given by `nvidia-smi`.
 
     Args:
@@ -1434,7 +1505,7 @@ def clock_rate(device: "Device" = None) -> int:
         return _get_amdsmi_clock_rate(device)
 
 
-def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+def _get_device(device: int | str | torch.device) -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 
     Args:
@@ -1460,7 +1531,7 @@ def _get_generator(device: torch.device) -> torch._C.Generator:
 
 
 def _set_rng_state_offset(
-    offset: int, device: Union[int, str, torch.device] = "cuda"
+    offset: int, device: int | str | torch.device = "cuda"
 ) -> None:
     r"""Set the random number generator state offset of the specified GPU.
 
@@ -1478,7 +1549,7 @@ def _set_rng_state_offset(
     _lazy_call(cb)
 
 
-def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int:
+def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
     r"""Return the random number generator state offset of the specified GPU.
 
     Args:
@@ -1494,7 +1565,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int
     return default_generator.get_offset()
 
 
-# pyrefly: ignore  # deprecated
+# pyrefly: ignore [deprecated]
 from .memory import *  # noqa: F403
 from .random import *  # noqa: F403
 
@@ -1711,7 +1782,7 @@ def _register_triton_kernels():
     def kernel_impl(*args, **kwargs):
         from torch.sparse._triton_ops import bsr_dense_mm
 
-        # pyrefly: ignore  # not-callable
+        # pyrefly: ignore [not-callable]
         return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
     @_WrappedTritonKernel
@@ -1746,9 +1817,9 @@ _lazy_call(_register_triton_kernels)
 def _compile_kernel(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: Optional[str] = None,
-    cuda_include_dirs: Optional[list] = None,
-    nvcc_options: Optional[list] = None,
+    compute_capability: str | None = None,
+    cuda_include_dirs: list | None = None,
+    nvcc_options: list | None = None,
 ):
     """
     Compiles a CUDA kernel using NVRTC and returns a callable function.
@@ -1844,6 +1915,7 @@ __all__ = [
     "ExternalStream",
     "Stream",
     "StreamContext",
+    "GreenContext",
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",

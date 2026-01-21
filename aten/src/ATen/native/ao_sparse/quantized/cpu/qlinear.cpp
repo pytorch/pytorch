@@ -128,7 +128,7 @@ at::Tensor PackedLinearWeight::apply_impl(
   auto* input_tr_ptr =
       reinterpret_cast<uint8_t*>(input_tr.data_ptr<c10::quint8>());
   // TODO: Activation transpose before and after the kernel can be removed if we
-  // keep activation tensor always tranposed.
+  // keep activation tensor always transposed.
   fbgemm::transpose_simd<uint8_t>(
       batch_size, K, input_ptr, K, input_tr_ptr, batch_size);
 
