@@ -99,7 +99,7 @@ from torch._guards import (
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
-from torch._library.opaque_object import is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_info, is_opaque_value_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -121,6 +121,7 @@ from .source import (
     AttrSource,
     CallFunctionNoArgsSource,
     CallMethodItemSource,
+    CellContentsSource,
     ChainedSource,
     ClosureSource,
     CodeSource,
@@ -813,12 +814,45 @@ def get_verbose_code_parts(
     verbose_code_parts = [
         get_verbose_code_part(code_part, guard) for code_part in code_parts
     ]
+
+    # For CellContentsSource (or any source with a CellContentsSource ancestor),
+    # add a hint explaining which closure variable is being checked.
+    # This helps users understand which closure variable caused the guard failure.
+    if guard is not None:
+        closure_hint = _get_closure_var_hint(guard.originating_source)
+        if closure_hint:
+            recompile_hint = (
+                f"{closure_hint}, {recompile_hint}" if recompile_hint else closure_hint
+            )
+
     if recompile_hint:
         verbose_code_parts = [
             f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
         ]
 
     return verbose_code_parts
+
+
+def _get_closure_var_hint(source: Optional[Source]) -> Optional[str]:
+    """
+    Walk up the source chain to find a CellContentsSource ancestor.
+    Returns a hint like 'guard on "varname".attr' or None if not found.
+    """
+    if source is None:
+        return None
+
+    full_name = source.name
+    current: Optional[Source] = source
+    while current is not None:
+        if isinstance(current, CellContentsSource) and current.freevar_name:
+            # Compute the path suffix by comparing names
+            # e.g., full_name="x.__closure__[0].cell_contents.scale"
+            #       current.name="x.__closure__[0].cell_contents"
+            #       suffix=".scale"
+            path_suffix = full_name[len(current.name) :]
+            return f'guard on "{current.freevar_name}"{path_suffix}'
+        current = current.base if isinstance(current, ChainedSource) else None
+    return None
 
 
 def convert_int_to_concrete_values(dim: Any) -> Optional[int]:
@@ -1480,7 +1514,9 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
+        elif istype(
+            source, (AttrSource, CellContentsSource, UnspecializedParamBufferSource)
+        ):
             assert base_guard_manager  # to make mypy happy
             assert isinstance(source, AttrSource)
             if should_optimize_getattr_on_nn_module(base_example_value):
@@ -2211,6 +2247,30 @@ class GuardBuilder(GuardBuilderBase):
         code = f"__dtensor_spec_{id(guard_fn)}"
         self.get_guard_manager(guard).add_lambda_guard(
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
+        )
+
+    def OPAQUE_OBJ_GUARD_FN_MATCH(self, guard: Guard) -> None:
+        """Guard on the values returned by the opaque object's guard_fn."""
+
+        value = self.get(guard)
+        opaque_info = get_opaque_obj_info(type(value))
+
+        if not opaque_info or not opaque_info.guard_fn:
+            return
+
+        original_values = deepcopy(opaque_info.guard_fn(value))
+
+        def opaque_guard_checker(x: Any) -> bool:
+            current_values = opaque_info.guard_fn(  # pyrefly: ignore[missing-attribute]
+                x
+            )
+            return current_values == original_values
+
+        global_name = f"___check_opaque_guard_fn_{id(opaque_guard_checker)}_c{CompileContext.current_compile_id()}"
+        self.get_guard_manager(guard).add_lambda_guard(
+            opaque_guard_checker,
+            get_verbose_code_parts(global_name, guard),
+            guard.user_stack,
         )
 
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
@@ -3487,10 +3547,17 @@ class GuardsStatePickler(pickle.Pickler):
                     inner_data,
                 )
 
+            # For FakeTensors, use pytype if set, otherwise default to
+            # torch.Tensor. This is important for cross-compilation where
+            # we compile with fake tensors but run with real tensors.
+            pytype = type(obj)
+            if isinstance(obj, torch._subclasses.FakeTensor):
+                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
-                type(obj),
+                pytype,
                 torch._C._dispatch_keys(obj).raw_repr(),
                 obj.grad,
             )

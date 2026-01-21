@@ -956,8 +956,6 @@ class DebugMode(TorchDispatchMode):
         return result
 
     def __enter__(self):
-        self.reset()
-
         if self.record_torchfunction:
             torch._C._push_on_torch_function_stack(self)
 
