@@ -15248,6 +15248,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "libdevice.fma", code, "Expected FMA to be used in generated code"
         )
 
+    @torch._functorch.config.patch(donated_buffer=False)
     def test_complex_scalar_istft_pattern(self):
         if not self.is_dtype_supported(torch.complex64):
             raise unittest.SkipTest("complex64 not supported on device")
