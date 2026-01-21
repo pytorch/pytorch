@@ -466,24 +466,22 @@ Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Gen
     // cauchy distwith inverse CDF: median + sigma * tan(pi * (U - 0.5))
     const auto halfTensor = [mpsGraph constantWithScalar:0.5 dataType:randomTensor.dataType];
     const auto piTensor = [mpsGraph constantWithScalar:M_PI dataType:randomTensor.dataType];
-   const auto medianTensor = [mpsGraph constantWithScalar:median dataType:randomTensor.dataType];
+    const auto medianTensor = [mpsGraph constantWithScalar:median dataType:randomTensor.dataType];
     const auto sigmaTensor = [mpsGraph constantWithScalar:sigma dataType:randomTensor.dataType];
 
     // (U - 0.5)
-    const auto shiftedTensor = [mpsGraph subtractionWithPrimaryTensor:randomTensor
-                                                     secondaryTensor:halfTensor
-                                                                name:nil];
+    const auto shiftedTensor = [mpsGraph subtractionWithPrimaryTensor:randomTensor secondaryTensor:halfTensor name:nil];
     // pi * (U - 0.5)
     const auto scaledTensor = [mpsGraph multiplicationWithPrimaryTensor:piTensor
-                                                       secondaryTensor:shiftedTensor
-                                                                  name:nil];
+                                                        secondaryTensor:shiftedTensor
+                                                                   name:nil];
     // tan(pi * (U - 0.5))
     const auto tanTensor = [mpsGraph tanWithTensor:scaledTensor name:nil];
 
     // sigma * tan(pi * (U - 0.5))
     const auto multipliedTensor = [mpsGraph multiplicationWithPrimaryTensor:sigmaTensor
-                                                           secondaryTensor:tanTensor
-                                                                      name:nil];
+                                                            secondaryTensor:tanTensor
+                                                                       name:nil];
     // median + sigma * tan(pi * (U - 0.5))
     return [mpsGraph additionWithPrimaryTensor:medianTensor secondaryTensor:multipliedTensor name:nil];
   };
