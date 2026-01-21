@@ -2994,3 +2994,13 @@ def _as_tensor_fullprec(t):
 # an autoloaded backend are defined
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+# Only import if distributed is available (USE_DISTRIBUTED=1)
+if hasattr(torch._C, "_c10d_init"):
+    import torch.distributed
+
+    if torch.distributed.is_available():
+        from torch._library.opaque_object import register_opaque_type
+
+        register_opaque_type(torch.distributed.ProcessGroup, typ="reference")
+        register_opaque_type(torch.distributed.DeviceMesh, typ="reference")

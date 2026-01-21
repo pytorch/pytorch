@@ -7,7 +7,7 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 
 import collections
 import typing
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeGuard, TypeVar, Union
 
 import torch
@@ -21,6 +21,7 @@ from .descriptors import (
     AOTInput,
     AOTOutput,
     DummyAOTInput,
+    DummyAOTOutput,
     SubclassGetAttrAOTInput,
     SubclassGetAttrAOTOutput,
     SubclassSizeAOTInput,
@@ -98,7 +99,11 @@ def get_subclass_typing_container(
 
 
 def create_subclass_metadata(
-    a: Any, start_idx: int, count_symints: bool, with_memory_format: bool = False
+    a: Any,
+    start_idx: int,
+    count_symints: bool,
+    with_memory_format: bool = False,
+    count_pgs: bool = False,
 ):
     if not is_traceable_wrapper_subclass(a):
         idx = start_idx + 1
@@ -120,16 +125,25 @@ def create_subclass_metadata(
             new_start_idx,
             count_symints=count_symints,
             with_memory_format=with_memory_format,
+            count_pgs=count_pgs,
         )
         attrs[key] = new_subclass_meta
 
     # It *must* be because is_traceable_wrapper_subclass() - but mypy is not smart.
     assert isinstance(a, Tensor)
 
+    num_pgs = 0
+    if count_pgs:  # Only count ProcessGroups when explicitly requested
+        from torch.distributed.tensor import DTensor
+
+        if isinstance(a, DTensor):
+            num_pgs = len(a._flatten_process_groups())
+
     new_start_idx = (
         new_start_idx
         + count_symints * len(enumerate_filter_symints(a.size()))
         + count_symints * len(enumerate_filter_symints(a.stride()))
+        + num_pgs
     )
 
     return (
@@ -156,6 +170,7 @@ def create_subclass_meta(
     *,
     count_symints: bool = True,
     with_memory_format: bool = False,
+    count_pgs: bool = False,
 ) -> list[Union[PlainTensorMeta, SubclassCreationMeta]]:
     idx = 0
     infos: list[Union[PlainTensorMeta, SubclassCreationMeta]] = []
@@ -168,6 +183,7 @@ def create_subclass_meta(
                 start_idx,
                 count_symints=count_symints,
                 with_memory_format=with_memory_format,
+                count_pgs=count_pgs,
             )
             infos.append(subclass_meta)
             cnt = subclass_meta.arg_count
@@ -217,16 +233,17 @@ AOTDescriptor = TypeVar("AOTDescriptor", AOTInput, AOTOutput)
 # this function below.
 def unwrap_tensor_subclasses(
     wrapped_args: list[FxValue],
-    wrapped_args_descs: list[AOTDescriptor],
+    wrapped_args_descs: Sequence[AOTDescriptor],
     *,
     append_symints: bool,
+    append_opaques: bool,
 ) -> tuple[list[FxValue], list[AOTDescriptor]]:
     def flatten_subclass(
         t: FxValue,
         desc: AOTDescriptor,
         *,
         out: tuple[list[FxValue], list[AOTDescriptor]],
-    ):
+    ) -> None:
         # unwrap a subclass into plain tensors and their size/stride if "append_symint"
         # is True
         if not is_traceable_wrapper_subclass(t):
@@ -236,14 +253,24 @@ def unwrap_tensor_subclasses(
 
         attrs, _ = t.__tensor_flatten__()
 
+        SubclassGetAttr: Callable[[AOTInput | AOTOutput, str], AOTDescriptor]
+        SubclassSize: Callable[[AOTInput | AOTOutput, int], AOTDescriptor]
+        SubclassStride: Callable[[AOTInput | AOTOutput, int], AOTDescriptor]
+        Dummy: Callable[[int], AOTDescriptor]
+        if isinstance(desc, AOTInput):
+            SubclassGetAttr = SubclassGetAttrAOTInput  # type: ignore[bad-assignment]
+            SubclassSize = SubclassSizeAOTInput  # type: ignore[bad-assignment]
+            SubclassStride = SubclassStrideAOTInput  # type: ignore[bad-assignment]
+            Dummy = DummyAOTInput  # type: ignore[bad-assignment]
+        else:
+            SubclassGetAttr = SubclassGetAttrAOTOutput  # type: ignore[bad-assignment]
+            SubclassSize = SubclassSizeAOTOutput  # type: ignore[bad-assignment]
+            SubclassStride = SubclassStrideAOTOutput  # type: ignore[bad-assignment]
+            Dummy = DummyAOTOutput  # type: ignore[bad-assignment]
+
         for attr in attrs:
             inner_tensor = getattr(t, attr)
-            n_desc: Any = (
-                SubclassGetAttrAOTInput(desc, attr)
-                if isinstance(desc, AOTInput)
-                # pyrefly: ignore [bad-argument-type]
-                else SubclassGetAttrAOTOutput(desc, attr)
-            )
+            n_desc: Any = SubclassGetAttr(desc, attr)
             flatten_subclass(inner_tensor, n_desc, out=out)
 
         if append_symints:
@@ -251,19 +278,26 @@ def unwrap_tensor_subclasses(
             strides = enumerate_filter_symints(t.stride())
             out[0].extend(s for _, s in sizes)
             out[0].extend(s for _, s in strides)
-            if isinstance(desc, AOTInput):
-                out[1].extend(SubclassSizeAOTInput(desc, i) for i, _ in sizes)  # type: ignore[misc]
-                out[1].extend(SubclassStrideAOTInput(desc, i) for i, _ in strides)  # type: ignore[misc]
-            else:
-                out[1].extend(SubclassSizeAOTOutput(desc, i) for i, _ in sizes)  # type: ignore[misc]
-                out[1].extend(SubclassStrideAOTOutput(desc, i) for i, _ in strides)  # type: ignore[misc]
+            out[1].extend(SubclassSize(desc, i) for i, _ in sizes)
+            out[1].extend(SubclassStride(desc, i) for i, _ in strides)
+
+        if append_opaques and torch.distributed.config.compile_on_one_rank:
+            from torch.distributed.tensor import DTensor
+
+            # TODO: What about AOTOutput?
+            if isinstance(desc, AOTInput) and isinstance(t, DTensor):
+                pgs = t._flatten_process_groups()
+                out[0].extend(pgs.values())
+                start_idx = len(out[1])
+                out[1].extend(
+                    Dummy(start_idx + idx) for idx, mesh_dim in enumerate(pgs.keys())
+                )
 
     xs_inner: list[FxValue] = []
     descs_inner: list[AOTDescriptor] = []
 
     for x, desc in zip(wrapped_args, wrapped_args_descs):
-        # pyrefly: ignore [bad-argument-type]
-        flatten_subclass(typing.cast(Tensor, x), desc, out=(xs_inner, descs_inner))
+        flatten_subclass(x, desc, out=(xs_inner, descs_inner))
 
     return xs_inner, descs_inner
 
@@ -308,6 +342,13 @@ def runtime_unwrap_tensor_subclasses(
             out.extend(
                 [r for (r, is_symint) in zip(stride, symint_placeholders) if is_symint]
             )
+
+        if torch.distributed.config.compile_on_one_rank:
+            from torch.distributed.tensor import DTensor
+
+            if isinstance(x, DTensor):
+                out.extend(x._flatten_process_groups().values())
+
         return out
 
     xs_inner: list[int | Tensor | SymInt | OpaqueType] = []
@@ -335,7 +376,7 @@ def unwrap_tensor_subclasses_with_indices_to_original(wrapped_args):
     ret_indices_to_original = []
     for i, a in enumerate(wrapped_args):
         a_unwrapped, _ = unwrap_tensor_subclasses(
-            [a], [DummyAOTInput(9999)], append_symints=False
+            [a], [DummyAOTInput(9999)], append_symints=False, append_opaques=False
         )
         ret_unwrapped.extend(a_unwrapped)
         n = len(a_unwrapped)

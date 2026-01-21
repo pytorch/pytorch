@@ -11,10 +11,11 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Optional
 
 import torch
+import torch.distributed.config
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
@@ -211,7 +212,7 @@ def run_functionalized_fw_and_collect_metadata(
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
-            flat_f_outs = f(*flat_f_args)
+            flat_f_outs: Sequence = f(*flat_f_args)
 
             # Assert that f does NOT have an AOTOutputs in it, easy mistake to
             # make!  You need to drop the second output before calling this
@@ -861,7 +862,9 @@ from a multi-output view call"
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
             traced_tangents_descs=traced_tangents_descs,
-            subclass_inp_meta=create_subclass_meta(flat_args),
+            subclass_inp_meta=create_subclass_meta(
+                flat_args, count_pgs=torch.distributed.config.compile_on_one_rank
+            ),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(
                 traced_tangents, count_symints=False, with_memory_format=True

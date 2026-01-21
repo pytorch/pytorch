@@ -1131,7 +1131,11 @@ else:
             import torch.distributed.config as config
             from torch._guards import detect_fake_mode
 
-            if not detect_fake_mode() or not config.compile_on_one_rank:
+            if (
+                not config.compile_on_one_rank
+                or not (fake_mode := detect_fake_mode())
+                or not fake_mode.shape_env
+            ):
                 # This is only valid when the current rank is part of the mesh.
                 assert self._coordinate_on_dim is not None
                 return self._coordinate_on_dim[index]
