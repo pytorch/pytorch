@@ -5,14 +5,13 @@ __all__ = ["InputObserver"]
 
 import contextlib
 import inspect
-from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 import torch
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 def flatten_unflatten_for_dynamic_shapes(
