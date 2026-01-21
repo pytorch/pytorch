@@ -336,6 +336,10 @@ class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         torch.cuda.synchronize()
 
         # create cache flush buffer: 256 MB = 256 * 1024 * 1024 bytes
+        # NOTE: This is the same buffer size as Triton's do_bench
+        # For AMD, there are better outcomes on short duration kernels (<20 us)
+        # when buffer size is set to the Infinity cache (LLC) instead of L2.
+        # LLC cache size is not a supported field in PyTorchdevice properties.
         # see https://github.com/triton-lang/triton/pull/840 for why `dtype=torch.int`
         buffer_size_bytes = 256 * 1024 * 1024
         buffer = torch.empty(buffer_size_bytes // 4, dtype=torch.int, device="cuda")
@@ -375,9 +379,9 @@ class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             and event.key.startswith("triton_")
         )
         
-        # If no Triton kernels found, fall back to GEMM kernels
-        # - "Cijk" prefix: ROCm/HIP GEMM kernels (rocBLAS/Tensile)
-        # - Contains "gemm": CUDA cuBLAS/cuDNN GEMM kernels
+        # If no Triton kernels found, fall back to GEMM kernels from other backends
+        # - "Cijk" prefix: rocBLAS/hipBLASLt GEMM kernels (rocBLAS/Tensile)
+        # - Contains "gemm": CK GEMM kernels
         # NOTE: This fallback path is not well tested at this time and may need refinement
         if triton_kernel_time_us == 0:
             triton_kernel_time_us = sum(
