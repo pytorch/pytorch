@@ -1,4 +1,4 @@
-{{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "Q_OFFSETS", "KV_OFFSETS", "Q_LIMITS", "KV_LIMITS", "LOGICAL_Q_LEN_BUF", "LOGICAL_KV_LEN_BUF")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -42,6 +42,17 @@
     Q_LEN = {{size("Q", 2)}}
     ZKV = {{size("K", 0)}}
     KV_LEN = {{size("K", 2)}}
+
+    # Compute logical sequence lengths (for mask_mod bounds checking)
+    # For varlen, these are loaded from scalar tensors to avoid constexpr recompilation
+    # For non-varlen, logical lengths equal physical lengths
+    {%- if HAS_OFFSETS %}
+    LOGICAL_Q_LEN = tl.load(LOGICAL_Q_LEN_BUF).to(INDEX_DTYPE)
+    LOGICAL_KV_LEN = tl.load(LOGICAL_KV_LEN_BUF).to(INDEX_DTYPE)
+    {%- else %}
+    LOGICAL_Q_LEN = Q_LEN
+    LOGICAL_KV_LEN = KV_LEN
+    {%- endif %}
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
@@ -115,38 +126,72 @@
     sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
 
+    # Load Q offset and limit for variable-length sequences
+    # offset: translates logical pos to physical pos for memory access
+    # limit: number of valid positions in this block
+    {%- if HAS_OFFSETS %}
+    stride_q_offsets_z = {{stride("Q_OFFSETS", 0)}}
+    stride_q_offsets_h = {{stride("Q_OFFSETS", 1)}}
+    q_sparse_block_idx = q_start // SPARSE_Q_MULTIPLE
+    q_offset_ptr = Q_OFFSETS + off_zq * stride_q_offsets_z + sparse_idx_hq * stride_q_offsets_h + q_sparse_block_idx
+    q_offset = tl.load(q_offset_ptr).to(INDEX_DTYPE)
+    stride_q_limits_z = {{stride("Q_LIMITS", 0)}}
+    stride_q_limits_h = {{stride("Q_LIMITS", 1)}}
+    q_limit_ptr = Q_LIMITS + off_zq * stride_q_limits_z + sparse_idx_hq * stride_q_limits_h + q_sparse_block_idx
+    q_limit = tl.load(q_limit_ptr).to(INDEX_DTYPE)
+    {%- else %}
+    q_offset = 0
+    q_limit = BLOCK_M
+    {%- endif %}
+
+    # Logical Q positions (used for mask_mod/score_mod)
+    offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
+    # Physical Q positions (used for memory access)
+    offs_m_physical = offs_m + q_offset
+
     {%- if USE_TMA %}
     q = tl.load_tensor_descriptor(
         desc_q,
-        [(q_start * BLOCK_M).to(tl.int32), 0],
+        [(offs_m_physical[0]).to(tl.int32), 0],
     )
     {%- else %}
-    offs_m = q_start * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
-    q = load_checked_2d(Q, offs_m, offs_k, stride_qm, stride_qk, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
+    q = load_checked_2d(Q, offs_m_physical, offs_k, stride_qm, stride_qk, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
     {%- endif %}
 
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # We don't know anything "special" about these blocks, so we need to apply
     # both score_mod and mask_mod to it
     kv_indices = KV_IDX + sparse_kv_idx_offset
-    kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
     block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
+    # Load first kv block index and kv_offset for variable-length sequences
+    # Note: even if kv_num_blocks = 0, the load is safe (allocated memory), and the value is ignored
+    first_kv_block_idx = tl.load(kv_indices)  # sparse block index
+    kv_start = first_kv_block_idx * SPARSE_KV_BLOCK_SIZE  # first kv block we're loading (logical)
+    {%- if HAS_OFFSETS %}
+    stride_kv_offsets_z = {{stride("KV_OFFSETS", 0)}}
+    stride_kv_offsets_h = {{stride("KV_OFFSETS", 1)}}
+    kv_offset_ptr = KV_OFFSETS + off_zq * stride_kv_offsets_z + sparse_idx_hq * stride_kv_offsets_h + first_kv_block_idx
+    kv_offset = tl.load(kv_offset_ptr).to(INDEX_DTYPE)
+    {%- else %}
+    kv_offset = 0
+    {%- endif %}
 
-    # K and V pointers will be passed directly to forward_inner
-
+    # Logical KV positions (used for mask_mod/score_mod)
     offs_n = kv_start + tl.arange(0, BLOCK_N)
-
 
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
         q, K, V,
+        KV_OFFSETS,
         desc_k, desc_v, Q_LEN, KV_LEN,
+        LOGICAL_Q_LEN, LOGICAL_KV_LEN,
         acc, l_i, m_i,
-        off_zq, off_hq, offs_m[:, None], offs_n[None, :],
-        kv_start,
+        off_zq, off_hq, sparse_idx_hq, offs_m[:, None], offs_n[None, :],
+        kv_start, first_kv_block_idx,
+        kv_offset,
         kv_indices, kv_num_blocks,
         0, block_n_end,
         MATMUL_PRECISION,
@@ -160,19 +205,31 @@
     if HAS_FULL_BLOCKS:
         # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
         kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
-        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+        first_full_kv_block_idx = tl.load(kv_indices)  # sparse block index
+        kv_start = first_full_kv_block_idx * SPARSE_KV_BLOCK_SIZE  # first kv block we're loading (logical)
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
         block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
-        # K and V pointers will be passed directly to forward_inner
+
+        {%- if HAS_OFFSETS %}
+        kv_offset_ptr_full = KV_OFFSETS + off_zq * stride_kv_offsets_z + sparse_idx_hq * stride_kv_offsets_h + first_full_kv_block_idx
+        kv_offset_full = tl.load(kv_offset_ptr_full).to(INDEX_DTYPE)
+        {%- else %}
+        kv_offset_full = 0
+        {%- endif %}
+
+        # Logical KV positions (used for mask_mod/score_mod)
         offs_n = kv_start + tl.arange(0, BLOCK_N)
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
             q, K, V,
+            KV_OFFSETS,
             desc_k, desc_v, Q_LEN, KV_LEN,
+            LOGICAL_Q_LEN, LOGICAL_KV_LEN,
             acc, l_i, m_i,
-            off_zq, off_hq, offs_m[:, None], offs_n[None, :],
-            kv_start,
+            off_zq, off_hq, sparse_idx_hq, offs_m[:, None], offs_n[None, :],
+            kv_start, first_full_kv_block_idx,
+            kv_offset_full,
             kv_indices, kv_num_blocks,
             0, block_n_end,
             MATMUL_PRECISION,
@@ -189,27 +246,46 @@
     acc = acc / l_i[:, None]
     idx_zq = tl.program_id(1).to(INDEX_DTYPE)
     idx_hq = tl.program_id(2).to(INDEX_DTYPE)
-    idx_m = offs_m[:, None].to(INDEX_DTYPE)
+    # For output storage, use physical positions when offsets are enabled
+    # This ensures output is stored at the correct physical memory locations
+    idx_m = offs_m_physical[:, None].to(INDEX_DTYPE)
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :].to(INDEX_DTYPE)
 
+    # Mask for output storage: must be within Q_LEN AND within block's valid limit
+    {%- if HAS_OFFSETS %}
+    # Local position within sparse block (not just thread block)
+    # This is needed because q_limit is for the entire sparse block, not the thread block
+    local_m_1d = ((q_start % SPARSE_Q_MULTIPLE) * BLOCK_M + tl.arange(0, BLOCK_M)).to(INDEX_DTYPE)
+    local_m_2d = local_m_1d[:, None]
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM) & (local_m_2d < q_limit)
+    {%- else %}
     mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
+    {%- endif %}
 
     tl.static_assert(acc.shape == [BLOCK_M, V_HEAD_DIM_ROUNDED])
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask", val_shape=("BLOCK_M", "V_HEAD_DIM_ROUNDED"))}}
 
     if OUTPUT_LOGSUMEXP:
         off_hz = off_zq * HQ + off_hq
-        l_ptrs = LSE + off_hz * Q_LEN + offs_m
+        # Use physical positions for LSE storage
+        l_ptrs = LSE + off_hz * Q_LEN + offs_m_physical
         lse = m_i + tl.math.log2(l_i)
-        if IS_DIVISIBLE:
-            tl.store(l_ptrs, lse)
-        else:
-            tl.store(l_ptrs, lse, mask=offs_m < Q_LEN)
+        # Mask must check both physical bounds and block limit
+        {%- if HAS_OFFSETS %}
+        lse_mask = (offs_m_physical < Q_LEN) & (local_m_1d < q_limit)
+        {%- else %}
+        lse_mask = offs_m_physical < Q_LEN
+        {%- endif %}
+        tl.store(l_ptrs, lse, mask=lse_mask)
 
     if OUTPUT_MAX:
         off_hz = off_zq * HQ + off_hq
-        max_ptrs = MAX + off_hz * Q_LEN + offs_m
-        if IS_DIVISIBLE:
-            tl.store(max_ptrs, m_i)
-        else:
-            tl.store(max_ptrs, m_i, mask=offs_m < Q_LEN)
+        # Use physical positions for MAX storage
+        max_ptrs = MAX + off_hz * Q_LEN + offs_m_physical
+        # Mask must check both physical bounds and block limit
+        {%- if HAS_OFFSETS %}
+        max_mask = (offs_m_physical < Q_LEN) & (local_m_1d < q_limit)
+        {%- else %}
+        max_mask = offs_m_physical < Q_LEN
+        {%- endif %}
+        tl.store(max_ptrs, m_i, mask=max_mask)
