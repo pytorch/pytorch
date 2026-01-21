@@ -2608,10 +2608,10 @@ end
                         # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
                         # as seen in https://docs.python.org/2/library/resource.html
                         if _IS_WINDOWS:
-                            from ctypes import (  # type: ignore[attr-defined]; pyrefly: ignore [missing-module-attribute]
+                            from ctypes import (
                                 byref,
                                 Structure,
-                                windll,
+                                windll,  # pyrefly: ignore [missing-module-attribute]
                             )
                             from ctypes.wintypes import DWORD, LPVOID, WORD
 

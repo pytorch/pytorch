@@ -7,8 +7,8 @@
 import math
 import os
 from enum import auto, Enum
-from typing import (  # type: ignore[attr-defined]; pyrefly: ignore [missing-module-attribute]
-    _eval_type,
+from typing import (
+    _eval_type,  # pyrefly: ignore [missing-module-attribute]
     Any,
     Generic,
     NamedTuple,

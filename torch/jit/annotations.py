@@ -38,8 +38,8 @@ from torch._jit_internal import (  # type: ignore[attr-defined]; pyrefly: ignore
     _qualified_name,
     Any,
     BroadcastingList1,
-    BroadcastingList2,
-    BroadcastingList3,
+    BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
+    BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
     Dict,
     Future,
     is_await,

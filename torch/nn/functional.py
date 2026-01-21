@@ -8,18 +8,18 @@ from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
-from torch._C import (  # pyrefly: ignore [missing-module-attribute]
+from torch._C import (
     _add_docstr,
     _infer_size,
-    _ScalingType as ScalingType,
-    _SwizzleType as SwizzleType,
+    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
+    _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
 )
-from torch._jit_internal import (  # pyrefly: ignore [missing-module-attribute]
+from torch._jit_internal import (
     _overload,
     boolean_dispatch,
     BroadcastingList1,
-    BroadcastingList2,
-    BroadcastingList3,
+    BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
+    BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401

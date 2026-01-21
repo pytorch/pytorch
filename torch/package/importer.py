@@ -1,12 +1,9 @@
-# mypy: allow-untyped-defs
 import importlib
 import logging
 import sys
 from abc import ABC, abstractmethod
-
-# pyrefly: ignore [missing-module-attribute]
-from pickle import (  # type: ignore[attr-defined]; pyrefly: ignore [missing-module-attribute]
-    _getattribute,
+from pickle import (
+    _getattribute,  # pyrefly: ignore [missing-module-attribute]
     _Pickler,
     whichmodule as _pickle_whichmodule,  # pyrefly: ignore  # missing-module-attribute
 )
