@@ -95,7 +95,7 @@ void showRtol(
   std::cout << "Max Diff found is: " << diff.max().item<double>() << std::endl;
   if (diff.sizes().size() == 2) {
     for (const auto y : c10::irange(diff.sizes()[0])) {
-      std::cout << y << ":";
+      std::cout << y << ':';
       for (const auto x : c10::irange(diff.sizes()[1])) {
         double diff_xy = diff[y][x].item<double>();
         if (diff_xy > maxDiff) {
@@ -109,7 +109,7 @@ void showRtol(
             }
           }
         } else {
-          std::cout << std::setw(5) << " ";
+          std::cout << std::setw(5) << ' ';
         }
       }
       std::cout << std::endl;
@@ -148,19 +148,19 @@ using at::native::vulkan::api::utils::ivec4;
 using at::native::vulkan::api::utils::vec4;
 
 std::ostream& operator<<(std::ostream& os, const vec4& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
-     << v.data[3u] << ")";
+  os << '(' << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
+     << v.data[3u] << ')';
   return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const ivec3& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ")";
+  os << '(' << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ')';
   return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const ivec4& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
-     << v.data[3u] << ")";
+  os << '(' << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ", "
+     << v.data[3u] << ')';
   return os;
 }
 
@@ -3379,51 +3379,51 @@ bool _test_quantized_linear(
       showRtol(out_cpu_dequant, out_vk_to_cpu_dequant);
     }
     if (xpos != -1 && ypos != -1) {
-      std::cout << "\nFailure caused on row/col: " << ypos << "/" << xpos
-                << "\n";
+      std::cout << "\nFailure caused on row/col: " << ypos << '/' << xpos
+                << '\n';
       std::cout << "Input tensor scale: " << scale << " zerop: " << zero_point
-                << "\n";
-      std::cout << "Input tensor row " << ypos << "\n";
+                << '\n';
+      std::cout << "Input tensor row " << ypos << '\n';
       for (int i = 0; i < input_cpu.sizes()[1]; i++) {
         std::cout << input_cpu[ypos][i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "Weight tensor scale: " << w_scale
-                << " zerop: " << w_zero_point << "\n";
-      std::cout << "Weight tensor col " << xpos << "\n";
+                << " zerop: " << w_zero_point << '\n';
+      std::cout << "Weight tensor col " << xpos << '\n';
       for (int i = 0; i < weight.sizes()[1]; i++) {
         std::cout << weight[xpos][i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "Input tensor quantized row " << ypos << " with dtype "
-                << (input_quant_dtype_int8 ? "QInt8" : "QUInt8") << "\n";
+                << (input_quant_dtype_int8 ? "QInt8" : "QUInt8") << '\n';
       for (int i = 0; i < input_cpu.sizes()[1]; i++) {
         std::cout << input_cpu_quantized[ypos][i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "Weight tensor quantized col " << xpos << " with dtype "
-                << (weight_quant_dtype_int8 ? "QInt8" : "QUInt8") << "\n";
+                << (weight_quant_dtype_int8 ? "QInt8" : "QUInt8") << '\n';
       for (int i = 0; i < weight.sizes()[1]; i++) {
         std::cout << weight_cpu_quantized[xpos][i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "bias tensor\n";
       for (int i = 0; i < bias.sizes()[0]; i++) {
         std::cout << bias[i].item<double>() << ", ";
       }
-      std::cout << "\n";
+      std::cout << '\n';
 
       std::cout << "out_scale: " << out_scale
-                << " out_zero_point: " << out_zero_point << "\n";
+                << " out_zero_point: " << out_zero_point << '\n';
 
       std::cout << "cpu unmatched output: "
-                << out_cpu_dequant[ypos][xpos].item<double>() << "\n";
+                << out_cpu_dequant[ypos][xpos].item<double>() << '\n';
       std::cout << "vk unmatched output: "
-                << out_vk_to_cpu_dequant[ypos][xpos].item<double>() << "\n";
+                << out_vk_to_cpu_dequant[ypos][xpos].item<double>() << '\n';
     }
   }
   return check;

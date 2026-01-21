@@ -118,6 +118,44 @@ class TorchBenchmarkBase(torch.nn.Module):
         name = (self.module_name() + "_" + "_".join(test_name_str)).replace(" ", "")
         return name
 
+    def get_memory_traffic_bytes(self):
+        """Return the number of bytes read/written by this operator.
+
+        Override this method in subclasses for operations with non-standard memory patterns
+        (e.g., matmul which is compute-bound rather than memory-bound).
+
+        The framework will use this value along with execution time to compute
+        and report memory bandwidth in GB/s.
+
+        Default implementation assumes a pointwise-like operation:
+        - Reads: all input tensors
+        - Writes: output tensor (estimated as size of largest input)
+
+        This default works correctly for:
+        - Element-wise operations (add, mul, relu, etc.)
+        - Activations (gelu, sigmoid, etc.)
+        - Optimizers (SGD, Adam, etc.)
+        - Reductions (sum, mean, etc. - may underestimate writes)
+
+        Returns:
+            int or None: Total bytes transferred (reads + writes), or None if not applicable
+        """
+        if not hasattr(self, "inputs") or not self.inputs:
+            return None
+
+        input_tensors = [v for v in self.inputs.values() if isinstance(v, torch.Tensor)]
+        if not input_tensors:
+            return None
+
+        # Calculate total bytes read from all inputs
+        bytes_read = sum(t.numel() * t.element_size() for t in input_tensors)
+
+        # Estimate output size as the largest input (common for pointwise ops)
+        largest_input = max(input_tensors, key=lambda t: t.numel())
+        bytes_written = largest_input.numel() * largest_input.element_size()
+
+        return bytes_read + bytes_written
+
 
 class PyTorchOperatorTestCase:
     """This class includes all the information needed to benchmark an operator.

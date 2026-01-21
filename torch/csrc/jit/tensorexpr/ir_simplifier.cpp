@@ -3079,7 +3079,7 @@ bool exprEquals(const ExprPtr& A, const ExprPtr& B) {
       return false;
     }
     return immediateEquals(diff, 0);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     return false;
   }
 }

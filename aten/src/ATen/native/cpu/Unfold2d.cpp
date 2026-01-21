@@ -298,7 +298,7 @@ void unfolded2d_copy(
                       memcpy(
                           dst + (size_t)y * output_width + x,
                           src + (size_t)iy * input_width + ix,
-                          sizeof(scalar_t) * (1));
+                          sizeof(scalar_t) * 1);
                   }
                 }
               }
@@ -317,7 +317,7 @@ void unfolded2d_copy(
                   memcpy(
                       dst + (size_t)y * output_width + x,
                       src + (size_t)iy * input_width + ix + x * dW,
-                      sizeof(scalar_t) * (1));
+                      sizeof(scalar_t) * 1);
               }
             }
           }

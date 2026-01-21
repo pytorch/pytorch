@@ -19,6 +19,7 @@ import torch
 from torch._inductor.utils import GPU_TYPES
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    _get_torch_hipblaslt_version,
     _get_torch_rocm_version,
     TEST_CUSPARSE_GENERIC,
     TEST_HIPSPARSE_GENERIC,
@@ -34,6 +35,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     is_privateuse1_backend_available,
     IS_REMOTE_GPU,
+    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     NATIVE_DEVICES,
@@ -375,7 +377,8 @@ class DeviceTypeTestBase(TestCase):
 
         default_dtypes = test.dtypes.get("all")
         msg = f"@dtypes is mandatory when using @dtypesIf however '{test.__name__}' didn't specify it"
-        assert default_dtypes is not None, msg
+        if default_dtypes is None:
+            raise AssertionError(msg)
 
         return test.dtypes.get(cls.device_type, default_dtypes)
 
@@ -390,8 +393,8 @@ class DeviceTypeTestBase(TestCase):
         return test.tolerance_overrides.get(dtype, tol(self.precision, self.rel_tol))
 
     def _apply_precision_override_for_test(self, test, param_kwargs):
-        dtype = param_kwargs["dtype"] if "dtype" in param_kwargs else None
-        dtype = param_kwargs["dtypes"] if "dtypes" in param_kwargs else dtype
+        dtype = param_kwargs.get("dtype")
+        dtype = param_kwargs.get("dtypes", dtype)
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
@@ -451,7 +454,8 @@ class DeviceTypeTestBase(TestCase):
 
                 return result
 
-            assert not hasattr(cls, name), f"Redefinition of test {name}"
+            if hasattr(cls, name):
+                raise AssertionError(f"Redefinition of test {name}")
             setattr(cls, name, instantiated_test)
 
         def default_parametrize_fn(test, generic_cls, device_cls):
@@ -688,10 +692,11 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
     def setUpClass(cls):
         cls.device_type = torch._C._get_privateuse1_backend_name()
         cls.device_mod = getattr(torch, cls.device_type, None)
-        assert (
-            cls.device_mod is not None
-        ), f"""torch has no module of `{cls.device_type}`, you should register
-                                            a module by `torch._register_device_module`."""
+        if cls.device_mod is None:
+            raise AssertionError(
+                f"torch has no module of `{cls.device_type}`, you should register "
+                "a module by `torch._register_device_module`."
+            )
         cls.primary_device = f"{cls.device_type}:{cls.device_mod.current_device()}"
 
 
@@ -736,9 +741,10 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
     intersect = set(except_for if except_for else []) & set(
         only_for if only_for else []
     )
-    assert not intersect, (
-        f"device ({intersect}) appeared in both except_for and only_for"
-    )
+    if intersect:
+        raise AssertionError(
+            f"device ({intersect}) appeared in both except_for and only_for"
+        )
 
     # Replace your privateuse1 backend name with 'privateuse1'
     if is_privateuse1_backend_available():
@@ -1337,6 +1343,10 @@ def _has_sufficient_memory(device, size):
     else:
         effective_size = size
 
+    # don't try using all RAM on s390x, leave some for service processes
+    if IS_S390X:
+        effective_size = effective_size * 2
+
     if psutil.virtual_memory().available < effective_size:
         gc.collect()
     return psutil.virtual_memory().available >= effective_size
@@ -1352,7 +1362,8 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
     In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):
-        assert size.endswith(("GB", "gb")), "only bytes or GB supported"
+        if not size.endswith(("GB", "gb")):
+            raise AssertionError(f"only bytes or GB supported, got {size!r}")
         size = 1024**3 * int(size[:-2])
 
     def inner(fn):
@@ -1425,6 +1436,12 @@ class onlyOn:
         def only_fn(slf, *args, **kwargs):
             if slf.device_type not in self.device_type:
                 reason = f"Only runs on {self.device_type}"
+                if IS_SANDCASTLE or IS_FBCODE:
+                    print(
+                        f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                        file=sys.stderr,
+                    )
+                    return
                 raise unittest.SkipTest(reason)
 
             return fn(slf, *args, **kwargs)
@@ -1441,15 +1458,20 @@ class deviceCountAtLeast:
         self.num_required_devices = num_required_devices
 
     def __call__(self, fn):
-        assert not hasattr(fn, "num_required_devices"), (
-            f"deviceCountAtLeast redefinition for {fn.__name__}"
-        )
+        if hasattr(fn, "num_required_devices"):
+            raise AssertionError(f"deviceCountAtLeast redefinition for {fn.__name__}")
         fn.num_required_devices = self.num_required_devices
 
         @wraps(fn)
         def multi_fn(slf, devices, *args, **kwargs):
             if len(devices) < self.num_required_devices:
                 reason = f"fewer than {self.num_required_devices} devices detected"
+                if IS_SANDCASTLE or IS_FBCODE:
+                    print(
+                        f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                        file=sys.stderr,
+                    )
+                    return
                 raise unittest.SkipTest(reason)
 
             return fn(slf, devices, *args, **kwargs)
@@ -1508,13 +1530,13 @@ def onlyNativeDeviceTypesAnd(devices=None):
 # self.precision *2, max(1, self.precision)).
 class precisionOverride:
     def __init__(self, d):
-        assert isinstance(d, dict), (
-            "precisionOverride not given a dtype : precision dict!"
-        )
-        for dtype in d.keys():
-            assert isinstance(dtype, torch.dtype), (
-                f"precisionOverride given unknown dtype {dtype}"
+        if not isinstance(d, dict):
+            raise AssertionError(
+                "precisionOverride not given a dtype : precision dict!"
             )
+        for dtype in d:
+            if not isinstance(dtype, torch.dtype):
+                raise AssertionError(f"precisionOverride given unknown dtype {dtype}")
 
         self.d = d
 
@@ -1545,14 +1567,13 @@ tol = namedtuple("tol", ["atol", "rtol"])
 
 class toleranceOverride:
     def __init__(self, d):
-        assert isinstance(d, dict), "toleranceOverride not given a dtype : tol dict!"
+        if not isinstance(d, dict):
+            raise AssertionError("toleranceOverride not given a dtype : tol dict!")
         for dtype, prec in d.items():
-            assert isinstance(dtype, torch.dtype), (
-                f"toleranceOverride given unknown dtype {dtype}"
-            )
-            assert isinstance(prec, tol), (
-                "toleranceOverride not given a dtype : tol dict!"
-            )
+            if not isinstance(dtype, torch.dtype):
+                raise AssertionError(f"toleranceOverride given unknown dtype {dtype}")
+            if not isinstance(prec, tol):
+                raise AssertionError("toleranceOverride not given a dtype : tol dict!")
 
         self.d = d
 
@@ -1575,25 +1596,25 @@ class dtypes:
     def __init__(self, *args, device_type="all"):
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
             for arg in args:
-                assert isinstance(arg, (list, tuple)), (
-                    "When one dtype variant is a tuple or list, "
-                    "all dtype variants must be. "
-                    f"Received non-list non-tuple dtype {str(arg)}"
-                )
-                assert all(isinstance(dtype, torch.dtype) for dtype in arg), (
-                    f"Unknown dtype in {str(arg)}"
-                )
+                if not isinstance(arg, (list, tuple)):
+                    raise AssertionError(
+                        "When one dtype variant is a tuple or list, "
+                        "all dtype variants must be. "
+                        f"Received non-list non-tuple dtype {str(arg)}"
+                    )
+                if not all(isinstance(dtype, torch.dtype) for dtype in arg):
+                    raise AssertionError(f"Unknown dtype in {str(arg)}")
         else:
-            assert all(isinstance(arg, torch.dtype) for arg in args), (
-                f"Unknown dtype in {str(args)}"
-            )
+            if not all(isinstance(arg, torch.dtype) for arg in args):
+                raise AssertionError(f"Unknown dtype in {str(args)}")
 
         self.args = args
         self.device_type = device_type
 
     def __call__(self, fn):
         d = getattr(fn, "dtypes", {})
-        assert self.device_type not in d, f"dtypes redefinition for {self.device_type}"
+        if self.device_type in d:
+            raise AssertionError(f"dtypes redefinition for {self.device_type}")
         d[self.device_type] = self.args
         fn.dtypes = d
         return fn
@@ -1868,6 +1889,31 @@ def skipCUDAIfRocmVersionLessThan(version=None):
     return dec_fn
 
 
+# Skips a test on CUDA if ROCm hipBLASLt is unavailable or its version is lower than requested.
+def skipCUDAIfRocmHipBlasltVersionLessThan(version=None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrap_fn(self, *args, **kwargs):
+            if self.device_type == "cuda":
+                if not TEST_WITH_ROCM:
+                    reason = "ROCm not available"
+                    raise unittest.SkipTest(reason)
+                hipblaslt_version_tuple = _get_torch_hipblaslt_version()
+                if (
+                    hipblaslt_version_tuple is None
+                    or version is None
+                    or hipblaslt_version_tuple < tuple(version)
+                ):
+                    reason = f"hipBLASLt {hipblaslt_version_tuple} is available but {version} required"
+                    raise unittest.SkipTest(reason)
+
+            return fn(self, *args, **kwargs)
+
+        return wrap_fn
+
+    return dec_fn
+
+
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfNotMiopenSuggestNHWC(fn):
     return skipCUDAIf(
@@ -2021,7 +2067,11 @@ flex_attention_supported_platform = unittest.skipUnless(
     ),
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
-if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
+if (
+    torch.version.hip
+    and torch.cuda.device_count() > 0
+    and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
+):
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
     E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max

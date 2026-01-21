@@ -173,8 +173,8 @@ void QueryPool::extract_results() {
 
 static std::string stringize(const VkExtent3D& extents) {
   std::stringstream ss;
-  ss << "{" << extents.width << ", " << extents.height << ", " << extents.depth
-     << "}";
+  ss << '{' << extents.width << ", " << extents.height << ", " << extents.depth
+     << '}';
   return ss.str();
 }
 

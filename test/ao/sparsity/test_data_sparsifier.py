@@ -123,7 +123,7 @@ class _BaseDataSparsiferTestCase(TestCase):
 
         step_count = 3
 
-        for _ in range(0, step_count):
+        for _ in range(step_count):
             sparsifier.step()
         for some_data in all_data:
             name, data, _ = self._get_name_data_config(some_data)
@@ -208,7 +208,7 @@ class _BaseDataSparsiferTestCase(TestCase):
         assert len(sparsifier1.data_groups) == len(sparsifier2.data_groups)
 
         state1 = state_dict1["state"]
-        for name in state1.keys():
+        for name in state1:
             # compare mask
             assert name in sparsifier2.state
             assert "mask" in sparsifier2.state[name]

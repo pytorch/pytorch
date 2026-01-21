@@ -154,7 +154,6 @@ void bsrmv<c10::complex<float>>(CUSPARSE_BSRMV_ARGTYPES(c10::complex<float>));
 template <>
 void bsrmv<c10::complex<double>>(CUSPARSE_BSRMV_ARGTYPES(c10::complex<double>));
 
-#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
 
 #define CUSPARSE_BSRSV2_BUFFER_ARGTYPES(scalar_t)                 \
   cusparseHandle_t handle, cusparseDirection_t dirA,              \
@@ -314,7 +313,6 @@ template <>
 void bsrsm2_solve<c10::complex<double>>(
     CUSPARSE_BSRSM2_SOLVE_ARGTYPES(c10::complex<double>));
 
-#endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 
 } // namespace at::cuda::sparse
 // NOLINTEND(misc-misplaced-const)

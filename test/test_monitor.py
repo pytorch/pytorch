@@ -111,6 +111,7 @@ class TestMonitor(TestCase):
 @skipIfTorchDynamo("Really weird error")
 class TestMonitorTensorboard(TestCase):
     def setUp(self):
+        super().setUp()
         global SummaryWriter, event_multiplexer
         try:
             from tensorboard.backend.event_processing import (

@@ -2,7 +2,6 @@
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -313,7 +312,7 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
   }
 
   if (FLAGS_caffe2_log_level > 2) {
-    std::cout << *this << "\n";
+    std::cout << *this << '\n';
   }
 }
 
@@ -401,14 +400,14 @@ std::ostream& operator<<(std::ostream& out, const GraphSignature& sig) {
   if (!sig.inputsToParameters().empty()) {
     out << "inputsToParameters: {\n";
     for (const auto& [inputName, paramName] : sig.inputsToParameters()) {
-      out << "\t" << inputName << " : " << paramName << "\n";
+      out << '\t' << inputName << " : " << paramName << '\n';
     }
     out << "}\n";
   }
   if (!sig.inputsToBuffers().empty()) {
     out << "inputsToBuffers: {\n";
     for (const auto& [inputName, bufferName] : sig.inputsToBuffers()) {
-      out << "\t" << inputName << " : " << bufferName << "\n";
+      out << '\t' << inputName << " : " << bufferName << '\n';
     }
     out << "}\n";
   }
@@ -416,28 +415,28 @@ std::ostream& operator<<(std::ostream& out, const GraphSignature& sig) {
     out << "inputsToTensorConstants: {\n";
     for (const auto& [inputName, tensorConstantName] :
          sig.inputsToTensorConstants()) {
-      out << "\t" << inputName << " : " << tensorConstantName << "\n";
+      out << '\t' << inputName << " : " << tensorConstantName << '\n';
     }
     out << "}\n";
   }
   if (!sig.inputsToCustomObjs().empty()) {
     out << "inputsToCustomObjs: {\n";
     for (const auto& [inputName, customObjName] : sig.inputsToCustomObjs()) {
-      out << "\t" << inputName << " : " << customObjName << "\n";
+      out << '\t' << inputName << " : " << customObjName << '\n';
     }
     out << "}\n";
   }
   if (!sig.userOutputs().empty()) {
     out << "userOutputs: {\n";
     for (const auto& outputName : sig.userOutputs()) {
-      out << "\t" << outputName.value_or("Constant") << "\n";
+      out << '\t' << outputName.value_or("Constant") << '\n';
     }
     out << "}\n";
   }
   if (!sig.buffersToMutate().empty()) {
     out << "buffersToMutate: {\n";
     for (const auto& [outputName, mutatedBufferName] : sig.buffersToMutate()) {
-      out << "\t" << outputName << " : " << mutatedBufferName << "\n";
+      out << '\t' << outputName << " : " << mutatedBufferName << '\n';
     }
     out << "}\n";
   }
@@ -445,7 +444,7 @@ std::ostream& operator<<(std::ostream& out, const GraphSignature& sig) {
     out << "userInputsToMutate: {\n";
     for (const auto& [outputName, mutatedUserInputName] :
          sig.userInputsToMutate()) {
-      out << "\t" << outputName << " : " << mutatedUserInputName << "\n";
+      out << '\t' << outputName << " : " << mutatedUserInputName << '\n';
     }
     out << "}\n";
   }
@@ -453,7 +452,7 @@ std::ostream& operator<<(std::ostream& out, const GraphSignature& sig) {
     if (!sig.gradientsToParameters().empty()) {
       out << "gradientsToParameters: {\n";
       for (const auto& [outputName, paramName] : sig.gradientsToParameters()) {
-        out << "\t" << outputName << " : " << paramName << "\n";
+        out << '\t' << outputName << " : " << paramName << '\n';
       }
       out << "}\n";
     }
@@ -461,11 +460,11 @@ std::ostream& operator<<(std::ostream& out, const GraphSignature& sig) {
       out << "gradientsToUserInputs: {\n";
       for (const auto& [outputName, userInputName] :
            sig.gradientsToUserInputs()) {
-        out << "\t" << outputName << " : " << userInputName << "\n";
+        out << '\t' << outputName << " : " << userInputName << '\n';
       }
       out << "}\n";
     }
-    out << "lossOutput: " << sig.lossOutput() << "\n";
+    out << "lossOutput: " << sig.lossOutput() << '\n';
   }
   return out;
 }

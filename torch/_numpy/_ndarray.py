@@ -49,7 +49,9 @@ SHORTHAND_TO_FLAGS = {
 
 class Flags:
     def __init__(self, flag_to_value: dict):
-        assert all(k in FLAGS for k in flag_to_value.keys())  # sanity check
+        invalid_keys = [k for k in flag_to_value if k not in FLAGS]
+        if invalid_keys:
+            raise AssertionError(f"Invalid flag keys: {invalid_keys}")
         self._flag_to_value = flag_to_value
 
     def __getattr__(self, attr: str):
@@ -59,7 +61,7 @@ class Flags:
             raise AttributeError(f"No flag attribute '{attr}'")
 
     def __getitem__(self, key):
-        if key in SHORTHAND_TO_FLAGS.keys():
+        if key in SHORTHAND_TO_FLAGS:
             key = SHORTHAND_TO_FLAGS[key]
         if key in FLAGS:
             try:
@@ -76,7 +78,7 @@ class Flags:
             super().__setattr__(attr, value)
 
     def __setitem__(self, key, value):
-        if key in FLAGS or key in SHORTHAND_TO_FLAGS.keys():
+        if key in FLAGS or key in SHORTHAND_TO_FLAGS:
             raise NotImplementedError("Modifying flags is not implemented")
         else:
             raise KeyError(f"No flag key '{key}'")
@@ -461,7 +463,8 @@ class ndarray:
 
         if new_numel >= old_numel:
             # zero-fill new elements
-            assert self.tensor.is_contiguous()
+            if not self.tensor.is_contiguous():
+                raise AssertionError("tensor must be contiguous for resize with growth")
             b = self.tensor.flatten()  # does not copy
             b[old_numel:].zero_()
 
@@ -575,8 +578,14 @@ class ndarray:
             tensor = torch.flip(tensor, (i,))
 
             # Account for the fact that a slice includes the start but not the end
-            assert isinstance(s.start, int) or s.start is None
-            assert isinstance(s.stop, int) or s.stop is None
+            if not (isinstance(s.start, int) or s.start is None):
+                raise AssertionError(
+                    f"slice start must be int or None, got {type(s.start).__name__}"
+                )
+            if not (isinstance(s.stop, int) or s.stop is None):
+                raise AssertionError(
+                    f"slice stop must be int or None, got {type(s.stop).__name__}"
+                )
             start = s.stop + 1 if s.stop else None
             stop = s.start + 1 if s.start else None
 
