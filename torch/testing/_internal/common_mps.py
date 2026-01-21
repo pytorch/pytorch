@@ -90,6 +90,7 @@ if torch.backends.mps.is_available():
             "linalg.diagonal",
             "linalg.householder_product",
             "linalg.svd",
+            "linalg.vecdot",
             "log10",
             "log1p",
             "log2",
@@ -292,6 +293,7 @@ if torch.backends.mps.is_available():
             "trace",
             "trapz",
             "trapezoid",
+            "vdot",
             "vstack",
             "where",
             "byte",
@@ -338,7 +340,6 @@ if torch.backends.mps.is_available():
             "linalg.normsubgradients_at_zero": [torch.float32],
             "linalg.qr": None,
             "linalg.svdvals": None,
-            "linalg.vecdot": None,
             "masked.median": None,
             "matrix_exp": None,
             "mode": None,
@@ -385,7 +386,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "vdot": None,
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
