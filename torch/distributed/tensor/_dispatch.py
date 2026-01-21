@@ -254,6 +254,11 @@ class OpDispatcher:
         assert output_sharding is not None, "output sharding should not be None"
         assert op_info is not None, "op_info should never be None"
 
+        # Record output placements for debugging
+        debug_mode = get_active_debug_mode()
+        if debug_mode is not None and output_sharding.output_spec is not None:
+            debug_mode.record_output_placements(output_sharding.output_spec)
+
         mesh = op_info.compute_mesh
         participating = mesh._is_current_rank_part_of_mesh()
         local_results = None
@@ -374,6 +379,11 @@ class OpDispatcher:
         """
         Tail of main dispatching logic, called from C++ fast path.
         """
+
+        # Record output placements for debugging
+        debug_mode = get_active_debug_mode()
+        if debug_mode is not None and output_sharding.output_spec is not None:
+            debug_mode.record_output_placements(output_sharding.output_spec)
 
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
