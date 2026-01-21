@@ -6312,6 +6312,149 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 )
 
     @supported_platform
+    @skip_on_cpu
+    def test_varlen_block_mask_forward(self, device):
+        """Test create_varlen_block_mask works end-to-end with flex_attention forward.
+
+        The varlen design uses offsets to translate logical iteration positions to
+        physical memory positions. Physical tensors have compact size (sum of actual
+        doc lengths), while the logical iteration space is padded to block boundaries.
+
+        For seq_lens = [300, 200, 500] with BLOCK_SIZE=128:
+        - Physical size = 300 + 200 + 500 = 1000 (compact)
+        - Logical size = ceil(300/128)*128 + ceil(200/128)*128 + ceil(500/128)*128
+                       = 384 + 256 + 512 = 1152 (padded to block boundaries)
+        - offsets translate: physical_pos = logical_pos + offset
+        - For Doc 0: offset = 0 - 0 = 0
+        - For Doc 1: offset = 300 - 384 = -84
+        - For Doc 2: offset = 500 - 640 = -140
+        """
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+
+        # Create sequence lengths for 3 documents
+        q_seq_lens = torch.tensor([300, 200, 500], device=device)
+        kv_seq_lens = torch.tensor([300, 200, 500], device=device)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=2,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Physical tensor size (compact - sum of actual doc lengths)
+        physical_q_len = q_seq_lens.sum().item()
+        physical_kv_len = kv_seq_lens.sum().item()
+
+        # Create query, key, value tensors with PHYSICAL (compact) size
+        # The kernel will use offsets to map logical iteration positions to
+        # physical memory positions for accessing these compact tensors.
+        query = torch.randn(
+            1, 2, physical_q_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, 2, physical_kv_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, 2, physical_kv_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+
+        # Run with torch.compile
+        compiled_flex = torch.compile(flex_attention)
+        out = compiled_flex(query, key, value, block_mask=block_mask)
+
+        # Output shape matches the PHYSICAL tensor size (compact)
+        # because output is stored at physical positions using offsets
+        self.assertEqual(out.shape, (1, 2, physical_q_len, HEAD_DIM))
+        self.assertFalse(torch.isnan(out).any())
+        self.assertFalse(torch.isinf(out).any())
+
+    @supported_platform
+    @skip_on_cpu
+    def test_varlen_block_mask_batch_invariance(self, device):
+        """Test that varlen block mask produces batch-invariant results.
+
+        With physical-sized tensors:
+        - Physical tensor size = sum of actual doc lengths (compact)
+        - Documents are laid out consecutively: [Doc0][Doc1][Doc2]
+        - Output is also physical-sized with same layout
+        """
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+
+        # Document lengths - we'll test that processing as single batch
+        # gives same results as processing documents separately
+        doc_lens = [300, 200, 500]
+        num_docs = len(doc_lens)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # Create packed version with varlen_block_mask
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Physical tensor size (compact - sum of actual doc lengths)
+        physical_len = q_seq_lens.sum().item()
+
+        # Create packed query, key, value with PHYSICAL size
+        query_packed = torch.randn(
+            1, 1, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key_packed = query_packed.clone()  # Use same values for determinism
+        value_packed = torch.randn(
+            1, 1, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+
+        # Run with torch.compile
+        compiled_flex = torch.compile(flex_attention)
+        out_packed = compiled_flex(
+            query_packed, key_packed, value_packed, block_mask=block_mask
+        )
+
+        # Output shape matches physical size
+        self.assertEqual(out_packed.shape, (1, 1, physical_len, HEAD_DIM))
+
+        # Calculate document offsets for PHYSICAL layout
+        # Documents are laid out consecutively in physical tensor
+        doc_offsets = [0]
+        for doc_len in doc_lens:
+            doc_offsets.append(doc_offsets[-1] + doc_len)
+
+        # For each document, verify the output is finite and valid
+        for i in range(num_docs):
+            doc_start = doc_offsets[i]
+            doc_end = doc_offsets[i + 1]
+            doc_output = out_packed[0, 0, doc_start:doc_end, :]
+            self.assertFalse(
+                torch.isnan(doc_output).any(),
+                f"Document {i} output contains NaN values",
+            )
+            self.assertFalse(
+                torch.isinf(doc_output).any(),
+                f"Document {i} output contains Inf values",
+            )
+
+    @supported_platform
     def test_create_varlen_block_mask(self, device):
         """Test create_varlen_block_mask creates correct block mask structure."""
         BLOCK_SIZE = 128

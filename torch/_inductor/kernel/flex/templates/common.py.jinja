@@ -1,10 +1,13 @@
 
 
+
 # Common Imports
 @triton.jit
 def forward_block_mn(
     {{gen_argdefs()}},
     q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+    # Logical sequence lengths for mask_mod bounds (may differ from Q_LEN/KV_LEN for varlen)
+    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets
@@ -46,9 +49,12 @@ def forward_block_mn(
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
     # which is larger than the actual number of elements. To avoid access memory out of bound,
-    # we need to mask out the elements that are out of Q_LEN & KV_LEN.
-    m = get_bounded_indices(offs_m, Q_LEN if CHECK_BLOCK_BOUNDARY else None)
-    n = get_bounded_indices(offs_n, KV_LEN if CHECK_BLOCK_BOUNDARY else None)
+    # we need to mask out the elements that are out of the sequence length.
+    # For varlen, use LOGICAL_Q/KV_LEN (logical iteration space) for mask_mod bounds,
+    # since mask_mod captures tensors sized for the logical space.
+    # For non-varlen, LOGICAL_Q/KV_LEN == Q/KV_LEN (physical tensor size).
+    m = get_bounded_indices(offs_m, LOGICAL_Q_LEN if CHECK_BLOCK_BOUNDARY else None)
+    n = get_bounded_indices(offs_n, LOGICAL_KV_LEN if CHECK_BLOCK_BOUNDARY else None)
 
     {{ modification(
         subgraph_number=0,
@@ -62,8 +68,10 @@ def forward_block_mn(
     ) | indent_except_first(1) }}
 
     if CHECK_BLOCK_BOUNDARY:
-        # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
-        post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
+        # Mask out the elements that are out of the logical sequence length.
+        # For varlen, offs_n uses logical positions which can exceed physical KV_LEN,
+        # so we use LOGICAL_KV_LEN for bounds checking.
+        post_mod_scores = tl.where(offs_n < LOGICAL_KV_LEN, post_mod_scores, float("-inf"))
 
     if not IS_FULL_BLOCKS:
         {{ modification(
@@ -77,7 +85,7 @@ def forward_block_mn(
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, False)
+            mask_mod_output = tl.where(offs_n < LOGICAL_KV_LEN, mask_mod_output, False)
         # apply mask for partially unmasked blocks
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
@@ -123,14 +131,19 @@ def forward_block_mn(
 def forward_inner(
     {{gen_argdefs()}},
     q, K, V,
+    KV_OFFSETS,
     desc_k, desc_v, Q_LEN, KV_LEN,
+    # Logical sequence lengths for mask_mod bounds (may differ from Q_LEN/KV_LEN for varlen)
+    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets used as inputs to score_mod & mask_mod
     # of size [BLOCK_M, BLOCK_N] or scalar.
-    off_z, off_h, offs_m, offs_n,
+    off_z, off_h, sparse_idx_hq, offs_m, offs_n,
     # Offsets needed for TMA loads
-    kv_start,
+    kv_start, first_kv_block_idx,
+    # Initial kv_offset for physical memory access (logical + offset = physical)
+    kv_offset,
     # blocksparse data
     kv_indices, kv_num_blocks,
     # start kv and end kv block
@@ -149,7 +162,14 @@ def forward_inner(
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
-    kv_offset = 0
+    # Track current sparse block index for varlen offset updates
+    current_sparse_block_idx = first_kv_block_idx
+    {%- if HAS_OFFSETS %}
+    stride_kv_offsets_z = {{stride("KV_OFFSETS", 0)}}
+    stride_kv_offsets_h = {{stride("KV_OFFSETS", 1)}}
+    # Track current kv_offset for pointer adjustments when crossing sparse block boundaries
+    current_kv_offset = kv_offset
+    {%- endif %}
 
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
@@ -158,6 +178,7 @@ def forward_inner(
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
                 q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+                LOGICAL_Q_LEN, LOGICAL_KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
@@ -178,6 +199,7 @@ def forward_inner(
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
                 q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+                LOGICAL_Q_LEN, LOGICAL_KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
@@ -201,5 +223,19 @@ def forward_inner(
         offs_n = offs_n + offset
         kv_offset += offset
 
+        # Update sparse block index and adjust kv_offset for physical offset change when crossing sparse block boundaries
+        {%- if HAS_OFFSETS %}
+        # Check if we crossed a sparse block boundary
+        if (start_n + 1) % SPARSE_KV_MULTIPLE == 0:
+            current_sparse_block_idx += 1
+            # Load new offset for the next sparse block
+            new_kv_offset_ptr = KV_OFFSETS + off_z * stride_kv_offsets_z + sparse_idx_hq * stride_kv_offsets_h + current_sparse_block_idx
+            new_kv_offset = tl.load(new_kv_offset_ptr).to(INDEX_DTYPE)
+            # Adjust kv_offset for the change in physical offset
+            # When crossing document boundaries, physical memory is not contiguous
+            offset_diff = new_kv_offset - current_kv_offset
+            kv_offset += offset_diff
+            current_kv_offset = new_kv_offset
+        {%- endif %}
 
     return acc, l_i, m_i
