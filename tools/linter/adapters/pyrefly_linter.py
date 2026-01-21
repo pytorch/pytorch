@@ -1,3 +1,31 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "numpy==1.26.4 ; python_version >= '3.10' and python_version <= '3.11'",
+#   "numpy==2.1.0 ; python_version >= '3.12' and python_version <= '3.13'",
+#   "numpy==2.3.4 ; python_version >= '3.14'",
+#   "expecttest==0.3.0",
+#   "pyrefly==0.44.1",
+#   "sympy==1.13.3",
+#   "types-requests==2.27.25",
+#   "types-pyyaml==6.0.2",
+#   "types-tabulate==0.8.8",
+#   "types-protobuf==5.29.1.20250403",
+#   "types-setuptools==79.0.0.20250422",
+#   "types-jinja2==2.11.9",
+#   "types-colorama==0.4.6",
+#   "filelock==3.18.0",
+#   "junitparser==2.1.1",
+#   "rich==14.1.0",
+#   "optree==0.17.0",
+#   "types-openpyxl==3.1.5.20250919",
+#   "types-python-dateutil==2.9.0.20251008",
+#   "packaging",
+#   "libcst",
+#   "isort",
+#   "usort",
+# ]
+# ///
 from __future__ import annotations
 
 import argparse
