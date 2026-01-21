@@ -311,7 +311,6 @@ if torch.backends.mps.is_available():
             "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "put": None,
             "cholesky_solve": None,
             "frexp": None,
             "gcd": None,
@@ -442,7 +441,6 @@ if torch.backends.mps.is_available():
             "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "put": None,
         }
 
         if MACOS_VERSION < 15.0:
