@@ -301,6 +301,7 @@ class InputObserver:
     This information is used to infer dynamic shapes and
     export arguments.
     """
+
     def __init__(self, store_n_calls: int = 3):
         self.store_n_calls = store_n_calls
         self.info: InputObserverInfo | None = None
