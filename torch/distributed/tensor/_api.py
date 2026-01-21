@@ -1109,7 +1109,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 
-        tensor_meta = TensorMeta(size, (0,), dtype)
+        tensor_meta = TensorMeta(size, torch_stride, dtype)
         spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
