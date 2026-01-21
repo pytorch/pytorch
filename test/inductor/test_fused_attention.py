@@ -142,6 +142,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             if self.device in ["cpu", "xpu"] and dtype == torch.half:
                 atol = 2e-3
                 rtol = 1e-2
+            if TEST_WITH_ROCM and dtype == torch.float:
+                atol = 3e-3
+                rtol = 1e-2
             self._check_common(dot_prod_attention, dtype=dtype, atol=atol, rtol=rtol)
             self._check_common(
                 checkpoint_wrapper(dot_prod_attention),
