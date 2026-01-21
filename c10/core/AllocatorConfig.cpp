@@ -1,6 +1,8 @@
 #include <c10/core/AllocatorConfig.h>
+#include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <array>
+#include <limits>
 
 namespace c10::CachingAllocator {
 
@@ -216,6 +218,22 @@ size_t AcceleratorAllocatorConfig::parsePinnedUseBackgroundThreads(
   return i;
 }
 
+size_t AcceleratorAllocatorConfig::parsePinnedMaxRoundThreshold(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  pinned_max_round_threshold_ = tokenizer.toSizeT(++i) * 1024 * 1024;
+  return i;
+}
+
+size_t AcceleratorAllocatorConfig::parsePinnedMaxCachedSize(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  pinned_max_cached_size_ = tokenizer.toSizeT(++i) * 1024 * 1024;
+  return i;
+}
+
 void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   // The following option will be reset to its default value if not explicitly
   // set each time.
@@ -240,6 +258,7 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
   }
   max_non_split_rounding_size_ = large_segment_size_.load();
 
+  bool max_round_threshold_set{false}, max_cached_size_set{false};
   for (size_t i = 0; i < tokenizer.size(); i++) {
     const auto& key = tokenizer[i];
     if (key == "large_segment_size_mb") {
@@ -256,6 +275,12 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       i = parseExpandableSegments(tokenizer, i);
     } else if (key == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
+    } else if (key == "pinned_max_round_threshold_mb") {
+      i = parsePinnedMaxRoundThreshold(tokenizer, i);
+      max_round_threshold_set = true;
+    } else if (key == "pinned_max_cached_size_mb") {
+      i = parsePinnedMaxCachedSize(tokenizer, i);
+      max_cached_size_set = true;
     } else {
       // If a device-specific configuration parser hook is registered, it will
       // check if the key is unrecognized.
@@ -272,6 +297,16 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
     if (i + 1 < tokenizer.size()) {
       tokenizer.checkToken(++i, ",");
     }
+  }
+
+  if (max_round_threshold_set && max_cached_size_set &&
+      pinned_max_round_threshold_ > pinned_max_cached_size_) {
+    TORCH_WARN_ONCE(
+        "max_round_threshold_mb (",
+        pinned_max_round_threshold_ >> 20,
+        ") > max_cached_size_mb (",
+        pinned_max_cached_size_ >> 20,
+        "). Allocations between these thresholds will be rounded up but not cached, which may be unexpected.");
   }
 }
 
