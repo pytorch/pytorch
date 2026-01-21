@@ -41,6 +41,7 @@ from torch.nn.attention.flex_attention import (
     AuxRequest,
     BlockMask,
     create_block_mask,
+    create_varlen_block_mask,
     flex_attention,
     flex_attention_hop,
     noop_mask,
@@ -4560,7 +4561,7 @@ class GraphModule(torch.nn.Module):
 
         score_mod_0 = self.score_mod_0
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, None, None, None, None, 128, 128, mask_fn_0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -4596,11 +4597,11 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, None, None, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_7: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -4620,7 +4621,7 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
             return full_default
 """.replace(  # noqa: B950
                 "GPU_TYPE", torch.device(device).type
@@ -6309,6 +6310,302 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                     reconstructed_value,
                     f"Attribute {attr_name} not equal after reconstruction",
                 )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_varlen_block_mask_forward(self, device):
+        """Test create_varlen_block_mask works end-to-end with flex_attention forward.
+
+        The varlen design uses offsets to translate logical iteration positions to
+        physical memory positions. Physical tensors have compact size (sum of actual
+        doc lengths), while the logical iteration space is padded to block boundaries.
+
+        For seq_lens = [300, 200, 500] with BLOCK_SIZE=128:
+        - Physical size = 300 + 200 + 500 = 1000 (compact)
+        - Logical size = ceil(300/128)*128 + ceil(200/128)*128 + ceil(500/128)*128
+                       = 384 + 256 + 512 = 1152 (padded to block boundaries)
+        - offsets translate: physical_pos = logical_pos + offset
+        - For Doc 0: offset = 0 - 0 = 0
+        - For Doc 1: offset = 300 - 384 = -84
+        - For Doc 2: offset = 500 - 640 = -140
+        """
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+
+        # Create sequence lengths for 3 documents
+        q_seq_lens = torch.tensor([300, 200, 500], device=device)
+        kv_seq_lens = torch.tensor([300, 200, 500], device=device)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=2,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Physical tensor size (compact - sum of actual doc lengths)
+        physical_q_len = q_seq_lens.sum().item()
+        physical_kv_len = kv_seq_lens.sum().item()
+
+        # Create query, key, value tensors with PHYSICAL (compact) size
+        # The kernel will use offsets to map logical iteration positions to
+        # physical memory positions for accessing these compact tensors.
+        query = torch.randn(
+            1, 2, physical_q_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, 2, physical_kv_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, 2, physical_kv_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+
+        # Run with torch.compile
+        compiled_flex = torch.compile(flex_attention)
+        out = compiled_flex(query, key, value, block_mask=block_mask)
+
+        # Output shape matches the PHYSICAL tensor size (compact)
+        # because output is stored at physical positions using offsets
+        self.assertEqual(out.shape, (1, 2, physical_q_len, HEAD_DIM))
+        self.assertFalse(torch.isnan(out).any())
+        self.assertFalse(torch.isinf(out).any())
+
+    @supported_platform
+    @skip_on_cpu
+    def test_varlen_block_mask_batch_invariance(self, device):
+        """Test that varlen block mask produces batch-invariant results.
+
+        With physical-sized tensors:
+        - Physical tensor size = sum of actual doc lengths (compact)
+        - Documents are laid out consecutively: [Doc0][Doc1][Doc2]
+        - Output is also physical-sized with same layout
+        """
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+
+        # Document lengths - we'll test that processing as single batch
+        # gives same results as processing documents separately
+        doc_lens = [300, 200, 500]
+        num_docs = len(doc_lens)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # Create packed version with varlen_block_mask
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Physical tensor size (compact - sum of actual doc lengths)
+        physical_len = q_seq_lens.sum().item()
+
+        # Create packed query, key, value with PHYSICAL size
+        query_packed = torch.randn(
+            1, 1, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key_packed = query_packed.clone()  # Use same values for determinism
+        value_packed = torch.randn(
+            1, 1, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+
+        # Run with torch.compile
+        compiled_flex = torch.compile(flex_attention)
+        out_packed = compiled_flex(
+            query_packed, key_packed, value_packed, block_mask=block_mask
+        )
+
+        # Output shape matches physical size
+        self.assertEqual(out_packed.shape, (1, 1, physical_len, HEAD_DIM))
+
+        # Calculate document offsets for PHYSICAL layout
+        # Documents are laid out consecutively in physical tensor
+        doc_offsets = [0]
+        for doc_len in doc_lens:
+            doc_offsets.append(doc_offsets[-1] + doc_len)
+
+        # For each document, verify the output is finite and valid
+        for i in range(num_docs):
+            doc_start = doc_offsets[i]
+            doc_end = doc_offsets[i + 1]
+            doc_output = out_packed[0, 0, doc_start:doc_end, :]
+            self.assertFalse(
+                torch.isnan(doc_output).any(),
+                f"Document {i} output contains NaN values",
+            )
+            self.assertFalse(
+                torch.isinf(doc_output).any(),
+                f"Document {i} output contains Inf values",
+            )
+
+    @supported_platform
+    def test_create_varlen_block_mask(self, device):
+        """Test create_varlen_block_mask creates correct block mask structure."""
+        BLOCK_SIZE = 128
+
+        # Create sequence lengths for 3 documents
+        q_seq_lens = torch.tensor([300, 200, 500], device=device)
+        kv_seq_lens = torch.tensor([300, 200, 500], device=device)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Check that the block mask has correct structure
+        # Expected total Q length: ceil(300/128)*128 + ceil(200/128)*128 + ceil(500/128)*128
+        # = 384 + 256 + 512 = 1152
+        expected_q_len = 384 + 256 + 512
+        expected_kv_len = 384 + 256 + 512
+        self.assertEqual(block_mask.seq_lengths, (expected_q_len, expected_kv_len))
+
+        # Check offsets and limits are populated
+        self.assertIsNotNone(block_mask.q_offsets)
+        self.assertIsNotNone(block_mask.q_limits)
+        self.assertIsNotNone(block_mask.kv_offsets)
+        self.assertIsNotNone(block_mask.kv_limits)
+
+        # Check shapes: 9 total blocks (3 + 2 + 4 for each doc)
+        num_q_blocks = expected_q_len // BLOCK_SIZE  # 9 blocks
+        num_kv_blocks = expected_kv_len // BLOCK_SIZE  # 9 blocks
+        self.assertEqual(block_mask.q_offsets.shape, (1, 1, num_q_blocks))
+        self.assertEqual(block_mask.kv_offsets.shape, (1, 1, num_kv_blocks))
+
+        # Check that limits are reasonable (between 0 and BLOCK_SIZE)
+        self.assertTrue((block_mask.q_limits >= 0).all())
+        self.assertTrue((block_mask.q_limits <= BLOCK_SIZE).all())
+        self.assertTrue((block_mask.kv_limits >= 0).all())
+        self.assertTrue((block_mask.kv_limits <= BLOCK_SIZE).all())
+
+        # Verify offsets are correct
+        # Offsets translate logical position to physical position for memory access:
+        # offset = physical_doc_start - logical_doc_start
+        # For seq_lens = [300, 200, 500]:
+        # - Doc 0: physical_start=0, logical_start=0, offset = 0 - 0 = 0 (3 blocks)
+        # - Doc 1: physical_start=300, logical_start=384, offset = 300 - 384 = -84 (2 blocks)
+        # - Doc 2: physical_start=500, logical_start=640, offset = 500 - 640 = -140 (4 blocks)
+        expected_offsets = torch.tensor(
+            [0, 0, 0, -84, -84, -140, -140, -140, -140],
+            device=device,
+            dtype=torch.int32,
+        )
+        self.assertTrue(
+            torch.equal(block_mask.q_offsets[0, 0], expected_offsets),
+            f"q_offsets mismatch: {block_mask.q_offsets[0, 0]} vs {expected_offsets}",
+        )
+
+        # Verify limits: last block of each doc has partial limits
+        # Doc 0: 300 tokens -> blocks have 128, 128, 44 valid
+        # Doc 1: 200 tokens -> blocks have 128, 72 valid
+        # Doc 2: 500 tokens -> blocks have 128, 128, 128, 116 valid
+        expected_limits = torch.tensor(
+            [128, 128, 44, 128, 72, 128, 128, 128, 116],
+            device=device,
+            dtype=torch.int32,
+        )
+        self.assertTrue(
+            torch.equal(block_mask.q_limits[0, 0], expected_limits),
+            f"q_limits mismatch: {block_mask.q_limits[0, 0]} vs {expected_limits}",
+        )
+
+        # Verify the block-level dense mask has correct shape
+        # to_dense() returns [B, H, num_q_blocks, num_kv_blocks]
+        dense_block_mask = block_mask.to_dense()
+        self.assertEqual(dense_block_mask.shape, (1, 1, num_q_blocks, num_kv_blocks))
+
+        # Check block-level sparsity pattern:
+        # Doc 0 blocks (0, 1, 2) should only attend to doc 0 blocks (0, 1, 2)
+        # Due to causal mask, block 0 attends to block 0, block 1 to 0-1, block 2 to 0-2
+        # Cross-document blocks should be zero
+        # Block 0 (doc 0) should not attend to blocks 3+ (doc 1, 2)
+        self.assertFalse(
+            dense_block_mask[0, 0, 0, 3].item(),
+            "Block 0 (doc 0) should not attend to block 3 (doc 1)",
+        )
+        self.assertFalse(
+            dense_block_mask[0, 0, 3, 0].item(),
+            "Block 3 (doc 1) should not attend to block 0 (doc 0)",
+        )
+        # Block within same doc should attend (causal allows diagonal and below)
+        self.assertTrue(
+            dense_block_mask[0, 0, 2, 0].item(),
+            "Block 2 (doc 0) should attend to block 0 (doc 0) - causal",
+        )
+        self.assertTrue(
+            dense_block_mask[0, 0, 2, 2].item(),
+            "Block 2 (doc 0) should attend to block 2 (doc 0) - diagonal",
+        )
+
+    @supported_platform
+    def test_create_varlen_block_mask_single_doc(self, device):
+        """Test create_varlen_block_mask with a single document."""
+        BLOCK_SIZE = 64
+
+        q_seq_lens = torch.tensor([100], device=device)
+        kv_seq_lens = torch.tensor([100], device=device)
+
+        def full_attention_mask(b, h, q_idx, kv_idx):
+            return torch.ones((), dtype=torch.bool, device=b.device)
+
+        block_mask = create_varlen_block_mask(
+            full_attention_mask,
+            B=1,
+            H=2,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Expected: ceil(100/64)*64 = 128
+        expected_len = 128
+        self.assertEqual(block_mask.seq_lengths, (expected_len, expected_len))
+
+        # Verify shapes
+        num_blocks = 2  # 128 / 64 = 2 blocks
+        self.assertEqual(block_mask.q_offsets.shape, (1, 2, num_blocks))
+        self.assertEqual(block_mask.kv_offsets.shape, (1, 2, num_blocks))
+
+        # Check limits: first block has 64 valid, second has 36 valid
+        expected_limits = torch.tensor([64, 36], device=device, dtype=torch.int32)
+        self.assertTrue(
+            torch.equal(block_mask.q_limits[0, 0], expected_limits),
+            f"q_limits mismatch: {block_mask.q_limits[0, 0]} vs {expected_limits}",
+        )
+
+        # With full attention mask, all blocks should attend to all blocks
+        # (within valid positions)
+        dense_block_mask = block_mask.to_dense()
+        self.assertEqual(dense_block_mask.shape, (1, 2, num_blocks, num_blocks))
+        # All blocks should be active (full attention within single doc)
+        self.assertTrue(dense_block_mask[0, 0, 0, 0].item())
+        self.assertTrue(dense_block_mask[0, 0, 0, 1].item())
+        self.assertTrue(dense_block_mask[0, 0, 1, 0].item())
+        self.assertTrue(dense_block_mask[0, 0, 1, 1].item())
 
 
 @large_tensor_test_class("2GB", device=test_device[0])

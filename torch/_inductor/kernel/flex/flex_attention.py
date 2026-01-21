@@ -68,6 +68,81 @@ def _sanitize_kernel_options_for_triton(
     return sanitized, backend
 
 
+def _setup_varlen_offsets(
+    q_offsets,
+    kv_offsets,
+    q_limits,
+    kv_limits,
+    seq_len_q: Expr,
+    seq_len_kv: Expr,
+    block_mask_q_length: Expr,
+    block_mask_kv_length: Expr,
+    device: torch.device,
+    kernel_options: dict[str, Any],
+):
+    """Setup variable-length offsets and logical sequence lengths.
+
+    For varlen attention, we need to handle offsets/limits for each sequence and
+    compute logical sequence lengths (the padded iteration space).
+
+    Returns tuple of:
+        (q_offsets, kv_offsets, q_limits, kv_limits,
+         logical_seq_len_q, logical_seq_len_kv,
+         logical_q_len_buf, logical_kv_len_buf)
+    """
+    has_offsets = q_offsets is not None and kv_offsets is not None
+    kernel_options.setdefault("HAS_OFFSETS", has_offsets)
+
+    if not has_offsets:
+        q_offsets, kv_offsets = (
+            empty(0, device=device, dtype=torch.int32) for _ in range(2)
+        )
+        q_limits, kv_limits = (
+            empty(0, device=device, dtype=torch.int32) for _ in range(2)
+        )
+        # For non-varlen, logical = physical sequence length
+        logical_seq_len_q = seq_len_q
+        logical_seq_len_kv = seq_len_kv
+    else:
+        # For varlen, use the logical sequence lengths from the block_mask
+        # These are set by create_varlen_block_mask and represent the padded iteration space
+        logical_seq_len_q = block_mask_q_length
+        logical_seq_len_kv = block_mask_kv_length
+
+    # Create scalar tensor inputs for logical lengths (only used when HAS_OFFSETS=true)
+    # These are loaded at runtime to avoid constexpr recompilation for each unique length
+    if has_offsets:
+        logical_q_len_buf = V.graph.add_tensor_constant(
+            torch.tensor(
+                [V.graph.sizevars.guard_int(logical_seq_len_q)],
+                dtype=torch.int64,
+                device=device,
+            )
+        )
+        logical_kv_len_buf = V.graph.add_tensor_constant(
+            torch.tensor(
+                [V.graph.sizevars.guard_int(logical_seq_len_kv)],
+                dtype=torch.int64,
+                device=device,
+            )
+        )
+    else:
+        # Placeholder tensors for non-varlen case (not used in template)
+        logical_q_len_buf = empty(0, device=device, dtype=torch.int64)
+        logical_kv_len_buf = empty(0, device=device, dtype=torch.int64)
+
+    return (
+        q_offsets,
+        kv_offsets,
+        q_limits,
+        kv_limits,
+        logical_seq_len_q,
+        logical_seq_len_kv,
+        logical_q_len_buf,
+        logical_kv_len_buf,
+    )
+
+
 @SymbolicGridFn
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
     """How is this kernel parallelized?
@@ -143,8 +218,8 @@ def flex_attention(
         )
 
     (
-        _,  # q_length
-        _,  # kv_length
+        block_mask_q_length,
+        block_mask_kv_length,
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -153,6 +228,10 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        kv_offsets,
+        kv_limits,
+        q_offsets,
+        q_limits,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -239,6 +318,8 @@ def flex_attention(
             mask_mod_other_buffers,
         )
 
+    has_varlen_offsets = q_offsets is not None and kv_offsets is not None
+
     (
         query,
         key,
@@ -251,6 +332,10 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        kv_offsets,
+        kv_limits,
+        q_offsets,
+        q_limits,
     ) = maybe_realize(
         [
             query,
@@ -264,15 +349,22 @@ def flex_attention(
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            kv_offsets,
+            kv_limits,
+            q_offsets,
+            q_limits,
         ]
     )
 
-    if _use_flex_flash_attention(
-        subgraph,
-        mask_graph,
-        kernel_options,
-        num_score_mod_placeholders=len(placeholder_inps),
-        backend=backend,
+    if (
+        _use_flex_flash_attention(
+            subgraph,
+            mask_graph,
+            kernel_options,
+            num_score_mod_placeholders=len(placeholder_inps),
+            backend=backend,
+        )
+        and not has_varlen_offsets
     ):
         return create_flex_flash_attention_kernel(
             query,
@@ -360,6 +452,29 @@ def flex_attention(
             empty(0, device=query.get_device()) for _ in range(2)
         )
 
+    # Setup variable-length offsets and logical sequence lengths
+    (
+        q_offsets,
+        kv_offsets,
+        q_limits,
+        kv_limits,
+        logical_seq_len_q,
+        logical_seq_len_kv,
+        logical_q_len_buf,
+        logical_kv_len_buf,
+    ) = _setup_varlen_offsets(
+        q_offsets,
+        kv_offsets,
+        q_limits,
+        kv_limits,
+        seq_len_q,
+        seq_len_kv,
+        block_mask_q_length,
+        block_mask_kv_length,
+        query.get_device(),
+        kernel_options,
+    )
+
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     choices: list[Any] = []
@@ -441,6 +556,12 @@ def flex_attention(
                 kv_indices,
                 full_kv_num_blocks,
                 full_kv_indices,
+                q_offsets,
+                kv_offsets,
+                q_limits,
+                kv_limits,
+                logical_q_len_buf,
+                logical_kv_len_buf,
             ],
             layout=layout,
             subgraphs=[
@@ -451,7 +572,9 @@ def flex_attention(
                 logsumexp,
                 max_scores,
             ],
-            call_sizes=query.get_size(),
+            # Use logical sequence length for grid calculation
+            # For varlen, this is the padded iteration space, not physical tensor size
+            call_sizes=[Bq, Hq, logical_seq_len_q, qk_head_dim],
             **cur_kernel_options,
         )
         if error is not None and len(configs) == 1:
@@ -467,6 +590,12 @@ def flex_attention(
             kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            q_offsets,
+            kv_offsets,
+            q_limits,
+            kv_limits,
+            logical_q_len_buf,
+            logical_kv_len_buf,
         ]
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
@@ -476,6 +605,7 @@ def flex_attention(
         6: create_indices_fake,
         7: create_num_blocks_fake_generator(full_kv_indices),
         8: create_indices_fake,
+        # q_offsets and kv_offsets at indices 9 and 10 don't need special generators
     }
 
     out = autotune_select_algorithm(
@@ -626,8 +756,8 @@ def flex_attention_backward(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
-        _,  # q_length
-        _,  # kv_length
+        block_mask_q_length,
+        block_mask_kv_length,
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -636,6 +766,10 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        kv_offsets,
+        kv_limits,
+        q_offsets,
+        q_limits,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
