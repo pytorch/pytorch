@@ -53,7 +53,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #endif
 
     if (kind & CO_FAST_FREE) {
-      CHECK(value != nullptr && PyCell_Check(value));
+      TORCH_DYNAMO_CHECK(value != nullptr && PyCell_Check(value));
       value = PyCell_GET(value);
     }
 
@@ -105,7 +105,7 @@ void FrameLocalsMapping::_realize_dict() {
 }
 
 py::tuple code_framelocals_names(py::handle code) {
-  CHECK(PyCode_Check(code.ptr()));
+  TORCH_DYNAMO_CHECK(PyCode_Check(code.ptr()));
   return py::cast<py::tuple>(((PyCodeObject*)code.ptr())->co_localsplusnames);
 }
 
@@ -127,7 +127,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
     PyObject* value = frame->f_localsplus[i];
     if (deref) {
-      CHECK(value != nullptr && PyCell_Check(value));
+      TORCH_DYNAMO_CHECK(value != nullptr && PyCell_Check(value));
       value = PyCell_GET(value);
     }
     _framelocals[i] = value;
@@ -196,7 +196,7 @@ void FrameLocalsMapping::_realize_dict() {
 }
 
 py::tuple code_framelocals_names(py::handle code) {
-  CHECK(PyCode_Check(code.ptr()));
+  TORCH_DYNAMO_CHECK(PyCode_Check(code.ptr()));
   py::tuple names = code.attr("co_varnames") + code.attr("co_cellvars");
   if (((PyCodeObject*)code.ptr())->co_flags & CO_OPTIMIZED) {
     names += code.attr("co_freevars");
