@@ -937,9 +937,7 @@ def _raw_device_uuid_amdsmi() -> list[str] | None:
             warnings.warn("Cannot get amd device handler", stacklevel=2)
             return None
         try:
-            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
-                2:
-            ]  # Removes 0x prefix from serial
+            uuid = amdsmi.amdsmi_get_gpu_device_uuid(handler)
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get uuid for amd device", stacklevel=2)
             return None
