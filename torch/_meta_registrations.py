@@ -2469,14 +2469,29 @@ def calc_conv_nd_return_shape(
                 # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+    # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
+    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
+    # but other backends fail: CPU rejects it, ROCm/miopen returns
+    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
+    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
+    from torch._subclasses.fake_tensor import FakeTensor
     from torch.fx.experimental.symbolic_shapes import sym_or
 
-    torch._check(
-        sym_or(*[x > 0 for x in ret_shape[2:]]),
-        lambda: f"Given input size per channel: {list(dims)}. "
-        f"Calculated output size per channel: {ret_shape[2:]}. "
-        f"Output size is too small",
+    device = (
+        input_tensor.fake_device
+        if isinstance(input_tensor, FakeTensor)
+        else input_tensor.device
     )
+
+    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    is_cudnn = device.type == "cuda" and torch.version.hip is None
+    if not is_cudnn:
+        torch._check(
+            sym_or(*[x > 0 for x in ret_shape[2:]]),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape[2:]}. "
+            f"Output size is too small",
+        )
 
     return ret_shape
 
