@@ -30,16 +30,8 @@ if not hasattr(torch._C, "_XpuStreamBase"):
         "_xpu_isCurrentStreamCapturing"
     )
 
-<<<<<<< HEAD
 from torch._C import _xpu_graph_pool_handle, _XPUGraph  # noqa: F401
 
-=======
-from torch._C import (  # noqa: F401
-    _xpu_isCurrentStreamCapturing,
-    _XPUGraph,
-    _xpu_graph_pool_handle,
-)
->>>>>>> 59a95865977 ([XPU] Add XPUGraph make_graphed_callables feature)
 
 def is_current_stream_capturing() -> bool:
     r"""Return True if XPU graph capture is underway on the current XPU stream, False otherwise.
