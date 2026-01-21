@@ -24,7 +24,13 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm7.0"
       "rocm7.1"
       )
-  set(__AOTRITON_CI_COMMIT "d34f3b6c824df77d5c5788a2e7555b2398be4b79")
+  # Allow overriding AOTriton commit via environment variable for CI flexibility
+  if(DEFINED ENV{AOTRITON_CI_COMMIT})
+    set(__AOTRITON_CI_COMMIT "$ENV{AOTRITON_CI_COMMIT}")
+    message(STATUS "Using AOTriton commit from environment: ${__AOTRITON_CI_COMMIT}")
+  else()
+    set(__AOTRITON_CI_COMMIT "d34f3b6c824df77d5c5788a2e7555b2398be4b79")
+  endif()
   set(__AOTRITON_SHA256_LIST
       "a3a7e391758b3580c42a1623d11606308ae52115b2a3eba5d1f440586a078391"  # rocm6.2
       "662fc06239c8091f57e13793a4fac0e783241c9f5e86b1701bbb2ba308ef4279"  # rocm6.3
