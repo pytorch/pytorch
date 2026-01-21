@@ -6569,6 +6569,7 @@
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
+    MPS: _unique_mps
   autogen: _unique.out
 
 - func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
