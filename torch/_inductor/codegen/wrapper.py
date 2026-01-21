@@ -92,6 +92,7 @@ pexpr = PythonPrinter().doprint
 
 
 ReuseKey = tuple[torch.device, torch.dtype, str, bool]
+CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 FxConversionFunc = Callable[["WrapperLine"], None]
 
@@ -107,6 +108,20 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
         # size hint
         sympy_str(V.graph.sizevars.simplify(storage_size)),
         alignment,
+    )
+
+
+def comm_buffer_reuse_key(node: BufferLike) -> CommBufferReuseKey:
+    # Comm buffers can only be reused by other comm buffers with the same (device, dtype, size, comm_buffer_type, group_name).
+    storage_size = V.graph.get_allocation_storage_size(node)
+    layout = node.get_output_spec()
+    assert isinstance(layout, ir.CommBufferLayout)
+    return (
+        node.get_device_or_error(),
+        node.get_dtype(),
+        sympy_str(V.graph.sizevars.simplify(storage_size)),
+        layout.comm_buffer_type,
+        layout.group_name,
     )
 
 
@@ -393,9 +408,14 @@ class SymbolicCallArg:
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
+        # Regular buffer reuse pool
         self.reuse_pool: dict[ReuseKey, list[FreeIfNotReusedLine]] = (
             collections.defaultdict(list)
         )
+        # Separate pool for comm buffers (comm-comm reuse only)
+        self.comm_buffer_reuse_pool: dict[
+            CommBufferReuseKey, list[FreeIfNotReusedLine]
+        ] = collections.defaultdict(list)
         self.total_allocated_buffer_size: int = 0
 
     def __contains__(self, key: ReuseKey) -> bool:
@@ -409,6 +429,20 @@ class MemoryPlanningState:
     def push(self, key: ReuseKey, item: FreeIfNotReusedLine) -> None:
         assert not item.is_reused
         self.reuse_pool[key].append(item)
+
+    def comm_buffer_contains(self, key: CommBufferReuseKey) -> bool:
+        return bool(self.comm_buffer_reuse_pool.get(key, None))
+
+    def comm_buffer_pop(self, key: CommBufferReuseKey) -> FreeIfNotReusedLine:
+        item = self.comm_buffer_reuse_pool[key].pop()
+        assert not item.is_reused
+        return item
+
+    def comm_buffer_push(
+        self, key: CommBufferReuseKey, item: FreeIfNotReusedLine
+    ) -> None:
+        assert not item.is_reused
+        self.comm_buffer_reuse_pool[key].append(item)
 
 
 class WrapperLine:
@@ -712,7 +746,10 @@ class EfficientPeakEstimate:
 
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
+    """Represents a buffer allocation during memory planning."""
+
     node: BufferLike
+    comm_buffer: bool = False
 
     def __post_init__(self):
         assert V.graph.scheduler.current_node is not None
@@ -721,6 +758,8 @@ class AllocateLine(MemoryPlanningLine):
         )
 
     def should_reuse_buffer(self, free_line: FreeIfNotReusedLine, size: int) -> bool:
+        if self.comm_buffer:
+            return True
         if free_line.scheduler_node_index + 1 == self.scheduler_node_index:
             return True
         overall_peak_memory = self.wrapper.estimate_peak.overall_peak_memory
@@ -732,7 +771,18 @@ class AllocateLine(MemoryPlanningLine):
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
 
-        # try to reuse a recently freed buffer
+        if self.comm_buffer:
+            # Comm buffers use separate pool (comm-comm reuse only)
+            key = comm_buffer_reuse_key(self.node)
+            if config.allow_buffer_reuse and state.comm_buffer_contains(key):
+                free_line = state.comm_buffer_pop(key)
+                free_line.is_reused = True
+                return ReuseLine(
+                    self.wrapper, free_line.node, self.node, comm_buffer=True
+                )
+            return self
+
+        # Regular buffer reuse
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
@@ -758,10 +808,46 @@ class AllocateLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
-        line = self.wrapper.make_buffer_allocation(self.node)
+        if self.comm_buffer:
+            self._codegen_comm_buffer(code)
+        else:
+            line = self.wrapper.make_buffer_allocation(self.node)
+            code.writeline(line)
+
+    def _codegen_comm_buffer(self, code: IndentedBuffer) -> None:
+        """Generate allocation code for comm buffers."""
+        name = self.node.get_name()
+        device = self.node.get_device()
+        assert device is not None and device.index is not None, (
+            f"Comm buffer requires a valid CUDA device with index, got {device}"
+        )
+        dtype = self.node.get_dtype()
+        shape = tuple(self.node.get_size())
+        stride = tuple(self.node.get_stride())
+        layout = self.node.get_output_spec()
+        assert isinstance(layout, ir.CommBufferLayout)
+        comm_buffer_type = layout.comm_buffer_type
+        group_name = layout.group_name
+
+        if comm_buffer_type == ir.CommBufferType.SYMM_MEM:
+            line = (
+                f"{name} = empty_strided_p2p("
+                f"{self.wrapper.codegen_shape_tuple(shape)}, "
+                f"{self.wrapper.codegen_shape_tuple(stride)}, "
+                f"{dtype}, "
+                f'torch.device("cuda:{device.index}"), '
+                f'group_name="{group_name}", '
+                f"alloc_id={random.randint(0, 2**64 - 1)})"
+            )
+        else:
+            raise NotImplementedError(
+                f"Unsupported comm buffer type: {comm_buffer_type}"
+            )
         code.writeline(line)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        if self.comm_buffer:
+            return converter._generate_comm_buffer_allocate
         return converter._generate_allocate
 
 
@@ -769,6 +855,7 @@ class AllocateLine(MemoryPlanningLine):
 class FreeIfNotReusedLine(MemoryPlanningLine):
     node: BufferLike
     is_reused: bool = False
+    comm_buffer: bool = False
 
     def __post_init__(self):
         assert V.graph.scheduler.current_node is not None
@@ -785,15 +872,29 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
         if config.allow_buffer_reuse:
-            state.push(buffer_reuse_key(self.node), self)
+            if self.comm_buffer:
+                # Comm buffers use separate pool (comm-comm reuse only)
+                key = comm_buffer_reuse_key(self.node)
+                state.comm_buffer_push(key, self)
+            else:
+                key = buffer_reuse_key(self.node)
+                state.push(key, self)
         return self
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         if not self.is_reused:
-            code.writeline(self.wrapper.make_buffer_free(self.node))
+            line = self.wrapper.make_buffer_free(self.node)
+            if self.comm_buffer:
+                layout = self.node.get_output_spec()
+                assert isinstance(layout, ir.CommBufferLayout)
+                code.writeline(f"{line} # {layout.comm_buffer_type.value} buffer free")
+            else:
+                code.writeline(line)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
+        if self.comm_buffer:
+            return converter._generate_comm_buffer_free
         return converter._generate_free_if_not_reused
 
 
@@ -822,6 +923,7 @@ class ReuseLine(MemoryPlanningLine):
     node: BufferLike
     reused_as: BufferLike
     delete_old: bool = True
+    comm_buffer: bool = False
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
         if self.node.get_name() in V.graph.removed_buffers:
@@ -844,91 +946,6 @@ class ReuseLine(MemoryPlanningLine):
 class NullLine(MemoryPlanningLine):
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_null
-
-
-@dataclasses.dataclass
-class CommBufferLine(WrapperLine):
-    wrapper: PythonWrapperCodegen  # type: ignore[name-defined] # noqa: F821
-    node: ir.Buffer
-
-    @property
-    def size(self) -> int:
-        from torch._inductor.utils import is_symbolic
-
-        numel = self.node.get_numel()
-        dtype = self.node.get_dtype()
-        if is_symbolic(numel):
-            raise AssertionError(
-                f"The size of a comm buffer can't be symbolic: {self.node}"
-            )
-        return int(numel) * dtype.itemsize
-
-    @property
-    def comm_buffer_type(self) -> ir.CommBufferType:
-        layout = self.node.get_output_spec()
-        assert isinstance(layout, ir.CommBufferLayout)
-        return layout.comm_buffer_type
-
-    @property
-    def group_name(self) -> str:
-        layout = self.node.get_output_spec()
-        assert isinstance(layout, ir.CommBufferLayout)
-        return layout.group_name
-
-
-@dataclasses.dataclass
-class CommBufferAllocateLine(CommBufferLine):
-    def codegen(self, code: IndentedBuffer) -> None:
-        assert self.node.get_name() not in V.graph.removed_buffers
-        name = self.node.get_name()
-        device = self.node.get_device()
-        dtype = self.node.get_dtype()
-        shape = tuple(self.node.get_size())
-        stride = tuple(self.node.get_stride())
-        code.writeline(
-            self.make_allocation_line(
-                self.comm_buffer_type,
-                self.group_name,
-                self.wrapper,
-                name,
-                device,
-                dtype,
-                shape,
-                stride,
-            )
-        )
-
-    @staticmethod
-    def make_allocation_line(
-        comm_buffer_type, group_name, wrapper, name, device, dtype, shape, stride
-    ):
-        if comm_buffer_type == ir.CommBufferType.SYMM_MEM:
-            return (
-                f"{name} = empty_strided_p2p("
-                f"{wrapper.codegen_shape_tuple(shape)}, "
-                f"{wrapper.codegen_shape_tuple(stride)}, "
-                f"{dtype}, "
-                f'torch.device("cuda:{device.index}"), '
-                f'group_name="{group_name}", '
-                f"alloc_id={random.randint(0, 2**64 - 1)})"
-            )
-        else:
-            raise NotImplementedError(
-                f"Unsupported comm buffer type: {comm_buffer_type}"
-            )
-
-    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
-        return converter._generate_comm_buffer_allocate
-
-
-@dataclasses.dataclass
-class CommBufferFreeLine(CommBufferLine):
-    def codegen(self, code: IndentedBuffer) -> None:
-        line = self.wrapper.make_buffer_free(self.node)
-        code.writeline(f"{line} # {self.comm_buffer_type.value} buffer free")
-
-    def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
-        return converter._generate_comm_buffer_free
 
 
 @dataclasses.dataclass
@@ -2253,9 +2270,12 @@ class PythonWrapperCodegen(CodeGen):
 
             import pickle
 
-            assert isinstance(value, torch.ScriptObject)
-
-            output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
+            try:
+                output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
+            except (TypeError, AttributeError, pickle.PicklingError) as e:
+                output.writeline(
+                    f'raise TypeError("Failed to pickle opaque type {type(value)} for variable {name}: {str(e)}")'
+                )
 
         output.writelines(
             ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
@@ -3360,7 +3380,7 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         if isinstance(layout, ir.CommBufferLayout):
-            self.writeline(CommBufferAllocateLine(self, buffer))
+            self.writeline(AllocateLine(self, buffer, comm_buffer=True))
             return
 
         self.writeline(AllocateLine(self, buffer))
@@ -3376,7 +3396,7 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(buffer.get_output_spec(), ir.CommBufferLayout):
             # Comm buffers are not eligible for in-place reuse. Their reuse is
             # achieved exclusively via buffer planning.
-            self.writeline(CommBufferFreeLine(self, buffer))
+            self.writeline(FreeIfNotReusedLine(self, buffer, comm_buffer=True))
             return
 
         if not self.can_reuse(buffer):
