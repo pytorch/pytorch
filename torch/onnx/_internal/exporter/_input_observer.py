@@ -286,7 +286,7 @@ class InputObserverInfo:
                 return args
             if not args:
                 return kwargs
-            # We need to more args to kwargs
+            # We need to move args to kwargs
             pos_names = list(self.signature.parameters)[: len(args)]
             return {**dict(zip(pos_names, args)), **kwargs}
 
