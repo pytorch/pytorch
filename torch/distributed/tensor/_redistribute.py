@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import itertools
 import logging
+import math
 import weakref
 from collections import defaultdict
 from collections.abc import Sequence
@@ -264,15 +265,19 @@ def _optimize_transform_infos(
         outermost_info = min(infos, key=lambda x: x.mesh_dim)
 
         # For reduce_scatter (Partial -> Shard), we cannot flatten if the tensor
-        # dimension is not evenly divisible by the flattened mesh size.
-        # This is because the two-step approach and the flattened approach produce
-        # different element-to-rank mappings when padding is involved.
+        # dimension is not evenly divisible by the total effective shard mesh size.
+        # This includes both the flattened mesh dims AND any intervening shards on
+        # non-transformed dims. E.g., for mesh (2,2,2), src=(P,S(0),P), dst=(S(0),S(0),S(0)):
+        # - All 3 dims end up with Shard(0), so effective_shard_mesh_size = 2*2*2 = 8
+        # - Tensor size 12 is not divisible by 8, so we cannot flatten
         src, dst = first_placements
         if src.is_partial() and dst.is_shard():
             shard_dim = cast(Shard, dst).dim
             tensor_dim_size = outermost_info.logical_shape[shard_dim]
-            flattened_mesh_size = flattened_mesh.size()
-            if tensor_dim_size % flattened_mesh_size != 0:
+            effective_shard_mesh_size = math.prod(
+                device_mesh.size(i) for i, p in enumerate(dst_placements) if p == dst
+            )
+            if tensor_dim_size % effective_shard_mesh_size != 0:
                 return None
 
         return _FlattenedTransformInfo(

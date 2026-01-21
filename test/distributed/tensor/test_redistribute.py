@@ -1561,6 +1561,53 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], _TransformInfo)
 
+    def test_reduce_scatter_with_intervening_shard_not_flattened(self):
+        """Reduce-scatter should NOT be flattened when intervening shard makes local size uneven.
+
+        Scenario:
+        - Tensor shape: (12,)
+        - Mesh: (2, 2, 2) with dims A, B, C
+        - src_placements: (Partial, S(0), Partial)
+        - dst_placements: (S(0), S(0), S(0))
+
+        Transforms: dims 0 and 2 are Partial->S(0), dim 1 is S(0)->S(0) (no-op)
+
+        The global check would pass: 12 % 4 == 0 (flattened mesh size = 2*2 = 4)
+        But after S(0) on dim 1, local size = 6, and 6 % 4 != 0 (uneven!)
+
+        This tests that the optimization correctly accounts for intervening shards
+        that affect local tensor sizes.
+        """
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "C"]._flatten("A_C")
+
+        # Transforms only for dims where src != dst (dim 1 is S(0)->S(0), no transform)
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[12],  # global tensor shape
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[12],  # global shape (local size computed by optimizer)
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Shard(0), Partial("sum"))
+        dst_placements = (Shard(0), Shard(0), Shard(0))
+
+        result = _optimize_transform_infos(
+            transform_infos, mesh, src_placements, dst_placements
+        )
+
+        # With the fix, the optimization correctly accounts for intervening shards.
+        # Since local size (6) is not evenly divisible by flattened mesh size (4),
+        # the result should NOT be flattened - returns 2 separate transforms.
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
     def test_empty_input(self):
         """Empty input returns empty output."""
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
