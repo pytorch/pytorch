@@ -10,7 +10,7 @@
 import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Optional, Union
+from typing import Union
 
 
 __all__ = ["EventSource", "Event", "NodeState", "RdzvEvent"]
@@ -54,7 +54,7 @@ class Event:
         if isinstance(data, str):
             data_dict = json.loads(data)
         data_dict["source"] = EventSource[data_dict["source"]]  # type: ignore[possibly-undefined]
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         return Event(**data_dict)
 
     def serialize(self) -> str:
@@ -95,8 +95,8 @@ class RdzvEvent:
     pid: int
     node_state: NodeState
     master_endpoint: str = ""
-    rank: Optional[int] = None
-    local_id: Optional[int] = None
+    rank: int | None = None
+    local_id: int | None = None
     error_trace: str = ""
 
     def __str__(self):
@@ -109,7 +109,7 @@ class RdzvEvent:
         if isinstance(data, str):
             data_dict = json.loads(data)
         data_dict["node_state"] = NodeState[data_dict["node_state"]]  # type: ignore[possibly-undefined]
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         return RdzvEvent(**data_dict)
 
     def serialize(self) -> str:

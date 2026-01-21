@@ -65,7 +65,7 @@ std::string readableArgs(
     } else {
       ss << arg;
     }
-    ss << "\n";
+    ss << '\n';
   }
   return ss.str();
 }

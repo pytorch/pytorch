@@ -151,7 +151,7 @@ bool AccessInfo::isWrite() const {
 }
 
 void AccessInfo::print() const {
-  std::cout << id_ << ". " << AccessToString(type_) << ": " << *var_ << "[";
+  std::cout << id_ << ". " << AccessToString(type_) << ": " << *var_ << '[';
   if (!bounds_.empty()) {
     for (size_t i = 0; i < bounds_.size() - 1; ++i) {
       bounds_[i].print();
@@ -161,30 +161,30 @@ void AccessInfo::print() const {
     size_t i = bounds_.size() - 1;
     bounds_[i].print();
   }
-  std::cout << "]";
+  std::cout << ']';
 
   if (!dependencies_.empty()) {
     std::cout << " - depends on: ";
     for (auto& pair : dependencies_) {
-      std::cout << pair.second->id() << " ";
+      std::cout << pair.second->id() << ' ';
     }
   }
 
   if (!dependents_.empty()) {
     std::cout << " - dependents: ";
     for (auto& pair : dependents_) {
-      std::cout << pair.second.lock()->id() << " ";
+      std::cout << pair.second.lock()->id() << ' ';
     }
   }
 
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 void AccessInfo::dumpDOT(std::ostream& os) const {
   if (type_ == AccessType::Input || type_ == AccessType::Output ||
       type_ == AccessType::Alloc) {
-    os << "n" << id_ << " [\n";
-    os << "label = \"" << AccessToString(type_) << "\\n " << *var_ << "[";
+    os << 'n' << id_ << " [\n";
+    os << "label = \"" << AccessToString(type_) << "\\n " << *var_ << '[';
     if (!bounds_.empty()) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
         os << *IRSimplifier::simplify(
@@ -203,17 +203,17 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
       os << "\tshape = \"house\"\n";
     }
   } else {
-    os << "n" << id_ << " [\n";
+    os << 'n' << id_ << " [\n";
     os << "label = \"" << AccessToString(type_) << " (#" << id_ << ")\\n";
     os << "buf : " << *var_ << "\\n";
     os << "bounds : [";
     if (!bounds_.empty()) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
-        os << "(" << *bounds_[i].start << ", " << *bounds_[i].end << "), ";
+        os << '(' << *bounds_[i].start << ", " << *bounds_[i].end << "), ";
       }
 
       size_t i = bounds_.size() - 1;
-      os << "(" << *bounds_[i].start << ", " << *bounds_[i].end << ")]";
+      os << '(' << *bounds_[i].start << ", " << *bounds_[i].end << ")]";
     }
     os << "\"\n";
     os << "\tshape = \"box\"\n";
@@ -228,8 +228,8 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
   }
   os << "]\n";
   for (auto& pair : dependencies_) {
-    os << "n" << pair.second->id() << " -> "
-       << "n" << id_ << " [color=\"" << edgeColour << "\"]\n";
+    os << 'n' << pair.second->id() << " -> " << 'n' << id_ << " [color=\""
+       << edgeColour << "\"]\n";
   }
 }
 

@@ -53,7 +53,13 @@ class ProcessGroupTest(TestCase):
 
 
 class Dist2MultiProcessTestCase(MultiProcessTestCase):
-    device: torch.device
+    @property
+    def device(self) -> torch.device:
+        raise NotImplementedError
+
+    # @device.setter
+    # def device(self, value: torch.device) -> None:
+    #     self._device = value
 
     @property
     def world_size(self) -> int:
@@ -257,7 +263,9 @@ class Dist2MultiProcessTestCase(MultiProcessTestCase):
 
 
 class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
-    device = torch.device("cpu")
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cpu")
 
     @requires_gloo()
     def new_group(self) -> torch.distributed.ProcessGroup:
@@ -274,6 +282,10 @@ class ProcessGroupGlooTest(Dist2MultiProcessTestCase):
 
 
 class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def new_group(self) -> torch.distributed.ProcessGroup:
@@ -281,8 +293,6 @@ class ProcessGroupNCCLTest(Dist2MultiProcessTestCase):
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["MASTER_ADDR"] = "127.0.0.1"
         os.environ["MASTER_PORT"] = "29501"
-
-        self.device = torch.device("cuda", self.rank)
 
         return dist2.new_group(
             backend="nccl",

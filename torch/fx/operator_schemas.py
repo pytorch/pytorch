@@ -5,7 +5,8 @@ import numbers
 import types
 import typing
 import warnings
-from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 from torch._jit_internal import boolean_dispatched
@@ -79,6 +80,7 @@ _type_eval_globals = {
     "NoneType": type(None),
     "Storage": torch.UntypedStorage,
     "t": typing.TypeVar("t"),
+    "PyObject": Any,
 }
 for k in dir(typing):
     _type_eval_globals[k] = getattr(typing, k)
@@ -332,6 +334,30 @@ def type_matches(signature_type: Any, argument_type: Any):
         return issubclass(argument_type, signature_type)
 
     return False
+
+
+@compatibility(is_backward_compatible=False)
+def _normalize_function_or_error(
+    target: Callable,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
+    arg_types: Optional[tuple[Any]] = None,
+    kwarg_types: Optional[dict[str, Any]] = None,
+    normalize_to_only_use_kwargs: bool = False,
+) -> ArgsKwargsPair:
+    """
+    Wrapper around normalize_function that never returns None, but
+    loudly errors instead
+    """
+    res = normalize_function(
+        target, args, kwargs, arg_types, kwarg_types, normalize_to_only_use_kwargs
+    )
+    if res is None:
+        raise RuntimeError(
+            f"Failed to normalize function {target} with args {args} and kwargs {kwargs}"
+        )
+    else:
+        return res
 
 
 @compatibility(is_backward_compatible=False)

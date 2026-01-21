@@ -823,7 +823,7 @@ if has_triton():
         mask = offsets < n_elements
         x = tl.load(in_ptr0 + offsets, mask=mask)
         y = tl.load(in_ptr1 + offsets, mask=mask)
-        for i in range(2):
+        for _ in range(2):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
         i = 2
@@ -912,7 +912,7 @@ if has_triton():
         b_ptrs = b_ptr + (offs_k[:, None] + offs_bn[None, :])
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+        for k in range(tl.cdiv(K, BLOCK_SIZE_K)):
             a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
             accumulator = tl.dot(a, b, accumulator)
@@ -987,6 +987,46 @@ if has_triton():
             }
                 ''',
             constraints=("=r, r"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_inline_asm_rocm_double_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm="""
+            v_sin_f32 $0, $1
+            v_exp_f32 $0, $0
+                """,
+            constraints=("=v, v"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_inline_asm_rocm_single_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm="""
+            v_sin_f32 $0, $1
+            v_exp_f32 $0, $0
+                """,
+            constraints=("=v, v"),
             args=[data],
             dtype=tl.float32,
             is_pure=True,

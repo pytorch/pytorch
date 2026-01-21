@@ -263,11 +263,30 @@ offers a comprehensive example of using these features to manipulate a checkpoin
 Starting in version 2.6, ``torch.load`` will use ``weights_only=True`` if the ``pickle_module``
 argument is not passed.
 
+.. _weights-only-security:
+
+weights_only security
+^^^^^^^^^^^^^^^^^^^^^
+
 As discussed in the documentation for :func:`torch.load`, ``weights_only=True`` restricts
 the unpickler used in ``torch.load`` to only executing functions/building classes required for
 ``state_dicts`` of plain ``torch.Tensors`` as well as some other primitive types. Further,
 unlike the default ``Unpickler`` provided by the ``pickle`` module, the ``weights_only`` Unpickler
 is not allowed to dynamically import anything during unpickling.
+
+``weights_only=True`` narrows the surface of remote code execution attacks but has the following limitations:
+
+1. ``weights_only=True`` does not guard against denial of service attacks.
+2. We try to prevent memory corruptions during ``torch.load(weights_only=True)`` but they might still be possible.
+
+Note that even if memory corruption does not occur during ``torch.load`` itself, loading CAN create
+unexpected objects for the downstream code that can also lead to memory corruption (e.g. a Tensor of
+indices and values made to a sparse Tensor in user code might write/read out of bounds).
+
+.. _weights-only-allowlist:
+
+weights_only allowlist
+^^^^^^^^^^^^^^^^^^^^^^
 
 As mentioned above, saving a module's ``state_dict`` is a best practice when using ``torch.save``. If loading an old
 checkpoint that contains an ``nn.Module``, we recommend ``weights_only=False``. When loading a checkpoint that contains
