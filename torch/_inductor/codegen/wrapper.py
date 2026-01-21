@@ -714,9 +714,11 @@ class MemoryPlanningLine(WrapperLine):
 class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine):
     """Enter a CUDA device context and allocate required side streams.
 
-    Note:
-        - The number of allocated streams is controlled by :attr:`config.num_streams`;
+    Attributes:
+        num_streams: Number of streams to allocate (determined by user annotations on nodes).
     """
+
+    num_streams: int = 1
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream allocation code."""
@@ -727,29 +729,37 @@ class EnterDeviceContextManagerWithStreamInfoLine(EnterDeviceContextManagerLine)
             code.writeline(f"{DEFAULT_STREAM} = torch.cuda.current_stream()")
             code.writeline(f"{ENTRANCE_EVENT} = {DEFAULT_STREAM}.record_event()")
 
-            code.writeline("from torch._inductor.stream_utils import get_cuda_stream_pool")
-            code.writeline(
-                f"cuda_stream_pool = get_cuda_stream_pool(device={self.device_idx}, "
-                f"pool_size={config.num_streams})",
-            )
-
-            for i in range(1, config.num_streams):
+            if self.num_streams > 1:
+                code.writeline("from torch._inductor.stream_utils import get_cuda_stream_pool")
                 code.writeline(
-                    f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
-                    f"= cuda_stream_pool.acquire()",
+                    f"cuda_stream_pool = get_cuda_stream_pool(device={self.device_idx}, "
+                    f"pool_size={self.num_streams})",
                 )
+
+                for i in range(1, self.num_streams):
+                    code.writeline(
+                        f"{STREAM_NAME_TEMPLATE.format(stream_idx=i)} "
+                        f"= cuda_stream_pool.acquire()",
+                    )
 
 
 @dataclasses.dataclass
 class ExitDeviceContextManagerWithStreamInfoLine(ExitDeviceContextManagerLine):
-    """Exit a CUDA device context and release allocated streams."""
+    """Exit a CUDA device context and release allocated streams.
+
+    Attributes:
+        num_streams: Number of streams that were allocated (must match Enter).
+    """
+
+    num_streams: int = 1
 
     def codegen(self, code: IndentedBuffer) -> None:
         """Generate context switching and stream release code."""
-        for i in range(1, config.num_streams):
-            code.writeline(
-                f"cuda_stream_pool.release({STREAM_NAME_TEMPLATE.format(stream_idx=i)})",
-            )
+        if self.num_streams > 1:
+            for i in range(1, self.num_streams):
+                code.writeline(
+                    f"cuda_stream_pool.release({STREAM_NAME_TEMPLATE.format(stream_idx=i)})",
+                )
         if not V.graph.cpp_wrapper:
             code.do_unindent()
 
@@ -4122,8 +4132,12 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         """Generate NVTX range pop for graph."""
         self.writeline("torch.cuda.nvtx.range_pop()")
 
-    def codegen_device_guard_enter(self, device_idx: int) -> None:
+    def codegen_device_guard_enter(self, device_idx: int, num_streams: int = 1) -> None:
         """Generate data structure for device guard context.
+
+        Args:
+            device_idx: The CUDA device index.
+            num_streams: Number of streams to allocate (from user annotations).
 
         Note:
             Refer to :class:`EnterDeviceContextManagerWithStreamInfoLine` doc for more details.
@@ -4132,13 +4146,15 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
             EnterDeviceContextManagerWithStreamInfoLine(
                 device_idx,
                 self.last_seen_device_guard_index,
+                num_streams,
             ),
         )
         self.last_seen_device_guard_index: int = device_idx
+        self._num_streams: int = num_streams
 
     def codegen_device_guard_exit(self) -> None:
         """Generate data structure for exiting device guard context."""
-        self.writeline(ExitDeviceContextManagerWithStreamInfoLine())
+        self.writeline(ExitDeviceContextManagerWithStreamInfoLine(self._num_streams))
 
     def codegen_cuda_stream_enter(
         self,
