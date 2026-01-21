@@ -163,9 +163,11 @@ def preserve_node_ordering(
         replacements[dependent_node] = ordered_node
 
 
-def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
+def _create_subgraph_for_node(
+    graph: fx.Graph, node: fx.Node, additional_deps=None
+) -> fx.GraphModule:
     """
-    Create a subgraph that exactly recreates a node's operation.
+    Create a subgraph that exactly recreates a node's operation optionally passing through additional dependencies.
 
     The subgraph takes only the fx.Node arguments and recreates the operation
     with the exact target, args structure, and kwargs.
@@ -173,6 +175,7 @@ def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
     Args:
         graph: The parent graph
         node: The node to wrap in a subgraph
+        additional_deps: Additional dependencies to pass through the subgraph
 
     Returns:
         A GraphModule containing the subgraph
@@ -197,6 +200,14 @@ def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
             placeholder.meta.update(arg.meta)
         new_args.append(placeholder)  # type: ignore[arg-type]
 
+    additional_deps_placeholders = []
+    for dep in additional_deps or []:
+        placeholder = subgraph.placeholder(f"dep_{placeholder_idx}")
+        placeholder_idx += 1
+        if "val" in dep.meta:
+            placeholder.meta.update(dep.meta)
+        additional_deps_placeholders.append(placeholder)
+
     new_kwargs: dict[str, Any] = {}
     for key, value in node.kwargs.items():
         if not isinstance(value, fx.Node):
@@ -220,8 +231,18 @@ def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
     # Copy metadata from the original node
     result.meta.update(node.meta)
 
-    out = subgraph.output(result)
-    if "val" in result.meta:
-        out.meta["val"] = result.meta["val"]
+    if additional_deps_placeholders:
+        outputs = tuple([result] + additional_deps_placeholders)
+        out = subgraph.output(outputs)
+        vals = []
+        for output in outputs:
+            if "val" in output.meta:
+                vals.append(output.meta["val"])
+
+        out.meta["val"] = tuple(vals)
+    else:
+        out = subgraph.output(result)
+        if "val" in result.meta:
+            out.meta["val"] = result.meta["val"]
 
     return fx.GraphModule(owning_module, subgraph)

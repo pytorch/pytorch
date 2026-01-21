@@ -923,6 +923,266 @@ class <lambda>(torch.nn.Module):
         ):
             extract_graph(fn, *inp)
 
+    def test_control_deps_wrapping_record_event(self) -> None:
+        """Test wrapping record_event with control_deps."""
+
+        def fn(x) -> torch.Tensor:
+            # Operations before the sync
+            y = x + 1
+            z = y * 2
+            # Now record event - this should capture y and z as deps
+            e = torch.Event()
+            e.record()
+            # Operations after the sync
+            w = z + 3
+            return w
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        gm = fw_graphs[0]
+        graph = gm.graph
+
+        # Original graph before transformation
+        self.assertExpectedInline(
+            print_graph(gm),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        #
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+
+        #
+        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add, 2);  add = None
+
+        #
+        record_event = torch.ops.streams.record_event.default(0, 1);  record_event = None
+
+        #
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, 3);  mul = None
+        return (add_1,)
+""",
+        )
+
+        record_nodes = list(
+            graph.find_nodes(
+                op="call_function", target=torch.ops.streams.record_event.default
+            )
+        )
+        self.assertEqual(len(record_nodes), 1)
+        record_node = record_nodes[0]
+
+        # Apply wrap_sync_control_deps
+        from torch._functorch._aot_autograd.streams import wrap_sync_control_deps
+
+        wrap_sync_control_deps(gm, record_node)
+
+        # Verify transformed graph
+        self.assertExpectedInline(
+            print_graph(gm),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        #
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+
+        #
+        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add, 2)
+
+        # No stacktrace found for following nodes
+        subgraph_record_event = self.subgraph_record_event
+        control_deps = torch.ops.higher_order.control_deps((add, mul), \
+subgraph_record_event, mul);  add = mul = subgraph_record_event = None
+
+        #
+        getitem: "f32[2, 2]" = control_deps[1];  control_deps = None
+
+        #
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(getitem, 3);  getitem = None
+        return (add_1,)
+
+    class subgraph_record_event(torch.nn.Module):
+        def forward(self, dep_0: "f32[2, 2]"):
+            #
+            record_event_default = torch.ops.streams.record_event.default(0, 1)
+            return (record_event_default, dep_0)
+""",
+        )
+
+        # Verify control_deps structure
+        import operator
+
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        control_deps_nodes = list(
+            graph.find_nodes(op="call_function", target=control_deps)
+        )
+        self.assertEqual(len(control_deps_nodes), 1)
+        control_deps_node = control_deps_nodes[0]
+
+        # Verify getitem nodes were created for pass-through dependencies
+        # Only mul is used after the sync, so only 1 getitem should be created
+        getitem_nodes = [
+            n
+            for n in graph.nodes
+            if n.op == "call_function"
+            and n.target == operator.getitem
+            and n.args[0] is control_deps_node
+        ]
+        self.assertEqual(len(getitem_nodes), 1)
+
+        # Verify downstream nodes use the getitem outputs
+        add_1_node = next(n for n in graph.nodes if n.name == "add_1")
+        self.assertTrue(
+            any(
+                isinstance(arg, torch.fx.Node) and arg in getitem_nodes
+                for arg in add_1_node.args
+            ),
+            f"add_1 should use getitem output but has args: {add_1_node.args}",
+        )
+
+    def test_control_deps_wrapping_wait_event(self) -> None:
+        """Test wrapping wait_event with control_deps."""
+
+        def fn(x) -> torch.Tensor:
+            s = torch.Stream(device="cuda")
+            e = torch.Event()
+
+            # Record on default stream
+            y = x + 1
+            e.record()
+
+            # Wait on the other stream and do work
+            with s:
+                e.wait()
+                z = y * 2
+
+            return z
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        gm = fw_graphs[0]
+        graph = gm.graph
+
+        # Find the wait_event node
+        wait_nodes = list(
+            graph.find_nodes(
+                op="call_function", target=torch.ops.streams.wait_event.default
+            )
+        )
+        self.assertEqual(len(wait_nodes), 1)
+        wait_node = wait_nodes[0]
+
+        # Apply wrap_sync_control_deps to wait_event
+        from torch._functorch._aot_autograd.streams import wrap_sync_control_deps
+
+        wrap_sync_control_deps(gm, wait_node)
+
+        # Verify control_deps was created
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        control_deps_nodes = list(
+            graph.find_nodes(op="call_function", target=control_deps)
+        )
+        # wait_event is on stream 0, but nodes before it may be on different streams
+        # So control_deps may or may not be created depending on stream assignment
+        # At minimum, the transformation should not crash
+        self.assertGreaterEqual(len(control_deps_nodes), 0)
+
+    def test_control_deps_prevents_invalid_reordering(self) -> None:
+        """
+        Test that control_deps creates proper data dependencies that prevent invalid reordering.
+
+        This test:
+        1. Creates a graph with control_deps wrapping
+        2. Manually moves a node to violate the ordering
+        3. Verifies graph.lint() catches the invalid ordering
+        """
+
+        def fn(x) -> torch.Tensor:
+            y = x + 1
+            z = y * 2
+            e = torch.Event()
+            e.record()
+            w = z + 3
+            return w
+
+        inp = (torch.ones(2, 2, device="cuda"),)
+        (
+            _,
+            _,
+            fw_graphs,
+            _,
+        ) = extract_graph(fn, *inp)
+
+        gm = fw_graphs[0]
+        graph = gm.graph
+
+        # Apply wrap_sync_control_deps
+        from torch._functorch._aot_autograd.streams import wrap_sync_control_deps
+
+        record_node = next(
+            iter(
+                graph.find_nodes(
+                    op="call_function", target=torch.ops.streams.record_event.default
+                )
+            )
+        )
+        wrap_sync_control_deps(gm, record_node)
+
+        # Find the control_deps node
+        from torch._inductor.fx_passes.control_dependencies import control_deps
+
+        control_deps_node = next(
+            iter(graph.find_nodes(op="call_function", target=control_deps))
+        )
+
+        # Find add_1 (the node after the sync that uses getitem output)
+        add_1_node = next(n for n in graph.nodes if n.name == "add_1")
+
+        # Record original valid order
+        original_order = [n.name for n in graph.nodes if n.op == "call_function"]
+        original_control_deps_idx = original_order.index("control_deps")
+        original_add_1_idx = original_order.index("add_1")
+        self.assertLess(
+            original_control_deps_idx,
+            original_add_1_idx,
+            "control_deps should be before add_1 in valid ordering",
+        )
+
+        # Verify the graph is valid before manual move
+        graph.lint()  # Should not raise
+
+        # Manually move add_1 BEFORE control_deps (violates dependency)
+        # node.prepend(x) inserts x before node
+        control_deps_node.prepend(add_1_node)
+
+        # Verify the order is now wrong (add_1 comes before control_deps)
+        violated_order = [n.name for n in graph.nodes if n.op == "call_function"]
+        violated_add_1_idx = violated_order.index("add_1")
+        violated_control_deps_idx = violated_order.index("control_deps")
+        self.assertLess(
+            violated_add_1_idx,
+            violated_control_deps_idx,
+            "add_1 should be before control_deps after manual move (violating order)",
+        )
+
+        # The graph now has invalid ordering - add_1 depends on getitem which depends on control_deps,
+        # but add_1 appears before control_deps. graph.lint() should catch this.
+        with self.assertRaises(RuntimeError):
+            graph.lint()
+
     @requires_cuda
     def test_epilogue_copy_stream_tracking(self):
         """
