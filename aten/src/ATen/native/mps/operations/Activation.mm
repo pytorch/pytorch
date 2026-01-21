@@ -21,6 +21,7 @@
 #include <ATen/ops/mish_backward_native.h>
 #include <ATen/ops/mish_native.h>
 #include <ATen/ops/relu_native.h>
+#include <ATen/ops/rrelu_with_noise_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
 #include <ATen/ops/silu_backward_native.h>
 #include <ATen/ops/silu_native.h>
@@ -1406,6 +1407,62 @@ Tensor& hardtanh_backward_out_mps(const Tensor& grad_output,
   }
 
   return grad_input;
+}
+
+// rrelu_with_noise implementation for MPS
+// Randomized Leaky ReLU: output = input if input >= 0, else input * random_slope
+// where random_slope is uniformly sampled from [lower, upper]
+Tensor& rrelu_with_noise_out_mps(
+    const Tensor& self,
+    Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> generator,
+    Tensor& output) {
+  TORCH_CHECK(self.sizes() == noise.sizes(),
+              "noise tensor shape must match self tensor shape. Got self.shape = ",
+              self.sizes(), " noise.shape = ", noise.sizes());
+
+  if (output.numel() == 0) {
+    return output;
+  }
+
+  if (training) {
+    // Generate random noise tensor with uniform distribution in [lower, upper]
+    noise.uniform_(lower.toDouble(), upper.toDouble(), generator);
+    // output = self >= 0 ? self : self * noise
+    at::where_out(output, self >= 0, self, self * noise);
+    // For gradient tracking: set noise to 1 where input >= 0
+    at::where_out(noise, self >= 0, at::ones_like(noise), noise);
+  } else {
+    // In eval mode, use average of lower and upper as slope
+    double negative_slope = (lower.toDouble() + upper.toDouble()) / 2.0;
+    at::leaky_relu_out(output, self, negative_slope);
+    noise.fill_(negative_slope);
+  }
+  return output;
+}
+
+Tensor rrelu_with_noise_mps(
+    const Tensor& self,
+    Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> generator) {
+  Tensor output = at::empty_like(self);
+  return rrelu_with_noise_out_mps(self, noise, lower, upper, training, generator, output);
+}
+
+Tensor& rrelu_with_noise_mps_(
+    Tensor& self,
+    Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> generator) {
+  return rrelu_with_noise_out_mps(self, noise, lower, upper, training, generator, self);
 }
 
 } // namespace at::native

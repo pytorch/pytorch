@@ -352,7 +352,6 @@ if torch.backends.mps.is_available():
             "nn.functional.multi_margin_loss": None,
             "nn.functional.multilabel_margin_loss": None,
             "nn.functional.pdist": None,
-            "nn.functional.rrelu": None,
             "nn.functional.norm": None,
             "ormqr": None,
             "pca_lowrank": None,
