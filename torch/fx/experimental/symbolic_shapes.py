@@ -5896,6 +5896,12 @@ class ShapeEnv:
             if expr in issued:
                 return
 
+            # Skip guards that involve symbols with only ephemeral sources.
+            # These symbols are created inside the graph (e.g., nested int symbols
+            # from jagged nested tensors) and cannot be guarded on.
+            if any(s in symbols_with_only_ephemeral_sources for s in expr.free_symbols):
+                return
+
             issued.add(expr)
 
             try:
@@ -5944,6 +5950,25 @@ class ShapeEnv:
             except Exception:
                 self.log.warning("Failing guard allocated at %s", guard.sloc)
                 raise
+
+        # Ensure all symbols that may appear in guards have sources from var_to_sources.
+        # This is needed for symbols created inside the graph (e.g., nested int symbols
+        # from jagged nested tensors) that aren't tracked via track_symint().
+        # Only use non-ephemeral sources since ephemeral sources cannot be guarded on.
+        # Track symbols that have only ephemeral sources so we can skip guards for them.
+        symbols_with_only_ephemeral_sources: set[sympy.Symbol] = set()
+        for guard in guards if guards is not None else self.guards:
+            for symbol in guard.expr.free_symbols:
+                if symbol not in symbol_to_source or not symbol_to_source[symbol]:
+                    if symbol in self.var_to_sources:
+                        non_ephemeral = [
+                            s for s in self.var_to_sources[symbol] if not s.is_ephemeral()
+                        ]
+                        if non_ephemeral:
+                            symbol_to_source[symbol] = non_ephemeral
+                        elif self.var_to_sources[symbol]:
+                            # All sources are ephemeral - mark for skipping
+                            symbols_with_only_ephemeral_sources.add(symbol)
 
         # First, issue all guards.
         # This removes all the checks that follow from bounds
