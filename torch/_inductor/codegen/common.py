@@ -548,6 +548,15 @@ def init_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+    if get_scheduling_for_device("tpu") is None:
+        register_backend_for_device(
+            "tpu",
+            PallasScheduling,
+            PythonWrapperCodegen,
+            # CppWrapperGpu,
+            # WrapperFxCodegen,
+        )
+
     if get_scheduling_for_device("xpu") is None:
         register_backend_for_device(
             "xpu",
@@ -620,7 +629,11 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     assert isinstance(device, str), type(device)
 
     if not device_op_overrides_dict:
-        from . import cpu_device_op_overrides, mps_device_op_overrides  # noqa: F401
+        from . import (  # noqa: F401  # noqa: F401
+            cpu_device_op_overrides,
+            mps_device_op_overrides,
+            pallas,
+        )
         from .cuda import device_op_overrides  # noqa: F401
         from .mtia import device_op_overrides as mtia_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401

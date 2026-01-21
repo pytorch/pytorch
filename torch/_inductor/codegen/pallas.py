@@ -11,7 +11,6 @@ import sympy  # noqa: TC002
 
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pallas import has_tpu_pallas
 from torch.utils._sympy.functions import ModularIndexing
 
 from .. import config
@@ -23,9 +22,11 @@ from .block_analysis import BlockPatternMatcher
 from .common import (
     BackendFeature,
     CSEVariable,
+    DeviceOpOverrides,
     IndentedBuffer,
     OpOverrides,
     PythonPrinter,
+    register_device_op_overrides,
 )
 from .simd import SIMDKernel, SIMDScheduling
 
@@ -860,6 +861,7 @@ class PallasKernel(SIMDKernel):
         # Determine device type once at initialization
         device = V.graph.get_current_device_or_throw()
         self.is_gpu = device.type == "cuda"
+        self.is_tpu = device.type == "tpu"
         # Use TMA (Tensor Memory Accelerator) for GPU to handle non-aligned tensor sizes
         # TMA automatically masks OOB accesses, eliminating the need for explicit
         # padding to multiples of 128. Uses lax.fori_loop with direct TMA primitives.
@@ -1459,13 +1461,12 @@ class PallasKernel(SIMDKernel):
         )
 
         # Check various conditions for skipping strided indexing
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
         is_known_non_contiguous = not is_contiguous and all(
             s is not None for s in actual_strides
         )
         has_symbolic_coef = any(not isinstance(c, int | float) for c in coefficients)
         skip_for_non_contiguous = (
-            is_known_non_contiguous and not is_tpu and buf_numel == output_numel
+            is_known_non_contiguous and not self.is_tpu and buf_numel == output_numel
         )
 
         # Determine if strided indexing is needed
@@ -2548,21 +2549,40 @@ class PallasKernel(SIMDKernel):
         }
 
         kernel_name = name or "<KERNEL_NAME>"
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
-        interpret_is_cpu = (
-            V.graph.get_current_device_or_throw().type == "cpu" and not is_tpu
-        )
-        if is_tpu:
-            if not torch._inductor.config.pallas_take_first_jax_device_only:
-                raise RuntimeError(
-                    "Pallas backend currently only supports using the first JAX device."
-                )
-            if not has_tpu_pallas():
-                raise RuntimeError(
-                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                    "Please make sure that you have a TPU available and that JAX is configured correctly."
-                )
+        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         interpret_literal = "True" if interpret_is_cpu else "False"
+
+        if self.is_tpu:
+            imports = """
+import functools
+import math
+import torch
+import jax
+import jax.numpy as jnp
+try:
+    import torch_tpu
+    from torch_tpu._internal.compile import tpu_torch_compile
+    from torch_tpu._internal import pallas as tpu_pallas
+except ImportError:
+    torch_tpu = None
+"""
+        else:
+            # For GPU (Mosaic backend), import plgpu for TMA operations
+            # Import math for symbolic expressions (e.g., math.floor, math.log2)
+            imports = """
+import functools
+import math
+import torch
+import jax
+import jax.numpy as jnp
+from jax.experimental import pallas as pl
+from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_dtype_to_jax_runtime
+""" + (
+                "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
+                if not interpret_is_cpu
+                else ""
+            )
+        code.splice(imports, strip=True)
 
         aliasable_flags: dict[str, bool] = {}
         for param in pure_out_params:
@@ -2844,28 +2864,28 @@ from torch._inductor.runtime.runtime_utils import (
                 kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
                 continue
 
-            if (
-                reshape_target_shape
-                and len(reshape_target_shape) > 1
-                and length_val == reshape_target_numel
-            ):
-                shape_str = ", ".join(str(s) for s in reshape_target_shape)
-                arange = f"jnp.arange({length_str})"
-                kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
-            elif num_broadcast_dims > 1 and idx != total_var_idx:
-                broadcast_idx = next(
-                    i for i, (vidx, _, _, _) in enumerate(broadcast_vars) if vidx == idx
-                )
-                axis_idx = self._broadcast_axis_idx(
-                    broadcast_vars, broadcast_idx, num_broadcast_dims
-                )
-                shape_parts = ["1"] * num_broadcast_dims
-                shape_parts[axis_idx] = length_str
-                shape_str = ", ".join(shape_parts)
-                arange = f"jnp.arange({length_str})"
-                kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
-            else:
-                kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
+                if (
+                    reshape_target_shape
+                    and len(reshape_target_shape) > 1
+                    and length_val == reshape_target_numel
+                ):
+                    shape_str = ", ".join(str(s) for s in reshape_target_shape)
+                    arange = f"jnp.arange({length_str})"
+                    kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
+                elif num_broadcast_dims > 1 and idx != total_var_idx:
+                    broadcast_idx = next(
+                        i for i, (vidx, _, _, _) in enumerate(broadcast_vars) if vidx == idx
+                    )
+                    axis_idx = self._broadcast_axis_idx(
+                        broadcast_vars, broadcast_idx, num_broadcast_dims
+                    )
+                    shape_parts = ["1"] * num_broadcast_dims
+                    shape_parts[axis_idx] = length_str
+                    shape_str = ", ".join(shape_parts)
+                    arange = f"jnp.arange({length_str})"
+                    kernel_body.writeline(f"{var_name} = {arange}.reshape({shape_str})")
+                else:
+                    kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
 
     @staticmethod
     def _broadcast_axis_idx(
@@ -2892,11 +2912,164 @@ from torch._inductor.runtime.runtime_utils import (
         kernel_input_params = ctx.kernel_input_params
         output_params = ctx.output_params
 
-        # TMA automatically handles out-of-bounds accesses
-        code.writeline("# Use lax.fori_loop with TMA for automatic OOB masking")
-        code.writeline("from jax import lax")
-        code.writeline("_tile_size = 128  # Warpgroup size")
-        code.writeline("_orig_out_shapes = out_shapes")
+        # Now emit the kernel function with the correct signature
+        kernel_signature = f"def {kernel_name}_kernel({', '.join(full_kernel_params)}):"
+        code.writeline(kernel_signature)
+
+        with code.indent():
+            for line in kernel_body._lines:
+                if isinstance(line, str):
+                    # Remove any existing indentation and re-add with code's indentation
+                    code.writeline(line.lstrip())
+                else:
+                    code._lines.append(line)
+
+            # Add store lines (using recomputed full_kernel_params)
+            # Filter stores to only emit those for outputs that are in kernel params.
+            # This handles cases where an intermediate value was stored but the buffer
+            # was later optimized away (not passed to the kernel).
+            for out_ptr, store_line in self.store_with_output:
+                if out_ptr in full_kernel_params:
+                    code.writeline(store_line)
+
+        # Now emit the kernel function with the correct signature
+        if self.is_tpu:
+            if len(output_params) == 1:
+                propagate_lambda = (
+                    "lambda *args: tpu_torch_compile.placeholder_like(args[-1])"
+                )
+            else:
+                propagate_lambda = (
+                    f"lambda *args: tuple(tpu_torch_compile.placeholder_like(a) "
+                    f"for a in args[-{len(output_params)}:])"
+                )
+            code.writeline(f"@tpu_pallas.custom_kernel(propagate={propagate_lambda})")
+
+            sig_template_refs = [
+                f"template_{p}" for p in output_params
+            ]  # Unused, just for matching
+            # We need to capture all non-output params (including scalars/sizevars)
+            kernel_input_params = [p for p in kernel_params if p not in output_params]
+            full_sig = kernel_input_params + sig_template_refs + output_params
+            kernel_signature = f"def {kernel_name}_kernel({', '.join(full_sig)}):"
+        else:
+            kernel_signature = (
+                f"def {kernel_name}_kernel({', '.join(full_kernel_params)}):"
+            )
+        code.writeline(kernel_signature)
+
+        with code.indent():
+            for line in kernel_body._lines:
+                if isinstance(line, str):
+                    # Remove any existing indentation and re-add with code's indentation
+                    code.writeline(line.lstrip())
+                else:
+                    code._lines.append(line)
+
+            # Add store lines (using recomputed full_kernel_params)
+            # Filter stores to only emit those for outputs that are in kernel params.
+            # This handles cases where an intermediate value was stored but the buffer
+            # was later optimized away (not passed to the kernel).
+            for out_ptr, store_line in self.store_with_output:
+                if out_ptr in full_kernel_params:
+                    code.writeline(store_line)
+
+        code.writeline("")
+
+        if self.is_tpu:
+            main_name = f"{kernel_name}_main"
+            code.writeline(
+                f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
+            )
+            with code.indent():
+                code.writeline("# Enable JAX x64 mode for float64/int64 support")
+                code.writeline("jax.config.update('jax_enable_x64', True)")
+                code.writeline("jax.clear_caches()")
+                code.writeline("if torch_tpu is None:")
+                code.writeline("    raise RuntimeError('torch_tpu not installed')")
+                code.writeline(
+                    f"res = {kernel_name}_kernel({', '.join(kernel_input_params + output_params)})"
+                )
+                if len(output_params) == 1:
+                    code.writeline(f"{output_params[0]}.copy_(res)")
+                else:
+                    for i, out_name in enumerate(output_params):
+                        code.writeline(f"{out_name}.copy_(res[{i}])")
+
+            return code.getvalue()
+
+        jit_wrapper_name = f"{kernel_name}_jit_wrapper"
+        donate_indices = []
+        # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
+        base_offset = 2 + len(size_var_params)
+        for idx, name in enumerate(kernel_input_params):
+            if (name in alias_params) or name.startswith("in_out_ptr"):
+                donate_indices.append(idx + base_offset)
+        if donate_indices:
+            donate_literal = "(" + ", ".join(str(x) for x in donate_indices) + ",)"
+        else:
+            donate_literal = "()"
+        # Size variables are static args (after out_shapes and out_dtypes)
+        static_argnums = list(range(2 + len(size_var_params)))
+        static_argnums_literal = "(" + ", ".join(str(x) for x in static_argnums) + ",)"
+        code.writeline(
+            "@functools.partial("
+            f"jax.jit, static_argnums={static_argnums_literal}, donate_argnums="
+            f"{donate_literal})"
+        )
+        # Include size_var_params in wrapper signature
+        wrapper_params = (
+            ["out_shapes", "out_dtypes"] + size_var_params + kernel_input_params
+        )
+        code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
+        with code.indent():
+            code.writeline("out_shapes_pallas = tuple(")
+            code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("indexer = lambda n: lambda i: [i] * n")
+            code.writeline("out_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+            code.writeline("    for i in [" + ", ".join(kernel_input_params) + "]")
+            code.writeline(")")
+
+            alias_pairs: list[tuple[int, int]] = []
+            for out_idx, name in enumerate(output_params):
+                if name.startswith("out_ptr"):
+                    if aliasable_flags.get(name, False):
+                        alias_name = f"{name}_alias"
+                        input_idx = kernel_input_params.index(alias_name)
+                        alias_pairs.append((input_idx, out_idx))
+                else:
+                    input_idx = kernel_input_params.index(name)
+                    alias_pairs.append((input_idx, out_idx))
+            alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
+
+            # Wrap kernel with functools.partial to pass scalar arguments (size variables)
+            partial_args = []
+            for sv_param in size_var_params:
+                partial_args.append(f"{sv_param}={sv_param}")
+
+            if partial_args:
+                kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
+            else:
+                kernel_arg = f"{kernel_name}_kernel,"
+
+            # Use plgpu.kernel for GPU (Mosaic), pl.pallas_call for CPU/TPU
+            # TMA approach requires: no reductions, all inputs contiguous, same sizes
+            use_tma = (
+                self.is_gpu and self.use_emit_pipeline and self._can_use_tma_approach()
+            )
+            if use_tma:
+                # TMA automatically handles out-of-bounds accesses
+                code.writeline("# Use lax.fori_loop with TMA for automatic OOB masking")
+                code.writeline("from jax import lax")
+                code.writeline("_tile_size = 128  # Warpgroup size")
+                code.writeline("_orig_out_shapes = out_shapes")
 
         code.writeline("_max_numel = 0")
         for param in kernel_input_params:
@@ -3171,13 +3344,7 @@ from torch._inductor.runtime.runtime_utils import (
                 )
                 for idx in ctx.copy_output_indices:
                     out_name = ctx.output_params[idx]
-                    if ctx.is_tpu:
-                        code.writeline(
-                            f"res_cpu = jax.device_get(result_values[{idx}])"
-                        )
-                        code.writeline(f"{out_name}.copy_(torch.from_dlpack(res_cpu))")
-                    else:
-                        code.writeline(
+                    code.writeline(
                             f"{out_name}.copy_(torch.from_dlpack(result_values[{idx}]))"
                         )
 
@@ -3263,3 +3430,61 @@ class PallasScheduling(SIMDScheduling):
         wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
 
         return kernel_name
+
+
+class TPUDeviceOpOverrides(DeviceOpOverrides):
+    def import_get_raw_stream_as(self, name: str) -> str:
+        return f"# import_get_raw_stream_as({name}) not implemented for TPU"
+
+    def set_device(self, device_idx: int) -> str:
+        return f"# torch.tpu.set_device({device_idx}) not implemented"
+
+    def synchronize(self) -> str:
+        return "import torch_tpu; torch_tpu.api.tpu_device()"
+
+    def device_guard(self, device_idx: int) -> str:
+        return f"# device_guard({device_idx}) not implemented"
+
+    def cpp_device_guard(self) -> str:
+        raise NotImplementedError("cpp_device_guard not implemented for TPU")
+
+    def cpp_aoti_device_guard(self) -> str:
+        raise NotImplementedError("cpp_aoti_device_guard not implemented for TPU")
+
+    def cpp_stream_guard(self) -> str:
+        raise NotImplementedError("cpp_stream_guard not implemented for TPU")
+
+    def cpp_aoti_stream_guard(self) -> str:
+        raise NotImplementedError("cpp_aoti_stream_guard not implemented for TPU")
+
+    def cpp_getStreamFromExternal(self) -> str:
+        raise NotImplementedError("cpp_getStreamFromExternal not implemented for TPU")
+
+    def kernel_header(self) -> str:
+        raise NotImplementedError("kernel_header not implemented for TPU")
+
+    def kernel_driver(self) -> str:
+        raise NotImplementedError("kernel_driver not implemented for TPU")
+
+    def cpp_stream_type(self) -> str:
+        raise NotImplementedError("cpp_stream_type not implemented for TPU")
+
+    def aoti_get_stream(self) -> str:
+        raise NotImplementedError("aoti_get_stream not implemented for TPU")
+
+    def cpp_kernel_type(self) -> str:
+        raise NotImplementedError("cpp_kernel_type not implemented for TPU")
+
+    def cpp_device_ptr(self) -> str:
+        raise NotImplementedError("cpp_device_ptr not implemented for TPU")
+
+    def tma_descriptor_helpers(self) -> str:
+        raise NotImplementedError("tma_descriptor_helpers not implemented for TPU")
+
+    def cpp_scratch(
+        self, idx: int, workspace: Any, prefix: Optional[str] = None
+    ) -> Optional[tuple[list[str], str]]:
+        raise NotImplementedError("cpp_scratch not implemented for TPU")
+
+
+register_device_op_overrides("tpu", TPUDeviceOpOverrides())

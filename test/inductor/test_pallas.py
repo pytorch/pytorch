@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import unittest
-from unittest import mock
 
 import torch
 import torch._dynamo
@@ -1555,26 +1554,19 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
+    try:
+        from torch_tpu import api as tpu_api
+    except ImportError:
+        tpu_api = None
 
-    @config.patch({"_debug_cpu_to_tpu_pallas": True})
     class PallasTestsTPU(PallasTestsMixin, TestCase):
-        DEVICE = "cpu"
-
-        @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
-        def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
-            def fn(a, b):
-                return a + b
-
-            with self.assertRaisesRegex(
-                RuntimeError,
-                (
-                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                    "Please make sure that you have a TPU available and that JAX is configured correctly."
-                ),
-            ):
-                torch.compile(
-                    fn, backend="inductor", options={"cpu_backend": "pallas"}
-                )(torch.randn(16), torch.randn(16))
+        @classmethod
+        def setUpClass(cls):
+            super().setUpClass()
+            if tpu_api:
+                cls.DEVICE = tpu_api.tpu_device()
+            else:
+                raise unittest.SkipTest("torch_tpu not installed")
 
     make_pallas(test_torchinductor.SweepInputsTpuTest, _debug_cpu_to_tpu_pallas=True)
 
