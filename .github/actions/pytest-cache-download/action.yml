@@ -18,9 +18,9 @@ runs:
   using: composite
   steps:
     - name: Setup uv
-      uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+      uses: pytorch/test-infra/.github/actions/setup-uv@main
       with:
-        python-version: 3.12
+        python-version: "3.12"
 
     - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
