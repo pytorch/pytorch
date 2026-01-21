@@ -356,18 +356,9 @@ def runtime_unwrap_tensor_subclasses(
     if append_symints:
         assert subclass_metas is not None
 
-    n = 0
     for idx, x in enumerate(wrapped_args):
         if not is_traceable_wrapper_subclass(x):
             xs_inner.append(x)
-            n += 1
-            if subclass_metas and len(subclass_metas) > idx:
-                if isinstance(meta := subclass_metas[idx], SubclassCreationMeta):
-                    # Bug in torchtitan: Compile w/ DTensor but pass
-                    # normal Tensor? In graph_utils.py
-                    # CompileModule.forward() it's converting to DTensor
-                    # when compiling but not when running!
-                    assert meta.arg_count == 1
             continue
 
         if subclass_metas is None:
@@ -376,7 +367,6 @@ def runtime_unwrap_tensor_subclasses(
             meta = subclass_metas[idx]
             assert isinstance(meta, SubclassCreationMeta)
             flatten_subclass(typing.cast(Tensor, x), meta, out=xs_inner)
-            n += meta.arg_count
 
     return xs_inner
 
