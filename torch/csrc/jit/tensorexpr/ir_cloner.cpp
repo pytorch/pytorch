@@ -4,8 +4,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
-#include <c10/util/irange.h>
-
 namespace torch::jit::tensorexpr {
 
 template <

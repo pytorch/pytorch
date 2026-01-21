@@ -8,7 +8,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from copy import deepcopy
 from numbers import Number
-from typing import Any, cast, Concatenate, Optional, TypeVar, Union
+from typing import Any, cast, Concatenate, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -109,6 +109,8 @@ def _dtype_to_typestr(dtype):
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
     _is_param: bool
+    # pyrefly: ignore [missing-attribute]
+    __dlpack_c_exchange_api__: object = torch._C._dlpack_exchange_api()
 
     def _clear_non_serializable_cached_data(self):
         r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
@@ -180,10 +182,10 @@ class Tensor(torch._C.TensorBase):
                 new_storage = self._typed_storage()._deepcopy(memo)
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
-                    quantizer_params: Union[
-                        tuple[torch.qscheme, float, int],
-                        tuple[torch.qscheme, Tensor, Tensor, int],
-                    ]
+                    quantizer_params: (
+                        tuple[torch.qscheme, float, int]
+                        | tuple[torch.qscheme, Tensor, Tensor, int]
+                    )
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = (
                             self.qscheme(),
@@ -350,7 +352,8 @@ class Tensor(torch._C.TensorBase):
             # hypothesis is that no one cares for meta tensors.
             if skip_data:
                 warnings.warn(
-                    "Serializing tensors on the meta device under skip_data context manager is a no-op"
+                    "Serializing tensors on the meta device under skip_data context manager is a no-op",
+                    stacklevel=2,
                 )
             arg_meta = (
                 self.dtype,
@@ -365,9 +368,9 @@ class Tensor(torch._C.TensorBase):
                     "Cannot serialize qtensor under skip_data context manager, file an issue if you need this feature"
                 )
             # quantizer_params can be different type based on torch attribute
-            quantizer_params: Union[
-                tuple[torch.qscheme, float, int], tuple[Any, Tensor, Tensor, int]
-            ]
+            quantizer_params: (
+                tuple[torch.qscheme, float, int] | tuple[Any, Tensor, Tensor, int]
+            )
             if self.qscheme() == torch.per_tensor_affine:
                 quantizer_params = (
                     torch.per_tensor_affine,
@@ -551,6 +554,7 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError("__setstate__ can be only called on leaf Tensors")
         if len(state) == 4:
             # legacy serialization of Tensor
+
             self.set_(*state)
             return
         elif len(state) == 5:
@@ -758,7 +762,7 @@ class Tensor(torch._C.TensorBase):
             )
         if self._post_accumulate_grad_hooks is None:
             self._post_accumulate_grad_hooks: dict[Any, Any] = (
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 OrderedDict()
             )
 
@@ -891,7 +895,7 @@ class Tensor(torch._C.TensorBase):
 
     def norm(
         self,
-        p: Optional[Union[float, str]] = "fro",
+        p: float | str | None = "fro",
         dim=None,
         keepdim=False,
         dtype=None,
@@ -942,15 +946,15 @@ class Tensor(torch._C.TensorBase):
     def stft(
         self,
         n_fft: int,
-        hop_length: Optional[int] = None,
-        win_length: Optional[int] = None,
-        window: "Optional[Tensor]" = None,
+        hop_length: int | None = None,
+        win_length: int | None = None,
+        window: "Tensor | None" = None,
         center: bool = True,
         pad_mode: str = "reflect",
         normalized: bool = False,
-        onesided: Optional[bool] = None,
-        return_complex: Optional[bool] = None,
-        align_to_window: Optional[bool] = None,
+        onesided: bool | None = None,
+        return_complex: bool | None = None,
+        align_to_window: bool | None = None,
     ):
         r"""See :func:`torch.stft`
 
@@ -991,13 +995,13 @@ class Tensor(torch._C.TensorBase):
     def istft(
         self,
         n_fft: int,
-        hop_length: Optional[int] = None,
-        win_length: Optional[int] = None,
-        window: "Optional[Tensor]" = None,
+        hop_length: int | None = None,
+        win_length: int | None = None,
+        window: "Tensor | None" = None,
         center: bool = True,
         normalized: bool = False,
-        onesided: Optional[bool] = None,
-        length: Optional[int] = None,
+        onesided: bool | None = None,
+        length: int | None = None,
         return_complex: bool = False,
     ):
         r"""See :func:`torch.istft`"""
@@ -1032,7 +1036,7 @@ class Tensor(torch._C.TensorBase):
     def resize(self, *sizes):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.resize, (self,), self, *sizes)
-        warnings.warn("non-inplace resize is deprecated")
+        warnings.warn("non-inplace resize is deprecated", stacklevel=2)
         from torch.autograd._functions import Resize
 
         return Resize.apply(self, sizes)
@@ -1040,7 +1044,7 @@ class Tensor(torch._C.TensorBase):
     def resize_as(self, tensor):
         if has_torch_function_variadic(self, tensor):
             return handle_torch_function(Tensor.resize_as, (self, tensor), self, tensor)
-        warnings.warn("non-inplace resize_as is deprecated")
+        warnings.warn("non-inplace resize_as is deprecated", stacklevel=2)
         from torch.autograd._functions import Resize
 
         return Resize.apply(self, tensor.size())
@@ -1062,7 +1066,6 @@ class Tensor(torch._C.TensorBase):
         else:
             return torch._VF.split_with_sizes(
                 self,
-                # pyrefly: ignore  # bad-argument-type
                 split_size,
                 dim,
             )
@@ -1110,7 +1113,6 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        # pyrefly: ignore  # no-matching-overload
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -1120,7 +1122,7 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     __pow__ = cast(
         Callable[
             ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
@@ -1137,7 +1139,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.remainder(other, self)  # pyrefly: ignore  # no-matching-overload
+        return torch.remainder(other, self)
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
@@ -1150,7 +1152,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.pow(other, self)  # pyrefly: ignore  # no-matching-overload
+        return torch.pow(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
@@ -1166,14 +1168,12 @@ class Tensor(torch._C.TensorBase):
     def __rlshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
-        # pyrefly: ignore  # no-matching-overload
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rrshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
-        # pyrefly: ignore  # no-matching-overload
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -1529,9 +1529,7 @@ class Tensor(torch._C.TensorBase):
         """
         return self.to_sparse()
 
-    def dim_order(
-        self, *, ambiguity_check: Union[bool, list[torch.memory_format]] = False
-    ):
+    def dim_order(self, *, ambiguity_check: bool | list[torch.memory_format] = False):
         """
         dim_order(ambiguity_check=False) -> tuple
 
@@ -1571,7 +1569,7 @@ class Tensor(torch._C.TensorBase):
             ... )  # It can be mapped to contiguous format
             (0, 1, 2, 3)
             >>> try:
-            ...     torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL")
+            ...     torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL") # type: ignore[arg-type]
             ... except TypeError as e:
             ...     print(e)
             The ambiguity_check argument must be a bool or a list of memory formats.
@@ -1713,10 +1711,10 @@ class Tensor(torch._C.TensorBase):
     def __dlpack__(
         self,
         *,
-        stream: Optional[Any] = -1,
-        max_version: Optional[tuple[int, int]] = None,
-        dl_device: Optional[tuple[enum.IntEnum, int]] = None,
-        copy: Optional[bool] = None,
+        stream: Any | None = -1,
+        max_version: tuple[int, int] | None = None,
+        dl_device: tuple[enum.IntEnum, int] | None = None,
+        copy: bool | None = None,
     ):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
@@ -1801,9 +1799,12 @@ class Tensor(torch._C.TensorBase):
                     raise BufferError("per-thread default stream is not supported.")
 
                 device_str = "CUDA" if is_cuda else "ROCm"
-                assert (is_cuda and stream != 0) or (
-                    is_rocm and stream not in (1, 2)
-                ), f"unsupported stream on {device_str}: {stream}."
+                if not (
+                    (is_cuda and stream != 0) or (is_rocm and stream not in (1, 2))
+                ):
+                    raise AssertionError(
+                        f"unsupported stream on {device_str}: {stream}."
+                    )
 
                 stream = torch.cuda.ExternalStream(stream)
 
@@ -1814,7 +1815,8 @@ class Tensor(torch._C.TensorBase):
                 event.record(current_stream)
                 stream.wait_event(event)
         elif self.device.type == "cpu":
-            assert stream is None or stream == -1, "stream should be None on cpu."
+            if stream is not None and stream != -1:
+                raise AssertionError("stream should be None on cpu.")
 
         if self.device.type == "xla":
             import torch_xla

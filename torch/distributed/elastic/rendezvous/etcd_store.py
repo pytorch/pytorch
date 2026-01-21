@@ -9,7 +9,6 @@ import datetime
 import random
 import time
 from base64 import b64decode, b64encode
-from typing import Optional
 
 # pyre-ignore[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
@@ -40,7 +39,7 @@ class EtcdStore(Store):
         etcd_client,
         etcd_store_prefix,
         # Default timeout same as in c10d/Store.hpp
-        timeout: Optional[datetime.timedelta] = None,
+        timeout: datetime.timedelta | None = None,
     ):
         super().__init__()  # required for pybind trampoline.
 
@@ -121,7 +120,7 @@ class EtcdStore(Store):
             except etcd.EtcdCompareFailed:
                 cas_delay()
 
-    def wait(self, keys, override_timeout: Optional[datetime.timedelta] = None):
+    def wait(self, keys, override_timeout: datetime.timedelta | None = None):
         """
         Wait until all of the keys are published, or until timeout.
 

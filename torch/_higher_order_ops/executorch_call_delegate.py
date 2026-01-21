@@ -30,6 +30,7 @@ class ExecutorchCallDelegate(HigherOrderOperator):
         super().__init__("executorch_call_delegate")
 
     def __call__(self, lowered_module, *args):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(lowered_module, *args)
 
 

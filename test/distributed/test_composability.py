@@ -499,6 +499,7 @@ class ComposabilityTest(MultiProcContinuousTest):
             [
                 _ComputationType.UNSHARD,
                 _ComputationType.FORWARD,
+                _ComputationType.REDUCE_GRAD,  # Contains final fsdp post_backward
             ],
             microbatch_index=0,
         )

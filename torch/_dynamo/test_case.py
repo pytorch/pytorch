@@ -16,7 +16,8 @@ import os
 import re
 import sys
 import unittest
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.testing
@@ -96,6 +97,7 @@ class TestCase(TorchTestCase):
             print(k, v.most_common())
         reset()
         utils.counters.clear()
+        torch._C._autograd._saved_tensors_hooks_enable()
         super().tearDown()
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
@@ -112,6 +114,21 @@ class TestCase(TorchTestCase):
 
     # assertExpectedInline might also need to be disabled for wrapped nested
     # graph break tests
+
+
+# NB: multiple inheritance with LoggingTestCase is possible - this should be fine
+# since there is no overlap in overridden methods.
+class TestCaseWithNestedGraphBreaks(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.prev_nested_graph_breaks = torch._dynamo.config.nested_graph_breaks
+        # pyrefly: ignore [bad-assignment]
+        torch._dynamo.config.nested_graph_breaks = True
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        # pyrefly: ignore [bad-assignment]
+        torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
 
 
 class CPythonTestCase(TestCase):
@@ -152,10 +169,11 @@ class CPythonTestCase(TestCase):
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
+    # pyrefly: ignore [bad-override]
     assertDictEqual = polyfills.assert_dict_equal
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns
     assertWarnsRegex = unittest.TestCase.assertWarnsRegex
@@ -204,7 +222,7 @@ class CPythonTestCase(TestCase):
         if m:
             test_py_ver = tuple(map(int, m.group().removeprefix(prefix).split("_")))
             py_ver = sys.version_info[:2]
-            if py_ver < test_py_ver:
+            if py_ver != test_py_ver:
                 expected = ".".join(map(str, test_py_ver))
                 got = ".".join(map(str, py_ver))
                 raise unittest.SkipTest(

@@ -60,7 +60,7 @@ struct ConvNdOptions {
   TORCH_ARG(padding_t, padding) = 0;
 
  public:
-  decltype(auto) padding(std::initializer_list<int64_t> il) {
+  auto padding(std::initializer_list<int64_t> il) {
     return padding(IntArrayRef{il});
   }
 
@@ -139,7 +139,7 @@ struct ConvOptions {
   TORCH_ARG(padding_t, padding) = 0;
 
  public:
-  decltype(auto) padding(std::initializer_list<int64_t> il) {
+  auto padding(std::initializer_list<int64_t> il) {
     return padding(IntArrayRef{il});
   }
 
@@ -209,7 +209,7 @@ struct ConvFuncOptions {
   TORCH_ARG(padding_t, padding) = 0;
 
  public:
-  decltype(auto) padding(std::initializer_list<int64_t> il) {
+  auto padding(std::initializer_list<int64_t> il) {
     return padding(IntArrayRef{il});
   }
 

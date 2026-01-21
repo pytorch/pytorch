@@ -56,7 +56,7 @@ static void start_manager() {
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
 
-  TORCH_CHECK(handle.length() != 0, "no response from torch_shm_manager at \"", manager_executable_path, "\"");
+  TORCH_CHECK(!handle.empty(), "no response from torch_shm_manager at \"", manager_executable_path, "\"");
 
   handle.pop_back(); // remove \n
   TORCH_CHECK(

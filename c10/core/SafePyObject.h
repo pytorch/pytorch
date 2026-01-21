@@ -44,7 +44,7 @@ struct C10_API SafePyObject {
       (*other.pyinterpreter_)->incref(other.data_);
     }
     if (data_ != nullptr) {
-      (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
+      (*pyinterpreter_)->decref(data_);
     }
     data_ = other.data_;
     pyinterpreter_ = other.pyinterpreter_;
@@ -53,7 +53,7 @@ struct C10_API SafePyObject {
 
   ~SafePyObject() {
     if (data_ != nullptr) {
-      (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
+      (*pyinterpreter_)->decref(data_);
     }
   }
 

@@ -1,11 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
-#include <ATen/cuda/CachingHostAllocator.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
@@ -19,6 +19,7 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 // TODO(NS): Investigate why FP8 conversion intrinsics end up being slower
 #ifdef AT_USE_NV_CVT_INTRINSICS
@@ -26,6 +27,24 @@
 #endif
 
 namespace at::native {
+
+namespace {
+
+// Initial pool size for CUDA events per device.
+constexpr size_t kInitialEventPoolSize = 8;
+
+at::cuda::CUDAEventPtr getEventFromPool(const at::DeviceIndex device_idx) {
+  static auto* event_pool = []() {
+    auto* pool = new at::cuda::EventPool();
+    // Pre-populate the pool with events to avoid stalls in creating events
+    pool->init_num_events(kInitialEventPoolSize);
+    return pool;
+  }();
+
+  return event_pool->get(device_idx);
+}
+
+} // namespace
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
 void conj_kernel_cuda(TensorIteratorBase &iter);
@@ -216,6 +235,10 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     AT_DISPATCH_BIT_TYPES(dtype, "copy_", [&] {
       gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
+  } else if (dtype == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
+      "Float4_e2m1fn_x2 to different types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
+    gpu_kernel_nocast(iter, [] GPU_LAMBDA(Float4_e2m1fn_x2 x) { return x; });
   } else {
     AT_DISPATCH_V2(
         dtype, "copy_", AT_WRAP([&] {
@@ -263,12 +286,14 @@ void copy_device_to_device(TensorIterator& iter,
     // write-after-read dependencies on the destination side are handled, so
     // that no one is operating on the dst memory when we perform the copy.
     // src waits on dst barrier (src already waits on src)
-    CUDAEvent dst_ready;
+
+    // Use event pool for better performance instead of creating new events
+    auto dst_ready = getEventFromPool(dst_device.index());
     device_guard.set_device(dst_device);
-    dst_ready.record(getCurrentCUDAStream(dst_device.index()));
+    dst_ready->record(getCurrentCUDAStream(dst_device.index()));
 
     device_guard.set_device(src_device);
-    dst_ready.block(copy_stream);
+    dst_ready->block(copy_stream);
   }
 
   if (memcpy_eligible) {
@@ -307,11 +332,11 @@ void copy_device_to_device(TensorIterator& iter,
     // operate on dst's copy until the copy is complete.
 
     // Still on src_device, record stream event
-    CUDAEvent src_ready;
-    src_ready.record(copy_stream);
+    auto src_ready = getEventFromPool(src_device.index());
+    src_ready->record(copy_stream);
 
     device_guard.set_device(dst_device);
-    src_ready.block(getCurrentCUDAStream(dst_device.index()));
+    src_ready->block(getCurrentCUDAStream(dst_device.index()));
   }
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -407,14 +432,26 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   // Copy between CPU and GPU
   cuda::OptionalCUDAGuard device_guard;
   cudaMemcpyKind kind;
+  const Tensor* host_tensor = nullptr;
   if (dst_device.is_cuda() && src_device.is_cpu()) {
     device_guard.set_device(dst_device);
     kind = cudaMemcpyHostToDevice;
+    host_tensor = &iter.tensor(1);
   } else if (dst_device.is_cpu() && src_device.is_cuda()) {
     device_guard.set_device(src_device);
     kind = cudaMemcpyDeviceToHost;
+    host_tensor = &iter.tensor(0);
   } else {
     TORCH_INTERNAL_ASSERT(false, "unsupported devices in GPU copy_()");
+  }
+
+  // Check for unpinned CPU memory during CUDA graph capture
+  if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+    TORCH_CHECK(
+        host_tensor->is_pinned(),
+        "Cannot copy between CPU and CUDA tensors during CUDA graph capture ",
+        "unless the CPU tensor is pinned. Please use tensor.pin_memory() or ",
+        "allocate the tensor with pin_memory=True.");
   }
 
   void* dst = iter.data_ptr(0);

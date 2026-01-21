@@ -1,4 +1,7 @@
-"""CUDA Event abstractions used in Inductor multi-stream scheduling.
+"""CUDA Event abstractions for Inductor stream support.
+
+This module provides event types for synchronizing between CUDA streams when
+nodes have user-annotated stream assignments.
 
 Attributes:
     ENTRANCE_EVENT: Name of the first event on the default CUDA Stream that got recorded before all
@@ -15,8 +18,8 @@ import dataclasses
 import functools
 import itertools
 
-import apex.contrib.torchsched.config as torchsched_config
-from apex.contrib.torchsched.inductor._utils import (
+from torch._inductor import config
+from torch._inductor.stream_utils import (
     DEFAULT_STREAM_IDX,
     ENTRANCE_EVENT,
     EVENT_NAME_TEMPLATE,
@@ -129,7 +132,7 @@ class CudaEventSym:
 class _CudaEventRecordLine(WrapperLine):
     event: CudaEventSym
     stream: str
-    _reuse_cuda_event: bool = torchsched_config.reuse_cuda_event
+    _reuse_cuda_event: bool = dataclasses.field(default_factory=lambda: config.reuse_cuda_event)
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert 0 <= self.event.ref_count
@@ -172,7 +175,7 @@ class CudaEventFactory:
         self.materialized_event_idx: itertools.count = itertools.count(start=1)
         self.available_materialized_events: OrderedSet[str] = OrderedSet()
         self._entrance_event: CudaEventSym | None = None
-        self._reuse_cuda_event: bool = torchsched_config.reuse_cuda_event
+        self._reuse_cuda_event: bool = config.reuse_cuda_event
 
     def get_entrance_event(self) -> CudaEventSym:
         """Return the cuda event that corresponding to compute graph entering."""

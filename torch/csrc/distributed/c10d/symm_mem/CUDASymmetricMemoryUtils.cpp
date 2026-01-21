@@ -1,5 +1,4 @@
 #include <sys/socket.h>
-#include <sys/syscall.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -12,7 +11,6 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -85,7 +83,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // Prepare data to send
   // Data being sent is "fd", the value of fd will be sent as auxiliary data
   // (control message)
-  struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
+  struct iovec io = {.iov_base = (void*)"fd", .iov_len = 2};
 
   // Prepare control message data buffer and zero it out
   // NOLINTNEXTLINE(*array*)
@@ -178,7 +176,7 @@ std::vector<int> IpcChannel::all_gather_fds(
     int rank,
     const std::vector<int>& pids,
     int fd) {
-  int world_size = (int)pids.size();
+  int world_size = static_cast<int>(pids.size());
   std::vector<int> fds(pids.size());
   fds[rank] = fd;
 
@@ -197,7 +195,7 @@ int IpcChannel::broadcast_fds(
     int src_rank,
     const std::vector<int>& pids,
     int fd) {
-  int world_size = (int)pids.size();
+  int world_size = static_cast<int>(pids.size());
 
   if (rank == src_rank) {
     for (int dst_rank = 0; dst_rank < world_size; ++dst_rank) {
