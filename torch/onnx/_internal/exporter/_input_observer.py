@@ -69,9 +69,10 @@ def flatten_unflatten_for_dynamic_shapes(
     return subtrees
 
 
-def infer_dynamic_dimensions(shape_list: tuple[int, ...]) -> list[int]:
+def infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]:
     """
-    Returns the list dynamic dimensions given a list of shapes corresponding to the same tensor.
+    Returns the list dynamic dimensions given a list of shapes
+    corresponding to the same tensor.
 
     Args:
         shape_list:
@@ -94,23 +95,22 @@ def infer_dynamic_dimensions(shape_list: tuple[int, ...]) -> list[int]:
 
 
 class InputObserverInfo:
-    def __init__(self, signature):
-        self.inputs_specs = []
-        self.flat_inputs = []
-        self.n_args = []
-        self.kwargs_keys = []
-        self.outputs_specs = []
-        self.flat_outputs = []
+    def __init__(self, signature: inspect.Signature):
+        # pyrefly: ignore
+        self.inputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
+        self.flat_inputs: list[list[torch.Tensor | None]] = []
+        # pyrefly: ignore
+        self.outputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
+        self.flat_outputs: list[torch.Tensor | list[torch.Tensor]] = []
         self.signature = signature
 
-        self._max_args = None
-        self._max_kwargs = None
-        self._spec = None
+        self._max_args: tuple[Any, torch.Tensor] | None = None
+        self._max_kwargs: dict[str, torch.Tensor] | None = None
 
     def __len__(self) -> int:
         return len(self.flat_inputs)
 
-    def add_inputs(self, args, kwargs):
+    def add_inputs(self, args: tuple[Any, ...], kwargs: dict[str, Any]):
         kwargs = {
             k: v
             for k, v in kwargs.items()
@@ -118,8 +118,6 @@ class InputObserverInfo:
         }
         flat_args, spec = torch.utils._pytree.tree_flatten((args, kwargs))
         self.inputs_specs.append(spec)
-        self.n_args.append(len(args))
-        self.kwargs_keys.append(tuple(kwargs))
         cloned = [(None if t is None else t.clone().detach()) for t in flat_args]
         self.flat_inputs.append(cloned)
 
@@ -129,19 +127,22 @@ class InputObserverInfo:
         if self._max_kwargs is None or len(cloned_kwargs) > len(self._max_kwargs):
             self._max_kwargs = cloned_kwargs
 
-    def add_outputs(self, res):
+    def add_outputs(self, res: torch.Tensor | tuple[torch.Tensor, ...]):
         flat_res, spec = torch.utils._pytree.tree_flatten(res)
         self.outputs_specs.append(spec)
         self.flat_outputs.append([t.clone().detach() for t in flat_res])
 
-    def build_inputs_completed_with_none_values(self):
-        # Let's compute the sizes of each indenpendently.
+    def build_inputs_completed_with_none_values(self) -> list[list[torch.Tensor]]:
+        # Let's compute the sizes of each independently.
+        if not self.flat_inputs or self._max_args is None or self._max_kwargs is None:
+            raise RuntimeError("No inputs were captured.")
         arg_sizes = [len(torch.utils._pytree.tree_flatten(a)[0]) for a in self._max_args]
         kwarg_sizes = {
             k: len(torch.utils._pytree.tree_flatten(v)[0]) for k, v in self._max_kwargs.items()
         }
 
         # Let's reprocess everything.
+        captured_inputs: dict[int | str, int] = {}
         new_flat_inputs = []
         for args_kwargs, spec in zip(self.flat_inputs, self.inputs_specs):
             args, kwargs = torch.utils._pytree.tree_unflatten(args_kwargs, spec)
@@ -153,21 +154,38 @@ class InputObserverInfo:
             flat = []
             for i in range(len(self._max_args)):
                 if i < len(args):
-                    flat.extend(torch.utils._pytree.tree_flatten(args[i])[0])
+                    ts = torch.utils._pytree.tree_flatten(args[i])[0]
+                    if i in captured_inputs and captured_inputs[i] != len(ts):
+                        raise RuntimeError(
+                            f"Positional argument {i} has {len(ts)} tensors "
+                            f"but previously got {captured_inputs[i]} tensors."
+                            f"Inference is impossible in that case."
+                        )
+                    captured_inputs[i] = len(ts)
+                    flat.extend(ts)
                 else:
                     flat.extend([None for _ in range(arg_sizes[i])])
             for k in self._max_kwargs:
                 if k in kwargs:
-                    flat.extend(torch.utils._pytree.tree_flatten(kwargs[k])[0])
+                    ts = torch.utils._pytree.tree_flatten(kwargs[k])[0]
+                    if k in captured_inputs and captured_inputs[k] != len(ts):
+                        raise RuntimeError(
+                            f"Named argument {k!r} has {len(ts)} tensors "
+                            f"but previously got {captured_inputs[k]} tensors."
+                            f"Inference is impossible in that case."
+                        )
+                    captured_inputs[k] = len(ts)
+                    flat.extend(ts)
                 else:
                     flat.extend([None for _ in range(kwarg_sizes[k])])
             new_flat_inputs.append(flat)
         return new_flat_inputs
 
-    def infer_dynamic_shapes(self):
-        if not self.flat_inputs:
-            raise RuntimeError("No inputs were captured.")
+    def infer_dynamic_shapes(self) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
         flat_inputs = self.build_inputs_completed_with_none_values()
+        # This is already checked by build_inputs_completed_with_none_values
+        # but this is not always well captured by tools checking types.
+        assert self._max_args is not None and self._max_kwargs is not None
         if len({len(flat) for flat in flat_inputs}) != 1:
             raise NotImplementedError(
                 "infer_dynamic_shapes is not implemented "
@@ -204,7 +222,8 @@ class InputObserverInfo:
         # nested types, here comes the fun part because the the shapes cannot be unflattened,
         # custom classes must appear in their flattened shape.
         # This does not work in all cases but every time every available argument is flattened
-        # with the same number of tensors. The function does not check if that assumption is true.
+        # with the same number of tensors. The function does not check
+        # if that assumption is true.
         flat_inputs, _max_spec = torch.utils._pytree.tree_flatten(
             (self._max_args, self._max_kwargs)
         )
@@ -224,19 +243,49 @@ class InputObserverInfo:
         if not ds_args:
             return tuple(ds_kwargs)
         pos_names = list(self.signature.parameters)[: len(ds_args)]
-        return {
-            **dict(zip(pos_names, ds_args)),
-            **ds_kwargs,
-        }
+        return {**dict(zip(pos_names, ds_args)), **ds_kwargs}
+
+    def infer_arguments(
+        self, index: int | None = None
+    ) -> tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
+        # This is already checked by build_inputs_completed_with_none_values
+        # but this is not always well captured by tools checking types.
+        assert self._max_args is not None and self._max_kwargs is not None
+        candidate = None
+        if index is None:
+            for i, (args_kwargs, spec) in enumerate(zip(self.flat_inputs, self.inputs_specs)):
+                args, kwargs = torch.utils._pytree.tree_unflatten(args_kwargs, spec)
+                if len(args) == len(self._max_args) and len(kwargs) == len(self._max_kwargs):
+                    index = i
+                    candidate = args, kwargs
+                    break
+        if index is not None:
+            # found one available set.
+            args, kwargs = candidate or torch.utils._pytree.tree_unflatten(
+                self.flat_inputs[index], self.inputs_specs[index]
+            )
+            if not kwargs:
+                return args
+            if not args:
+                return kwargs
+            # We need to more args to kwargs
+            pos_names = list(self.signature.parameters)[: len(args)]
+            return {**dict(zip(pos_names, args)), **kwargs}
+
+        raise NotImplementedError(
+            "We coud not find a good set of inputs/outputs. "
+            "We need to replace none by empty tensors."
+        )
 
 
 class InputObserver:
     def __init__(self, store_n_calls: int = 3):
         self.store_n_calls = store_n_calls
-        self.info = None
+        self.info: InputObserverInfo | None = None
 
     def _forward_captured(self, *args, _captured_forward=None, **kwargs):
-        torch._check(_captured_forward is not None, lambda: "_captured_forward cannot be None")
+        assert _captured_forward is not None, "_captured_forward cannot be None"
+        assert self.info is not None, "info cannot be None"
         n_stored = len(self.info)
         if n_stored < self.store_n_calls:
             self.info.add_inputs(args, kwargs)
@@ -263,8 +312,16 @@ class InputObserver:
         finally:
             model.forward = forward_method
 
-    def infer_dynamic_shapes(self):
+    def _check_captured(self):
+        if self.info is None:
+            raise RuntimeError("No inputs were captured.")
+
+    def infer_dynamic_shapes(self) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
+        self._check_captured()
         return self.info.infer_dynamic_shapes()
 
-    def infer_export_inputs(self):
-        raise NotImplementedError("not implemented yet")
+    def infer_arguments(
+        self, index: int | None = None
+    ) -> tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
+        self._check_captured()
+        return self.info.infer_arguments(index=index)
