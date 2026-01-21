@@ -174,6 +174,11 @@ size_t parseChosenWorkspaceSize() {
   }
 }
 
+size_t getChosenWorkspaceSize() {
+  static size_t pool_size = parseChosenWorkspaceSize();
+  return pool_size;
+}
+
 size_t parseCUDABlasLtWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
@@ -183,7 +188,12 @@ size_t parseCUDABlasLtWorkspaceSize() {
   }
   size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
 #else
+#if !defined(FBCODE)
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#else
+   /* use CUDABlas default workspace size if unified */
+  size_t workspace_size = getChosenWorkspaceSize() / 1024;
+#endif
 #endif
 
   if (val.has_value()) {
@@ -204,11 +214,6 @@ size_t parseCUDABlasLtWorkspaceSize() {
     }
   }
   return workspace_size * 1024;
-}
-
-size_t getChosenWorkspaceSize() {
-  size_t pool_size = parseChosenWorkspaceSize();
-  return pool_size;
 }
 
 #define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
