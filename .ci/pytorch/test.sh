@@ -1322,10 +1322,10 @@ test_libtorch_agnostic_targetting() {
     pip install --upgrade pip
     pip --version
 
-    echo "Installing PyTorch 2.9..."
+    echo "Installing PyTorch 2.8..."
 
     # Install from release channel only
-    PYTORCH_VERSION="2.9.0"
+    PYTORCH_VERSION="2.8.0"
 
     # Extract CUDA version from BUILD_ENVIRONMENT (e.g., "cuda12.1" -> "cu121")
     if [[ "$BUILD_ENVIRONMENT" =~ cuda([0-9]+)\.([0-9]+) ]]; then
@@ -1342,7 +1342,7 @@ test_libtorch_agnostic_targetting() {
     if pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
         echo "Installed PyTorch ${PYTORCH_VERSION} from release channel (${CUDA_VERSION})"
     else
-        echo "  FAILED to install PyTorch 2.9.0 from release channel"
+        echo "  FAILED to install PyTorch 2.8.0 from release channel"
         echo "  URL: https://download.pytorch.org/whl/${CUDA_VERSION}/"
         deactivate
         rm -rf venv_pytorch_2_9

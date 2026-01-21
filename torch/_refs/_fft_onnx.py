@@ -1,4 +1,5 @@
 import math
+
 import torch
 
 
@@ -76,9 +77,10 @@ def _fft_1d_radix2(x, n):
         x = _fft_butterfly_stage(x, stage, n)
     return x
 
+
 def _rfftn_onnx_radix2(input, shape, dim):
     # ---- guards (mandatory) ----
-    if any(not isinstance(n, int) for n in shape):
+    if any(not isinstance(n, (int, torch.SymInt)) for n in shape):
         raise RuntimeError("ONNX rfftn requires static shapes")
 
     for n in shape:

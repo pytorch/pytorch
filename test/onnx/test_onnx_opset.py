@@ -4,7 +4,6 @@ import io
 import itertools
 
 import onnx
-
 import pytorch_test_common
 
 import torch
@@ -652,6 +651,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
     def test_fft_rfftn_static_export(self):
         """Test ONNX export of torch.fft.rfftn with static power-of-2 shapes."""
+
         class M(torch.nn.Module):
             def forward(self, x):
                 # Explicit shape parameter is required for ONNX
@@ -667,6 +667,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
     def test_fft_rfftn_3d(self):
         """Test ONNX export of 3D FFT."""
+
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.fft.rfftn(x, s=(8, 8, 8), dim=(-3, -2, -1))
@@ -680,6 +681,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
     def test_fft_rfftn_with_norm(self):
         """Test ONNX export of FFT with normalization."""
+
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.fft.rfftn(x, s=(8, 8), dim=(-2, -1), norm="ortho")
@@ -693,17 +695,18 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
 
     def test_fft_rfftn_non_power_of_2_fails(self):
         """Test that non-power-of-2 shapes are handled appropriately.
-        
+
         Note: Depending on the export path (torch.export vs torch.jit), the error
         may occur at different stages (symbolic export, decomposition, or inference).
         """
+
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.fft.rfftn(x, s=(7, 7), dim=(-2, -1))
 
         x = torch.randn(1, 7, 7)
         onnx_buffer = io.BytesIO()
-        
+
         # Try to export - error may be raised or may succeed depending on path
         try:
             torch.onnx.export(M(), x, onnx_buffer, opset_version=18)
@@ -714,7 +717,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
             error_msg = str(e).lower()
             self.assertTrue(
                 "power" in error_msg or "size" in error_msg,
-                f"Expected error about power-of-2 or size, got: {e}"
+                f"Expected error about power-of-2 or size, got: {e}",
             )
 
 

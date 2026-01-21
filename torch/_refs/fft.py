@@ -8,8 +8,8 @@ import torch._prims_common as utils
 from torch._decomp import register_decomposition
 from torch._prims_common import DimsType, ShapeType, TensorLikeType
 from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
-from torch.onnx import is_in_onnx_export
 from torch._refs._fft_onnx import _rfftn_onnx_radix2
+from torch.onnx import is_in_onnx_export
 
 
 __all__ = [
@@ -408,7 +408,7 @@ def rfftn(
     if is_in_onnx_export():
         # Explicit validation for ONNX export constraints
         for n in shape:
-            if not isinstance(n, int):
+            if not isinstance(n, (int, torch.SymInt)):
                 raise RuntimeError(
                     "ONNX fft_rfftn requires static shapes. "
                     "Please use torch.fft.rfftn(x, s=(static_size, ...), dim=...)"
@@ -423,7 +423,6 @@ def rfftn(
     else:
         out = prims.fft_r2c(input, dim=dim, onesided=True)
     return _apply_norm(out, norm=norm, signal_numel=_prod(shape), forward=True)
-
 
 
 @register_decomposition(aten.fft_ihfftn)

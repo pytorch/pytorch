@@ -267,26 +267,28 @@ def fft_rfftn(g: jit_utils.GraphContext, input, s, dim, norm):
         # Try multiple ways to get input tensor sizes
         # First try without allowing non-static sizes
         input_sizes = symbolic_helper._get_tensor_sizes(input, allow_nonstatic=False)
-        
+
         if input_sizes is None:
             # Try with allowing non-static sizes (this may include None values for dynamic dims)
             input_sizes = symbolic_helper._get_tensor_sizes(input, allow_nonstatic=True)
-        
+
         if input_sizes is None or dim is None:
             raise RuntimeError(
-                f"ONNX export of fft_rfftn with shape=None is not supported without static shape information. "
-                f"Please modify your model to pass explicit 's' parameter to torch.fft.rfftn() "
-                f"or export with torch.export instead of torch.onnx.export."
+                "ONNX export of fft_rfftn with shape=None is not supported without static shape information. "
+                "Please modify your model to pass explicit 's' parameter to torch.fft.rfftn() "
+                "or export with torch.export instead of torch.onnx.export."
             )
-        
+
         # Extract sizes for the specified dimensions
         s_list = []
         for d in dim:
             # Normalize negative index
             actual_dim = d if d >= 0 else len(input_sizes) + d
             if actual_dim < 0 or actual_dim >= len(input_sizes):
-                raise RuntimeError(f"Invalid dimension {d} for input with rank {len(input_sizes)}")
-            
+                raise RuntimeError(
+                    f"Invalid dimension {d} for input with rank {len(input_sizes)}"
+                )
+
             size_val = input_sizes[actual_dim]
             if size_val is None:
                 # Dynamic dimension - use a marker that we'll handle
@@ -299,14 +301,14 @@ def fft_rfftn(g: jit_utils.GraphContext, input, s, dim, norm):
                 )
             s_list.append(size_val)
         s = s_list
-    
+
     # Validate that all FFT dimensions are static (already checked above, but be explicit)
     if any(size is None for size in s):
         raise RuntimeError(
             "ONNX fft_rfftn requires static sizes for all FFT dimensions. "
             "Cannot export FFT with dynamic spatial dimensions."
         )
-    
+
     # Validate power-of-2 constraint for ONNX FFT (radix-2 decomposition)
     for i, size in enumerate(s):
         if size <= 0:
@@ -320,7 +322,7 @@ def fft_rfftn(g: jit_utils.GraphContext, input, s, dim, norm):
                 f"Got size {size} for FFT dimension {i}. "
                 f"Supported sizes: 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, ..."
             )
-    
+
     # Rely on decomposition only - do not call Python functions in symbolic code
     # The decomposition will be applied by the torch.export system
     return g.op("Identity", input)
