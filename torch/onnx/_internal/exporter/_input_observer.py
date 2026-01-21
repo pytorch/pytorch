@@ -91,7 +91,7 @@ def infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]
     unique_ranks = {len(shape) for shape in shape_list}
     torch._check(
         len(unique_ranks) == 1,
-        lambda: "all shapes in shape_list must have the the same rank",
+        lambda: "all shapes in shape_list must have the same rank",
     )
     rank = unique_ranks.pop()
     dynamic = []
