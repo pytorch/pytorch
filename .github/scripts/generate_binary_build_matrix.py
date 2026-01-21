@@ -72,7 +72,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cuda-nvrtc-cu12==12.8.93; platform_system == 'Linux' | "
         "nvidia-cuda-runtime-cu12==12.8.90; platform_system == 'Linux' | "
         "nvidia-cuda-cupti-cu12==12.8.90; platform_system == 'Linux' | "
-        "nvidia-cudnn-cu12==9.10.2.21; platform_system == 'Linux' | "
+        "nvidia-cudnn-cu12==9.15.1.9; platform_system == 'Linux' | "
         "nvidia-cublas-cu12==12.8.4.1; platform_system == 'Linux' | "
         "nvidia-cufft-cu12==11.3.3.83; platform_system == 'Linux' | "
         "nvidia-curand-cu12==10.3.9.90; platform_system == 'Linux' | "
