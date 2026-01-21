@@ -108,7 +108,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 "bucket non all_gather/reduce_scatter node is not supported"
             )
 
-        logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")
+        logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
 
         # Identify the new wait and start
         new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
