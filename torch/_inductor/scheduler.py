@@ -6691,7 +6691,7 @@ class Scheduler:
         self.flush()
 
     def benchmark_combo_kernel(
-        self, node_list: Sequence[BaseSchedulerNode]
+        self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results
     ) -> tuple[float, float, list[Optional[str]]]:
         """
         Benchmark fused list of nodes and return the execution time
@@ -6702,7 +6702,7 @@ class Scheduler:
         self.current_device = device
         assert device is not None
         backend = self.get_backend(device)
-        return backend.benchmark_combo_kernel(node_list)
+        return backend.benchmark_combo_kernel(node_list, node_benchmark_results)
 
     def speedup_by_combo_kernel(self, nodes: list[BaseSchedulerNode]) -> bool:
         """
@@ -6723,6 +6723,7 @@ class Scheduler:
         from triton.compiler.errors import CompilationError
 
         ms1, path1_list = 0.0, []
+        node_benchmark_results = {}
         for i, snode in enumerate(subkernel_nodes):
             node_list = snode.get_nodes()
             # We can not accurately benchmark kernel using atomic_add
@@ -6734,6 +6735,7 @@ class Scheduler:
 
             try:
                 ms, path = self.benchmark_fused_nodes(node_list)
+                node_benchmark_results[snode] = (ms, path)
                 if math.isinf(ms):
                     fusion_log.debug(
                         "ComboKernel benchmark: register spilling of %d-th subkernel",
@@ -6753,7 +6755,9 @@ class Scheduler:
             path1_list.append(path)
 
         try:
-            ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
+            ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(
+                subkernel_nodes, node_benchmark_results
+            )
         except CompilationError as e:
             # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
             if "Loop-carried variable" in str(e):
@@ -6944,7 +6948,7 @@ class BaseScheduling:  # noqa: docstring_linter
         return 0
 
     def benchmark_combo_kernel(
-        self, node_list: Sequence[BaseSchedulerNode]
+        self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results
     ) -> tuple[float, float, list[Optional[str]]]:
         """
         Benchmark the list of nodes to combine and return the execution time
