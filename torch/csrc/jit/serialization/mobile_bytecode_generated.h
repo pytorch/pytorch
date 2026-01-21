@@ -602,7 +602,7 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool requires_grad() const {
     return GetField<uint8_t>(VT_REQUIRES_GRAD, 0) != 0;
   }
-  bool mutate_requires_grad(bool _requires_grad = 0) {
+  bool mutate_requires_grad(bool _requires_grad = false) {
     return SetField<uint8_t>(VT_REQUIRES_GRAD, static_cast<uint8_t>(_requires_grad), 0);
   }
   const torch::jit::mobile::serialization::QuantizedSchema *quantized_schema() const {

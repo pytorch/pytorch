@@ -2,7 +2,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Union
 
 import torch
 from torch._ops import OpOverload
@@ -21,7 +20,7 @@ from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 __all__ = ["register_sharding"]
 
 
-def register_sharding(op: Union[OpOverload, list[OpOverload]]):
+def register_sharding(op: OpOverload | list[OpOverload]):
     """
     :meth:`register_sharding` is an experimental API that allows users to register sharding
     strategies for an operator when the tensor inputs and outputs are DTensor.

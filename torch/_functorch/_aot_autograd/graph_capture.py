@@ -4,6 +4,7 @@ This module dispatches the graphs to either the forward-only or joint compilatio
 pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
 """
 
+import contextlib
 import dataclasses
 from typing import Any, Optional
 
@@ -32,6 +33,13 @@ from .graph_capture_wrappers import (
     handle_effect_tokens_fn,
 )
 from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
+from .streams import (
+    assign_backward_streams,
+    assign_epilogue_copy_streams,
+    insert_backward_syncs,
+    populate_fw_metadata_with_stream_indices,
+    sync_deallocations,
+)
 from .utils import (
     call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
@@ -70,20 +78,26 @@ def _create_graph(
             out, out_descs = call_and_expect_output_descs(f, args)
             return out
 
-    with (
-        enable_python_dispatcher(),
-        FunctionalTensorMode(
+    if aot_config.disable_functionalization:
+        ctx = contextlib.nullcontext()
+    else:
+        ctx = FunctionalTensorMode(  # type: ignore[assignment]
             pre_dispatch=aot_config.pre_dispatch,
             export=aot_config.is_export,
             # Allow token discovery for joint fn tracing as tokens can be used in backward.
             _allow_token_discovery=True,
-        ),
+        )
+
+    with (
+        enable_python_dispatcher(),
+        ctx,
     ):
         fx_g = make_fx(
             inner_f,
             decomposition_table=aot_config.decompositions,
             record_module_stack=True,
             pre_dispatch=aot_config.pre_dispatch,
+            _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
         )(*args)
 
         if args_descs is not None:
@@ -162,14 +176,22 @@ def aot_dispatch_base_graph(
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
 
-    fn_to_trace, updated_flat_args, updated_flat_args_descs = create_functionalized_fn(
-        fn_to_trace,
-        flat_args,
-        flat_args_descs,
-        meta=fw_metadata,
-        aot_config=aot_config,
-        trace_joint=False,
-    )
+    if aot_config.disable_functionalization:
+        updated_flat_args, updated_flat_args_descs = (
+            flat_args,
+            flat_args_descs,
+        )
+    else:
+        fn_to_trace, updated_flat_args, updated_flat_args_descs = (
+            create_functionalized_fn(
+                fn_to_trace,
+                flat_args,
+                flat_args_descs,
+                meta=fw_metadata,
+                aot_config=aot_config,
+                trace_joint=False,
+            )
+        )
 
     # TODO: replace with AOTDispatchSubclassWrapper once we refactor
     # fn_input_mutations_to_outputs and create_functionalized_fn
@@ -188,17 +210,18 @@ def aot_dispatch_base_graph(
         fw_only=flat_fn,
     )
 
-    (
-        fn_to_trace,
-        updated_flat_args_subclasses_desugared,
-        updated_flat_args_subclasses_desugared_descs,
-    ) = handle_effect_tokens_fn(
-        fn_to_trace,
-        updated_flat_args_subclasses_desugared,
-        updated_flat_args_subclasses_desugared_descs,
-        meta=fw_metadata,
-        trace_joint=False,
-    )
+    if not aot_config.disable_functionalization:
+        (
+            fn_to_trace,
+            updated_flat_args_subclasses_desugared,
+            updated_flat_args_subclasses_desugared_descs,
+        ) = handle_effect_tokens_fn(
+            fn_to_trace,
+            updated_flat_args_subclasses_desugared,
+            updated_flat_args_subclasses_desugared_descs,
+            meta=fw_metadata,
+            trace_joint=False,
+        )
 
     aot_graphs_log.debug(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
@@ -265,12 +288,18 @@ def aot_dispatch_base_graph(
 
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
-    copy_count = assert_functional_graph(fw_module.graph)
-    fw_module.graph.eliminate_dead_code()
-    fw_module.recompile()
-
-    copy_count2 = assert_functional_graph(fw_module.graph)
-    propagate_input_mutation_stacktraces(fw_module.graph)
+    if not aot_config.disable_functionalization:
+        copy_count = assert_functional_graph(fw_module.graph)
+        assign_epilogue_copy_streams(fw_module)
+        # Populate fw_metadata with stream indices from the compiled graph
+        populate_fw_metadata_with_stream_indices(fw_module, fw_metadata)
+        fw_module.graph.eliminate_dead_code()
+        fw_module.recompile()
+        copy_count2 = assert_functional_graph(fw_module.graph)
+        propagate_input_mutation_stacktraces(fw_module.graph)
+        assert copy_count == copy_count2
+    else:
+        fw_module.graph.eliminate_dead_code()
 
     # See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
@@ -283,8 +312,6 @@ def aot_dispatch_base_graph(
             saved_updated_flat_args_subclasses_desugared_descs[num_tokens:]
         )
 
-    assert copy_count == copy_count2
-
     if aot_config.enable_log:
         aot_graphs_log.info(
             "%s",
@@ -295,6 +322,9 @@ def aot_dispatch_base_graph(
                 include_stride=True,
                 include_device=True,
                 colored=True,
+                # For more expanded output set this to True (but can't default
+                # to this because it affects tests):
+                expanded_def=False,
             ),
         )
 
@@ -369,23 +399,30 @@ def aot_dispatch_autograd_graph(
         flat_fn,
         flat_args_descs,
         fw_metadata,
+        aot_config,
     )
     joint_fn_to_trace = create_joint(
         fn_prepared_for_autograd, flat_args_descs, aot_config=aot_config
     )
     joint_fn_handle = joint_fn_to_trace.handle
 
-    joint_fn_to_trace, updated_joint_inputs, updated_joint_inputs_descs = (
-        create_functionalized_fn(
-            joint_fn_to_trace,
+    if aot_config.disable_functionalization:
+        updated_joint_inputs, updated_joint_inputs_descs = (
             joint_inputs,
             joint_inputs_descs,
-            meta=fw_metadata,
-            aot_config=aot_config,
-            trace_joint=True,
-            joint_fn_handle=joint_fn_handle,
         )
-    )
+    else:
+        joint_fn_to_trace, updated_joint_inputs, updated_joint_inputs_descs = (
+            create_functionalized_fn(
+                joint_fn_to_trace,
+                joint_inputs,
+                joint_inputs_descs,
+                meta=fw_metadata,
+                aot_config=aot_config,
+                trace_joint=True,
+                joint_fn_handle=joint_fn_handle,
+            )
+        )
 
     # TODO: replace with AOTDispatchSubclassWrapper once we refactor
     # fn_input_mutations_to_outputs and create_functionalized_fn
@@ -403,15 +440,16 @@ def aot_dispatch_autograd_graph(
     updated_joint_inputs = subclass_tracing_info.plain_tensor_args
     updated_joint_inputs_descs = subclass_tracing_info.plain_tensor_args_descs
 
-    (joint_fn_to_trace, updated_joint_inputs, updated_joint_inputs_descs) = (
-        handle_effect_tokens_fn(
-            joint_fn_to_trace,
-            updated_joint_inputs,
-            updated_joint_inputs_descs,
-            meta=fw_metadata,
-            trace_joint=True,
+    if not aot_config.disable_functionalization:
+        (joint_fn_to_trace, updated_joint_inputs, updated_joint_inputs_descs) = (
+            handle_effect_tokens_fn(
+                joint_fn_to_trace,
+                updated_joint_inputs,
+                updated_joint_inputs_descs,
+                meta=fw_metadata,
+                trace_joint=True,
+            )
         )
-    )
 
     # When we call _create_graph, this may mutate the metadata of joint
     # inputs.  But callers are expecting to get the original joint inputs.  So
@@ -440,15 +478,36 @@ def aot_dispatch_autograd_graph(
         aot_config=aot_config,
     )
 
-    # There should be *NO* mutating ops in the graph at this point.
-    assert_functional_graph(fx_g.graph)
-
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
-    fx_g.graph.eliminate_dead_code()
+
+    # Have to copy before eliminate_dead_code otherwise the
+    # fw node match might be erased
     copy_fwd_metadata_to_bw_nodes(fx_g)
+
+    # After copying metadata, assign streams to gradient accumulation nodes
+    assign_backward_streams(fx_g)
+
+    assign_epilogue_copy_streams(fx_g)
+
+    # Insert syncs for newly assigned backward streams
+    insert_backward_syncs(fx_g)
+
+    # Sync deallocations for tensors where the stream w/ their last usage
+    # is distinct from their allocation stream
+    sync_deallocations(fx_g)
+
+    # Populate fw_metadata with stream indices from the compiled graph
+    # NB: This needs to be done after the above stream assignments
+    populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
+
+    fx_g.graph.eliminate_dead_code()
+    if not aot_config.disable_functionalization:
+        # There should be *NO* mutating ops in the graph at this point.
+        assert_functional_graph(fx_g.graph)
+
     fx_g.recompile()
 
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect

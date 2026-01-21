@@ -28,6 +28,15 @@ endif()
 # Find CUDA.
 find_package(CUDA)
 if(NOT CUDA_FOUND)
+  # If user explicitly set USE_CUDA=1, error out instead of falling back
+  if(_USE_CUDA_EXPLICITLY_SET AND USE_CUDA)
+    message(FATAL_ERROR
+      "PyTorch: CUDA was explicitly requested (USE_CUDA=1) but cannot be found. "
+      "Please check your CUDA installation, ensure CUDA toolkit is installed, "
+      "and that CUDA_HOME or CMAKE_CUDA_COMPILER is set correctly. "
+      "If you want to build without CUDA, please set USE_CUDA=0.")
+  endif()
+
   message(WARNING
     "PyTorch: CUDA cannot be found. Depending on whether you are building "
     "PyTorch or a PyTorch dependent library, the next warning / error will "
@@ -132,7 +141,7 @@ set(CUDA_NVRTC_LIB "${CUDA_nvrtc_LIBRARY}" CACHE FILEPATH "")
 if(CUDA_NVRTC_LIB AND NOT CUDA_NVRTC_SHORTHASH)
   find_package(Python COMPONENTS Interpreter)
   execute_process(
-    COMMAND Python::Interpreter -c
+    COMMAND "${Python_EXECUTABLE}" -c
     "import hashlib;hash=hashlib.sha256();hash.update(open('${CUDA_NVRTC_LIB}','rb').read());print(hash.hexdigest()[:8])"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE CUDA_NVRTC_SHORTHASH)

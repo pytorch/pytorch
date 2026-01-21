@@ -5,7 +5,7 @@ import json
 import sys
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 
 _FILE = Path(__file__).absolute()
@@ -18,7 +18,7 @@ else:
     import _linter
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
 
 GRANDFATHER_LIST = _FILE.parent / "docstring_linter-grandfather.json"
@@ -155,7 +155,7 @@ class DocstringLinter(_linter.FileLinter):
     def _is_bad_block(self, b: _linter.Block, pf: _linter.PythonFile) -> bool:
         max_lines = self._max_lines[b.category]
         return (
-            not (b.is_override or pf.omitted(pf.tokens, b.begin, b.dedent))
+            not (b.is_override or pf.omitted(pf.tokens, b.begin, b.end + 1))
             and b.line_count > max_lines
             and len(b.docstring) < self.args.min_docstring
             and (self.args.lint_local or not b.is_local)

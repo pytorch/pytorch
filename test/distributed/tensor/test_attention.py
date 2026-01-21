@@ -1,10 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import functools
 import itertools
 import random
 import unittest
-from typing import Callable, ClassVar, Optional, Union
+import unittest.mock
+from collections.abc import Callable
+from typing import Any, ClassVar, Optional
 
 import torch
 import torch.distributed as dist
@@ -12,7 +13,7 @@ import torch.distributed.distributed_c10d as c10d
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DeviceMesh
+from torch.distributed.tensor import DeviceMesh, DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
     _CausalBehavior,
@@ -21,17 +22,22 @@ from torch.distributed.tensor.experimental._attention import (
     _cp_options,
     _disable_context_parallel_dispatcher,
     _enable_context_parallel_dispatcher,
+    _HeadTailLoadBalancer,
     _is_causal_behavior,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
+    _PTRRLoadBalancer,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
 )
-from torch.distributed.tensor.experimental._cp_custom_ops import flex_cp_allgather
-from torch.distributed.tensor.experimental._load_balancer import (
-    _HeadTailLoadBalancer,
-    _LoadBalancer,
-    _PerDocumentHeadTailLoadBalancer,
+from torch.distributed.tensor.experimental._context_parallel._cp_custom_ops import (
+    flex_cp_allgather,
+)
+from torch.distributed.tensor.experimental._context_parallel._sharding_rules import (
+    register_cp_sharding_rules,
+    unregister_cp_sharding_rules,
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -39,6 +45,7 @@ from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     AuxOutput,
     AuxRequest,
+    BlockMask,
     create_block_mask,
     flex_attention,
 )
@@ -51,7 +58,9 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     with_comms,
 )
 
@@ -157,7 +166,7 @@ class RingAttentionTest(DTensorTestBase):
             # parameters because when require_grad is True, resize_ is not
             # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
             # now. So we can just use context_parallel() to shard q, k, v.
-            # In reality, context_paralle() should be used to shard the input.
+            # In reality, context_parallel() should be used to shard the input.
             # In reality, context_parallel() should only be used to shard
             # the model inputs (batch).
 
@@ -391,9 +400,7 @@ def generate_random_lengths_in_chunks(
     return [num_chunks * chunk_size for num_chunks in num_chunks_per_document]
 
 
-def length_to_offsets(
-    lengths: list[list[int]], device: Union[str, torch.device]
-) -> Tensor:
+def length_to_offsets(lengths: list[list[int]], device: str | torch.device) -> Tensor:
     """Converts a list of lengths to a list of offsets.
 
     Args:
@@ -475,8 +482,9 @@ class CPFlexAttentionTest(DTensorTestBase):
         *,
         qkv_size: int,
         B: int = 1,
-        mask_func: _mask_mod_signature = causal_mask,
-        lb: Optional[_LoadBalancer] = None,
+        block_mask,
+        lb_type: str,
+        document_lengths: Optional[list[list[int]]] = None,
     ) -> None:
         torch.use_deterministic_algorithms(True)
         torch.cuda.manual_seed(1234)
@@ -486,6 +494,14 @@ class CPFlexAttentionTest(DTensorTestBase):
         dim = 32
         nheads = 8
         seq_dim = 2
+        lb = self._get_load_balancer(
+            lb_type,
+            {
+                "seq_length": qkv_size,
+                "document_lengths": document_lengths,
+                "block_mask": block_mask,
+            },
+        )
 
         qkv = [
             torch.rand(
@@ -496,15 +512,6 @@ class CPFlexAttentionTest(DTensorTestBase):
             )
             for _ in range(3)
         ]
-
-        block_mask = compiled_create_block_mask(
-            mask_func,
-            B=B,
-            H=1,
-            Q_LEN=qkv_size,
-            KV_LEN=qkv_size,
-            device=self.device_type,
-        )
 
         expect_out, expect_aux = compiled_flex_attention(
             *qkv, block_mask=block_mask, return_aux=AuxRequest(lse=True)
@@ -547,6 +554,8 @@ class CPFlexAttentionTest(DTensorTestBase):
         # backward run
         cp_out.sum().backward()
 
+        atol = 2e-06
+        rtol = 1e-05
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(
             device_mesh,
@@ -554,8 +563,8 @@ class CPFlexAttentionTest(DTensorTestBase):
             seq_dims=[seq_dim] * 2,
             load_balancer=lb,
         )
-        torch.testing.assert_close(cp_out, expect_out)
-        torch.testing.assert_close(cp_lse, expect_aux.lse)
+        torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
 
         # unshard the gradient
         cp_qkv_grad = context_parallel_unshard(
@@ -567,7 +576,38 @@ class CPFlexAttentionTest(DTensorTestBase):
 
         qkv_grad = [t.grad for t in qkv]
         for grad, cp_grad in zip(qkv_grad, cp_qkv_grad):
-            torch.testing.assert_close(grad, cp_grad)
+            torch.testing.assert_close(grad, cp_grad, atol=atol, rtol=rtol)
+
+    def _get_load_balancer(
+        self, lb_type: str, kwargs: dict[str, Any]
+    ) -> Optional[_LoadBalancer]:
+        seq_length = kwargs["seq_length"]
+        document_lengths = kwargs["document_lengths"]
+        block_mask = kwargs["block_mask"]
+
+        # generate load balancer
+        if lb_type == "None":
+            load_balancer = None  # no load-balance
+        elif lb_type == "_HeadTailLoadBalancer":
+            assert isinstance(seq_length, int)
+            load_balancer = _HeadTailLoadBalancer(
+                seq_length, self.world_size, torch.device(self.device_type)
+            )
+        elif lb_type == "_PerDocumentHeadTailLoadBalancer":
+            assert isinstance(document_lengths, list)
+            load_balancer = _PerDocumentHeadTailLoadBalancer(
+                document_lengths, self.world_size, torch.device(self.device_type)
+            )
+        elif lb_type == "_PTRRLoadBalancer":
+            assert isinstance(block_mask, BlockMask)
+            load_balancer = _PTRRLoadBalancer(
+                block_mask,
+                self.world_size,
+            )
+        else:
+            raise ValueError(f"load_balancer type {lb_type} is not supported!")
+
+        return load_balancer
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -575,33 +615,65 @@ class CPFlexAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
     def test_cp_flex_attention_causal_mask(self) -> None:
-        restore_enable_load_balance = _cp_options.enable_load_balance
+        seq_length_list = [256 * self.world_size, 2048]
+        load_balance_type_list = [
+            "None",
+            "_HeadTailLoadBalancer",
+            "_PTRRLoadBalancer",
+        ]
 
-        for enable_load_balance in [
-            False,  # test w/o load-balancing
-            True,  # test w/ the default load-balancing
-        ]:
-            _cp_options.enable_load_balance = enable_load_balance
-            self.run_subtests(
-                {
-                    "qkv_size": [
-                        (256 if enable_load_balance else 128) * self.world_size,
-                        2048,
-                    ],
-                },
-                self._test_cp_flex_attention,
+        # NOTE: Each (seq_len, load_balance_type) tuple introduces 2
+        # create_block_mask compilations: 1 for single-rank flex_attention and 1 for
+        # CP flex_attention. In order to avoid the "exceeds_recompile_limit" error,
+        # we need to increase the cache_size_limit to 2 * num_of_sub_test_runs which
+        # will be the total number of compilations in our test case.
+        torch._dynamo.config.cache_size_limit = (len(seq_length_list) + 1) * (
+            1 + len(load_balance_type_list)
+        )
+
+        for qkv_size, lb_type in itertools.product(
+            seq_length_list, load_balance_type_list
+        ):
+            block_mask = compiled_create_block_mask(
+                causal_mask,
+                B=1,
+                H=1,
+                Q_LEN=qkv_size,
+                KV_LEN=qkv_size,
+                device=self.device_type,
             )
-
-        _cp_options.enable_load_balance = restore_enable_load_balance
+            self._test_cp_flex_attention(
+                qkv_size=qkv_size, block_mask=block_mask, lb_type=lb_type
+            )
 
         # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
-        with self.assertRaisesRegex(
-            NotImplementedError, "Q_LEN 128 is not divisible by CP mesh world size"
-        ):
-            self.run_subtests(
-                {"qkv_size": [64 * self.world_size]},
-                self._test_cp_flex_attention,
-            )
+        qkv_size = 64 * self.world_size
+        block_mask = compiled_create_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
+            device=self.device_type,
+        )
+
+        for lb_type in ["None", "_HeadTailLoadBalancer"]:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                f"Q_LEN {qkv_size} is not divisible",
+            ):
+                self._test_cp_flex_attention(
+                    qkv_size=qkv_size, block_mask=block_mask, lb_type=lb_type
+                )
+
+        for lb_type in ["_PTRRLoadBalancer"]:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "must be divisible by group_size",
+            ):
+                self._test_cp_flex_attention(
+                    qkv_size=qkv_size, block_mask=block_mask, lb_type=lb_type
+                )
 
     # TODO: merge with the above test
     @skip_if_lt_x_gpu(2)
@@ -610,76 +682,70 @@ class CPFlexAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
     def test_cp_flex_attention_document_mask(self) -> None:
-        restore_enable_load_balance = _cp_options.enable_load_balance
-
         random.seed(10)
 
         # parameters for testing
         doc_count = 28
-        enable_load_balance_list = [True, False]
         batch_size_list = [2, 4, 8]
         max_seq_len_list = [
             256 * self.world_size,
             2048,
             # 128 * self.world_size  # NOTE: Mismatched elements: 8 / 131072 (0.0%),
         ]
+        load_balance_type = [
+            "None",
+            "_HeadTailLoadBalancer",
+            "_PerDocumentHeadTailLoadBalancer",
+            "_PTRRLoadBalancer",
+        ]
 
-        # NOTE: Each (enable_load_balance, batch_size, seq_len) tuple introduces 2
+        # NOTE: Each (batch_size, seq_len, load_balance_type) tuple introduces 2
         # create_block_mask compilations: 1 for single-rank flex_attention and 1 for
         # CP flex_attention. In order to avoid the "exceeds_recompile_limit" error,
-        # we need to increase the cache_size_limit to 12 which is the total number
-        # of compilations in our test case.
+        # we need to increase the cache_size_limit to 2 * num_of_sub_test_runs which
+        # will be the total number of compilations in our test case.
         torch._dynamo.config.cache_size_limit = (
-            2
-            * len(enable_load_balance_list)
-            * len(batch_size_list)
-            * len(max_seq_len_list)
+            2 * len(batch_size_list) * len(max_seq_len_list) * len(load_balance_type)
         )
 
         # TODO: change this for-loop to run_subtests
-        # Use a for-loop instead of run_subtests because we need to intialize the mask
+        # Use a for-loop instead of run_subtests because we need to initialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
-        for enable_load_balance, batch_size, max_seq_len in itertools.product(
-            enable_load_balance_list, batch_size_list, max_seq_len_list
+        for batch_size, max_seq_len, lb_type in itertools.product(
+            batch_size_list,
+            max_seq_len_list,
+            load_balance_type,
         ):
-            _cp_options.enable_load_balance = enable_load_balance
-
             # initialize document mask
             lengths = [
                 (
                     generate_random_lengths_in_chunks(
                         max_seq_len, doc_count, chunk_size=2 * self.world_size
                     )
-                    if enable_load_balance
+                    if lb_type == "_PerDocumentHeadTailLoadBalancer"
                     else generate_random_lengths(max_seq_len, doc_count)
                 )
                 for _ in range(batch_size)
             ]
             offsets = length_to_offsets(lengths, self.device_type)
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
-
-            # generate load balancer
-            load_balancer = (
-                _PerDocumentHeadTailLoadBalancer(
-                    lengths, self.world_size, torch.device(self.device_type)
-                )
-                if enable_load_balance
-                else None
+            block_mask = compiled_create_block_mask(
+                document_causal_mask,
+                B=batch_size,
+                H=1,
+                Q_LEN=max_seq_len,
+                KV_LEN=max_seq_len,
+                device=self.device_type,
             )
 
-            # construct testing function
-            test_func = functools.partial(
-                self._test_cp_flex_attention,
+            self._test_cp_flex_attention(
                 qkv_size=max_seq_len,
                 B=batch_size,
-                lb=load_balancer,
-                mask_func=document_causal_mask,
+                lb_type=lb_type,
+                block_mask=block_mask,
+                document_lengths=lengths,
             )
-
-            test_func()
-
-        _cp_options.enable_load_balance = restore_enable_load_balance
 
 
 class TestCPCustomOps(DTensorTestBase):
@@ -711,6 +777,456 @@ class TestCPCustomOps(DTensorTestBase):
         ]
         for example in examples_k_v:
             torch.library.opcheck(flex_cp_allgather, example)
+
+
+class TestSharding(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_context_parallel_shard(self) -> None:
+        B = 4
+        seq_len = 32
+
+        device_mesh = init_device_mesh(
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+        )
+        freqs_cis = torch.arange(0, seq_len, device=self.device_type)
+        q = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        k = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        v = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+
+        load_balancer = _HeadTailLoadBalancer(
+            seq_len, self.world_size, torch.device(self.device_type)
+        )
+        freqs_cis_shard, q_shard, k_shard, v_shard = _context_parallel_shard(
+            device_mesh, [freqs_cis, q, k, v], [0, 1, 1, 1], load_balancer=load_balancer
+        )
+        self.assertEqual(freqs_cis_shard.size(), (seq_len // 2,))
+        chunks = freqs_cis.chunk(self.world_size * 2)
+        self.assertEqual(
+            freqs_cis_shard,
+            map_local_tensor_for_rank(
+                chunks,
+                self.rank,
+                lambda chunks, rank: torch.cat(
+                    [chunks[rank], chunks[self.world_size * 2 - rank - 1]],
+                    dim=0,
+                ),
+            ),
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_context_parallel_shard_with_positions(self) -> None:
+        """Test context parallel sharding with expanded batch dimensions.
+
+        This test validates the fix for buffer sharding when the batch dimension
+        is created through expand() or view() operations. Before the fix, the
+        loop-based torch.index_select approach failed on expanded tensors.
+        """
+        B = 4
+        seq_len = 32
+
+        device_mesh = init_device_mesh(
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+        )
+
+        # Create positions tensor and expand to add batch dimension
+        positions = torch.arange(0, seq_len, device=self.device_type)
+        positions = positions.expand(B, seq_len)
+
+        q = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        k = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+        v = torch.ones(B * seq_len, device=self.device_type).reshape(B, seq_len)
+
+        load_balancer = _HeadTailLoadBalancer(
+            seq_len, self.world_size, torch.device(self.device_type)
+        )
+
+        # positions has seq_dim=1 (same as q, k, v) after expansion
+        positions_shard, q_shard, k_shard, v_shard = _context_parallel_shard(
+            device_mesh, [positions, q, k, v], [1, 1, 1, 1], load_balancer=load_balancer
+        )
+
+        # Verify the sharded positions tensor has correct shape
+        self.assertEqual(positions_shard.size(), (B, seq_len // 2))
+
+        # Verify the sharded values match expected chunked and concatenated results
+        # For each batch, the positions should be chunked and rearranged
+        chunks = positions.chunk(self.world_size * 2, dim=1)
+        expected_positions = map_local_tensor_for_rank(
+            chunks,
+            self.rank,
+            lambda chunks, rank: torch.cat(
+                [chunks[rank], chunks[self.world_size * 2 - rank - 1]],
+                dim=1,
+            ),
+        )
+        self.assertEqual(positions_shard, expected_positions)
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Does not support flash nor efficient attention",
+    )
+    def test_attention_shard_without_cp(self) -> None:
+        """Test that sharding on sequence dimension without CP enabled is not supported."""
+        from torch.distributed.tensor import distribute_tensor, Replicate, Shard
+
+        B = 2
+        nheads = 4
+        seq_len = 256
+        dim = 32
+
+        device_mesh = init_device_mesh(
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+        )
+
+        for backend in backends:
+            with sdpa_kernel(backend):
+                dtype = torch.bfloat16
+                if backend == SDPBackend.EFFICIENT_ATTENTION:
+                    dtype = torch.float32
+                # Create q, k, v tensors with shape (B, nheads, seq_len, dim)
+                q = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                k = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                v = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
+                k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
+                v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
+
+                register_cp_sharding_rules()
+                out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
+                unregister_cp_sharding_rules(clear_the_cache=True)
+                out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
+                # Run SDPA with sequence-sharded tensors WITHOUT enabling CP
+                # Without CP enabled, DTensor should select a different strategy
+                # (not sequence-sharded) because Shard(2) strategy is only available with CP
+
+                # Verify the output is NOT sharded on sequence dimension (dim 2)
+                # This proves that CP sharding rules were not used
+                self.assertNotEqual(
+                    out.placements[0], Shard(2), f"Placement {out.placements}"
+                )
+                # The output should be replicated or sharded on batch head dimensions.
+                self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])
+
+
+class TestContextParallelStyle(DTensorTestBase):
+    """Test suite for _ContextParallel.flex_input_fn argument handling"""
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _create_test_tensors(self):
+        """Helper to create test query, key, value tensors"""
+        query = torch.randn(2, 4, 128, 64, device=self.device_type)
+        key = torch.randn(2, 4, 128, 64, device=self.device_type)
+        value = torch.randn(2, 4, 128, 64, device=self.device_type)
+        return query, key, value
+
+    def _setup_mock_and_context(self, mock_allgather, key, value):
+        """Helper to setup mock and create CP instance + device mesh"""
+        # Setup mock with transformed tensors
+        mock_key = key * 2
+        mock_value = value * 3
+        mock_allgather.return_value = (mock_key, mock_value)
+
+        # Create CP instance and device mesh
+        cp_style = _ContextParallel(
+            seq_dim=2, attention_type=_ContextParallel.AttentionType.FLEX
+        )
+        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+
+        return cp_style, device_mesh, mock_key, mock_value
+
+    @with_comms
+    @unittest.mock.patch(
+        "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
+    )
+    def test_flex_input_fn_all_positional(self, mock_allgather):
+        """Test flex_input_fn with all positional arguments"""
+        query, key, value = self._create_test_tensors()
+        cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
+            mock_allgather, key, value
+        )
+
+        # Call with all positional args
+        args = (query, key, value)
+        kwargs = {}
+        out_args, out_kwargs = cp_style.flex_input_fn(None, args, kwargs, device_mesh)
+
+        # Verify mock called and output structure
+        mock_allgather.assert_called_once()
+        self.assertEqual(len(out_args), 3)
+        self.assertEqual(len(out_kwargs), 0)
+
+        # Verify query unchanged, key/value replaced
+        torch.testing.assert_close(out_args[0], query)
+        torch.testing.assert_close(out_args[1], mock_key)
+        torch.testing.assert_close(out_args[2], mock_value)
+
+    @with_comms
+    @unittest.mock.patch(
+        "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
+    )
+    def test_flex_input_fn_all_keyword(self, mock_allgather):
+        """Test flex_input_fn with all keyword arguments"""
+        query, key, value = self._create_test_tensors()
+        cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
+            mock_allgather, key, value
+        )
+
+        # Call with all keyword args
+        args = ()
+        kwargs = {"query": query, "key": key, "value": value}
+        out_args, out_kwargs = cp_style.flex_input_fn(None, args, kwargs, device_mesh)
+
+        # Verify mock called and output structure
+        mock_allgather.assert_called_once()
+        self.assertEqual(len(out_args), 0)
+        self.assertIn("query", out_kwargs)
+        self.assertIn("key", out_kwargs)
+        self.assertIn("value", out_kwargs)
+
+        # Verify query unchanged, key/value replaced
+        torch.testing.assert_close(out_kwargs["query"], query)
+        torch.testing.assert_close(out_kwargs["key"], mock_key)
+        torch.testing.assert_close(out_kwargs["value"], mock_value)
+
+    @with_comms
+    @unittest.mock.patch(
+        "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
+    )
+    def test_flex_input_fn_query_positional_kv_keyword(self, mock_allgather):
+        """Test with query positional, key/value keyword"""
+        query, key, value = self._create_test_tensors()
+        cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
+            mock_allgather, key, value
+        )
+
+        # Query positional, key/value keyword
+        args = (query,)
+        kwargs = {"key": key, "value": value}
+        out_args, out_kwargs = cp_style.flex_input_fn(None, args, kwargs, device_mesh)
+
+        # Verify mock called and output structure
+        mock_allgather.assert_called_once()
+        self.assertEqual(len(out_args), 1)
+        torch.testing.assert_close(out_args[0], query)
+
+        # Verify key/value in kwargs and updated
+        self.assertIn("key", out_kwargs)
+        self.assertIn("value", out_kwargs)
+        torch.testing.assert_close(out_kwargs["key"], mock_key)
+        torch.testing.assert_close(out_kwargs["value"], mock_value)
+
+    @with_comms
+    @unittest.mock.patch(
+        "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
+    )
+    def test_flex_input_fn_qk_positional_v_keyword(self, mock_allgather):
+        """Test with query/key positional, value keyword"""
+        query, key, value = self._create_test_tensors()
+        cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
+            mock_allgather, key, value
+        )
+
+        # Query/key positional, value keyword
+        args = (query, key)
+        kwargs = {"value": value}
+        out_args, out_kwargs = cp_style.flex_input_fn(None, args, kwargs, device_mesh)
+
+        # Verify mock called and output structure
+        mock_allgather.assert_called_once()
+        self.assertEqual(len(out_args), 2)
+        torch.testing.assert_close(out_args[0], query)
+        torch.testing.assert_close(out_args[1], mock_key)
+
+        # Verify value in kwargs and updated
+        self.assertIn("value", out_kwargs)
+        torch.testing.assert_close(out_kwargs["value"], mock_value)
+
+    @with_comms
+    @unittest.mock.patch(
+        "torch.distributed.tensor.experimental._context_parallel._attention.flex_cp_allgather"
+    )
+    def test_flex_input_fn_with_extra_args(self, mock_allgather):
+        """Test with mixed positional/keyword and extra arguments"""
+        query, key, value = self._create_test_tensors()
+        cp_style, device_mesh, mock_key, mock_value = self._setup_mock_and_context(
+            mock_allgather, key, value
+        )
+
+        # Mix of positional and keyword with extra args
+        def score_mod(q, k, b, h, m, n):
+            return q
+
+        block_mask = None
+        args = (query, key, value, score_mod, block_mask)
+        kwargs = {"enable_gqa": False}
+        out_args, out_kwargs = cp_style.flex_input_fn(None, args, kwargs, device_mesh)
+
+        # Verify mock called and output structure
+        mock_allgather.assert_called_once()
+        self.assertEqual(len(out_args), 5)
+        torch.testing.assert_close(out_args[0], query)
+        torch.testing.assert_close(out_args[1], mock_key)
+        torch.testing.assert_close(out_args[2], mock_value)
+        self.assertEqual(out_args[3], score_mod)
+        self.assertEqual(out_args[4], block_mask)
+
+        # Verify extra kwargs unchanged
+        self.assertEqual(out_kwargs["enable_gqa"], False)
+
+
+class TestContextParallelStyleSDPA(DTensorTestBase):
+    """Test suite for _ContextParallel.sdpa_input_fn argument handling"""
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _create_test_tensors(self):
+        """Helper to create test query, key, value tensors"""
+        query = torch.randn(2, 4, 128, 64, device=self.device_type)
+        key = torch.randn(2, 4, 128, 64, device=self.device_type)
+        value = torch.randn(2, 4, 128, 64, device=self.device_type)
+        return query, key, value
+
+    def _setup_context(self):
+        """Helper to create CP instance and device mesh"""
+        cp_style = _ContextParallel(
+            seq_dim=2, attention_type=_ContextParallel.AttentionType.SDPA
+        )
+        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
+        return cp_style, device_mesh
+
+    @with_comms
+    def test_sdpa_input_fn_all_positional(self):
+        """Test sdpa_input_fn with all positional arguments"""
+        query, key, value = self._create_test_tensors()
+        cp_style, device_mesh = self._setup_context()
+
+        # Call with all positional args
+        args = (query, key, value)
+        kwargs = {}
+        out_args, out_kwargs = cp_style.sdpa_input_fn(None, args, kwargs, device_mesh)
+
+        # Verify output structure: should be all positional
+        self.assertEqual(len(out_args), 3)
+        self.assertEqual(len(out_kwargs), 0)
+
+        # Verify all outputs are DTensors
+        self.assertIsInstance(out_args[0], DTensor)
+        self.assertIsInstance(out_args[1], DTensor)
+        self.assertIsInstance(out_args[2], DTensor)
+
+        # Verify DTensors have correct placement (Shard(2) for seq_dim=2)
+        from torch.distributed.tensor.placement_types import Shard
+
+        self.assertEqual(out_args[0].placements, [Shard(2)])
+        self.assertEqual(out_args[1].placements, [Shard(2)])
+        self.assertEqual(out_args[2].placements, [Shard(2)])
+
+    @with_comms
+    def test_sdpa_input_fn_all_keyword(self):
+        """Test sdpa_input_fn with all keyword arguments"""
+        query, key, value = self._create_test_tensors()
+        cp_style, device_mesh = self._setup_context()
+
+        # Call with all keyword args
+        args = ()
+        kwargs = {"query": query, "key": key, "value": value}
+        out_args, out_kwargs = cp_style.sdpa_input_fn(None, args, kwargs, device_mesh)
+
+        # Verify output structure: should be all keyword
+        self.assertEqual(len(out_args), 0)
+        self.assertIn("query", out_kwargs)
+        self.assertIn("key", out_kwargs)
+        self.assertIn("value", out_kwargs)
+
+        # Verify all outputs are DTensors
+        self.assertIsInstance(out_kwargs["query"], DTensor)
+        self.assertIsInstance(out_kwargs["key"], DTensor)
+        self.assertIsInstance(out_kwargs["value"], DTensor)
+
+        # Verify DTensors have correct placement
+        from torch.distributed.tensor.placement_types import Shard
+
+        self.assertEqual(out_kwargs["query"].placements, [Shard(2)])
+        self.assertEqual(out_kwargs["key"].placements, [Shard(2)])
+        self.assertEqual(out_kwargs["value"].placements, [Shard(2)])
+
+    @with_comms
+    def test_sdpa_input_fn_query_positional_kv_keyword(self):
+        """Test sdpa_input_fn with query positional, key/value keyword"""
+        query, key, value = self._create_test_tensors()
+        cp_style, device_mesh = self._setup_context()
+
+        # Query positional, key/value keyword
+        args = (query,)
+        kwargs = {"key": key, "value": value}
+        out_args, out_kwargs = cp_style.sdpa_input_fn(None, args, kwargs, device_mesh)
+
+        # Verify output structure: query should be positional, rest keyword
+        self.assertEqual(len(out_args), 1)
+        self.assertIn("key", out_kwargs)
+        self.assertIn("value", out_kwargs)
+
+        # Verify all outputs are DTensors
+        self.assertIsInstance(out_args[0], DTensor)
+        self.assertIsInstance(out_kwargs["key"], DTensor)
+        self.assertIsInstance(out_kwargs["value"], DTensor)
+
+        # Verify DTensors have correct placement
+        from torch.distributed.tensor.placement_types import Shard
+
+        self.assertEqual(out_args[0].placements, [Shard(2)])
+        self.assertEqual(out_kwargs["key"].placements, [Shard(2)])
+        self.assertEqual(out_kwargs["value"].placements, [Shard(2)])
+
+
+RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
+    RingAttentionTest,
+    skipped_tests=[
+        # Need to make attention implementation local tensor friendly, e.g.
+        # rewrite "rank local" logic
+        "test_ring_attention_sdpa",
+    ],
+)
+
+CPFlexAttentionTestWithLocalTensor = create_local_tensor_test_class(
+    CPFlexAttentionTest,
+    skipped_tests=[
+        # Missing support for batched tensors
+        "test_cp_flex_attention_causal_mask",
+        "test_cp_flex_attention_document_mask",
+    ],
+)
+
+TestCPCustomOpsWithLocalTensor = create_local_tensor_test_class(
+    TestCPCustomOps,
+    skipped_tests=[
+        # Missing support for fake tensors
+        "test_flex_cp_custom_op",
+    ],
+)
+
+TestShardingWithLocalTensor = create_local_tensor_test_class(
+    TestSharding,
+)
 
 
 if __name__ == "__main__":

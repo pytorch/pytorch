@@ -204,7 +204,7 @@ Scalar scalar_reciprocal(const Scalar& scalar) {
     return Scalar(1. / scalar.toComplexDouble());
   }
   TORCH_INTERNAL_ASSERT(
-      false, "divison with ", scalar.type(), " not supported");
+      false, "division with ", scalar.type(), " not supported");
 }
 
 void foreach_tensor_div_scalar_kernel_cuda_(

@@ -3,8 +3,9 @@ import json
 import logging
 from abc import abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Optional, TypeVar
+from typing import Any, Generic, Optional, TypeVar
 
 import torch
 from torch._dynamo.package import (
@@ -107,9 +108,15 @@ class PrecompileContext:
         """
         Records a backend artifact to be used with dynamo cache entries
         """
-        cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
-            artifact
-        )
+        # Temporarily disable all dispatch modes (including FakeTensorMode) during
+        # deepcopy to avoid issues with cloning fake tensors (e.g., device mesh
+        # with meta tensors that fail when cloning due to device mismatches)
+        from torch.utils._mode_utils import no_dispatch
+
+        with no_dispatch():
+            cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
+                artifact
+            )
 
     @classmethod
     def record_dynamo_cache_entry(
@@ -203,7 +210,7 @@ class PrecompileContext:
                 if result is not None:
                     precompile_cache_entries[key] = result
             except Exception as e:
-                logger.warning("Failed to create cache entry %s: %s", key, str(e))
+                logger.warning("Failed to create cache entry %s", key, exc_info=True)
 
                 error = e
                 data = json.dumps(

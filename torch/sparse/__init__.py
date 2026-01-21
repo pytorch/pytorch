@@ -19,7 +19,7 @@ from .semi_structured import (
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, tuple[int, ...], list[int]]]
+    DimOrDims = Optional[int | tuple[int, ...] | list[int]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
@@ -198,7 +198,7 @@ Examples::
 )
 
 
-def sum(input: Tensor, dim: DimOrDims = None, dtype: Optional[DType] = None) -> Tensor:
+def sum(input: Tensor, dim: DimOrDims = None, dtype: DType | None = None) -> Tensor:
     r"""Return the sum of each row of the given sparse tensor.
 
     Returns the sum of each row of the sparse tensor :attr:`input` in the given
@@ -521,7 +521,7 @@ class check_sparse_tensor_invariants:
     # context manager support
     def __init__(self, enable=True):
         self.state = enable
-        self.saved_state: Optional[bool] = None
+        self.saved_state: bool | None = None
 
     def __enter__(self):
         if self.saved_state is not None:
@@ -533,7 +533,8 @@ class check_sparse_tensor_invariants:
         torch._C._set_check_sparse_tensor_invariants(self.state)
 
     def __exit__(self, type, value, traceback):
-        assert self.saved_state is not None
+        if self.saved_state is None:
+            raise AssertionError("saved_state should not be None on exit")
         torch._C._set_check_sparse_tensor_invariants(self.saved_state)
         self.saved_state = None
 
@@ -623,20 +624,20 @@ def as_sparse_gradcheck(gradcheck):
                         )
                         obj = obj.to_dense().sparse_mask(full_mask)
                     if obj.layout is torch.sparse_coo:
-                        # pyrefly: ignore  # no-matching-overload
+                        # pyrefly: ignore [no-matching-overload]
                         d.update(
                             indices=obj._indices(), is_coalesced=obj.is_coalesced()
                         )
                         values = obj._values()
                     elif obj.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                        # pyrefly: ignore  # no-matching-overload
+                        # pyrefly: ignore [no-matching-overload]
                         d.update(
                             compressed_indices=obj.crow_indices(),
                             plain_indices=obj.col_indices(),
                         )
                         values = obj.values()
                     else:
-                        # pyrefly: ignore  # no-matching-overload
+                        # pyrefly: ignore [no-matching-overload]
                         d.update(
                             compressed_indices=obj.ccol_indices(),
                             plain_indices=obj.row_indices(),

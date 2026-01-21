@@ -39,6 +39,7 @@ static void get_shapes(MPSShape* input_shape_readonly,
 TORCH_IMPL_FUNC(softmax_mps_out)
 (const Tensor& input_, const int64_t dim, const bool half_to_float, const Tensor& output) {
   TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on MPS");
+  TORCH_CHECK(c10::isFloatingType(input_.scalar_type()), "softmax only supported for floating types");
   static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   if (input_.numel() == 0) {

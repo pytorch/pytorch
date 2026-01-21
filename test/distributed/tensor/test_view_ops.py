@@ -30,6 +30,7 @@ from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
@@ -647,7 +648,7 @@ class TestViewOps(DTensorTestBase):
     @with_comms
     def test_squeeze_(self):
         mesh_2d = init_device_mesh(self.device_type, (3, 2), mesh_dim_names=("a", "b"))
-        torch.manual_seed(self.rank)
+        self.init_manual_seed_for_rank()
         x = torch.randn((1, 4), device=self.device_type)
         dist_x = DTensor.from_local(x, mesh_2d, [Partial(), Shard(1)])
         self._test_op_on_dtensor(
@@ -663,6 +664,109 @@ class TestViewOps(DTensorTestBase):
         )
         self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
+    @with_comms
+    def test_storage_offset_slice(self):
+        """
+        Test that storage_offset is properly tracked on DTensor when slicing
+        a replicated tensor.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Create a replicated DTensor
+        tensor = torch.randn(10, device=self.device_type)
+        dtensor = distribute_tensor(tensor, mesh, [Replicate()])
+
+        # Perform a slice operation [1:]
+        with CommDebugMode() as comm_mode:
+            sliced_dtensor = dtensor[1:]
+            # Slicing should not trigger any communication
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # Verify that the DTensor's storage_offset matches the expected value
+        self.assertEqual(sliced_dtensor.storage_offset(), 1)
+
+        # Verify that the local tensor also has the correct storage_offset
+        self.assertEqual(sliced_dtensor.to_local().storage_offset(), 1)
+
+        # Verify the shape is correct
+        self.assertEqual(sliced_dtensor.shape, torch.Size([9]))
+
+        # Verify the values are correct
+        expected = tensor[1:]
+        self.assertEqual(sliced_dtensor.full_tensor(), expected)
+
+    @with_comms
+    def test_storage_offset_shard_dim0_slice_dim1(self):
+        """
+        Test that storage_offset is properly tracked when tensor is sharded on dim 0
+        and sliced on dim 1.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Create a 2D tensor and shard on dim 0
+        tensor = torch.randn(12, 8, device=self.device_type)
+        dtensor = distribute_tensor(tensor, mesh, [Shard(0)])
+
+        # Perform a slice operation [:, 2:]
+        with CommDebugMode() as comm_mode:
+            sliced_dtensor = dtensor[:, 2:]
+            # Slicing should not trigger any communication
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # The storage_offset should be 2 (skipping 2 elements in each row)
+        self.assertEqual(sliced_dtensor.storage_offset(), 2)
+
+        # Verify that the local tensor also has the correct storage_offset
+        self.assertEqual(sliced_dtensor.to_local().storage_offset(), 2)
+
+        # Verify the shape is correct
+        expected_shape = torch.Size([12, 6])
+        self.assertEqual(sliced_dtensor.shape, expected_shape)
+
+        # Verify the values are correct
+        expected = tensor[:, 2:]
+        self.assertEqual(sliced_dtensor.full_tensor(), expected)
+
+    @with_comms
+    def test_storage_offset_shard_dim1_slice_dim0(self):
+        """
+        Test that storage_offset is properly tracked when tensor is sharded on dim 1
+        and sliced on dim 0.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Create a 2D tensor and shard on dim 1
+        tensor = torch.randn(10, 12, device=self.device_type)
+        dtensor = distribute_tensor(tensor, mesh, [Shard(1)])
+
+        # Perform a slice operation [2:, :]
+        with CommDebugMode() as comm_mode:
+            sliced_dtensor = dtensor[2:, :]
+            # Slicing should not trigger any communication
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        local_dim1_size = 12 // self.world_size
+        expected_offset = 2 * local_dim1_size
+        self.assertEqual(sliced_dtensor.storage_offset(), expected_offset)
+
+        self.assertEqual(sliced_dtensor.to_local().storage_offset(), expected_offset)
+
+        # Verify the shape is correct
+        expected_shape = torch.Size([8, 12])
+        self.assertEqual(sliced_dtensor.shape, expected_shape)
+
+        # Verify the values are correct
+        expected = tensor[2:, :]
+        self.assertEqual(sliced_dtensor.full_tensor(), expected)
+
+
+TestViewOpsWithLocalTensor = create_local_tensor_test_class(
+    TestViewOps,
+    skipped_tests=[
+        # Comparing data pointers is not supported for local tensor
+        "test_dtensor_view_op_uneven",
+    ],
+)
 
 if __name__ == "__main__":
     run_tests()
