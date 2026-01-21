@@ -6126,6 +6126,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: std_out
+    MPS: std_out_mps
     QuantizedCPU: std_out_quantized_cpu
   tags: reduction
 
@@ -6667,6 +6668,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: var_out
+    MPS: var_out_mps
   tags: reduction
 
 - func: var.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor

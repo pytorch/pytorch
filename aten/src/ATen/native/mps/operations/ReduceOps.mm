@@ -4,6 +4,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/irange.h>
 
@@ -1699,6 +1700,28 @@ std::tuple<Tensor, Tensor> var_mean_mps(const Tensor& self,
   auto mean = at::empty(var.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   reduction_out_mps(self, dim, keepdim, std::nullopt, mean, MPSReductionType::MEAN, "mean_out_mps");
   return {var, mean};
+}
+
+Tensor& std_out_mps(const Tensor& self,
+                    at::OptionalIntArrayRef dim,
+                    const std::optional<Scalar>& correction,
+                    bool keepdim,
+                    Tensor& result) {
+  auto out = std_mps(self, dim, correction, keepdim);
+  at::native::resize_output(result, out.sizes());
+  result.copy_(out);
+  return result;
+}
+
+Tensor& var_out_mps(const Tensor& self,
+                    at::OptionalIntArrayRef dim,
+                    const std::optional<Scalar>& correction,
+                    bool keepdim,
+                    Tensor& result) {
+  auto out = var_mps(self, dim, correction, keepdim);
+  at::native::resize_output(result, out.sizes());
+  result.copy_(out);
+  return result;
 }
 
 } // namespace at::native
