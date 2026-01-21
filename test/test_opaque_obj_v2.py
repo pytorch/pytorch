@@ -24,6 +24,7 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
     aot_export_module,
 )
+from torch._inductor.compile_fx import compile_fx
 from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
@@ -1996,6 +1997,83 @@ def forward(self, L_x_ : torch.Tensor):
         grad_o = torch.rand_like(result)
         result.backward(grad_o)
         self.assertEqual(x2.grad, grad_o * 1.5)
+
+    def test_invoke_subgraph(self):
+        @torch.compiler.nested_compile_region
+        def fn(scale_obj, x):
+            result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
+            result = result * 2
+            return result
+
+        def gn(scale_obj, x):
+            z = fn(scale_obj, x)
+            return z + z
+
+        scale_obj = OpaqueMultiplier(3.0)
+        x = torch.randn(2, 2, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        ref = gn(scale_obj, x_clone)
+        ref.sum().backward()
+
+        backend = AotEagerAndRecordGraphs()
+        opt_outer = torch.compile(gn, fullgraph=True, backend=backend)
+        res = opt_outer(scale_obj, x)
+        res.sum().backward()
+
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))
+        self.assertExpectedInline(
+            actual,
+            f"""\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_scale_obj_ : {fx_class}, L_x_: "f32[2, 2]"):
+        l_scale_obj_ = L_scale_obj_
+        l_x_ = L_x_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_scale_obj_, l_x_);  subgraph_0 = l_scale_obj_ = l_x_ = None
+        getitem_2: "f32[2, 2]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        add: "f32[2, 2]" = getitem_2 + getitem_2;  getitem_2 = None
+        return (add,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_scale_obj_ : {fx_class}, l_x_: "f32[2, 2]"):
+            result: "f32[2, 2]" = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
+
+            result_1: "f32[2, 2]" = result * 2;  result = None
+            return (result_1,)
+""",  # noqa: B950
+        )
+
+        self.assertEqual(ref, res)
+        self.assertEqual(ref.grad, res.grad)
+
+    def test_opaque_object_with_inductor_backend(self):
+        """Test that opaque objects work correctly with inductor's get_attr handling."""
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.color = Color.RED
+
+            def forward(self, x):
+                return torch.ops._TestOpaqueObject.apply_color_scale(self.color, x)
+
+        mod = TestModule()
+        x = torch.randn(3, 3)
+
+        gm = torch.fx.symbolic_trace(mod)
+
+        has_get_attr = any(node.op == "get_attr" for node in gm.graph.nodes)
+        self.assertTrue(has_get_attr, "expected get_attr node for opaque object")
+
+        compiled_fn = compile_fx(gm, [x])
+        result = compiled_fn(x)
+
+        expected = x * float(Color.RED.value)
+        self.assertTrue(torch.allclose(result, expected))
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
