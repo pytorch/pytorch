@@ -19,6 +19,12 @@ from torch._functorch.pyfunctorch import dispatch_functorch, TransformType
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
+try:
+    from types import NotImplementedType  # Python 3.10+
+except ImportError:  # pragma: no cover
+    NotImplementedType = type(NotImplemented)  # type: ignore[misc]
+
+
 if TYPE_CHECKING:
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
 
@@ -174,7 +180,7 @@ class OperatorBase:
 
         def functionalize_dispatch_mode_fn(
             mode: FunctionalTensorMode | None, *args: _P.args, **kwargs: _P.kwargs
-        ) -> _T:
+        ) -> _T | NotImplementedType:
             from torch._higher_order_ops.utils import has_user_subclass
             from torch._subclasses import FakeTensor
             from torch._subclasses.functional_tensor import FunctionalTensor

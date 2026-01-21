@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -40,6 +40,10 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
+
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
 
 
 invoke_subgraph_counter = 0
@@ -744,67 +748,22 @@ def _(subgraph, identifier, *operands):
     return autograd_fn_callable(*operands)
 
 
-def analyze_ouptut(subgraph: Callable[..., Any], operands: tuple[Any, ...]):
-    from torch.distributed.tensor import DTensor
-
-    result = subgraph(*operands)
-
-    if isinstance(result, DTensor):
-        return result._spec
-    elif isinstance(result, (tuple, list)):
-        specs = []
-        for item in result:
-            if isinstance(item, DTensor):
-                specs.append(item._spec)
-            else:
-                specs.append(None)  #
-        return specs
-    else:
-        return None  # Scalar or other non-DTensor result
-
-
-def wrap_with_unified_spec(result: Any, spec: Any) -> Any:
-    from torch.distributed.tensor import DTensor
-    from torch.distributed.tensor._dtensor_spec import DTensorSpec
-
-    if isinstance(result, torch.Tensor) and isinstance(spec, DTensorSpec):
-        return DTensor(
-            result,
-            spec,
-            requires_grad=result.requires_grad
-            if hasattr(result, "requires_grad")
-            else False,
-        )
-    elif isinstance(result, (tuple, list)) and isinstance(spec, (tuple, list)):
-        # Handle multiple outputs
-        wrapped_results = []
-        for item, item_spec in zip(result, spec):
-            if isinstance(item, torch.Tensor) and isinstance(item_spec, DTensorSpec):
-                wrapped_results.append(
-                    DTensor(
-                        item,
-                        item_spec,
-                        requires_grad=item.requires_grad
-                        if hasattr(item, "requires_grad")
-                        else False,
-                    )
-                )
-            else:
-                wrapped_results.append(item)
-        return tuple(wrapped_results) if isinstance(result, tuple) else wrapped_results
-    else:
-        raise NotImplementedError(
-            f"Unsupported result type: {type(result)} and spec type: {type(spec)}"
-        )
-
-
 def invoke_subgraph_dtensor(subgraph, identifier, *operands):
-    # This means that some of the inputs in the operands are DTensors.
+    """
+    Handle invoke_subgraph when some inputs are DTensors.
+
+    This creates a wrapper subgraph that:
+    1. Reconstructs DTensors from local tensors using captured input specs
+    2. Calls the original subgraph with DTensors
+    3. Extracts local tensors from DTensor outputs
+    4. Captures output specs for wrapping results back to DTensors
+    """
     from torch.distributed.tensor import DTensor
 
-    assert isinstance(operands, tuple), "operands are expected to be a tuple or list."
+    assert isinstance(operands, tuple), "operands are expected to be a tuple"
 
-    mesh = None
+    # Validate all DTensors have the same mesh
+    mesh: DeviceMesh | None = None
     for operand in operands:
         if isinstance(operand, DTensor):
             if mesh is None:
@@ -813,15 +772,79 @@ def invoke_subgraph_dtensor(subgraph, identifier, *operands):
                 f"All DTensor operands must have the same mesh but got {mesh} and {operand.device_mesh}"
             )
 
-    assert mesh is not None, "No DTensor operands found in cond's inputs"
+    assert mesh is not None, "No DTensor operands found in inputs"
+
+    # Capture input specs (None for non-DTensors)
+    input_specs = [op._spec if isinstance(op, DTensor) else None for op in operands]
+
+    # Container to capture output specs during wrapper execution
+    output_specs_container: list[Any] = [None]
+
+    def wrapper_subgraph(*local_operands):
+        # Reconstruct DTensors from local tensors using captured input specs
+        reconstructed_operands = [
+            DTensor(  # pyrefly: ignore [bad-argument-type]
+                local_op,  # pyrefly: ignore [bad-argument-count]
+                spec,
+                requires_grad=local_op.requires_grad,  # pyrefly: ignore [unexpected-keyword]
+            )
+            if spec is not None
+            else local_op
+            for local_op, spec in zip(local_operands, input_specs)
+        ]
+
+        # Call the original subgraph with DTensors
+        result = subgraph(*reconstructed_operands)
+
+        # Process outputs: capture specs and extract local tensors
+        def extract_spec_and_local(x):
+            if isinstance(x, DTensor):
+                return x._spec, x._local_tensor
+            return None, x
+
+        if isinstance(result, (tuple, list)):
+            specs_and_locals = [extract_spec_and_local(r) for r in result]
+            output_specs_container[0] = [spec for spec, _ in specs_and_locals]
+            local_results = [local for _, local in specs_and_locals]
+            return type(result)(local_results)
+        else:
+            spec, local = extract_spec_and_local(result)
+            output_specs_container[0] = spec
+            return local
+
+    # Extract local tensors from DTensor inputs
     local_operands = pytree.tree_map_only(DTensor, lambda x: x._local_tensor, operands)
 
-    # Get the output spec
-    output_spec = analyze_ouptut(subgraph, operands)
+    # Call invoke_subgraph with the wrapper and local tensors
+    # pyrefly: ignore [bad-argument-type]
+    local_result = invoke_subgraph(wrapper_subgraph, identifier, *local_operands)
 
-    local_result = invoke_subgraph(subgraph, identifier, *local_operands)
+    # Wrap results back to DTensors using captured output specs
+    output_specs = output_specs_container[0]
 
-    return wrap_with_unified_spec(local_result, output_spec)
+    if isinstance(local_result, (tuple, list)):
+        wrapped = [
+            DTensor(  # pyrefly: ignore [bad-argument-type]
+                r,  # pyrefly: ignore [bad-argument-count]
+                spec,
+                requires_grad=r.requires_grad,  # pyrefly: ignore [unexpected-keyword]
+            )
+            if spec is not None and isinstance(r, torch.Tensor)
+            else r
+            for r, spec in zip(local_result, output_specs)
+        ]
+        return type(local_result)(wrapped)
+    else:
+        if output_specs is not None and isinstance(local_result, torch.Tensor):
+            # pyrefly: ignore [bad-argument-type]
+            return DTensor(
+                # pyrefly: ignore [bad-argument-count]
+                local_result,
+                output_specs,
+                # pyrefly: ignore [unexpected-keyword]
+                requires_grad=local_result.requires_grad,
+            )
+        return local_result
 
 
 @invoke_subgraph.py_impl(DebugMode)
