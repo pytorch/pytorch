@@ -14,7 +14,7 @@ There are two primary integration paths for accelerators:
     - Bridges to Kineto, which aggregates device timelines via vendor libraries (e.g., CUPTI for CUDA).
     - Provides rich activity traces and advanced export/visualization, but requires a Kineto-capable backend.
 
-This document focuses on path (1): how a `PrivateUse1` accelerator exposes the minimal hooks to plug into the legacy autograd profiler so aten ops and `record_function` ranges are correctly attributed to device activity.
+This document focuses on path (1): how a `PrivateUse1` accelerator exposes the minimal hooks to plug into the legacy autograd profiler so ATen ops and `record_function` ranges are correctly attributed to device activity.
 
 ## Design
 
@@ -37,7 +37,9 @@ This layering keeps PyTorch device-agnostic: Python brokers the session, `Profil
 
 ## Implementation (Legacy way)
 
-Here we use OpenReg (Open Registration) to illustrate the minimal set of hooks a `PrivateUse1` accelerator needs to expose so the profiler can attribute aten ops, `record_function` ranges, and user code to device activity. OpenReg keeps upstream code untouched by translating profiler requests into its runtime calls, mirroring what a production accelerator would implement inside an out-of-tree extension.
+Here we use OpenReg (Open Registration) to illustrate the minimal set of hooks a `PrivateUse1` accelerator needs to expose so the profiler can attribute ATen ops, `record_function` ranges, and user code to device activity. OpenReg keeps upstream code untouched by translating profiler requests into its runtime calls, mirroring what a production accelerator would implement inside an out-of-tree extension.
+
+OpenReg currently relies on the legacy profiler (`torch.autograd.profiler.profile`) interface rather than the modern one (`torch.profiler.profile`) because the latter enforces `use_kineto=True`.
 
 ### Profiler stubs (C++)
 
@@ -71,19 +73,13 @@ print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
 prof.export_chrome_trace("openreg_trace.json")
 ```
 
-A few noteworthy behaviors:
-
-1. **Legacy autograd path**: OpenReg currently relies on the autograd profiler rather than Kineto. Always pass `use_kineto=False` (the default for `PrivateUse1`) if you call lower-level APIs.
-2. **Shape recording**: `record_shapes=True` works end-to-end because OpenReg registers shape metadata capture in `torch/csrc/profiler/util.h` via the standard RecordFunction callbacks.
-3. **`record_function` compatibility**: Custom scopes (`torch.profiler.record_function`) are propagated automatically, enabling model authors to annotate higher-level stages like data transfer or optimizer steps.
-
 ### Data capture flow
 
 1. User code enters `autograd_profile(use_device="openreg")`.
-2. The profiler transitions to `ProfilerState.PRIVATEUSE1` and enables `RecordFunction` callbacks.
-3. Whenever an operator or `record_function` scope begins, the profiler asks the active backend to `record()` an event.
+2. The profiler transitions to `ProfilerState.KINETO_PRIVATEUSE1_FALLBACK`.
+3. The profiler asks the active backend to `record()` an event.
 4. The OpenReg stubs allocate `orEvent` objects, attach them to the current stream, and stash CPU timestamps.
-5. When scopes end, the profiler calls `elapsed()` to compute durations, aggregates statistics, and optionally serializes Chrome traces.
+5. When events end, the profiler calls `elapsed()` to compute durations.
 
 
 [PyTorch Profiler README]: https://github.com/pytorch/pytorch/blob/main/torch/csrc/profiler/README.md "PyTorch Profiler README"
