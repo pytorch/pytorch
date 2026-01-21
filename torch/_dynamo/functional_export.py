@@ -21,7 +21,6 @@ from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import (
     dynamo_timed,
     get_metrics_context,
-    set_torch_function_mode_stack,
 )
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
@@ -482,163 +481,6 @@ def _normalize_shuffle_graph(shuffle_gm: torch.fx.GraphModule) -> None:
         setattr(shuffle_gm, name, buffer)
 
 
-@dataclass(frozen=True)
-class PyTreeifyOutput:
-    graph_module: torch.fx.GraphModule
-    in_spec: TreeSpec
-    in_shuffle_graph: torch.fx.GraphModule
-    num_flat_args: int
-    out_spec: TreeSpec
-    out_shuffle_graph: torch.fx.GraphModule
-    root: Optional[torch.nn.Module] = None
-
-
-def pytreeify(
-    out: CaptureOutput, mod: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> PyTreeifyOutput:
-    """
-    Given a dynamo capture output, return a callable graph module that
-    contain the following information:
-    1. input/output pytree spec
-    2. input/output shuffle functions
-    Input shuffle functions are the converters taking pytree falttened inputs
-    and reorder them to the calling convention of dynamo raw graph module.
-    Output shuffle functions are the converters taking the outputs of the
-    dynamo raw graph module and convert them to the pytree format.
-
-    This function will replay any side effects that happened during the bytecode,
-    so it is important to check against side effects before calling this function.
-    """
-    assert out.backend_input is not None
-    backend_input = out.backend_input
-
-    root = None
-    if isinstance(mod, torch.nn.Module):
-        args = (mod,) + args
-        root = mod
-    elif inspect.ismethod(mod):
-        args = (mod.__self__,) + args
-        root = mod.__self__
-
-    flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
-    torch._dynamo.eval_frame.check_user_input_output(
-        flat_real_args[1 if root else 0 :], UserErrorType.INVALID_INPUT
-    )
-    f_globals = out.graph_capture_output.f_globals
-
-    class Yield(Exception):
-        pass
-
-    class InShuffle(torch.nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.mod = mod
-            self.num_inputs = len(flat_real_args)
-            self.gm_inputs = None
-
-        def forward(self, *flat_proxy_args: Any) -> tuple[Any, ...]:
-            args, kwargs = pytree.tree_unflatten(
-                [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
-            )
-
-            def backend_dummy(*example_inputs: Any) -> Any:
-                # pyrefly: ignore [bad-assignment]
-                self.gm_inputs = example_inputs
-                raise Yield
-
-            # Save mode stack before running forward_callable, as the captured
-            # bytecode may include side effects that modify the mode stack.
-            saved_mode_stack = torch.overrides._get_current_function_mode_stack()
-            try:
-                out.forward_callable(
-                    compiled_fn=backend_dummy, extra_globals=f_globals
-                )(*args, **kwargs)
-            except Yield:
-                assert self.gm_inputs is not None
-                return self.gm_inputs
-            finally:
-                set_torch_function_mode_stack(saved_mode_stack)
-            raise RuntimeError
-
-    fake_mode = torch._dynamo.utils.detect_fake_mode(flat_real_args)
-    if fake_mode and fake_mode.shape_env is None:
-        fake_mode.shape_env = ShapeEnv()
-    in_shuffle_graph = make_fx(
-        # pyrefly: ignore [bad-argument-type]
-        InShuffle(),
-        tracing_mode="symbolic",
-        proxy_module_inputs=True,
-    )(*flat_real_args)
-    _normalize_shuffle_graph(in_shuffle_graph)
-
-    output_node = next(iter(reversed(backend_input.graph_module.graph.nodes)))
-
-    class OutShuffle(torch.nn.Module):
-        def __init__(self) -> None:
-            super().__init__()
-            self.num_inputs = len(flat_real_args)
-
-            self.num_outputs = len(output_node.args[0])
-            self.out_spec: Optional[TreeSpec] = None
-
-        def forward(self, *flat_proxy_args: Any) -> list[Any]:
-            args, kwargs = pytree.tree_unflatten(
-                [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
-            )
-
-            def backend_dummy(*example_inputs: Any) -> Any:
-                return [
-                    flat_proxy_args[self.num_inputs + i]
-                    for i in range(self.num_outputs)
-                ]
-
-            # Save mode stack before running forward_callable, as the captured
-            # bytecode may include side effects that modify the mode stack.
-            saved_mode_stack = torch.overrides._get_current_function_mode_stack()
-            try:
-                results = out.forward_callable(
-                    compiled_fn=backend_dummy, extra_globals=f_globals
-                )(*args, **kwargs)
-            finally:
-                set_torch_function_mode_stack(saved_mode_stack)
-            ret, self.out_spec = pytree.tree_flatten(results)
-            return ret
-
-    out_shuffle = OutShuffle()
-    flat_out_shuffle_args = [
-        *flat_real_args,
-        *pytree.tree_map_only(
-            torch.fx.Node,
-            lambda x: fake_mode.from_tensor(x.meta["example_value"])
-            if fake_mode
-            else x.meta["example_value"],
-            output_node.args[0],
-        ),
-    ]
-    fake_mode = torch._dynamo.utils.detect_fake_mode(flat_out_shuffle_args)
-    if fake_mode and fake_mode.shape_env is None:
-        fake_mode.shape_env = ShapeEnv()
-    with enable_python_dispatcher():
-        out_shuffle_graph = make_fx(
-            # pyrefly: ignore [bad-argument-type]
-            out_shuffle,
-            tracing_mode="real",
-            proxy_module_inputs=True,
-        )(*flat_out_shuffle_args)
-    _normalize_shuffle_graph(out_shuffle_graph)
-
-    assert out_shuffle.out_spec is not None
-    return PyTreeifyOutput(
-        backend_input.graph_module,
-        in_spec,
-        in_shuffle_graph,
-        len(flat_real_args),
-        out_shuffle.out_spec,
-        out_shuffle_graph,
-        root=root,  # type: ignore[arg-type]
-    )
-
-
 def normalize_graph_module(gm: torch.fx.GraphModule) -> None:
     for node in gm.graph.nodes:
         if node.op == "placeholder":
@@ -917,7 +759,9 @@ def dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
-            torch._dynamo.config.patch(side_effect_replay_policy="warn"),
+            torch._dynamo.config.patch(
+                replay_side_effects=False, side_effect_replay_policy="warn"
+            ),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
         ):
