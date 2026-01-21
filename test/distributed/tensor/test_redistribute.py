@@ -1608,6 +1608,52 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(len(result), 2)
         self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
 
+    def test_reduce_scatter_with_prior_shard_flattened(self):
+        """Reduce-scatter should be flattened when prior shard is already in logical_shape.
+
+        Scenario:
+        - Tensor shape: (24,)
+        - Mesh: (2, 2, 2) with dims A, B, C
+        - src_placements: (Shard(0), Partial, Partial)
+        - dst_placements: (Shard(0), Shard(0), Shard(0))
+
+        Transforms: dims 1 and 2 are Partial->S(0), dim 0 is S(0)->S(0) (no-op)
+
+        The outermost transform is on mesh_dim=1, with logical_shape=[12]
+        (already reduced from global 24 by dim 0's shard).
+
+        effective_shard_mesh_size should only include dims >= 1, so = 2*2 = 4.
+        12 % 4 == 0, so flattening should be ALLOWED.
+        """
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["B", "C"]._flatten("B_C")
+
+        # Transforms only for dims where src != dst (dim 0 is S(0)->S(0), no transform)
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[12],  # after dim 0's shard (24/2=12)
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[12],  # same, since dim 1 is Partial
+            ),
+        ]
+
+        src_placements = (Shard(0), Partial("sum"), Partial("sum"))
+        dst_placements = (Shard(0), Shard(0), Shard(0))
+
+        result = _optimize_transform_infos(
+            transform_infos, mesh, src_placements, dst_placements
+        )
+
+        # Should be flattened: 12 % 4 == 0
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+        self.assertEqual(result[0].original_mesh_dims, (1, 2))
+
     def test_empty_input(self):
         """Empty input returns empty output."""
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))

@@ -260,22 +260,27 @@ def _optimize_transform_infos(
             return None
 
         # For nested sharding, each transform has a different logical_shape.
-        # We need to use the logical_shape from the outermost mesh dimension
-        # (the one with the smallest mesh_dim), which represents the global shape.
+        # We use the outermost transform's logical_shape, which represents the
+        # tensor shape after all shards on mesh dims < outermost_info.mesh_dim.
+        # (This is global shape only if outermost_info.mesh_dim == 0.)
         outermost_info = min(infos, key=lambda x: x.mesh_dim)
 
         # For reduce_scatter (Partial -> Shard), we cannot flatten if the tensor
-        # dimension is not evenly divisible by the total effective shard mesh size.
-        # This includes both the flattened mesh dims AND any intervening shards on
-        # non-transformed dims. E.g., for mesh (2,2,2), src=(P,S(0),P), dst=(S(0),S(0),S(0)):
-        # - All 3 dims end up with Shard(0), so effective_shard_mesh_size = 2*2*2 = 8
-        # - Tensor size 12 is not divisible by 8, so we cannot flatten
+        # dimension is not evenly divisible by the effective shard mesh size.
+        # The effective size includes shards on mesh dims >= outermost_info.mesh_dim
+        # (since logical_shape already accounts for shards on earlier dims).
+        # E.g., for mesh (2,2,2), src=(P,S(0),P), dst=(S(0),S(0),S(0)), transforms on 0,2:
+        # - outermost_info.mesh_dim=0, logical_shape=[12] (global)
+        # - effective_shard_mesh_size = 2*2*2 = 8 (all dims >= 0 with S(0))
+        # - 12 % 8 != 0, so we cannot flatten
         src, dst = first_placements
         if src.is_partial() and dst.is_shard():
             shard_dim = cast(Shard, dst).dim
             tensor_dim_size = outermost_info.logical_shape[shard_dim]
             effective_shard_mesh_size = math.prod(
-                device_mesh.size(i) for i, p in enumerate(dst_placements) if p == dst
+                device_mesh.size(i)
+                for i, p in enumerate(dst_placements)
+                if p == dst and i >= outermost_info.mesh_dim
             )
             if tensor_dim_size % effective_shard_mesh_size != 0:
                 return None
