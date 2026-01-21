@@ -1238,9 +1238,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     # group or group name
                     assert args[0].is_python_constant() or (
                         isinstance(args[0], TorchScriptObjectVariable)
-                        and args[
+                        and args[  # pyrefly: ignore[missing-attribute]
                             0
-                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
+                        ].value.script_class_name
                         == "torch.distributed.distributed_c10d.ProcessGroup"
                     )
                 elif len(args) == 2:
