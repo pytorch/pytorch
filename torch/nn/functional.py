@@ -8,13 +8,13 @@ from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
-from torch._C import (
+from torch._C import (  # pyrefly: ignore [missing-module-attribute]
     _add_docstr,
     _infer_size,
     _ScalingType as ScalingType,
     _SwizzleType as SwizzleType,
 )
-from torch._jit_internal import (
+from torch._jit_internal import (  # pyrefly: ignore [missing-module-attribute]
     _overload,
     boolean_dispatch,
     BroadcastingList1,

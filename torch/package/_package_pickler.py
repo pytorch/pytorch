@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # pyrefly: ignore [missing-module-attribute]
 import sys
-from pickle import (  # type: ignore[attr-defined]
+from pickle import (  # type: ignore[attr-defined]; pyrefly: ignore [missing-module-attribute]
     _compat_pickle,
     _extension_registry,
     _getattribute,

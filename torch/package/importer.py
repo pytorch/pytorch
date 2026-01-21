@@ -5,7 +5,7 @@ import sys
 from abc import ABC, abstractmethod
 
 # pyrefly: ignore [missing-module-attribute]
-from pickle import (  # type: ignore[attr-defined]
+from pickle import (  # type: ignore[attr-defined]; pyrefly: ignore [missing-module-attribute]
     _getattribute,
     _Pickler,
     whichmodule as _pickle_whichmodule,  # pyrefly: ignore  # missing-module-attribute

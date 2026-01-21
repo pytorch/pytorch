@@ -33,7 +33,7 @@ from torch._C import (
     TupleType,
     UnionType,
 )
-from torch._jit_internal import (  # type: ignore[attr-defined]
+from torch._jit_internal import (  # type: ignore[attr-defined]; pyrefly: ignore [missing-module-attribute]
     _Await,
     _qualified_name,
     Any,
@@ -508,6 +508,7 @@ def try_ann_to_type(ann, loc, rcb=None):
     # Maybe resolve a NamedTuple to a Tuple Type
     if rcb is None:
         rcb = _fake_rcb
+    # pyrefly: ignore [bad-argument-type]
     return torch._C._resolve_type_from_object(ann, loc, rcb)
 
 

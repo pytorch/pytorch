@@ -14,7 +14,7 @@ from abc import ABCMeta
 from collections.abc import Iterator
 
 # TODO: Use TypeAlias when Python 3.6 is deprecated
-from typing import (  # type: ignore[attr-defined]
+from typing import (  # type: ignore[attr-defined]; pyrefly: ignore [missing-module-attribute]
     _eval_type,
     _GenericAlias,
     _tp_cache,
