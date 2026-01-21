@@ -31,6 +31,11 @@ from .graph_view import get_subgraph_by_path, GraphView, make_graph_view
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
     """
@@ -103,6 +108,8 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 "bucket non all_gather/reduce_scatter node is not supported"
             )
 
+        logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
+
         # Identify the new wait and start
         new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
         assert len(new_waits) == 1, f"Expected exactly one new wait, got {new_waits}"
@@ -143,10 +150,13 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
                 node, "placeholder", self.node_ancestors
             ):
                 continue
-            if is_reduce_scatter(node) and not self._check_recursive_dep(
-                self.collective_info[node].wait_node, "output", self.node_users
-            ):
-                continue
+            if is_reduce_scatter(node):
+                wait_node = self.collective_info[node].wait_node
+                if not (
+                    len(wait_node.users) == 1
+                    and self._check_recursive_dep(wait_node, "output", self.node_users)
+                ):
+                    continue
             if key is not None:
                 grouped_collectives[key].add(node)
 
