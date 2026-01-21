@@ -272,68 +272,102 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     original eager Python code is executed directly.
 
     Quick Start:
-        1. Decorate your function with ``@leaf_function``
-        2. Return outputs as a tuple: ``return (result,)`` for one tensor,
-           ``return (a, b)`` for multiple
-        3. Define a shape-inference function using ``@your_fn.fake_impl``
+        Suppose we want to log per-sample statistics during the forward pass::
 
-        Minimal example::
+            def compute_and_log_stats(x):
+                stats = x.mean(dim=1)
+                logger.info(f"Per-sample means: {stats}")
+                return (stats,)
+
+        With ``torch.compile(..., fullgraph=True)``, this fails because
+        ``logger.info`` causes a graph break. To fix it, follow the steps below:
+
+        1. Decorate your function with ``@leaf_function``
+        2. Define a shape-inference function using ``@your_fn.fake_impl``
+
+        Concrete implementation:
+
+            import logging
+            import torch
+            from torch._dynamo.decorators import leaf_function
+
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger(__name__)
+
 
             @leaf_function
-            def my_fn(x):
-                result = some_external_call(x)
-                return (result,)  # Must return tuple of tensors
+            def compute_and_log_stats(x):
+                stats = x.mean(dim=1)  # Shape: (x.shape[0],)
+                logger.info(f"Per-sample means: {stats}")
+                return (stats,)
 
 
-            @my_fn.fake_impl
-            def my_fn_fake(x):
-                # Return tensors with correct shapes (values don't matter)
-                return (torch.empty_like(x),)
+            @compute_and_log_stats.fake_impl
+            def compute_and_log_stats_fake(x):
+                # Match the output shape: (x.shape[0],)
+                return (x.new_empty(x.shape[0]),)
 
 
-            # Usage
             class MyModule(torch.nn.Module):
                 def forward(self, x):
-                    return my_fn(x)
+                    return compute_and_log_stats(x)
 
 
-            model = torch.compile(MyModule(), backend="aot_eager")
-            out = model(x)[0]  # Unpack the tuple
+            x = torch.randn(3, 4)
+            model = torch.compile(MyModule(), backend="aot_eager", fullgraph=True)
+            out = model(x)[0]
+            # Logs: "Per-sample means: tensor([0.12, -0.56, ...])"
 
     When to Use:
         Use ``leaf_function`` when you need eager execution semantics that tracing
         cannot preserve:
 
-        - **External library calls**: Code that Dynamo/AOT cannot trace (custom CUDA
-          kernels, external libraries, etc.)
-        - **Logging/debugging**: Print statements that should run at runtime, not
-          during tracing
+        - **Non-traceable code**: The function consists of code that Dynamo or
+          AOT Autograd cannot trace.
         - **Runtime side effects**: Operations that must happen exactly once per call
+          at runtime (e.g., logging, external library calls).
 
-        If your function has a static computation graph (no runtime-only side effects),
-        prefer ``allow_in_graph`` or ``nonstrict_trace`` instead—they allow AOT autograd
+        If your function has a static computation graph and no runtime side effects,
+        prefer ``allow_in_graph`` or ``nonstrict_trace`` instead. They allow AOT autograd
         to trace through and potentially optimize the code.
 
-    How it Works:
-        Understanding this helps avoid pitfalls:
+    Usage:
+        **Supported Inputs**:
+        - Inputs must use pytree-compatible types: tensors, Python primitives
+        (int, float, bool, str), and built-in containers (list, tuple, dict).
+        User-defined classes must be registered as pytree nodes via
+        :func:`torch.utils._pytree.register_pytree_node`.
+        - ``nn.Module`` can also be passed as input; its parameters and buffers are
+        tracked for autograd. The module must exist outside the compile region.
 
-        1. **Compilation**: Dynamo and AOT autograd do not trace into the leaf function.
-           Only your ``fake_impl`` runs during compilation to determine output shapes
-           and dtypes. The real function runs at runtime as eager Python.
+        **Supported Outputs**: Must be a tuple of tensors: ``return (tensor,)`` for one tensor,
+        ``return (a, b)`` for multiple. PyTree support will be added soon.
 
-        2. **Isolation**: The leaf function and compiled code run in separate execution
-           contexts. Explicit inputs and outputs of the leaf function are visible to
-           both sides, but mutations to closures and globals inside the leaf function
-           are not visible to the compiled region, and vice versa.
+        **fake_impl (required)**: Since the function body is not traced, you must
+        provide a shape-inference function via ``@fn.fake_impl``. It runs at compile
+        time with FakeTensor inputs (tensors with no data, only metadata) and must
+        satisfy the following requirements:
+
+        - Must have the same input and output signature (e.g., pytree structure, tensor shapes,
+          and dtypes) as the real function
+        - Must be runnable with FakeTensor inputs
+        - Must only use its explicit arguments (no closures over tensors or modules)
+
+        Note: The input and output signature must be determinable at compile time.
+        If your function's output structure depends on runtime values, adjust the leaf function
+        boundary until outputs become predictable.
+
+        To validate that your ``fake_impl`` matches the real function's outputs, set
+        ``torch._dynamo.config.leaf_function_validate_outputs = True``. For more
+        details, see :func:`torch.library.register_fake`.
+
+        **Limitations**: Currently, inductor backend and ``torch.export`` are not
+        yet supported.
 
     Training / Autograd:
-        Training is fully supported. When you call ``.backward()`` on outputs from
-        a compiled function that uses ``leaf_function``, gradients flow through correctly.
-
-        How it works: At the leaf function boundary, inputs and outputs are detached
-        from the outer autograd graph. The leaf function builds its own local autograd
-        graph internally. Gradients flow through this local graph back to the explicit
-        tensor inputs and ``nn.Module`` parameters (and buffers, if they require gradients).
+        Training is supported automatically if your leaf function is differentiable
+        in eager mode (e.g., it's implemented with PyTorch ops, ``torch.autograd.Function``,
+        or differentiable custom ops).
 
         **Restriction**: Calling ``.backward()`` *inside* the leaf function is not
         supported.
@@ -344,63 +378,25 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         ``torch._dynamo.config.leaf_function_check_escaped_gradients = True``.
         When enabled, a ``RuntimeError`` is raised with details about the escaped tensors.
 
-    Providing fake_impl:
-        Since the function body is not traced, you must provide a **shape-inference
-        function** via ``@fn.fake_impl``. This is sometimes called a "meta kernel" or
-        "abstract impl". It specifies the behavior on tensors that carry no data:
-        given input tensors with certain properties (sizes/strides/device), it returns
-        output tensors with the correct properties (pytree structure, shapes, dtypes).
+        Internally, inputs and outputs are detached from the outer autograd graph at the
+        leaf function boundary. The leaf function builds its own local autograd
+        graph. In backward, gradients propagate through this local graph to the
+        leaf function's inputs. If an nn.Module is passed in as input, the gradients
+        will also flow back to its parameters and buffers.
 
-        The output structure and dtypes must be determinable at compile time. If your
-        function's output structure depends on runtime values (e.g., data-dependent
-        number of tensors or dtypes), consider changing the leaf function boundary
-        to include or exclude code until outputs become predictable. Data-dependent
-        tensor shapes are supported.
+    How it Works:
+        Understanding this helps avoid pitfalls:
 
-        Requirements:
+        1. **Compilation**: Dynamo and AOT autograd do not trace into the leaf function.
+           Only your ``fake_impl`` runs during compilation to determine output signatures,
+           shapes, and dtypes. The real function runs at runtime as eager Python.
 
-        - Must be runnable with FakeTensor inputs (tensors with no real values, only
-          metadata such as shape, dtype, device, etc.)
-        - Must return the same pytree structure, shapes, and dtypes as the real function
-        - Must only use its explicit arguments (no closures over tensors or modules)
-
-        For more details on writing fake implementations, see
-        :func:`torch.library.register_fake`.
-
-        ``nn.Module`` can be passed as an explicit input argument; gradients will
-        propagate back to the module's parameters. The module must exist outside the
-        compile region (cannot be constructed during compilation).
-
-        The ``fake_impl`` may run multiple times during compilation; the real function
-        runs once per call at runtime.
-
-        To validate that your ``fake_impl`` matches the real function's outputs, set
-        ``torch._dynamo.config.leaf_function_validate_outputs = True``.
-
-    Inputs:
-        ``nn.Module`` can be passed as an input argument. The module's parameters
-        and buffers will be tracked for autograd, so gradients flow back to them.
-        The module must exist outside the compile region (cannot be constructed
-        during compilation).
-
-        Inputs must use pytree-compatible types. Tensors, Python primitives
-        (int, float, bool, str), and built-in containers (list, tuple, dict) work
-        by default. User-defined classes must be registered via
-        :func:`torch.utils._pytree.register_pytree_node`,
-        :func:`torch.utils._pytree.register_dataclass`, or
-        :func:`torch.utils._pytree.register_constant`.
-
-    Outputs:
-        Outputs must be a tuple of tensors: ``return (tensor,)`` for a single tensor,
-        or ``return (tensor1, tensor2)`` for multiple. The ``fake_impl`` must return
-        a tuple with the same structure.
-
-    Limitations:
-        Currently works with ``backend="eager"`` and ``backend="aot_eager"`` only.
-        Inductor backend and ``torch.export`` are not yet supported.
+        2. **Isolation**: Mutations to shared state (globals, closures) may not be
+           visible across the leaf function boundary. Pass data explicitly as
+           function arguments and return results as outputs.
 
     Dangerous Patterns:
-        These patterns may cause silent incorrectness:
+        These patterns may cause silent incorrectness or errors:
 
         - **Side effects between leaf functions and compiled regions**: Mutations to
           Python state inside a leaf function may not be visible to the compiled
@@ -431,10 +427,12 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
         - **Closures in fake_impl**: Tensors or modules captured from enclosing scopes
           in the ``fake_impl`` will cause compilation errors. The real function can
-          close over them, but the ``fake_impl`` must only use its arguments.
+          close over them if they don't require gradient, but the ``fake_impl`` must
+          only use its arguments.
 
           Bad::
 
+              # requires_grad must be False. Otherwise, you'll get a runtime error
               weight = torch.randn(3, 3)
 
 
@@ -473,49 +471,43 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
           execution.
 
     Example:
-        External library call with training::
+        Wrapping an external library that implements custom CUDA kernels via
+        ``torch.autograd.Function``. The library has control flow Dynamo cannot
+        trace, but gradients flow because it defines backward logic::
 
             @leaf_function
-            def call_external_kernel(x):
-                # Hypothetical external library that AOT can't trace
-                result = external_lib.custom_kernel(x)
-                return (result,)
+            def custom_forward(linear, x):
+                # Logging at runtime
+                print(f"Input: shape={x.shape}, mean={x.mean().item():.4f}")
 
+                # external_lib.linear is a torch.autograd.Function with custom
+                # kernels and backward logic defined
+                out = external_lib.linear(x, linear.weight, linear.bias)
 
-            @call_external_kernel.fake_impl
-            def call_external_kernel_fake(x):
-                return (torch.empty_like(x),)
-
-        Logging/debugging::
-
-            @leaf_function
-            def forward_with_logging(model, x):
-                print(f"Input shape: {x.shape}, mean: {x.mean().item():.4f}")
-                out = model(x)
-                print(f"Output: [{out.min().item():.4f}, {out.max().item():.4f}]")
+                print(f"Output: shape={out.shape}, norm={out.norm().item():.4f}")
                 return (out,)
 
 
-            @forward_with_logging.fake_impl
-            def forward_with_logging_fake(model, x):
-                return (torch.empty_like(x),)
+            @custom_forward.fake_impl
+            def custom_forward_fake(linear, x):
+                # Return tensor with correct shape: (batch, out_features)
+                return (x.new_empty(x.shape[0], linear.weight.shape[0]),)
 
 
-            class DebugModule(torch.nn.Module):
+            class MyModel(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.linear = torch.nn.Linear(10, 10)
+                    self.linear = torch.nn.Linear(10, 20)
 
                 def forward(self, x):
-                    return forward_with_logging(self.linear, x)
+                    return custom_forward(self.linear, x)
 
 
-            # Training works - gradients flow through the leaf function
-            model = DebugModule()
-            compiled_model = torch.compile(model, backend="aot_eager")
+            model = MyModel()
+            compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
             x = torch.randn(32, 10, requires_grad=True)
-            out = compiled_model(x)[0]
-            out.sum().backward()  # Gradients propagate correctly
+            out = compiled(x)[0]
+            out.sum().backward()  # Gradients flow to model.linear.weight/bias and x
 
     Args:
         fn: The function being decorated.
