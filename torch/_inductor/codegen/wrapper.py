@@ -3212,9 +3212,7 @@ class PythonWrapperCodegen(CodeGen):
             return s.codegen_reference()
         elif has_triton_package() and isinstance(s, triton.language.dtype):  # type: ignore[possibly-undefined]
             return repr(s)
-        elif isinstance(s, ir.GeneratorState):
-            return s.codegen_reference()
-        elif isinstance(s, ir.OpaqueObjectState):
+        elif isinstance(s, (ir.GeneratorState, ir.OpaqueObjectState)):
             return s.codegen_reference()
         elif is_opaque_value_type(type(s)):
             obj_repr, opaque_types = get_opaque_obj_repr(s)

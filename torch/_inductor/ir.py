@@ -6057,9 +6057,9 @@ class ExternKernel(InputsKernel):
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
-        args_flat_is_tensor = []
+        args_flat_is_tensor: list[bool] = []
         # tensor_args can be either tensor or torchbind objects
-        tensor_args = []
+        tensor_args: list[IRNode] = []
         non_tensor_args: list[object] = []
         real_non_tensor_args: list[
             FakeScriptObject | torch._C.Generator | torch._C.ScriptObject | torch.Tensor
