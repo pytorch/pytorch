@@ -7,6 +7,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace_native.h>
 #include <ATen/ops/range_native.h>
 #include <cmath>
 #include <limits>
@@ -241,6 +242,98 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       feeds[cachedGraph->endTensor] = getMPSGraphTensorFromScalar(stream, endScalar);
       MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
+
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+    }
+
+    if (!result.is_contiguous()) {
+      result.copy_(r);
+    }
+  }
+  return result;
+}
+
+namespace {
+struct LogspaceCachedGraph : public mps::MPSCachedGraph {
+  LogspaceCachedGraph(MPSGraph* mpsGraph, MPSDataType dataType, int32_t steps)
+      : MPSCachedGraph(mpsGraph) {
+    @autoreleasepool {
+      // Create coordinate tensor [0, 1, 2, ..., steps-1]
+      auto shapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:&steps length:sizeof(int32_t)]
+                                              shape:@[ @1 ]
+                                           dataType:MPSDataTypeInt32];
+      auto coordsTensor = [mpsGraph coordinateAlongAxis:0 withShapeTensor:shapeTensor name:nil];
+      coordsTensor = [mpsGraph castTensor:coordsTensor toType:MPSDataTypeFloat32 name:@"coords"];
+
+      startTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeFloat32, @[ @1 ]);
+      stepTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeFloat32, @[ @1 ]);
+      baseTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeFloat32, @[ @1 ]);
+
+      // exponent = start + coords * step
+      auto scaledCoords = [mpsGraph multiplicationWithPrimaryTensor:coordsTensor
+                                                    secondaryTensor:stepTensor
+                                                               name:nil];
+      auto exponent = [mpsGraph additionWithPrimaryTensor:scaledCoords secondaryTensor:startTensor name:nil];
+
+      // output = base ^ exponent
+      outputTensor = [mpsGraph powerWithPrimaryTensor:baseTensor secondaryTensor:exponent name:nil];
+
+      // Cast to target type if needed
+      if (dataType != MPSDataTypeFloat32) {
+        outputTensor = [mpsGraph castTensor:outputTensor toType:dataType name:@"output"];
+      }
+    }
+  }
+  MPSGraphTensor* startTensor = nil;
+  MPSGraphTensor* stepTensor = nil;
+  MPSGraphTensor* baseTensor = nil;
+  MPSGraphTensor* outputTensor = nil;
+};
+} // anonymous namespace
+
+Tensor& logspace_mps_out(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
+  using namespace mps;
+
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (result.numel() != steps) {
+    result.resize_({steps});
+  }
+
+  if (steps == 0) {
+    // skip
+  } else if (steps == 1) {
+    result.fill_(std::pow(base, start.to<double>()));
+  } else {
+    Tensor r = !mps::needsGather(result) ? result : result.contiguous();
+
+    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+    MPSStream* stream = getCurrentMPSStream();
+
+    @autoreleasepool {
+      std::string key = "logspace_mps_out:" + getTensorsStringKey({result}) + ":" + std::to_string(steps) + ":" +
+          std::to_string(base);
+      auto cachedGraph = cache_->LookUpAs<LogspaceCachedGraph>(key);
+
+      if (!cachedGraph) {
+        cachedGraph = cache_->CreateCachedGraphAs<LogspaceCachedGraph>(key, ^MPSCachedGraph*() {
+          @autoreleasepool {
+            MPSGraph* mpsGraph = make_mps_graph();
+            return new LogspaceCachedGraph(mpsGraph, getMPSDataType(result), static_cast<int32_t>(steps));
+          }
+        });
+      }
+
+      NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
+      double step_val = (end.to<double>() - start.to<double>()) / (static_cast<double>(steps) - 1.0);
+      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
+
+      MPSScalar startScalar = getMPSScalar(start.to<double>(), ScalarType::Float);
+      feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, startScalar);
+      MPSScalar stepScalar = getMPSScalar(step_val, ScalarType::Float);
+      feeds[cachedGraph->stepTensor] = getMPSGraphTensorFromScalar(stream, stepScalar);
+      MPSScalar baseScalar = getMPSScalar(base, ScalarType::Float);
+      feeds[cachedGraph->baseTensor] = getMPSGraphTensorFromScalar(stream, baseScalar);
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }

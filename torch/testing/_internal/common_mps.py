@@ -307,7 +307,6 @@ if torch.backends.mps.is_available():
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, Optional[list]] = {
             # Failures due to lack of op implementation on MPS backend
-            "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
@@ -440,7 +439,6 @@ if torch.backends.mps.is_available():
             ],
         }
         UNIMPLEMENTED_XFAILLIST_SPARSE: dict[str, Optional[list]] = {
-            "logspace": None,
             "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
