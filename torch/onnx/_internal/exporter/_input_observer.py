@@ -169,7 +169,7 @@ class InputObserverInfo:
                     if i in captured_inputs and captured_inputs[i] != len(ts):
                         raise RuntimeError(
                             f"Positional argument {i} has {len(ts)} tensors "
-                            f"but previously got {captured_inputs[i]} tensors."
+                            f"but previously got {captured_inputs[i]} tensors. "
                             f"Inference is impossible in that case."
                         )
                     captured_inputs[i] = len(ts)
