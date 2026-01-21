@@ -402,7 +402,6 @@ if torch.backends.mps.is_available():
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
             "linalg.pinvsingular": None,  # Missing `aten::linalg_qr.out`.
-            "nonzero_static": None,
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
             "nn.functional.adaptive_avg_pool2d": None,
