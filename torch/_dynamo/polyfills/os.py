@@ -14,6 +14,7 @@ __all__ = ["fspath"]
 
 
 # Copied from os.py in the standard library
+# pyrefly: ignore [bad-argument-type]
 @substitute_in_graph(os.fspath, can_constant_fold_through=True)
 def fspath(path: AnyStr | os.PathLike[AnyStr]) -> AnyStr:
     if isinstance(path, (str, bytes)):

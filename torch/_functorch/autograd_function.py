@@ -46,6 +46,7 @@ class CustomFunctionHigherOrderOperator(HigherOrderOperator):
         # (because autograd.Function happens before the Python dispatch key)
         # and only traces the forward pass.
         if torch._C._are_functorch_transforms_active():
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(autograd_function, *args, **kwargs)
         return autograd_function.apply(*args, **kwargs)
 
@@ -744,6 +745,7 @@ class AutogradFunctionApply(HigherOrderOperator):
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
+        saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
@@ -755,6 +757,17 @@ class AutogradFunctionApply(HigherOrderOperator):
                 # from the dynamo graph body to the local_map graph body.
                 # This is required for fx_traceback.annotate for work.
                 output, saved_values = torch.fx.Interpreter(fwd).run(*args)
+
+                # See Note [Activations with no version counter checks in eager]
+                # Mark tensors that came from ctx.save_for_backward with metadata.
+                # This allows AOT autograd to distinguish between tensors saved via
+                # save_for_backward vs those stashed directly on ctx (e.g., ctx.x = x).
+                from torch.fx.experimental.proxy_tensor import _get_proxies
+
+                for idx, t in enumerate(saved_values):
+                    if idx not in saved_for_backward_idx:
+                        for proxy in _get_proxies(t):
+                            proxy.node.meta["saved_tensor_with_no_vc_check"] = True
 
                 # If users call ctx.mark_non_differentiable() in the original fwd function.
                 if len(non_differentiable_idx) > 0:

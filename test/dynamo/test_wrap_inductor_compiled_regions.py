@@ -10,7 +10,6 @@ from torch._dynamo.utils import counters
 from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch.nn.attention.flex_attention import flex_attention, flex_attention_hop
-from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import (
@@ -459,7 +458,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertNotIn("inductor_compiled_code", debug_unwrapped.debug_string())
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_with_wrapper_basic(self):
         """Test that flex_attention works with wrap_inductor_compiled_regions=True"""
 
@@ -496,7 +494,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(output, output_unwrapped, rtol=1e-3, atol=1e-3)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_wrapper_visible_in_debug_mode(self):
         """Test that inductor_compiled_code HOP is visible to DebugMode when wrapper is enabled"""
 
@@ -547,7 +544,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         )
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_wrapper_with_backward(self):
         """Test that wrapper works correctly with backward pass"""
 
@@ -605,7 +601,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     @inductor_config.patch("fx_graph_cache", True)
     @inductor_config.patch("fx_graph_remote_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
@@ -675,7 +670,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(result1, result2)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_with_sac_must_save(self):
         """
         Test that SAC policy MUST_SAVE for flex_attention_hop
@@ -760,7 +754,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(v.grad)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_flex_attention_with_sac_prefer_recompute(self):
         """
         Test that SAC policy PREFER_RECOMPUTE for flex_attention_hop
@@ -989,7 +982,6 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             self.assertEqual(result_with, expected2)
 
     @requires_cuda_and_triton
-    @skipIfRocm
     def test_sac_outer_compile_inner_flex_attention(self):
         """
         Test SAC(compile(foo)) with flex_attention - the key motivating use case.
@@ -1071,6 +1063,21 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(q.grad, q2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
+
+    def test_fake_tensor_mode_raises_error(self):
+        """Test that running compiled code inside FakeTensorMode raises a clear error"""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            model = torch.nn.Linear(4, 4)
+            inp = torch.rand(4, 4)
+
+            with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Inductor compiled code cannot be run with FakeTensor inputs",
+                ):
+                    torch.compile(model)(inp)
 
 
 if __name__ == "__main__":
