@@ -269,12 +269,16 @@ def set_device(device: Device) -> None:
 
 
 def get_device_properties(device: Device = None) -> dict[str, Any]:
-    r"""Return a dictionary of MTIA device properties
+    r"""Get the properties of a device.
 
     Args:
-        device (torch.device or int, optional) selected device. Returns
-            statistics for the current device, given by current_device(),
-            if device is None (default).
+        device (torch.device or int or str, optional): device for which to return the
+            properties of the device.  It uses the current device, given by
+            :func:`~torch.mtia.current_device`, if :attr:`device` is ``None``
+            (default).
+
+    Returns:
+        _MtiaDeviceProperties: the properties of the device
     """
     return torch._C._mtia_getDeviceProperties(_get_device_index(device, optional=True))
 

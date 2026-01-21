@@ -49,7 +49,27 @@ struct _MTIAGraph {
   }
 };
 
+static void registerMtiaDeviceProperties(PyObject* module) {
+  // Add _mtiaDeviceProperties class to torch._C
+  auto m = py::handle(module).cast<py::module>();
+
+  py::class_<mtiaDeviceProp>(m, "_MtiaDeviceProperties")
+      .def_readonly("name", &mtiaDeviceProp::name)
+      .def_readonly("total_memory", &mtiaDeviceProp::total_memory)
+      .def_readonly("max_grid_height", &mtiaDeviceProp::max_grid_height)
+      .def_readonly("max_grid_width", &mtiaDeviceProp::max_grid_width)
+      .def("__repr__", [](const mtiaDeviceProp& prop) {
+        std::ostringstream stream;
+        stream << "_MtiaDeviceProperties(name='" << prop.name
+               << "', total_memory=" << prop.total_memory / (1024ull * 1024)
+               << "MB, max_grid_height=" << prop.max_grid_height
+               << ", max_grid_width=" << prop.max_grid_width << ")";
+        return stream.str();
+      });
+}
+
 void initModule(PyObject* module) {
+  registerMtiaDeviceProperties(module);
   auto m = py::handle(module).cast<py::module>();
 
   m.def("_mtia_init", []() {
@@ -147,11 +167,12 @@ void initModule(PyObject* module) {
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
 
-  m.def("_mtia_getDeviceProperties", [](c10::DeviceIndex device_index) {
-    PyObject* raw_pyobject =
-        at::detail::getMTIAHooks().getDeviceProperties(device_index);
-    return py::reinterpret_steal<py::object>(raw_pyobject);
-  });
+  m.def(
+      "_mtia_getDeviceProperties",
+      [](c10::DeviceIndex device_index) -> mtiaDeviceProp* {
+        return at::detail::getMTIAHooks().getDeviceProperties(device_index);
+      },
+      py::return_value_policy::reference);
 
   m.def("_mtia_emptyCache", []() { at::detail::getMTIAHooks().emptyCache(); });
 
