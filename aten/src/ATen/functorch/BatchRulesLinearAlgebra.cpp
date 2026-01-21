@@ -527,7 +527,7 @@ _scaled_dot_product_flash_attention_batch_rule(
 }
 
 std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, SymInt, SymInt, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
-_scaled_dot_product_flash_attention_low_p_batch_rule(
+_scaled_dot_product_flash_attention_quantized_batch_rule(
   const Tensor& query, std::optional<int64_t> query_bdim,
   const Tensor& key, std::optional<int64_t> key_bdim,
   const Tensor& value, std::optional<int64_t> value_bdim,
@@ -835,7 +835,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
 
   VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
-  VMAP_SUPPORT2(_scaled_dot_product_flash_attention, low_p, _scaled_dot_product_flash_attention_low_p_batch_rule);
+  VMAP_SUPPORT2(_scaled_dot_product_flash_attention, quantized, _scaled_dot_product_flash_attention_quantized_batch_rule);
   VMAP_SUPPORT(_scaled_dot_product_cudnn_attention, _scaled_dot_product_cudnn_attention_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);

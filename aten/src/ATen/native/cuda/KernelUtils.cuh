@@ -253,7 +253,11 @@ __device__ inline void cmtdStore(void* address, T value) {
         for (int i=0; i<num_char_per_val; i++)
           __hip_atomic_store(reinterpret_cast<char *>(address)+i, _pnr.c[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#ifdef __gfx1250__
+      asm volatile("s_wait_loadcnt(0)" ::: "memory");
+#else
       asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+#endif
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 }
 #endif
