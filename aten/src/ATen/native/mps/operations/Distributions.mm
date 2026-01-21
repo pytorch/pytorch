@@ -16,6 +16,7 @@
 #include <ATen/ops/cauchy_native.h>
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
+#include <ATen/ops/geometric_native.h>
 #include <ATen/ops/full_like.h>
 #include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
@@ -436,6 +437,47 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
                                       MPSGraphRandomDistributionUniform,
                                       gen,
                                       "exponential_mps_:" + std::to_string(lambda),
+                                      random_op_block);
+}
+
+// Geometric distribution
+// Samples from geometric distribution with probability p
+// Returns the number of Bernoulli trials needed to get one success
+// Uses inverse transform sampling: floor(log(1-U) / log(1-p)) + 1
+// where U is uniform(0,1)
+Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
+  TORCH_CHECK(0.0 < p && p < 1.0, "geometric_ expects 0 < p < 1, but got p=", p);
+
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    // Compute log(1-p)
+    double log_one_minus_p = std::log(1.0 - p);
+    MPSGraphTensor* logOneMinusPTensor = [mpsGraph constantWithScalar:log_one_minus_p
+                                                             dataType:randomTensor.dataType];
+    // Compute 1 - U
+    MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:randomTensor.dataType];
+    MPSGraphTensor* oneMinusU = [mpsGraph subtractionWithPrimaryTensor:oneTensor
+                                                       secondaryTensor:randomTensor
+                                                                  name:nil];
+    // Compute log(1 - U)
+    MPSGraphTensor* logOneMinusU = [mpsGraph logarithmWithTensor:oneMinusU name:nil];
+    // Compute log(1-U) / log(1-p)
+    MPSGraphTensor* quotient = [mpsGraph divisionWithPrimaryTensor:logOneMinusU
+                                                   secondaryTensor:logOneMinusPTensor
+                                                              name:nil];
+    // Compute floor and add 1
+    MPSGraphTensor* floored = [mpsGraph floorWithTensor:quotient name:nil];
+    return [mpsGraph additionWithPrimaryTensor:floored secondaryTensor:oneTensor name:nil];
+  };
+  auto eps = std::numeric_limits<float>::epsilon();
+  return mps::random_mps_impl<double>(self,
+                                      eps,
+                                      1.0 - eps,
+                                      std::nullopt,
+                                      std::nullopt,
+                                      MPSGraphRandomDistributionUniform,
+                                      gen,
+                                      "geometric_mps_:" + std::to_string(p),
                                       random_op_block);
 }
 

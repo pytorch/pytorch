@@ -386,8 +386,6 @@ if torch.backends.mps.is_available():
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
-            "geometric": None,
-            "geometric_": None,
             "cdouble": None,
             "double": None,
             "log_softmaxwith_dtype": [
