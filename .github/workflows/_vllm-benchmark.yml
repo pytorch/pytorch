@@ -82,10 +82,10 @@ jobs:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts
 
-      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+      - uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
-          python-version: 3.12
-          activate-environment: true
+          python-version: "3.12"
+          activate-environment: "true"
 
       - name: Install build artifacts
         shell: bash
