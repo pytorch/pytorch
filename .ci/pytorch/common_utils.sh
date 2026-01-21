@@ -199,14 +199,56 @@ function install_torchvision() {
   fi
 }
 
-function install_torchrec_and_fbgemm() {
-  local torchrec_commit
-  torchrec_commit=$(get_pinned_commit torchrec)
+function install_fbgemm() {
+  local build_variant=$1
+
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
     fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
   fi
+
+  # Check if the wheel has been already been built
+  local wheel_dir=dist/fbgemm_gpu
+  local found_whl=0
+  for file in "${wheel_dir}"/*.whl
+  do
+    if [[ -f "${file}" ]]; then
+      found_whl=1
+      break
+    fi
+  done
+
+  pip_install tabulate==0.9.0 tensordict==0.10.0  # needed for newer fbgemm
+  pip_install patchelf  # needed for rocm fbgemm
+
+  # Build the wheel if it doesn't exist
+  if [ "${found_whl}" == "0" ]; then
+    git clone --recursive https://github.com/pytorch/fbgemm
+    pushd fbgemm/fbgemm_gpu
+    git checkout "${fbgemm_commit}" --recurse-submodules
+    python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
+    popd
+
+    # Save the wheel before cleaning up
+    mkdir -p dist/fbgemm_gpu
+    cp fbgemm/fbgemm_gpu/dist/*.whl dist/fbgemm_gpu
+  fi
+
+  # Install fbgemm wheel
+  for file in "${wheel_dir}"/*.whl
+  do
+    pip_install_whl "${file}"
+  done
+
+  # Clean up
+  rm -rf fbgemm
+}
+
+function install_torchrec_and_fbgemm() {
+  local torchrec_commit
+  torchrec_commit=$(get_pinned_commit torchrec)
+
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
@@ -236,55 +278,12 @@ function install_torchrec_and_fbgemm() {
     echo "ROCm version: $ROCM_INT"
     export BUILD_ROCM_VERSION="$MAJOR_VERSION.$MINOR_VERSION"
 
-    pip_install tabulate  # needed for newer fbgemm
-    pip_install patchelf  # needed for rocm fbgemm
-
-    local wheel_dir=dist/fbgemm_gpu
-    local found_whl=0
-    for file in "${wheel_dir}"/*.whl
-    do
-      if [[ -f "${file}" ]]; then
-        found_whl=1
-        break
-      fi
-    done
-
-    # Build the wheel if it doesn't exist
-    if [ "${found_whl}" == "0" ]; then
-      git clone --recursive https://github.com/pytorch/fbgemm
-      pushd fbgemm/fbgemm_gpu
-      git checkout "${fbgemm_commit}" --recurse-submodules
-      # until the fbgemm_commit includes the tbb patch
-      patch <<'EOF'
---- a/FbgemmGpu.cmake
-+++ b/FbgemmGpu.cmake
-@@ -184,5 +184,6 @@ gpu_cpp_library(
-     fbgemm_gpu_tbe_cache
-     fbgemm_gpu_tbe_optimizers
-     fbgemm_gpu_tbe_utils
-+    tbb
-   DESTINATION
-     fbgemm_gpu)
-EOF
-      python setup.py bdist_wheel --build-variant=rocm
-      popd
-
-      # Save the wheel before cleaning up
-      mkdir -p dist/fbgemm_gpu
-      cp fbgemm/fbgemm_gpu/dist/*.whl dist/fbgemm_gpu
-    fi
-
-    for file in "${wheel_dir}"/*.whl
-    do
-      pip_install_whl "${file}"
-    done
-
-    rm -rf fbgemm
+    install_fbgemm "rocm"
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     # Skip fbgemm for CUDA 13 as it's not compatible yet
     if [[ "$BUILD_ENVIRONMENT" != *cuda13* ]]; then
-      pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
+      install_fbgemm "cuda"
     fi
   fi
 }

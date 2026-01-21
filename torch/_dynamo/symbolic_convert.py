@@ -235,6 +235,7 @@ class SpeculationEntry:
     instruction_pointer: int
     inst: Instruction  # for debugging only
     _failed: bool = False
+    # TX error_on_graph_break setting at the time of failure
     error_on_graph_break: Optional[bool] = None
     reason: Optional[GraphCompileReason] = None
 
@@ -270,6 +271,9 @@ class SpeculationLog:
 
     entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
+    # If True, graph break at autograd.grad instead of tracing it.
+    # Set when we detect that autograd.grad consumed grad_fns that are returned.
+    graph_break_on_autograd_grad: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -830,6 +834,34 @@ def generic_jump(
     return inner
 
 
+def _reconstruct_block_stack(
+    tx: InstructionTranslatorBase, cg: PyCodegen, cleanup: list[Instruction]
+) -> None:
+    """Generates bytecode to restore the block stack for running the unsupported instruction
+    in the compiled bytecode."""
+    # Reconstruct the context variable CLASS in the block stack
+    all_txes: list[InstructionTranslatorBase] = []
+    cur_tx: Optional[InstructionTranslatorBase] = tx
+    while cur_tx is not None:
+        all_txes.append(cur_tx)
+        cur_tx = cur_tx.parent
+    for tx in reversed(all_txes):
+        for b in tx.block_stack:
+            # Don't exit any modes we have entered,
+            # output bytecode will mutate the tf mode stack accordingly
+            if isinstance(b.with_context, TorchFunctionModeVariable):
+                cg.extend_output(
+                    b.resume_fn().try_except_torch_function_mode(
+                        cg.code_options, cleanup
+                    )
+                )
+                continue
+            assert b.with_context is not None
+            assert isinstance(b.with_context, (ContextWrappingVariable))
+            b.with_context.reconstruct_type(cg)
+            cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
+
+
 # NOTE: for the purposes of nested graph breaks, break_graph_if_unsupported only works on instructions
 # with 0 or 1 outputs. If you wish to support bytecodes with 2+ outputs, either rewrite the instruction
 # into a sequence of simpler instructions, or file an issue for consultation.
@@ -919,21 +951,7 @@ def break_graph_if_unsupported(
             )
             cg = PyCodegen(self.output.root_tx)
             cleanup: list[Instruction] = []
-            # Reconstruct the context variable CLASS in the block stack
-            for b in self.block_stack:
-                # Don't exit any modes we have entered,
-                # output bytecode will mutate the tf mode stack accordingly
-                if isinstance(b.with_context, TorchFunctionModeVariable):
-                    cg.extend_output(
-                        b.resume_fn().try_except_torch_function_mode(
-                            cg.code_options, cleanup
-                        )
-                    )
-                    continue
-                assert b.with_context is not None
-                assert isinstance(b.with_context, (ContextWrappingVariable))
-                b.with_context.reconstruct_type(cg)
-                cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
+            _reconstruct_block_stack(self, cg, cleanup)
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 
@@ -1128,8 +1146,12 @@ class InstructionTranslatorBase(
     exec_recorder: Optional[ExecutionRecorder]
     strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
     start_point: Optional[int]
-    is_leaf_tracer: bool
+    # Does this function make no inlined function calls?
+    has_no_inlined_calls: bool
     parent: Optional[InstructionTranslatorBase]
+    # Does this tx currently have a child tx tracing?
+    # Used to correctly implement should_compile_partial_graph
+    is_child_tracer_active: bool
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: Optional[CompilePackage]
     latest_bytecode_queue: deque[str]
@@ -1240,7 +1262,6 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
-        self.is_leaf_tracer = False
         if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):  # type: ignore[attr-defined]
             return self.inline_generator_function(fn, args, kwargs)
         else:
@@ -1456,7 +1477,6 @@ class InstructionTranslatorBase(
         log.debug("step triggered compile")
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
-            partial_convert=True,
             reason=GraphCompileReason("step_unsupported", [self.frame_summary()]),
         )
         # current frame state
@@ -1494,6 +1514,9 @@ class InstructionTranslatorBase(
             )
             skip_code(leaf_resume_code)
 
+            cleanup: list[Instruction] = []
+            _reconstruct_block_stack(self.parent, cg, cleanup)
+
             # current frame state
             # cells,
             # [
@@ -1503,6 +1526,8 @@ class InstructionTranslatorBase(
             #   frame 1 stack + locals,
             # ], [frame N cells], [frame N locals],
             self.codegen_call_resume([leaf_resume_code], [leaf_resume_name], cg)
+
+            cg.extend_output(cleanup)
 
             # current frame state
             # cells,
@@ -1525,48 +1550,48 @@ class InstructionTranslatorBase(
                 ]
             )
 
-            # add the leaf_resume result to frame N-1 stack
+            # current frame state
+            # cells, frame_values, leaf_resume result
+            # extract frame N-1 stack
             num_stack = all_stack_locals_metadata[1].num_stack
             cg.extend_output(
                 [
-                    create_instruction("BUILD_LIST", arg=1),
                     *create_copy(2),
                     cg.create_load_const(0),
                     cg.create_binary_subscr(),
-                    *create_binary_slice(num_stack, num_stack, True),
+                    *create_binary_slice(0, num_stack),
+                ]
+            )
+
+            # current frame state
+            # cells, frame_values, leaf_resume result, frame N-1 stack
+            # add the leaf_resume result to frame N-1 stack
+            cg.extend_output(
+                [
+                    *create_swap(2),
+                    create_instruction("LIST_APPEND", arg=1),
                 ]
             )
             self.parent.push(UnknownVariable())
             all_stack_locals_metadata[1].num_stack += 1
 
             # current frame state
-            # cells, frame_values
-            # extract frame N-1 stack to stack
-            cg.extend_output(
-                [
-                    create_dup_top(),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    *create_binary_slice(0, num_stack + 1),
-                ]
-            )
-
-            # current frame state
             # cells, frame_values, frame N-1 stack + leaf_resume result
             # remove frame N-1 stack from frame_values
-            cg.extend_output(
-                # frame_values[0] = frame_values[0][num_stack + 1:]
-                [
-                    *create_copy(2),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    create_dup_top(),
-                    *create_binary_slice(num_stack + 1, None),
-                    *create_swap(2),
-                    cg.create_load_const(0),
-                    create_instruction("STORE_SUBSCR"),
-                ]
-            )
+            if num_stack > 0:
+                cg.extend_output(
+                    # frame_values[0] = frame_values[0][num_stack:]
+                    [
+                        *create_copy(2),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                        create_dup_top(),
+                        *create_binary_slice(num_stack, None),
+                        *create_swap(2),
+                        cg.create_load_const(0),
+                        create_instruction("STORE_SUBSCR"),
+                    ]
+                )
 
             # current frame state
             # cells, frame_values, frame N-1 stack + leaf_resume result
@@ -1595,6 +1620,13 @@ class InstructionTranslatorBase(
                 )
             )
         else:
+            # NOTE: if WithExitFunctionVariable is reconstructed here, then the generated bytecode will be wrong.
+            # However, we don't expect this to happen since WithExitFunctionVariable can only be present on the stack,
+            # which must be empty in step graph breaks.
+            # If we do decide to support step graph breaks with WithExitFunctionVariable in the future, we should
+            # either call a skipped resume function as in the nested step graph break case, or reconstruct the
+            # proper context manager object from the class (like what we used to do historically in variables/ctx_manager.py).
+
             # pop cells
             self.output.add_output_instructions(
                 [
@@ -3254,7 +3286,8 @@ class InstructionTranslatorBase(
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
-            and not self.error_on_graph_break
+            # Only the leaf tracer's error_on_graph_break should be used
+            and (self.is_child_tracer_active or not self.error_on_graph_break)
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
             # Do not allow nested graph breaks in HOPs
@@ -3491,11 +3524,12 @@ class InstructionTranslatorBase(
         push=False, msg_prefix="Encountered intentional debugging graph break"
     )
     def graph_break_on_leaf_function(self, inst: Instruction) -> None:
-        if self.is_leaf_tracer:
+        if self.has_no_inlined_calls:
             unimplemented(
                 gb_type="Forced graph break on leaf function",
                 context="",
-                explanation="Forced graph break for nested graph break testing purposes",
+                explanation="Forced graph break on non-inlining function for "
+                "nested graph break testing purposes",
                 hints=[
                     "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False",
                 ],
@@ -4462,8 +4496,9 @@ class InstructionTranslatorBase(
 
         self.strict_checks_fn = None
 
-        self.is_leaf_tracer = True
+        self.has_no_inlined_calls = True
         self.parent = None
+        self.is_child_tracer_active = False
         self.debug_locals = []
 
         self.package = package
@@ -5016,6 +5051,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def inline_call_(self) -> VariableTracker:
         parent = self.parent
+        parent.has_no_inlined_calls = False
+        parent.is_child_tracer_active = True
         code = self.f_code
 
         strict_ctx: Any = contextlib.nullcontext()
@@ -5038,7 +5075,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug("FAILED INLINING %s", code)
             raise
         finally:
+            # Pass inlined tx's error_on_graph_break to parent.
+            # Deals with the case where the parent's error_on_graph_break is True
+            # while the inlined tx's error_on_graph_break was set to False.
             parent.error_on_graph_break = self.error_on_graph_break
+            parent.is_child_tracer_active = False
 
         if self.output.should_exit:
             # graph break

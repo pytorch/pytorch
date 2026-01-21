@@ -50,8 +50,6 @@ from .common import (
 from .wrapper import (
     AllocateLine,
     BufferLike,
-    CommBufferAllocateLine,
-    CommBufferFreeLine,
     CommentLine,
     ConditionalLine,
     DynamicScalarLine,
@@ -927,11 +925,11 @@ class FxConverter:
         # Does nothing.
 
     def _generate_comm_buffer_allocate(self, line: WrapperLine) -> None:
-        assert isinstance(line, CommBufferAllocateLine)
+        assert isinstance(line, AllocateLine) and line.comm_buffer
         raise NotImplementedError("Comm buffer allocation is not yet supported")
 
     def _generate_comm_buffer_free(self, line: WrapperLine) -> None:
-        assert isinstance(line, CommBufferFreeLine)
+        assert isinstance(line, FreeIfNotReusedLine) and line.comm_buffer
         self._free(line.node)
 
     def _generate_triton_call(self, line: WrapperLine) -> None:
@@ -960,23 +958,30 @@ class FxConverter:
                 for dynamic shapes.
                 """
 
-                def to_size_hint(arg: Any) -> Any:
+                def to_size_hint_sympy_int(arg: Union[sympy.Expr, int]) -> int:
                     if len(free_unbacked_symbols(arg)) > 0:
                         # NYI: tuning args require backed symints.
                         raise UnbackedSymintsError
-                    return pytree.tree_map(V.graph.sizevars.size_hint, arg)
+                    return V.graph.sizevars.size_hint(arg)
+
+                def to_size_hint_list(arg: list[Union[torch.SymInt, int]]) -> list[int]:
+                    args_sympy = [
+                        x.node.expr if isinstance(x, torch.SymInt) else x for x in arg
+                    ]
+                    return pytree.tree_map(to_size_hint_sympy_int, args_sympy)
 
                 if not isinstance(arg, torch.fx.Node):
-                    return to_size_hint(arg)
+                    return to_size_hint_sympy_int(arg)
 
                 fake = arg.meta["val"]
                 return torch.empty_strided(
-                    to_size_hint(fake.shape),
-                    to_size_hint(fake.stride()),
+                    to_size_hint_list(fake.shape),
+                    to_size_hint_list(fake.stride()),
                     dtype=fake.dtype,
                     device=device,
                 ).zero_()
 
+            # call args can be fx nodes or sympy expressions or integers!
             arg_values = [node_to_tuning_arg(arg) for arg in call_args]
             tuner.run(*arg_values, stream=stream)
 

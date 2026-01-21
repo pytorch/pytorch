@@ -285,4 +285,6 @@ def statically_launched_kernel_by_device(
     if device_type == "cuda":
         return StaticallyLaunchedCudaKernel(kernel)
     else:
-        raise NotImplementedError(f"Device type {device_type} not supported")
+        raise NotImplementedError(
+            f"Device type {device_type} is not supported for static launcher"
+        )
