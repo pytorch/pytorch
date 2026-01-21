@@ -1052,6 +1052,47 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
+    def test_with_effects_through_functional_tensor_mode(self):
+        """Test that with_effects can flow through FunctionalTensorMode.
+
+        This tests the fix where regional inductor compiles graphs that already
+        contain with_effects nodes from a previous functionalization pass.
+        The with_effects HOP needs to pass through FunctionalTensorMode without
+        being re-functionalized.
+        """
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        def fn_with_effects(x, y):
+            token = torch.ops.prims._make_token()
+            new_token, result = with_effects(
+                token,
+                torch.ops.aten.add.Tensor,
+                x,
+                y,
+            )
+            return result
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        with (
+            torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+            ),
+            FunctionalTensorMode(),
+        ):
+            x_func = FunctionalTensor.to_functional(x)
+            y_func = FunctionalTensor.to_functional(y)
+            result = fn_with_effects(x_func, y_func)
+
+        expected = x + y
+        if isinstance(result, FunctionalTensor):
+            result = torch._from_functional_tensor(result.elem)
+        self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     run_tests()
