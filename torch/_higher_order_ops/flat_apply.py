@@ -8,7 +8,6 @@ import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._higher_order_ops.utils import reconstruct_original_args
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 
@@ -146,6 +145,9 @@ def impl(
         # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
         assert isinstance(func, _ConstantFunction)
+
+    # Lazy import to avoid circular dependency with invoke_leaf_function
+    from torch._higher_order_ops.invoke_leaf_function import reconstruct_original_args
 
     # Reconstruct args/kwargs from flat_args and process any LeafModuleState objects
     with reconstruct_original_args(in_spec, flat_args) as (args, kwargs):
