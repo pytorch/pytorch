@@ -178,7 +178,8 @@ jobs:
             --from-benchmark-configs-dir vllm-benchmarks/benchmarks \
             --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
             --models "${MODELS}" \
-            --device "${DEVICE_NAME}"
+            --device "${DEVICE_NAME}" \
+            --include-eager-mode
           popd
 
           pushd vllm-project/vllm
