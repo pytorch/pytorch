@@ -137,6 +137,8 @@ NVSHMEMSymmComm::NVSHMEMSymmComm(
       rank_(0),
       world_size_(0),
       buffer_ptr_(nullptr),
+      lsa_signal_pad_(nullptr),
+      gin_signal_pad_(nullptr),
       context_dev_(nullptr) {
   initialize();
 }
@@ -197,10 +199,30 @@ void NVSHMEMSymmComm::initialize() {
       buffer_size_,
       " bytes");
 
+  // Allocate dual signal pads for different communication domains:
+  // - LSA signal pad: For local/direct memory access via nvshmem_ptr()
+  // - GIN signal pad: For GPU-initiated networking via nvshmemx_signal_op()
+  // Using a fixed size of 256 signals each (enough for most use cases)
+  constexpr size_t kSignalPadSize = 256 * sizeof(uint64_t);
+
+  lsa_signal_pad_ = static_cast<uint64_t*>(nvshmem_malloc(kSignalPadSize));
+  TORCH_CHECK(
+      lsa_signal_pad_ != nullptr,
+      "nvshmem_malloc failed to allocate LSA signal pad");
+
+  gin_signal_pad_ = static_cast<uint64_t*>(nvshmem_malloc(kSignalPadSize));
+  TORCH_CHECK(
+      gin_signal_pad_ != nullptr,
+      "nvshmem_malloc failed to allocate GIN signal pad");
+
   // Zero-initialize the buffer
   if (buffer_ptr_ != nullptr && buffer_size_ > 0) {
     C10_CUDA_CHECK(cudaMemset(buffer_ptr_, 0, buffer_size_));
   }
+
+  // Zero-initialize both signal pads
+  C10_CUDA_CHECK(cudaMemset(lsa_signal_pad_, 0, kSignalPadSize));
+  C10_CUDA_CHECK(cudaMemset(gin_signal_pad_, 0, kSignalPadSize));
 
   // Synchronize to ensure all PEs have completed allocation
   C10_CUDA_CHECK(cudaDeviceSynchronize());
@@ -212,6 +234,8 @@ void NVSHMEMSymmComm::initialize() {
       world_size_,
       buffer_ptr_,
       buffer_size_,
+      lsa_signal_pad_,
+      gin_signal_pad_,
       device_idx_,
       0, // offset = 0
       global_rank,
@@ -249,6 +273,18 @@ void NVSHMEMSymmComm::cleanup() {
     if (buffer_ptr_ != nullptr) {
       nvshmem_free(buffer_ptr_);
       buffer_ptr_ = nullptr;
+    }
+
+    // Free LSA signal pad
+    if (lsa_signal_pad_ != nullptr) {
+      nvshmem_free(lsa_signal_pad_);
+      lsa_signal_pad_ = nullptr;
+    }
+
+    // Free GIN signal pad
+    if (gin_signal_pad_ != nullptr) {
+      nvshmem_free(gin_signal_pad_);
+      gin_signal_pad_ = nullptr;
     }
   } catch (...) {
     // Ignore cleanup errors

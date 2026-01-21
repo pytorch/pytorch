@@ -45,9 +45,14 @@ Usage Pattern:
             byte_offset: tl.int64 = 0
             n_elems: tl.int64 = num_elements
             # Pass backend_hint to primitives for compile-time dispatch
-            result = symm_all_reduce(
-                ctx_ptr, buffer_ptr, byte_offset, n_elems,
-                REDUCE_OP_SUM, DTYPE_FLOAT32, backend_hint
+            symm_all_reduce(
+                ctx_ptr,
+                buffer_ptr,
+                byte_offset,
+                n_elems,
+                REDUCE_OP_SUM,
+                DTYPE_FLOAT32,
+                backend_hint,
             )
 
         return my_kernel
@@ -114,6 +119,38 @@ REDUCE_OP_SUM = _REDUCE_OP_SUM
 _DTYPE_FLOAT32 = 0
 
 DTYPE_FLOAT32 = _DTYPE_FLOAT32
+
+# Fence scope constants (matching CUDA constants)
+_FENCE_SCOPE_CTA = 0  # Intra-block sync (__syncthreads())
+_FENCE_SCOPE_GPU = 1  # Device-wide memory fence (__threadfence())
+_FENCE_SCOPE_SYSTEM = 2  # System-wide fence (__threadfence_system())
+
+FENCE_SCOPE_CTA = _FENCE_SCOPE_CTA
+FENCE_SCOPE_GPU = _FENCE_SCOPE_GPU
+FENCE_SCOPE_SYSTEM = _FENCE_SCOPE_SYSTEM
+
+# Signal operation constants (matching CUDA constants)
+_SIGNAL_OP_SET = 0  # Atomic set (replace value)
+_SIGNAL_OP_ADD = 1  # Atomic add (increment value)
+
+SIGNAL_OP_SET = _SIGNAL_OP_SET
+SIGNAL_OP_ADD = _SIGNAL_OP_ADD
+
+# Signal comparison condition constants (matching NVSHMEM constants)
+# These are used with symm_signal_wait_until
+_SIGNAL_CMP_EQ = 1  # Equal
+_SIGNAL_CMP_NE = 2  # Not equal
+_SIGNAL_CMP_GT = 3  # Greater than
+_SIGNAL_CMP_GE = 4  # Greater than or equal
+_SIGNAL_CMP_LT = 5  # Less than
+_SIGNAL_CMP_LE = 6  # Less than or equal
+
+SIGNAL_CMP_EQ = _SIGNAL_CMP_EQ
+SIGNAL_CMP_NE = _SIGNAL_CMP_NE
+SIGNAL_CMP_GT = _SIGNAL_CMP_GT
+SIGNAL_CMP_GE = _SIGNAL_CMP_GE
+SIGNAL_CMP_LT = _SIGNAL_CMP_LT
+SIGNAL_CMP_LE = _SIGNAL_CMP_LE
 
 
 class TorchSymmLibFinder:
@@ -337,9 +374,14 @@ if TRITON_AVAILABLE:
                 ):
                     byte_offset: tl.int64 = 0
                     n_elems: tl.int64 = num_elements
-                    result = symm_all_reduce(
-                        ctx_ptr, buffer_ptr, byte_offset, n_elems,
-                        REDUCE_OP_SUM, DTYPE_FLOAT32, backend_hint
+                    symm_all_reduce(
+                        ctx_ptr,
+                        buffer_ptr,
+                        byte_offset,
+                        n_elems,
+                        REDUCE_OP_SUM,
+                        DTYPE_FLOAT32,
+                        backend_hint,
                     )
 
                 return my_kernel
@@ -456,6 +498,8 @@ if TRITON_AVAILABLE:
 
         This calls the unified frontend function that dynamically dispatches to
         either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context or unsupported reduce_op/dtype.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
@@ -497,6 +541,8 @@ if TRITON_AVAILABLE:
 
         This calls the NVSHMEM backend directly, bypassing runtime dispatch.
         Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context or unsupported reduce_op/dtype.
         """
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
@@ -514,6 +560,206 @@ if TRITON_AVAILABLE:
                 ): ("nvshmem_symm_all_reduce", core.dtype("int32")),
             },
             is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
+    # SYMM_QUIET - FLUSH/COMPLETE ALL OUTSTANDING SYMMETRIC OPERATIONS
+    # =========================================================================
+
+    @core.extern
+    def _symm_quiet_frontend(
+        ctx_ptr,
+        _semantic=None,
+    ):
+        """
+        Frontend quiet operation that dispatches based on SymmContext type.
+
+        Flushes/completes all outstanding symmetric operations issued by this rank.
+        Ensures that all prior symm_put/_signal calls are completed (data delivered
+        to destination) before proceeding.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): ("symm_quiet", core.dtype("int32")),
+            },
+            is_pure=False,  # Has side effects (memory ordering)
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_quiet(
+        ctx_ptr,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific quiet operation.
+
+        Flushes/completes all outstanding NVSHMEM operations issued by this PE.
+        Maps to nvshmem_quiet().
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): (
+                    "nvshmem_symm_quiet",
+                    core.dtype("int32"),
+                ),
+            },
+            is_pure=False,  # Has side effects (memory ordering)
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
+    # SYMM_BARRIER - TEAM-WIDE BARRIER SYNCHRONIZATION
+    # =========================================================================
+
+    @core.extern
+    def _symm_barrier_frontend(
+        ctx_ptr,
+        _semantic=None,
+    ):
+        """
+        Frontend barrier operation that dispatches based on SymmContext type.
+
+        Performs a team-wide barrier synchronization. All ranks in the team block
+        until everyone has reached this point.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): (
+                    "symm_barrier",
+                    core.dtype("int32"),
+                ),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_barrier(
+        ctx_ptr,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific barrier operation.
+
+        Performs a team-wide barrier synchronization using NVSHMEM.
+        Maps to nvshmemx_barrier_all_block().
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): (
+                    "nvshmem_symm_barrier",
+                    core.dtype("int32"),
+                ),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
+    # SYMM_FENCE - MEMORY FENCE FOR ORDERING
+    # =========================================================================
+
+    @core.extern
+    def _symm_fence_frontend(
+        ctx_ptr,
+        scope,
+        _semantic=None,
+    ):
+        """
+        Frontend fence operation that dispatches based on SymmContext type.
+
+        Provides memory ordering guarantees at different scopes and also
+        inserts appropriate NVSHMEM/NIC fence for symmetric operations.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context or invalid scope.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, scope],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # scope
+                ): ("symm_fence", core.dtype("int32")),
+            },
+            is_pure=False,  # Has side effects (memory ordering)
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_fence(
+        ctx_ptr,
+        scope,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific fence operation.
+
+        Provides memory ordering guarantees at different scopes:
+        - FENCE_SCOPE_CTA (0): __syncthreads() + nvshmem_fence()
+        - FENCE_SCOPE_GPU (1): __threadfence() + nvshmem_fence()
+        - FENCE_SCOPE_SYSTEM (2): __threadfence_system() + nvshmem_fence()
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context or invalid scope.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, scope],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # scope
+                ): ("nvshmem_symm_fence", core.dtype("int32")),
+            },
+            is_pure=False,  # Has side effects (memory ordering)
             _semantic=_semantic,
         )
 
@@ -552,20 +798,16 @@ if TRITON_AVAILABLE:
             dtype: Data type (constexpr)
                    - 0 (DTYPE_FLOAT32): float32 (only supported value)
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
-                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
-                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
-                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
-
-        Returns:
-            int32: 0 on success, negative on error
-                   -1: null context or invalid context type
-                   -2: unknown context type (only for frontend dispatch)
-                   -3: unsupported reduction operation
-                   -4: unsupported data type
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context, unsupported reduce_op, or
+            unsupported dtype. Use device-side error checking for debugging.
         """
         # Validate reduce_op at compile time
         tl.static_assert(
@@ -583,7 +825,7 @@ if TRITON_AVAILABLE:
         # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
         if backend == 0:  # BACKEND_DEFAULT
             # Runtime dispatch based on SymmContext type
-            return _symm_all_reduce_frontend(
+            _symm_all_reduce_frontend(
                 ctx_ptr,
                 local_ptr,
                 byte_offset,
@@ -593,7 +835,7 @@ if TRITON_AVAILABLE:
             )
         elif backend == 2:  # BACKEND_NVSHMEM
             # Direct NVSHMEM dispatch
-            return _nvshmem_symm_all_reduce(
+            _nvshmem_symm_all_reduce(
                 ctx_ptr,
                 local_ptr,
                 byte_offset,
@@ -608,7 +850,1289 @@ if TRITON_AVAILABLE:
                 False,
                 "NCCL backend not supported (no device bitcode library available)",
             )
+
+    @triton.jit
+    def _symm_signal_ptr_frontend(
+        ctx_ptr,
+        peer,
+    ):
+        """
+        [INTERNAL] Unified frontend for signal_ptr operation.
+        Uses runtime dispatch based on SymmContext type.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, peer],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 peer) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # peer
+                ): ("symm_signal_ptr", core.dtype("int64")),
+            },
+            is_pure=True,  # Returns pointer without side effects
+            _semantic=_semantic,
+        )
+
+    @triton.jit
+    def _nvshmem_symm_signal_ptr(
+        ctx_ptr,
+        peer,
+    ):
+        """
+        [INTERNAL] NVSHMEM-specific signal_ptr implementation.
+
+        Get a device pointer to peer's LSA signal pad (if accessible via P2P).
+        Uses nvshmem_ptr() to get the remote address.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Returns 0 if peer's signal pad is not accessible via P2P.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, peer],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 peer) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # peer
+                ): ("nvshmem_symm_signal_ptr", core.dtype("int64")),
+            },
+            is_pure=True,  # Returns pointer without side effects
+            _semantic=_semantic,
+        )
+
+    @triton.jit
+    def symm_signal_ptr(
+        ctx_ptr,
+        peer,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Get a device pointer to peer's signal pad (if accessible via P2P).
+
+        Returns a device pointer to the peer's signal pad that can be used for
+        direct load/store operations. This is useful for implementing custom
+        signaling patterns with direct memory access.
+
+        For NVSHMEM, this returns the LSA signal pad (used for P2P load/store).
+        The GIN signal pad (used by symm_signal for atomic operations) is
+        separate and not accessible via this function.
+
+        For NCCL, this returns the signal pad accessible via the LSA window.
+
+        If the peer's signal pad is not accessible via P2P (e.g., remote node),
+        returns 0/None.
+
+        Example usage:
+            # Get pointer to peer's signal pad
+            peer_signal_pad = symm_signal_ptr(ctx_ptr, peer)
+
+            # If accessible, can use direct load/store
+            if peer_signal_pad != 0:
+                # Direct store to peer's signal (index 0)
+                tl.store(peer_signal_pad, value)
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            peer: Peer rank/PE to get signal pad pointer for (int32)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Returns:
+            Device pointer to peer's signal pad (int64), or 0 if not P2P accessible.
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            return _symm_signal_ptr_frontend(ctx_ptr, peer)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            return _nvshmem_symm_signal_ptr(ctx_ptr, peer)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+            return tl.zeros((1,), dtype=tl.int64)[0]  # Unreachable
+
+    @triton.jit
+    def symm_quiet(
+        ctx_ptr,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Flush/complete all outstanding symmetric operations issued by this rank.
+
+        This ensures that all prior symm_put/_signal calls are completed (data
+        delivered to destination) before proceeding. This is a local completion
+        guarantee - it does not synchronize with other ranks.
+
+        Use this after a series of puts/signals to ensure all data has been
+        delivered before proceeding to dependent operations.
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmem_quiet()
+        - NCCL: gin.flush() (when device bitcode is available)
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_quiet_frontend(ctx_ptr)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_quiet(ctx_ptr)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    @triton.jit
+    def symm_barrier(
+        ctx_ptr,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Perform team-wide barrier synchronization.
+
+        All ranks in the team block until everyone has reached this point.
+        This is a collective operation that must be called by all ranks in the team.
+
+        Unlike symm_quiet (which ensures local operations are complete), symm_barrier
+        provides global synchronization where all ranks wait for each other.
+
+        Common usage pattern:
+          1. All ranks perform local operations (puts, signals, etc.)
+          2. Call symm_barrier to ensure all ranks have completed their operations
+          3. Proceed with operations that depend on data from other ranks
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmemx_barrier_all_block()
+        - NCCL: ncclLsaBarrier() (when device bitcode is available)
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_barrier_frontend(ctx_ptr)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_barrier(ctx_ptr)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    @triton.jit
+    def symm_fence(
+        ctx_ptr,
+        scope: tl.constexpr,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Memory fence for ordering at different scopes.
+
+        Provides memory ordering guarantees at different scopes:
+        - FENCE_SCOPE_CTA (0): Intra-block sync (__syncthreads())
+          Synchronizes all threads within the same thread block.
+        - FENCE_SCOPE_GPU (1): Device-wide memory fence (__threadfence())
+          Ensures all prior memory writes are visible to all threads on the GPU.
+        - FENCE_SCOPE_SYSTEM (2): System-wide fence (__threadfence_system())
+          Ensures all prior memory writes are visible system-wide (CPU, other GPUs).
+
+        For symmetric operations, this also inserts appropriate NVSHMEM/NIC fence
+        to enforce ordering between consecutive puts. This ensures that if you do:
+          symm_put(dest, data1, pe)
+          symm_fence(ctx, FENCE_SCOPE_GPU)
+          symm_put(dest, data2, pe)
+        The first put will be ordered before the second put to the same PE.
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: __syncthreads()/__threadfence()/__threadfence_system() + nvshmem_fence()
+        - NCCL: __syncthreads()/__threadfence()/__threadfence_system() (when device bitcode available)
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            scope: Fence scope (constexpr)
+                   - 0 (FENCE_SCOPE_CTA): Intra-block synchronization
+                   - 1 (FENCE_SCOPE_GPU): Device-wide memory fence
+                   - 2 (FENCE_SCOPE_SYSTEM): System-wide memory fence
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context or invalid scope.
+        """
+        # Validate scope at compile time
+        tl.static_assert(
+            scope >= 0 and scope <= 2,
+            "scope must be 0 (CTA), 1 (GPU), or 2 (SYSTEM)",
+        )
+
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_fence_frontend(ctx_ptr, scope)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_fence(ctx_ptr, scope)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    # =========================================================================
+    # SYMM_REMOTE_PTR - GET DEVICE POINTER TO PEER'S SYMMETRIC BUFFER
+    # =========================================================================
+
+    @core.extern
+    def _symm_remote_ptr_frontend(
+        ctx_ptr,
+        local_ptr,
+        peer,
+        _semantic=None,
+    ):
+        """
+        Frontend remote pointer operation that dispatches based on SymmContext type.
+
+        Gets a device pointer to the peer's symmetric buffer. This pointer can be
+        used for direct P2P access via tl.load/tl.store if the peer is accessible
+        via P2P (e.g., NVLink connected GPUs).
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, local_ptr, peer],
+            {
+                # C function signature: (int64, int64, int32) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int64"),  # local_ptr
+                    core.dtype("int32"),  # peer
+                ): ("symm_remote_ptr", core.dtype("int64")),
+            },
+            is_pure=True,  # Pure function - just returns a pointer
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_remote_ptr(
+        ctx_ptr,
+        local_ptr,
+        peer,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific remote pointer operation.
+
+        Gets a device pointer to the peer's symmetric buffer using NVSHMEM.
+        Maps to nvshmem_ptr().
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, local_ptr, peer],
+            {
+                # C function signature: (int64, int64, int32) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int64"),  # local_ptr
+                    core.dtype("int32"),  # peer
+                ): ("nvshmem_symm_remote_ptr", core.dtype("int64")),
+            },
+            is_pure=True,  # Pure function - just returns a pointer
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
+    # SYMM_MULTICAST_PTR - GET MULTICAST POINTER FOR BROADCASTING
+    # =========================================================================
+
+    @core.extern
+    def _symm_multicast_ptr_frontend(
+        ctx_ptr,
+        local_ptr,
+        team_ptr,
+        _semantic=None,
+    ):
+        """
+        Frontend multicast pointer operation that dispatches based on SymmContext type.
+
+        Gets a multicast pointer for broadcasting to all peers. This is used for
+        efficient one-to-many communication where the same data is sent to all
+        peers in the group.
+
+        Returns 0 if multicast is not supported by the hardware.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, local_ptr, team_ptr],
+            {
+                # C function signature: (int64, int64, int64) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int64"),  # local_ptr
+                    core.dtype("int64"),  # team_ptr (pointer to SymmTeam)
+                ): ("symm_multicast_ptr", core.dtype("int64")),
+            },
+            is_pure=True,  # Pure function - just returns a pointer
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_multicast_ptr(
+        ctx_ptr,
+        local_ptr,
+        team_ptr,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific multicast pointer operation.
+
+        Gets a multicast pointer for broadcasting to all peers using NVSHMEM.
+        Requires hardware support (e.g., NVSwitch with multicast capability).
+
+        Returns 0 if multicast is not supported.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, local_ptr, team_ptr],
+            {
+                # C function signature: (int64, int64, int64) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int64"),  # local_ptr
+                    core.dtype("int64"),  # team_ptr (pointer to NVSHMEMSymmTeam)
+                ): ("nvshmem_symm_multicast_ptr", core.dtype("int64")),
+            },
+            is_pure=True,  # Pure function - just returns a pointer
+            _semantic=_semantic,
+        )
+
+    @triton.jit
+    def symm_remote_ptr(
+        ctx_ptr,
+        local_ptr,
+        peer,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Get a device pointer to peer's symmetric buffer for direct P2P access.
+
+        This function returns a device pointer that can be used for direct
+        tl.load/tl.store operations to access the peer's symmetric buffer.
+        If the peer is not accessible via P2P (e.g., not NVLink connected),
+        returns 0 (null pointer).
+
+        Usage pattern:
+          peer_ptr = symm_remote_ptr(ctx, my_local_ptr, peer_rank)
+          if peer_ptr != 0:
+              data = tl.load(peer_ptr + offset)  # Direct P2P read
+              tl.store(peer_ptr + offset, value)  # Direct P2P write
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmem_ptr(local_ptr, peer)
+        - NCCL: ncclGetLsaPointer() (when device bitcode is available)
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            local_ptr: Pointer to local symmetric buffer (device pointer as int64)
+            peer: Peer rank/PE to get pointer for (int32)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Returns:
+            int64: Device pointer to peer's symmetric buffer, or 0 if not accessible
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            return _symm_remote_ptr_frontend(ctx_ptr, local_ptr, peer)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            return _nvshmem_symm_remote_ptr(ctx_ptr, local_ptr, peer)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+            return 0
+
+    @triton.jit
+    def symm_multicast_ptr(
+        ctx_ptr,
+        local_ptr,
+        team_ptr,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Get a multicast pointer for broadcasting to all peers.
+
+        This function returns a multicast pointer that can be used for efficient
+        one-to-many communication. When data is stored to this pointer, it is
+        automatically broadcast to all peers in the group.
+
+        Returns 0 if multicast is not supported by the hardware (e.g., no NVSwitch
+        with multicast capability).
+
+        Usage pattern:
+          mc_ptr = symm_multicast_ptr(ctx, my_local_ptr, team_ptr)
+          if mc_ptr != 0:
+              tl.store(mc_ptr + offset, value)  # Broadcast to all peers
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmemx_mc_ptr(team, ptr) where team is retrieved from NVSHMEMSymmTeam
+        - NCCL: ncclGetLsaMultimemPointer() (when device bitcode is available)
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            local_ptr: Pointer to local symmetric buffer (device pointer as int64)
+            team_ptr: Pointer to SymmTeam (NCCLSymmTeam or NVSHMEMSymmTeam) as int64
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Returns:
+            int64: Multicast pointer for broadcasting, or 0 if not supported
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            return _symm_multicast_ptr_frontend(ctx_ptr, local_ptr, team_ptr)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            return _nvshmem_symm_multicast_ptr(ctx_ptr, local_ptr, team_ptr)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+            return 0
+
+    # =========================================================================
+    # SYMM_TEAM PRIMITIVES - TOPOLOGY MANAGEMENT
+    # =========================================================================
+
+    @core.extern
+    def _symm_team_size_frontend(
+        team_ptr,
+        _semantic=None,
+    ):
+        """
+        Frontend team_size operation.
+
+        Returns the number of ranks in the team.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [team_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): ("symm_team_size", core.dtype("int32")),
+            },
+            is_pure=True,  # Pure function - just returns team size
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_team_size(
+        team_ptr,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific team_size operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [team_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): ("nvshmem_symm_team_size", core.dtype("int32")),
+            },
+            is_pure=True,
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _symm_team_rank_frontend(
+        team_ptr,
+        _semantic=None,
+    ):
+        """
+        Frontend team_rank operation.
+
+        Returns the calling process's rank index within the team.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [team_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): ("symm_team_rank", core.dtype("int32")),
+            },
+            is_pure=True,  # Pure function - just returns rank
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_team_rank(
+        team_ptr,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific team_rank operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [team_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): ("nvshmem_symm_team_rank", core.dtype("int32")),
+            },
+            is_pure=True,
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _symm_team_lsa_size_frontend(
+        team_ptr,
+        _semantic=None,
+    ):
+        """
+        Frontend team_lsa_size operation.
+
+        Returns the number of ranks in the caller's LSA (Local Symmetric Access) domain.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [team_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): ("symm_team_lsa_size", core.dtype("int32")),
+            },
+            is_pure=True,  # Pure function - just returns LSA size
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_team_lsa_size(
+        team_ptr,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific team_lsa_size operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [team_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): (
+                    "nvshmem_symm_team_lsa_size",
+                    core.dtype("int32"),
+                ),
+            },
+            is_pure=True,
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _symm_team_lsa_frontend(
+        team_ptr,
+        peer,
+        _semantic=None,
+    ):
+        """
+        Frontend team_lsa operation.
+
+        Returns whether the peer rank is in the same LSA domain as the caller.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [team_ptr, peer],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # team_ptr
+                    core.dtype("int32"),  # peer
+                ): ("symm_team_lsa", core.dtype("int32")),
+            },
+            is_pure=True,  # Pure function - just checks LSA membership
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_team_lsa(
+        team_ptr,
+        peer,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific team_lsa operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [team_ptr, peer],
+            {
+                # C function signature: (int64, int32) -> int32
+                (
+                    core.dtype("int64"),  # team_ptr
+                    core.dtype("int32"),  # peer
+                ): ("nvshmem_symm_team_lsa", core.dtype("int32")),
+            },
+            is_pure=True,
+            _semantic=_semantic,
+        )
+
+    @triton.jit
+    def symm_team_size(
+        team_ptr,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Get the number of ranks in the team.
+
+        This returns the total number of processes/PEs that are members of the
+        specified team.
+
+        Args:
+            team_ptr: Pointer to SymmTeam (as int64 for Triton compatibility)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on team type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Returns:
+            int32: Number of ranks in the team, or -1 if team is invalid
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+        """
+        if backend == 0:  # BACKEND_DEFAULT
+            return _symm_team_size_frontend(team_ptr)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            return _nvshmem_symm_team_size(team_ptr)
+        else:
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
             return -1
+
+    @triton.jit
+    def symm_team_rank(
+        team_ptr,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Get the calling process's rank index within the team.
+
+        Returns the rank of this process within the specified team (0..team_size-1).
+        This is the team-local rank, not the global rank.
+
+        Args:
+            team_ptr: Pointer to SymmTeam (as int64 for Triton compatibility)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on team type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Returns:
+            int32: Rank index within the team (0..team_size-1), or -1 if team is invalid
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+        """
+        if backend == 0:  # BACKEND_DEFAULT
+            return _symm_team_rank_frontend(team_ptr)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            return _nvshmem_symm_team_rank(team_ptr)
+        else:
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+            return -1
+
+    @triton.jit
+    def symm_team_lsa_size(
+        team_ptr,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Get the number of ranks in the caller's LSA (Local Symmetric Access) domain.
+
+        LSA domain contains peers that can directly access each other's memory via
+        load/store operations (e.g., NVLink-connected GPUs on the same node).
+
+        This is useful for optimizing communication patterns:
+        - Peers in LSA domain: Use direct memory access (symm_remote_ptr + tl.load/store)
+        - Peers outside LSA: Use explicit put/get operations
+
+        Args:
+            team_ptr: Pointer to SymmTeam (as int64 for Triton compatibility)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on team type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Returns:
+            int32: Number of ranks in the LSA domain, or -1 if team is invalid
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+        """
+        if backend == 0:  # BACKEND_DEFAULT
+            return _symm_team_lsa_size_frontend(team_ptr)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            return _nvshmem_symm_team_lsa_size(team_ptr)
+        else:
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+            return -1
+
+    @triton.jit
+    def symm_team_lsa(
+        team_ptr,
+        peer,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Check if a peer rank is in the same LSA domain as the caller.
+
+        Returns 1 (true) if the peer can be accessed via direct load/store operations
+        (e.g., via symm_remote_ptr), 0 (false) if explicit communication is required.
+
+        Usage pattern:
+          is_lsa = symm_team_lsa(team, peer)
+          if is_lsa == 1:
+              # Direct memory access available
+              peer_ptr = symm_remote_ptr(ctx, local_ptr, peer)
+              data = tl.load(peer_ptr + offset)
+          else:
+              # Use explicit get operation
+              symm_get(ctx, local_buf, remote_buf, peer, size)
+
+        Args:
+            team_ptr: Pointer to SymmTeam (as int64 for Triton compatibility)
+            peer: Peer rank to check (team-local rank, 0..team_size-1)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on team type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Returns:
+            int32: 1 if peer is in LSA domain, 0 if not, -1 if team is invalid
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+        """
+        if backend == 0:  # BACKEND_DEFAULT
+            return _symm_team_lsa_frontend(team_ptr, peer)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            return _nvshmem_symm_team_lsa(team_ptr, peer)
+        else:
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+            return -1
+
+    # =========================================================================
+    # SYMM_SIGNAL - POINT-TO-POINT SIGNALING
+    # =========================================================================
+
+    @core.extern
+    def _symm_signal_frontend(
+        ctx_ptr,
+        signal_index,
+        dest_rank,
+        value,
+        op,
+        _semantic=None,
+    ):
+        """
+        Frontend signal operation that dispatches based on SymmContext type.
+
+        Signal a remote rank's flag without data transfer. Atomically operates
+        (set/add) on the symmetric signal at signal_index on dest_rank.
+        Uses the signal pad stored in the context.
+        Used for point-to-point notification.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context or invalid signal operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index, dest_rank, value, op],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 signal_index, int32 dest_rank,
+                #  int64 value, int32 op) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int32"),  # dest_rank
+                    core.dtype("int64"),  # value
+                    core.dtype("int32"),  # op
+                ): ("symm_signal", core.dtype("int32")),
+            },
+            is_pure=False,  # Remote atomic operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_signal(
+        ctx_ptr,
+        signal_index,
+        dest_rank,
+        value,
+        op,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific signal operation.
+
+        Signal a remote rank's flag without data transfer using NVSHMEM atomics.
+        Uses the signal pad stored in the context.
+        Maps to nvshmem_uint64_atomic_set() or nvshmem_uint64_atomic_add()
+        depending on the op parameter.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context or invalid signal operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index, dest_rank, value, op],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 signal_index, int32 dest_rank,
+                #  int64 value, int32 op) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int32"),  # dest_rank
+                    core.dtype("int64"),  # value
+                    core.dtype("int32"),  # op
+                ): ("nvshmem_symm_signal", core.dtype("int32")),
+            },
+            is_pure=False,  # Remote atomic operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
+    # SYMM_SIGNAL_WAIT_UNTIL - WAIT FOR SIGNAL CONDITION
+    # =========================================================================
+
+    @core.extern
+    def _symm_signal_wait_until_frontend(
+        ctx_ptr,
+        signal_index,
+        cmp,
+        cmp_value,
+        _semantic=None,
+    ):
+        """
+        Frontend signal_wait_until operation that dispatches based on SymmContext type.
+
+        Blocks the calling thread/CTA until a local signal at signal_index meets
+        the specified condition relative to the comparison value.
+
+        Uses the gin_signal_pad from the context (same pad that symm_signal writes
+        to). This enables point-to-point synchronization patterns.
+
+        Supported conditions:
+        - SIGNAL_CMP_EQ (1): Wait until signal == cmp_value
+        - SIGNAL_CMP_NE (2): Wait until signal != cmp_value
+        - SIGNAL_CMP_GT (3): Wait until signal > cmp_value
+        - SIGNAL_CMP_GE (4): Wait until signal >= cmp_value
+        - SIGNAL_CMP_LT (5): Wait until signal < cmp_value
+        - SIGNAL_CMP_LE (6): Wait until signal <= cmp_value
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context or invalid comparison operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index, cmp, cmp_value],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 signal_index, int32 cmp,
+                #  int64 cmp_value) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int32"),  # cmp
+                    core.dtype("int64"),  # cmp_value
+                ): ("symm_signal_wait_until", core.dtype("int64")),
+            },
+            is_pure=False,  # Blocking wait operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_signal_wait_until(
+        ctx_ptr,
+        signal_index,
+        cmp,
+        cmp_value,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific signal_wait_until operation.
+
+        Blocks the calling thread/CTA until a local signal at signal_index meets
+        the specified condition relative to the comparison value.
+
+        Uses nvshmem_signal_wait_until() from NVSHMEM.
+
+        Supported conditions:
+        - SIGNAL_CMP_EQ (1): Wait until signal == cmp_value
+        - SIGNAL_CMP_NE (2): Wait until signal != cmp_value
+        - SIGNAL_CMP_GT (3): Wait until signal > cmp_value
+        - SIGNAL_CMP_GE (4): Wait until signal >= cmp_value
+        - SIGNAL_CMP_LT (5): Wait until signal < cmp_value
+        - SIGNAL_CMP_LE (6): Wait until signal <= cmp_value
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context or invalid comparison operation.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index, cmp, cmp_value],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int32 signal_index, int32 cmp,
+                #  int64 cmp_value) -> int64
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int32"),  # cmp
+                    core.dtype("int64"),  # cmp_value
+                ): ("nvshmem_symm_signal_wait_until", core.dtype("int64")),
+            },
+            is_pure=False,  # Blocking wait operation has side effects
+            _semantic=_semantic,
+        )
+
+    @triton.jit
+    def symm_signal(
+        ctx_ptr,
+        signal_index,
+        dest_rank,
+        value: tl.constexpr = 1,
+        op: tl.constexpr = 0,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Signal a remote rank's flag without data transfer.
+
+        Atomically operates (set/add) on the symmetric signal at signal_index
+        on dest_rank. Uses the signal pad stored in the context.
+        Used for point-to-point notification.
+
+        This is a non-blocking operation. To ensure the signal has been delivered,
+        use symm_quiet() after the signal.
+
+        Common usage patterns:
+          # Simple notification (signal value = 1)
+          symm_signal(ctx, idx, dest_rank)
+          symm_quiet(ctx)  # Ensure signal is delivered
+
+          # Signal with specific value
+          symm_signal(ctx, idx, dest_rank, value=42, op=SIGNAL_OP_SET)
+
+          # Increment a counter
+          symm_signal(ctx, idx, dest_rank, value=1, op=SIGNAL_OP_ADD)
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmemx_signal_op(signal_pad + idx, value, sig_op, dest_rank)
+        - NCCL: atomicExch/atomicAdd on signal_pad_ptrs[dest_rank] + idx
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            signal_index: Index into the signal buffer (int32)
+            dest_rank: Destination rank/PE to signal (int32)
+            value: Value to set/add (constexpr, default=1)
+            op: Signal operation (constexpr, default=SIGNAL_OP_SET)
+                - 0 (SIGNAL_OP_SET): Atomic set (replace value)
+                - 1 (SIGNAL_OP_ADD): Atomic add (increment value)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context or invalid signal operation.
+        """
+        # Validate op at compile time
+        tl.static_assert(
+            op == 0 or op == 1,  # SIGNAL_OP_SET or SIGNAL_OP_ADD
+            "op must be 0 (SIGNAL_OP_SET) or 1 (SIGNAL_OP_ADD)",
+        )
+
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_signal_frontend(
+                ctx_ptr,
+                signal_index,
+                dest_rank,
+                value,
+                op,
+            )
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_signal(
+                ctx_ptr,
+                signal_index,
+                dest_rank,
+                value,
+                op,
+            )
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    @triton.jit
+    def symm_signal_wait_until(
+        ctx_ptr,
+        signal_index,
+        cmp: tl.constexpr,
+        cmp_value,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Wait until a local signal meets a specified condition.
+
+        Blocks the calling thread/CTA until the signal at signal_index meets
+        the specified condition relative to cmp_value. Uses the gin_signal_pad
+        from the context (same pad that symm_signal writes to).
+
+        This enables point-to-point synchronization patterns where one rank
+        signals with symm_signal and another waits with symm_signal_wait_until.
+
+        Common usage patterns:
+          # Wait for signal to be set (equal to 1)
+          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_EQ, 1)
+
+          # Wait for counter to reach threshold
+          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, expected_count)
+
+        Supported conditions:
+        - SIGNAL_CMP_EQ (1): Wait until signal == cmp_value
+        - SIGNAL_CMP_NE (2): Wait until signal != cmp_value
+        - SIGNAL_CMP_GT (3): Wait until signal > cmp_value
+        - SIGNAL_CMP_GE (4): Wait until signal >= cmp_value
+        - SIGNAL_CMP_LT (5): Wait until signal < cmp_value
+        - SIGNAL_CMP_LE (6): Wait until signal <= cmp_value
+
+        Note: NCCL only supports SIGNAL_CMP_GE condition.
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmem_signal_wait_until(signal_pad + idx, cmp, cmp_value)
+        - NCCL: ncclGin::waitSignal with ncclGin_WaitSignalGe
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            signal_index: Index into the signal buffer (int32)
+            cmp: Comparison operation (constexpr)
+                 - 1 (SIGNAL_CMP_EQ): Equal
+                 - 2 (SIGNAL_CMP_NE): Not equal
+                 - 3 (SIGNAL_CMP_GT): Greater than
+                 - 4 (SIGNAL_CMP_GE): Greater than or equal
+                 - 5 (SIGNAL_CMP_LT): Less than
+                 - 6 (SIGNAL_CMP_LE): Less than or equal
+            cmp_value: Value to compare against (int64)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                     - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                     - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                     - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Returns:
+            int64: The signal value that satisfied the condition
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context or invalid comparison operation.
+        """
+        # Validate cmp at compile time
+        tl.static_assert(
+            cmp >= 1 and cmp <= 6,
+            "cmp must be between 1 (SIGNAL_CMP_EQ) and 6 (SIGNAL_CMP_LE)",
+        )
+
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            return _symm_signal_wait_until_frontend(
+                ctx_ptr,
+                signal_index,
+                cmp,
+                cmp_value,
+            )
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            return _nvshmem_symm_signal_wait_until(
+                ctx_ptr,
+                signal_index,
+                cmp,
+                cmp_value,
+            )
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+            return tl.zeros((1,), dtype=tl.int64)[0]  # Unreachable
 
 else:
     # Triton not available - provide stubs
@@ -620,6 +2144,42 @@ else:
     def symm_all_reduce(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_all_reduce")
 
+    def symm_quiet(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_quiet")
+
+    def symm_barrier(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_barrier")
+
+    def symm_fence(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_fence")
+
+    def symm_remote_ptr(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_remote_ptr")
+
+    def symm_multicast_ptr(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_multicast_ptr")
+
+    def symm_team_size(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_team_size")
+
+    def symm_team_rank(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_team_rank")
+
+    def symm_team_lsa_size(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_team_lsa_size")
+
+    def symm_team_lsa(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_team_lsa")
+
+    def symm_signal(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_signal")
+
+    def symm_signal_ptr(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_signal_ptr")
+
+    def symm_signal_wait_until(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_signal_wait_until")
+
 
 __all__ = [
     # Backend hint constants
@@ -630,10 +2190,40 @@ __all__ = [
     "REDUCE_OP_SUM",
     # Data type constants
     "DTYPE_FLOAT32",
+    # Fence scope constants
+    "FENCE_SCOPE_CTA",
+    "FENCE_SCOPE_GPU",
+    "FENCE_SCOPE_SYSTEM",
+    # Signal operation constants
+    "SIGNAL_OP_SET",
+    "SIGNAL_OP_ADD",
+    # Signal comparison condition constants
+    "SIGNAL_CMP_EQ",
+    "SIGNAL_CMP_NE",
+    "SIGNAL_CMP_GT",
+    "SIGNAL_CMP_GE",
+    "SIGNAL_CMP_LT",
+    "SIGNAL_CMP_LE",
     # Library finder
     "TorchSymmLibFinder",
     # Decorators
     "requires_torch_symm",
-    # Triton extern function
+    # Triton extern functions
     "symm_all_reduce",
+    # Ordering primitives
+    "symm_quiet",
+    "symm_barrier",
+    "symm_fence",
+    # Memory primitives
+    "symm_remote_ptr",
+    "symm_multicast_ptr",
+    "symm_signal_ptr",
+    # Team primitives
+    "symm_team_size",
+    "symm_team_rank",
+    "symm_team_lsa_size",
+    "symm_team_lsa",
+    # Signal primitives
+    "symm_signal",
+    "symm_signal_wait_until",
 ]

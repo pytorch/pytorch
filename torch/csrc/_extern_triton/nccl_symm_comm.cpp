@@ -190,6 +190,8 @@ void NCCLSymmComm::initialize() {
   owns_dev_comm_ = true;
 
   // Step 4: Create host-side context
+  // Note: signal_pad_ptrs is nullptr for now - it would need to be allocated
+  // and populated with peer signal pad addresses for full signal support
   context_host_ = NCCLSymmContext(
       rank_,
       world_size_,
@@ -198,6 +200,7 @@ void NCCLSymmComm::initialize() {
       dev_comm,
       buffer_ptr_,
       buffer_size_,
+      nullptr, // signal_pad_ptrs - TODO: populate for full signal support
       device_idx_);
 
   // Step 5: Copy context to device

@@ -1,0 +1,577 @@
+// nccl_symm.cuh
+// NCCL backend implementation for symmetric memory operations
+//
+// This file contains NCCL-specific device functions that can be compiled
+// independently and linked into the unified torch_symm.bc bitcode library.
+//
+// Note: NCCL does NOT provide a device bitcode library (libnccl_device.bc).
+// This implementation is included for completeness and can be tested for
+// compilation errors. When linked with torch_symm.cu, NCCL_HAS_DEVICE_BITCODE
+// controls whether NCCL backend dispatch is enabled.
+//
+// BUILD MODES:
+// - TORCH_SYMM_BITCODE_BUILD=1: Bitcode build for Triton - NCCL device code
+//   is excluded to avoid unresolved symbols when linking with Triton kernels.
+// - Regular PyTorch build: NCCL device code is included when
+//   NCCL_SYMM_TYPES_AVAILABLE is defined.
+//
+// NCCL LSA Barrier API:
+// The proper NCCL LSA barrier API uses ncclLsaBarrierSession<Coop> which is
+// a RAII class that manages barrier state. It provides:
+// - arrive(): Signal arrival at barrier
+// - wait(): Wait for all peers to arrive
+// - sync(): arrive() + wait() combined
+//
+// Cooperative group types (Coop):
+// - ncclCoopCta: Block-level cooperative group (__syncthreads())
+// - ncclCoopWarp: Warp-level cooperative group
+// - ncclCoopThread: Single thread
+//
+// The barrier session is created with:
+// - ncclLsaBarrierSession<ncclCoopCta>(ncclCoopCta{}, comm, ncclTeamTagLsa{},
+//                                       barrier_index, use_multimem)
+
+#pragma once
+
+#include <cuda_runtime.h>
+#include <stdint.h>
+
+#include "symm_comm.cuh"
+
+// =============================================================================
+// REDUCTION OPERATION AND DATA TYPE CONSTANTS
+// =============================================================================
+
+#ifndef REDUCE_OP_SUM
+#define REDUCE_OP_SUM 0
+#endif
+
+#ifndef DTYPE_FLOAT32
+#define DTYPE_FLOAT32 0
+#endif
+
+// Fence scope constants
+#ifndef FENCE_SCOPE_CTA
+#define FENCE_SCOPE_CTA 0
+#define FENCE_SCOPE_GPU 1
+#define FENCE_SCOPE_SYSTEM 2
+#endif
+
+// Signal operation constants
+#ifndef SIGNAL_OP_SET
+#define SIGNAL_OP_SET 0
+#define SIGNAL_OP_ADD 1
+#endif
+
+// Signal comparison condition constants (for symm_signal_wait_until)
+// These match the abstracted constants in symm_comm.cuh
+#ifndef SIGNAL_CMP_EQ
+#define SIGNAL_CMP_EQ 1 // Equal
+#define SIGNAL_CMP_NE 2 // Not equal
+#define SIGNAL_CMP_GT 3 // Greater than
+#define SIGNAL_CMP_GE 4 // Greater than or equal
+#define SIGNAL_CMP_LT 5 // Less than
+#define SIGNAL_CMP_LE 6 // Less than or equal
+#endif
+
+// =============================================================================
+// NCCL CAST HELPERS
+// =============================================================================
+
+/**
+ * Cast SymmContext to NCCLSymmContext after runtime type check.
+ * Asserts on failure.
+ */
+__device__ __forceinline__ NCCLSymmContext* cast_to_nccl_context(
+    SymmContext* ctx) {
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+  TORCH_SYMM_CHECK(
+      ctx->type == SymmContext::Type::NCCL, "SymmContext is not NCCL type");
+  return static_cast<NCCLSymmContext*>(ctx);
+}
+
+/**
+ * Cast SymmTeam to NCCLSymmTeam after runtime type check.
+ * Asserts on failure.
+ */
+__device__ __forceinline__ NCCLSymmTeam* cast_to_nccl_team(SymmTeam* team) {
+  TORCH_SYMM_CHECK(team != nullptr, "SymmTeam is null");
+  TORCH_SYMM_CHECK(
+      team->type == SymmTeam::Type::NCCL, "SymmTeam is not NCCL type");
+  return static_cast<NCCLSymmTeam*>(team);
+}
+
+// =============================================================================
+// NCCL HELPER FUNCTIONS
+// =============================================================================
+
+// Skip NCCL device implementations during bitcode build to avoid unresolved
+// symbols when linking with Triton kernels. These will be compiled when
+// PyTorch is built normally with NCCL_SYMM_TYPES_AVAILABLE defined.
+#if !defined(TORCH_SYMM_BITCODE_BUILD)
+
+/**
+ * Get a pointer to a peer's symmetric buffer at a given offset (NCCL).
+ */
+__device__ __forceinline__ void* nccl_get_peer_ptr(
+    NCCLSymmContext* nccl_ctx,
+    int peer,
+    size_t byte_offset) {
+  return ncclGetLsaPointer(nccl_ctx->buffer_window, byte_offset, peer);
+}
+
+/**
+ * Perform LSA barrier synchronization using ncclLsaBarrierSession.
+ *
+ * This is the correct NCCL LSA barrier API. The barrier session is a RAII
+ * object that manages barrier state and provides arrive/wait/sync operations.
+ *
+ * @param nccl_ctx NCCL symmetric context with device communicator
+ * @param barrier_index Index of the barrier to use (0..nBarriers-1)
+ * @param use_multimem Whether to use multicast (NVSwitch) for barrier
+ */
+__device__ __forceinline__ void nccl_lsa_barrier_sync(
+    NCCLSymmContext* nccl_ctx,
+    uint32_t barrier_index,
+    bool use_multimem = false) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Create a CTA-scoped barrier session and sync
+  // ncclLsaBarrierSession is a RAII class - sync() is called, then destructor
+  // updates the epoch state
+  ncclLsaBarrierSession<ncclCoopCta> barrier(
+      ncclCoopCta{},
+      *nccl_ctx->dev_comm,
+      ncclTeamTagLsa{},
+      barrier_index,
+      use_multimem);
+  barrier.sync(ncclCoopCta{}, cuda::memory_order_seq_cst);
+#endif
+}
+
+// =============================================================================
+// NCCL BACKEND IMPLEMENTATIONS
+// =============================================================================
+
+/**
+ * NCCL backend implementation of all-reduce.
+ *
+ * DEMONSTRATION ONLY: This kernel implementation is intentionally simple and
+ * NOT efficient. It is provided solely to demonstrate the symmetric memory
+ * abstraction layer API.
+ */
+__device__ void nccl_all_reduce_impl(
+    NCCLSymmContext* nccl_ctx,
+    float* local_buffer,
+    int64_t byte_offset,
+    int64_t num_elements,
+    int32_t reduce_op,
+    int32_t dtype) {
+  TORCH_SYMM_CHECK(
+      reduce_op == REDUCE_OP_SUM, "Only REDUCE_OP_SUM is supported");
+  TORCH_SYMM_CHECK(dtype == DTYPE_FLOAT32, "Only DTYPE_FLOAT32 is supported");
+
+  int rank = nccl_ctx->rank;
+  int world_size = nccl_ctx->world_size;
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+
+  // Barrier before reading peer data
+  nccl_lsa_barrier_sync(nccl_ctx, 0, false);
+
+  for (int64_t i = tid; i < num_elements; i += stride) {
+    float sum = local_buffer[i];
+
+    for (int peer = 0; peer < world_size; peer++) {
+      if (peer != rank) {
+        float* peer_buffer =
+            static_cast<float*>(nccl_get_peer_ptr(nccl_ctx, peer, byte_offset));
+        sum += peer_buffer[i];
+      }
+    }
+
+    local_buffer[i] = sum;
+  }
+
+  // Barrier after writing results
+  nccl_lsa_barrier_sync(nccl_ctx, 1, false);
+}
+
+/**
+ * NCCL backend implementation of quiet.
+ *
+ * For NCCL, quiet is implemented as an LSA barrier to ensure all prior
+ * operations are visible to peers.
+ */
+__device__ void nccl_quiet_impl(NCCLSymmContext* nccl_ctx) {
+  nccl_lsa_barrier_sync(nccl_ctx, 0, false);
+}
+
+/**
+ * NCCL backend implementation of barrier.
+ *
+ * Uses ncclLsaBarrierSession for proper LSA barrier synchronization.
+ */
+__device__ void nccl_barrier_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t barrier_id) {
+  nccl_lsa_barrier_sync(nccl_ctx, static_cast<uint32_t>(barrier_id), false);
+}
+
+/**
+ * NCCL backend implementation of fence.
+ */
+__device__ void nccl_fence_impl(NCCLSymmContext* nccl_ctx, int32_t scope) {
+  switch (scope) {
+    case FENCE_SCOPE_CTA:
+      __syncthreads();
+      break;
+    case FENCE_SCOPE_GPU:
+      __threadfence();
+      break;
+    case FENCE_SCOPE_SYSTEM:
+      __threadfence_system();
+      break;
+    default:
+      TORCH_SYMM_CHECK(false, "Invalid fence scope");
+  }
+}
+
+/**
+ * NCCL backend implementation of remote_ptr.
+ */
+__device__ int64_t nccl_remote_ptr_impl(
+    NCCLSymmContext* nccl_ctx,
+    int64_t local_ptr,
+    int32_t peer) {
+  size_t byte_offset = reinterpret_cast<char*>(local_ptr) -
+      reinterpret_cast<char*>(nccl_ctx->local_buffer);
+  void* peer_ptr =
+      ncclGetLsaPointer(nccl_ctx->buffer_window, byte_offset, peer);
+  return reinterpret_cast<int64_t>(peer_ptr);
+}
+
+/**
+ * NCCL backend implementation of multicast_ptr.
+ */
+__device__ int64_t
+nccl_multicast_ptr_impl(NCCLSymmContext* nccl_ctx, int64_t local_ptr) {
+  size_t byte_offset = reinterpret_cast<char*>(local_ptr) -
+      reinterpret_cast<char*>(nccl_ctx->local_buffer);
+  void* mc_ptr = ncclGetLsaMultimemPointer(
+      nccl_ctx->buffer_window, byte_offset, nccl_ctx->dev_comm);
+  return reinterpret_cast<int64_t>(mc_ptr);
+}
+
+/**
+ * NCCL backend implementation of signal.
+ *
+ * Atomically updates a signal value at a remote rank's signal location.
+ * For NCCL, this uses the ncclGin (GPU-Initiated Networking) API for signaling.
+ *
+ * The ncclGin::signal API provides direct signaling without data transfer:
+ * - ncclGin_SignalInc{signalIndex}: Increment remote signal by 1
+ * - ncclGin_SignalAdd{signalIndex, value}: Add arbitrary value to remote signal
+ *
+ * @param nccl_ctx NCCL context with signal_pad_ptrs and dev_comm
+ * @param signal_index Index of the signal to update
+ * @param dest_rank Destination rank to signal
+ * @param value Value to use in the operation
+ * @param op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ */
+__device__ void nccl_signal_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t signal_index,
+    int32_t dest_rank,
+    uint64_t value,
+    int32_t op) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // ncclGin only supports ADD operations (SignalInc and SignalAdd)
+  TORCH_SYMM_CHECK(
+      op == SIGNAL_OP_ADD, "NCCL signal only supports SIGNAL_OP_ADD");
+
+  // Use ncclGin for GPU-initiated signaling
+  // Initialize GIN context (context ID 0 for simplicity)
+  int ginContext = 0;
+  ncclGin gin{*nccl_ctx->dev_comm, ginContext};
+
+  // Use ncclGin::signal directly:
+  // - value == 1: Use ncclGin_SignalInc (increment by 1)
+  // - value > 1:  Use ncclGin_SignalAdd (add arbitrary value)
+  if (value == 1) {
+    // Use ncclGin::signal with SignalInc to atomically increment by 1
+    gin.signal(
+        ncclTeamWorld(*nccl_ctx->dev_comm),
+        dest_rank,
+        ncclGin_SignalInc{static_cast<uint32_t>(signal_index)});
+  } else {
+    // Use ncclGin::signal with SignalAdd for arbitrary value
+    gin.signal(
+        ncclTeamWorld(*nccl_ctx->dev_comm),
+        dest_rank,
+        ncclGin_SignalAdd{static_cast<uint32_t>(signal_index), value});
+  }
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(false, "NCCL signal requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
+/**
+ * NCCL backend implementation of signal_ptr.
+ *
+ * Returns a device pointer to a peer's signal pad, if accessible via P2P.
+ * For NCCL, this uses the LSA window to get the peer's signal pad address.
+ *
+ * @param nccl_ctx NCCL context with signal_window
+ * @param peer Peer rank to get signal pad pointer for
+ * @return Device pointer to peer's signal pad, or 0 if not accessible
+ */
+__device__ int64_t
+nccl_signal_ptr_impl(NCCLSymmContext* nccl_ctx, int32_t peer) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Use ncclGetLsaPointer with signal_window to get peer's signal pad
+  // Offset 0 gives the base of the signal pad
+  void* peer_signal_pad = ncclGetLsaPointer(nccl_ctx->signal_window, 0, peer);
+  return reinterpret_cast<int64_t>(peer_signal_pad);
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(false, "NCCL signal_ptr requires NCCL_SYMM_TYPES_AVAILABLE");
+  return 0;
+#endif
+}
+
+/**
+ * NCCL backend implementation of signal_wait_until.
+ *
+ * Blocks the calling thread/CTA until a local signal at signal_index meets
+ * the specified condition relative to the comparison value.
+ *
+ * Uses ncclGin::waitSignal for GPU-initiated networking wait operations.
+ * Note: NCCL's ncclGin::waitSignal only supports >= condition (wait until
+ * signal value meets or exceeds the given threshold).
+ *
+ * Supported conditions:
+ * - SIGNAL_CMP_GE (4): Wait until signal >= cmp_value
+ *
+ * @param nccl_ctx NCCL context with dev_comm
+ * @param signal_index Index of the signal to wait on
+ * @param cmp Comparison operation (only SIGNAL_CMP_GE supported for NCCL)
+ * @param cmp_value Value to compare against
+ * @return The signal value that satisfied the condition
+ */
+__device__ uint64_t nccl_signal_wait_until_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t signal_index,
+    int32_t cmp,
+    uint64_t cmp_value) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // NCCL's ncclGin::waitSignal only supports waiting for >= condition
+  // SIGNAL_CMP_GE is our constant value 4
+  TORCH_SYMM_CHECK(
+      cmp == SIGNAL_CMP_GE,
+      "NCCL signal_wait_until only supports SIGNAL_CMP_GE condition");
+
+  // Initialize GIN context (context ID 0 for simplicity)
+  int ginContext = 0;
+  ncclGin gin{*nccl_ctx->dev_comm, ginContext};
+
+  // Use ncclGin::waitSignal to wait until signal >= cmp_value
+  // waitSignal<Coop>(signal, least, bits, ord)
+  // We use ncclCoopCta for block-level cooperation
+  gin.waitSignal(
+      ncclCoopCta{}, static_cast<ncclGinSignal_t>(signal_index), cmp_value);
+
+  // Return the comparison value as NCCL doesn't return the actual signal value
+  return cmp_value;
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(
+      false, "NCCL signal_wait_until requires NCCL_SYMM_TYPES_AVAILABLE");
+  return 0;
+#endif
+}
+
+// =============================================================================
+// NCCL TRITON WRAPPERS
+// These are the entry points for Triton kernels via extern_elementwise.
+// They must be extern "C" to avoid C++ name mangling.
+// =============================================================================
+
+extern "C" {
+
+/**
+ * NCCL-specific wrapper for all-reduce.
+ */
+__device__ int32_t nccl_symm_all_reduce(
+    int64_t ctx_ptr,
+    int64_t local_ptr,
+    int64_t byte_offset,
+    int64_t num_elements,
+    int32_t reduce_op,
+    int32_t dtype) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  float* buffer = reinterpret_cast<float*>(local_ptr);
+  nccl_all_reduce_impl(
+      nccl_ctx, buffer, byte_offset, num_elements, reduce_op, dtype);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for quiet operation.
+ */
+__device__ int32_t nccl_symm_quiet(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_quiet_impl(nccl_ctx);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for barrier operation.
+ */
+__device__ int32_t nccl_symm_barrier(int64_t ctx_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_barrier_impl(nccl_ctx, 0);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for fence operation.
+ */
+__device__ int32_t nccl_symm_fence(int64_t ctx_ptr, int32_t scope) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_fence_impl(nccl_ctx, scope);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for remote_ptr operation.
+ */
+__device__ int64_t
+nccl_symm_remote_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  return nccl_remote_ptr_impl(nccl_ctx, local_ptr, peer);
+}
+
+/**
+ * NCCL-specific wrapper for multicast_ptr operation.
+ */
+__device__ int64_t
+nccl_symm_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr, int64_t team_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  return nccl_multicast_ptr_impl(nccl_ctx, local_ptr);
+}
+
+/**
+ * NCCL-specific wrapper for signal operation.
+ *
+ * Atomically updates a signal value at a remote rank's signal location.
+ * Uses the signal pad stored in the context.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to update
+ * @param dest_rank Destination rank to signal
+ * @param value Value to use in the operation
+ * @param op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ */
+__device__ int32_t nccl_symm_signal(
+    int64_t ctx_ptr,
+    int32_t signal_index,
+    int32_t dest_rank,
+    int64_t value,
+    int32_t op) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_signal_impl(
+      nccl_ctx, signal_index, dest_rank, static_cast<uint64_t>(value), op);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for signal_ptr operation.
+ *
+ * Returns a device pointer to a peer's signal pad, if accessible via P2P.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param peer Peer rank to get signal pad pointer for
+ * @return Device pointer to peer's signal pad, or 0 if not accessible
+ */
+__device__ int64_t nccl_symm_signal_ptr(int64_t ctx_ptr, int32_t peer) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  return nccl_signal_ptr_impl(nccl_ctx, peer);
+}
+
+/**
+ * NCCL-specific wrapper for signal_wait_until operation.
+ *
+ * Blocks the calling thread/CTA until a local signal at signal_index meets
+ * the specified condition relative to the comparison value.
+ *
+ * Uses ncclGin::waitSignal for GPU-initiated networking wait operations.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to wait on
+ * @param cmp Comparison operation (only SIGNAL_CMP_GE supported for NCCL)
+ * @param cmp_value Value to compare against
+ * @return The signal value that satisfied the condition
+ */
+__device__ int64_t nccl_symm_signal_wait_until(
+    int64_t ctx_ptr,
+    int32_t signal_index,
+    int32_t cmp,
+    int64_t cmp_value) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  return static_cast<int64_t>(nccl_signal_wait_until_impl(
+      nccl_ctx, signal_index, cmp, static_cast<uint64_t>(cmp_value)));
+}
+
+// =============================================================================
+// NCCL TEAM PRIMITIVES
+// =============================================================================
+
+/**
+ * NCCL-specific wrapper for team_size.
+ */
+__device__ int32_t nccl_symm_team_size(int64_t team_ptr) {
+  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
+  NCCLSymmTeam* nccl_team = cast_to_nccl_team(team);
+  return nccl_team->team_size;
+}
+
+/**
+ * NCCL-specific wrapper for team_rank.
+ */
+__device__ int32_t nccl_symm_team_rank(int64_t team_ptr) {
+  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
+  NCCLSymmTeam* nccl_team = cast_to_nccl_team(team);
+  return nccl_team->team_rank;
+}
+
+/**
+ * NCCL-specific wrapper for team_lsa_size.
+ */
+__device__ int32_t nccl_symm_team_lsa_size(int64_t team_ptr) {
+  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
+  NCCLSymmTeam* nccl_team = cast_to_nccl_team(team);
+  return nccl_team->lsa_size;
+}
+
+/**
+ * NCCL-specific wrapper for team_lsa.
+ */
+__device__ int32_t nccl_symm_team_lsa(int64_t team_ptr, int32_t peer) {
+  SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
+  NCCLSymmTeam* nccl_team = cast_to_nccl_team(team);
+  return nccl_team->is_lsa_peer(peer) ? 1 : 0;
+}
+
+} // extern "C"
+
+#endif // !defined(TORCH_SYMM_BITCODE_BUILD)

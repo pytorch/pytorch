@@ -115,6 +115,8 @@ class TORCH_API NVSHMEMSymmComm {
 
   // NVSHMEM resources
   void* buffer_ptr_; // Symmetric memory buffer allocated via nvshmem_malloc
+  uint64_t* lsa_signal_pad_; // LSA signal pad for P2P load/store signaling
+  uint64_t* gin_signal_pad_; // GIN signal pad for remote atomic signaling
 
   // Context
   NVSHMEMSymmContext context_host_;

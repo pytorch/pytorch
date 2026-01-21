@@ -21,6 +21,10 @@ Reduction operation and data type support:
 - reduce_op: REDUCE_OP_SUM (0) - only SUM is currently supported
 - dtype: DTYPE_FLOAT32 (0) - only float32 is currently supported
 
+Signal operation support:
+- op: SIGNAL_OP_SET (0) - atomic set (replace value)
+- op: SIGNAL_OP_ADD (1) - atomic add (increment value)
+
 Backend support:
 - NVSHMEM: Fully functional (provides libnvshmem_device.bc)
 - NCCL: NOT functional (NCCL does not provide device bitcode library)
@@ -33,9 +37,12 @@ from torch._extern_triton._torch_symm_triton import (
     BACKEND_NVSHMEM,
     DTYPE_FLOAT32,
     REDUCE_OP_SUM,
+    SIGNAL_OP_ADD,
+    SIGNAL_OP_SET,
     TorchSymmLibFinder,
     requires_torch_symm,
     symm_all_reduce,
+    symm_signal,
 )
 
 __all__ = [
@@ -47,8 +54,12 @@ __all__ = [
     "REDUCE_OP_SUM",
     # Data type constants
     "DTYPE_FLOAT32",
+    # Signal operation constants
+    "SIGNAL_OP_SET",
+    "SIGNAL_OP_ADD",
     # Torch symmetric memory
     "TorchSymmLibFinder",
     "requires_torch_symm",
     "symm_all_reduce",
+    "symm_signal",
 ]
