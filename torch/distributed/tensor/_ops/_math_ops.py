@@ -412,6 +412,7 @@ def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
     elif norm_type == 0 or norm_type == 1:
         return "sum"
     else:
+        assert isinstance(norm_type, (int, float))
         return NormReduction(norm_type)
 
 
