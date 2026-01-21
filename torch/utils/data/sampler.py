@@ -146,14 +146,18 @@ class RandomSampler(Sampler[int]):
         self._num_samples = num_samples
         self.generator = generator
 
-        if not isinstance(self.replacement, bool):
+        self.validate_args(self.replacement, self.num_samples)
+
+    @staticmethod
+    def validate_args(replacement: bool, num_samples: int | None):
+        if not isinstance(replacement, bool):
             raise TypeError(
-                f"replacement should be a boolean value, but got replacement={self.replacement}"
+                f"replacement should be a boolean value, but got replacement={replacement}"
             )
 
-        if not isinstance(self.num_samples, int) or self.num_samples <= 0:
+        if not isinstance(num_samples, int) or num_samples <= 0:
             raise ValueError(
-                f"num_samples should be a positive integer value, but got num_samples={self.num_samples}"
+                f"num_samples should be a positive integer value, but got num_samples={num_samples}"
             )
 
     @property
@@ -315,6 +319,14 @@ class BatchSampler(Sampler[list[int]]):
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.
+        self.validate_args(batch_size, drop_last)
+
+        self.sampler = sampler
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+
+    @staticmethod
+    def validate_args(batch_size: int, drop_last: bool) -> None:
         if (
             not isinstance(batch_size, int)
             or isinstance(batch_size, bool)
@@ -327,9 +339,6 @@ class BatchSampler(Sampler[list[int]]):
             raise ValueError(
                 f"drop_last should be a boolean value, but got drop_last={drop_last}"
             )
-        self.sampler = sampler
-        self.batch_size = batch_size
-        self.drop_last = drop_last
 
     def __iter__(self) -> Iterator[list[int]]:
         sampler_iter = iter(self.sampler)
@@ -364,9 +373,8 @@ class RandomBatchSampler(Sampler[list[int]]):
         replacement: bool = False,
         generator=None,
     ) -> None:
-        # Validate parameters using init of RandomSampler and BatchSampler
-        RandomSampler(data_source, replacement, None, generator)
-        BatchSampler([], batch_size, drop_last)
+        RandomSampler.validate_args(replacement, len(data_source))
+        BatchSampler.validate_args(batch_size, drop_last)
 
         self.data_source = data_source
         self.batch_size = batch_size
