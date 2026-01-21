@@ -4419,7 +4419,7 @@
 
 - func: mvlgamma.out(Tensor self, int p, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: mvlgamma_out
+    CPU, CUDA, MPS: mvlgamma_out
   tags: pointwise
 
 - func: mvlgamma(Tensor self, int p) -> Tensor
