@@ -461,4 +461,3 @@ class LoadPlanner:
 
         . N.B. This is called on every rank.
         """
-        pass

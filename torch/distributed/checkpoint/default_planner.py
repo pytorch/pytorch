@@ -11,6 +11,7 @@ from collections import ChainMap
 from typing import Any, cast
 
 import torch
+import torch.distributed as dist
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint._nested_dict import (
@@ -49,8 +50,6 @@ from torch.distributed.checkpoint.planner_helpers import (
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.tensor import DTensor
-
-import torch.distributed as dist
 
 from . import _version
 
@@ -279,7 +278,7 @@ class DefaultLoadPlanner(LoadPlanner):
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
     allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in the checkpoint.
-    replicate_group: ProcessGroup used for HSDP optimization. If set, only rank 0 of this group performs load, then broadcasts to others.
+    replicate_group: ProcessGroup for HSDP. If set, only rank 0 loads and broadcasts to others.
     """
 
     original_state_dict: STATE_DICT_TYPE
@@ -362,21 +361,24 @@ class DefaultLoadPlanner(LoadPlanner):
         if self.replicate_group is not None:
             self.tensors_to_broadcast = []
             is_non_primary = self.replicate_group.rank() > 0
-            
+
             if is_non_primary:
                 filtered_items = []
-            
+
             for item in plan.items:
                 obj = find_state_dict_object(self.state_dict, item.dest_index)
-                
-                if isinstance(obj, (torch.Tensor, DTensor)) and obj.device.type != "cpu":
+
+                if (
+                    isinstance(obj, (torch.Tensor, DTensor))
+                    and obj.device.type != "cpu"
+                ):
                     self.tensors_to_broadcast.append(obj)
                 elif is_non_primary:
                     filtered_items.append(item)
-            
+
             if is_non_primary:
                 plan.items = filtered_items
-        
+
         return plan
 
     def create_global_plan(self, global_plan: list[LoadPlan]) -> list[LoadPlan]:
@@ -417,7 +419,11 @@ class DefaultLoadPlanner(LoadPlanner):
             return
         for tensor in self.tensors_to_broadcast:
             local_tensor = tensor.to_local() if isinstance(tensor, DTensor) else tensor
-            dist.broadcast(local_tensor, src=dist.get_global_rank(self.replicate_group, 0), group=self.replicate_group)
+            dist.broadcast(
+                local_tensor,
+                src=dist.get_global_rank(self.replicate_group, 0),
+                group=self.replicate_group,
+            )
 
 
 class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
