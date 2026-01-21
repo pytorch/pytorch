@@ -159,6 +159,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
+        _,  # kv_offsets (varlen)
+        _,  # kv_limits (varlen)
+        _,  # q_offsets (varlen)
+        _,  # q_limits (varlen)
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         _,
@@ -243,6 +247,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     kernel_options.setdefault("SM_SCALE", scale)
     kernel_options.setdefault("SPLIT_KV", get_split_k(B, Hkv, seq_len_kv))
+    # Flex decoding doesn't support varlen, so HAS_OFFSETS is always False
+    kernel_options.setdefault("HAS_OFFSETS", False)
+    # Create empty KV_OFFSETS tensor for non-varlen (required by forward_inner signature)
+    kv_offsets = empty(0, device=query.get_device(), dtype=torch.int32)
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
     # create config dependent intermediate buffers
@@ -373,6 +381,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 kv_indices,
                 full_kv_num_blocks,
                 full_kv_indices,
+                kv_offsets,
             ],
             layout=layout_acc,
             subgraphs=[
@@ -402,6 +411,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            kv_offsets,
         ]
         + filtered_score_mod_buffers
         + filtered_mask_mod_buffers
@@ -412,6 +422,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
         6: create_indices_fake,
         7: create_num_blocks_fake_generator(full_kv_indices),
         8: create_indices_fake,
+        # kv_offsets at index 9 doesn't need special generator (empty tensor)
     }
 
     buf_ACC = autotune_select_algorithm(

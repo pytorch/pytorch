@@ -1,4 +1,4 @@
-    {{def_kernel("Q", "K", "V", "M", "L", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+    {{def_kernel("Q", "K", "V", "M", "L", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "KV_OFFSETS")}}
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
     # reduction buffers: M rowmax across local KV split, L local sumexp across local KV split
@@ -161,15 +161,24 @@
     )
     {%- endif %}
 
+    # kv_offset = 0 for non-varlen (local var needed for loop-carried variable type compatibility)
+    kv_offset = 0
+
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
-        # accumulatd values
+        q, K, V,
+        KV_OFFSETS,
+        desc_k, desc_v, Q_LEN, KV_LEN,
+        Q_LEN, KV_LEN,  # LOGICAL_Q_LEN, LOGICAL_KV_LEN (same as physical for non-varlen)
+        # accumulated values
         acc, l_i, m_i,
-        #offsets
-        off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
-        off_n,
-        #block sparse data
+        # offsets for score_mod/mask_mod
+        off_z, offs_hq[:, None], sparse_idx_h, offs_m[:, None], offs_n[None, :],
+        # kv_start, first_kv_block_idx (first_kv_block_idx unused when HAS_OFFSETS=False)
+        off_n, 0,
+        # kv_offset
+        kv_offset,
+        # block sparse data
         kv_indices, kv_num_blocks,
         block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
         MATMUL_PRECISION,
@@ -196,15 +205,24 @@
 
         offs_n = tl.arange(0, BLOCK_N) + off_n
 
+        # Reset kv_offset for full blocks section
+        kv_offset = 0
+
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
-            # accumulatd values
+            q, K, V,
+            KV_OFFSETS,
+            desc_k, desc_v, Q_LEN, KV_LEN,
+            Q_LEN, KV_LEN,  # LOGICAL_Q_LEN, LOGICAL_KV_LEN (same as physical for non-varlen)
+            # accumulated values
             acc, l_i, m_i,
-            #offsets
-            off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
-            off_n,
-            #block sparse data
+            # offsets for score_mod/mask_mod
+            off_z, offs_hq[:, None], sparse_idx_h, offs_m[:, None], offs_n[None, :],
+            # kv_start, first_kv_block_idx (first_kv_block_idx unused when HAS_OFFSETS=False)
+            off_n, 0,
+            # kv_offset
+            kv_offset,
+            # block sparse data
             kv_indices, kv_num_blocks,
             block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
             MATMUL_PRECISION,
