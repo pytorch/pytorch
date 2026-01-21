@@ -906,9 +906,9 @@ def forward(self, args_0):
     _fn_args = (args_0, )
     L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_args_0_ = L_args_0_
-    add = l_args_0_ + 1
+    add = l_args_0_ + 1;  add = None
     mul = l_args_0_ * 2;  l_args_0_ = None
-    return self._dynamo_bytecode_unflatten((mul, add,), _fn_args)""",
+    return self._dynamo_bytecode_unflatten((mul,), _fn_args)""",
         )
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 

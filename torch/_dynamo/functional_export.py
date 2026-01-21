@@ -5,7 +5,6 @@ import traceback
 import types
 from collections import namedtuple
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 
 import sympy
@@ -13,30 +12,23 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.decorators import disable as dynamo_disable
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
-from torch._dynamo.utils import (
-    dynamo_timed,
-    get_metrics_context,
-)
+from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
 from torch.export import _restore_state_dict
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
-    ShapeEnv,
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.node import Argument, Target
-from torch.utils._pytree import TreeSpec
 
 
 if TYPE_CHECKING:
