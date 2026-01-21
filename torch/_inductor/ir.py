@@ -42,6 +42,7 @@ from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
+from torch._library.opaque_object import is_opaque_type
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -4234,17 +4235,11 @@ class CommBufferLayout(FixedLayout):
 
     def __init__(
         self,
-        layout: FlexibleLayout,
+        layout: Union[FlexibleLayout, FixedLayout],
         comm_buffer_type: CommBufferType,
         group_name: str,
     ):
-        if not isinstance(layout, FlexibleLayout):
-            raise AssertionError(
-                "A `CommBufferLayout` can only be initialized with "
-                f"a `FlexibleLayout` (got {layout})."
-            )
-
-        fixed = layout.as_fixed()
+        fixed = layout.as_fixed() if isinstance(layout, FlexibleLayout) else layout
         super().__init__(
             device=fixed.device,
             dtype=fixed.dtype,
@@ -5446,12 +5441,14 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         kernel: Any,
         accumulator_type: Any,
+        workspace_size: int = 0,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self.outputs: list[Buffer] = [self]
+        self.workspace_size = workspace_size
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -5460,6 +5457,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
         self.make_kernel_render = self._make_kernel_render
+
+    def get_workspace_size(self) -> int:
+        """Return the workspace size in bytes."""
+        return self.workspace_size
 
     def get_outputs(self) -> list[Buffer]:
         return self.outputs
@@ -5495,6 +5496,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             output_node=out_node,
             kernel_metadata=self.kernel_metadata,
             accumulator_type=self.accumulator_type,
+            workspace_size=self.workspace_size,
         )
 
         def render():
@@ -9439,7 +9441,7 @@ class TorchBindObject(NonTensorObj):
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
 
-        if real_script_obj is None:
+        if is_opaque_type(real_script_obj):
             return 0
 
         assert hasattr(real_script_obj, "__obj_flatten__")

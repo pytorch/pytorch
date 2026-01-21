@@ -52,11 +52,7 @@ def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
-    """Build config key from cutlass_api kernel metadata.design.
-
-    Note: design can be None (default in KernelMetadata). We use hasattr checks
-    defensively since only BLASDesignMetadata has tile_shape/cluster_shape.
-    """
+    """Build config key from cutlass_api kernel metadata.design."""
     if (
         hasattr(design, "tile_shape")
         and len(design.tile_shape) >= 3
@@ -126,6 +122,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return kernels[:count]
 
         m, n, k = inputs.mnk_hinted()
+        batch_size = inputs.batch_hinted()
         dtype_a = inputs.dtype(inputs._mat1_idx)
         strides = inputs.strides_hinted()
         layout_a = "row" if strides[inputs._mat1_idx][-1] == 1 else "col"
@@ -147,6 +144,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             count,
             OrderedSet(config_to_kernels.keys()),
             accumulator_type,
+            batch_size,
         )
 
         if not heuristic_configs:
@@ -248,6 +246,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         count: int,
         valid_configs: OrderedSet[ConfigKey],
         accumulator_type: torch.dtype = torch.float32,
+        batch_size: int = 1,
     ) -> list[HeuristicConfig]:
         """
         Get kernel configurations recommended by nvMatmulHeuristics.
@@ -291,8 +290,9 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         lh.loadInternalDiscoverySet(layout, precision=precision)
 
-        # TODO(nikhilap) support different batch sizes
-        problem = lh.makeNvMatmulHeuristicsProblem(m, n, k, layout, batch_size=1)
+        problem = lh.makeNvMatmulHeuristicsProblem(
+            m, n, k, layout, batch_size=batch_size
+        )
         raw_configs = lh.getEx(problem, count, backend, precision=precision)
         lh.destroyBackend(backend)
 
