@@ -89,14 +89,6 @@
       "Hints": []
     }
   ],
-  "GB0009": [
-    {
-      "Gb_type": "Attempted to inline function marked as skipped (SkipFunctionVariable)",
-      "Context": "Attempted to inline a SkipFunctionVariable {func}",
-      "Explanation": "Attempted to inline a function that was previously determined to be marked as intentionally skipped.",
-      "Hints": []
-    }
-  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
