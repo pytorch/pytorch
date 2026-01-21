@@ -273,7 +273,7 @@ class InputObserverInfo:
             return {**dict(zip(pos_names, args)), **kwargs}
 
         raise NotImplementedError(
-            "We coud not find a good set of inputs/outputs. "
+            "We could not find a good set of inputs/outputs. "
             "We need to replace none by empty tensors."
         )
 
