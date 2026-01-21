@@ -112,7 +112,7 @@ class LaunchConfig:
     duplicate_stdout_filters: list[str] | None = None
     duplicate_stderr_filters: list[str] | None = None
     virtual_local_rank: bool = False
-    shutdown_timeout: int = -1
+    shutdown_timeout: int | None = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -135,11 +135,10 @@ class LaunchConfig:
             logger.info("Using default numa options = %r", self.numa_options)
 
         # Set shutdown_timeout from environment variable if not explicitly set
-        if self.shutdown_timeout == -1:
+        if self.shutdown_timeout is None:
             self.shutdown_timeout = int(
                 os.environ.get("TORCH_ELASTIC_SHUTDOWN_TIMEOUT", "30")
             )
-            logger.info("Using shutdown_timeout = %d seconds", self.shutdown_timeout)
         elif self.shutdown_timeout < 0:
             raise ValueError(
                 f"shutdown_timeout must be non-negative, got {self.shutdown_timeout}"
@@ -314,7 +313,7 @@ def launch_agent(
         logs_specs=config.logs_specs,  # type: ignore[arg-type]
         start_method=config.start_method,
         log_line_prefix_template=config.log_line_prefix_template,
-        shutdown_timeout=config.shutdown_timeout,
+        shutdown_timeout=config.shutdown_timeout,  # type: ignore[arg-type]
     )
 
     shutdown_rdzv = True
