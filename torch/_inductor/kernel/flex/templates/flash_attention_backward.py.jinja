@@ -58,7 +58,7 @@
     {# mask_mod is subgraph 2 when HAS_SCORE_MOD, else subgraph 0 #}
     {% set mask_subgraph_idx = 2 if HAS_SCORE_MOD else 0 %}
     @cute.jit
-    def mask_mod(b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+    def mask_mod(b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=mask_subgraph_idx,

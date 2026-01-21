@@ -32,7 +32,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
@@ -879,13 +879,16 @@ class BuiltinVariable(VariableTracker):
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
+                    if istype(left, variables.ObjectVariable) and istype(
+                        right, variables.ObjectVariable
+                    ):
+                        return ConstantVariable.create(op(left.value, right.value))
                     if (
                         istype(left, variables.ExceptionVariable)
                         and istype(right, variables.ExceptionVariable)
                         and left.exc_type is not right.exc_type
                     ):
                         return ConstantVariable.create(op(left, right))
-                    return None
 
                 result.append(((VariableTracker, VariableTracker), handle_is))  # type: ignore[arg-type]
 
@@ -1006,14 +1009,33 @@ class BuiltinVariable(VariableTracker):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import LazyVariableTracker
+        from .lazy import LazyConstantVariable, LazyVariableTracker
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
-        if any(issubclass(t, LazyVariableTracker) for t in arg_types):
+        # Check for non-LazyConstantVariable lazy types that need realization.
+        # LazyConstantVariable is mapped to ConstantVariable in call_function's
+        # get_handler_type_for_dispatch, so it won't appear in arg_types here.
+        # But regular LazyVariableTracker still needs to be realized before handling.
+        if any(
+            issubclass(t, LazyVariableTracker)
+            and not issubclass(t, LazyConstantVariable)
+            for t in arg_types
+        ):
+            # Realize lazy args except LazyConstantVariable.
+            # Only realize top-level args, not nested VariableTracker fields.
+            def realize_arg(arg: VariableTracker) -> VariableTracker:
+                if isinstance(arg, LazyVariableTracker) and not isinstance(
+                    arg, LazyConstantVariable
+                ):
+                    return arg.realize()
+                return arg
+
             return lambda tx, args, kwargs: obj.call_function(
-                tx, [v.realize() for v in args], kwargs
+                tx,
+                [realize_arg(a) for a in args],
+                kwargs,
             )
 
         if inspect.isclass(fn) and (
@@ -1416,17 +1438,20 @@ class BuiltinVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Get handler types for dispatch. This may install guards for lazy variables.
+        handler_types = [x.get_handler_type_for_dispatch() for x in args]
+
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
-            key = (self.fn, *(type(x) for x in args), True)
+            key = (self.fn, *handler_types, True)
         else:
-            key = (self.fn, *(type(x) for x in args))
+            key = (self.fn, *handler_types)
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:
             self.call_function_handler_cache[key] = handler = self._make_handler(  # type: ignore[assignment]
-                self.fn, [type(x) for x in args], bool(kwargs)
+                self.fn, handler_types, bool(kwargs)
             )
         assert handler is not None
         return handler(tx, args, kwargs)  # type: ignore[return-value]
@@ -1530,7 +1555,6 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in dict_methods:
                 if isinstance(args[0], variables.UserDefinedDictVariable):
-                    # pyrefly: ignore [missing-attribute]
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1539,7 +1563,6 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in set_methods:
                 if isinstance(args[0], variables.UserDefinedSetVariable):
-                    # pyrefly: ignore [missing-attribute]
                     return args[0]._set_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.SetVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1623,7 +1646,9 @@ class BuiltinVariable(VariableTracker):
         # TODO handle more cases and merge this with this with `generic_jump`.
         return None
 
-    def call_repr(self, tx: "InstructionTranslator", arg):
+    def call_repr(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker | None:
         """Handle repr() on user defined objects."""
         if isinstance(arg, variables.UserDefinedObjectVariable):
             repr_method = arg.value.__repr__
@@ -1632,11 +1657,18 @@ class BuiltinVariable(VariableTracker):
                 # Default repr - build and trace it
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
+            elif is_wrapper_or_member_descriptor(repr_method):
+                unimplemented(
+                    gb_type="Attempted to call repr() method implemented in C/C++",
+                    context="",
+                    explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+                    hints=["Write the repr method in Python"],
+                )
             else:
-                # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
+        return None
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2176,7 +2208,7 @@ class BuiltinVariable(VariableTracker):
                 "2 args",
                 f"{len(args)} args",
             )
-        # pyrefly: ignore [bad-unpacking]
+
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -2185,7 +2217,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, dict):
             arg_list = [ConstantVariable.create(k) for k in arg]
             return DictVariableType(
-                # pyrefly: ignore [bad-argument-type]
                 dict.fromkeys(arg_list, value),
                 user_cls,
                 mutation_type=ValueMutationNew(),
@@ -2194,7 +2225,6 @@ class BuiltinVariable(VariableTracker):
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
                 return DictVariableType(
-                    # pyrefly: ignore [bad-argument-type]
                     dict.fromkeys(keys, value),
                     user_cls,
                     mutation_type=ValueMutationNew(),
@@ -2676,7 +2706,7 @@ class BuiltinVariable(VariableTracker):
                         gb_type="Attempted to wrap sparse Tensor",
                         context="",
                         explanation="torch.compile does not support sparse Tensors",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                        hints=[*graph_break_hints.SPARSE_TENSOR],
                     )
 
             try:
@@ -3283,13 +3313,13 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.fn)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 
