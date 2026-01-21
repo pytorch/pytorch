@@ -39,7 +39,7 @@ runs:
   using: composite
   steps:
     - name: Setup uv
-      uses: pytorch/test-infra/.github/actions/setup-uv@main
+      uses: pytorch/test-infra/.github/actions/setup-uv@seemethere/setup-uv-wrapper
       with:
         python-version: "3.12"
 

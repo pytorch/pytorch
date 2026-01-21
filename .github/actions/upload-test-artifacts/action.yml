@@ -26,7 +26,7 @@ runs:
     # Always set up uv and zip files first (needed for S3, reusable for GHA fallback)
     - name: Setup uv
       if: runner.os != 'Windows'
-      uses: pytorch/test-infra/.github/actions/setup-uv@main
+      uses: pytorch/test-infra/.github/actions/setup-uv@seemethere/setup-uv-wrapper
       with:
         python-version: "3.12"
 
