@@ -4332,6 +4332,50 @@ if HAS_CUDA_AND_TRITON:
             eager_out = f(x, y)
             self.assertEqual(compiled_out, eager_out)
 
+        @config.patch("graph_partition", True)
+        @dynamo_config.patch("capture_dynamic_output_shape_ops", True)
+        def test_graph_partition_unbacked_symint_in_output_shapes(self):
+            @torch.library.custom_op(
+                "testlib::get_split",
+                mutates_args=(),
+                device_types="cuda",
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def get_split(x: torch.Tensor) -> int:
+                return 64
+
+            @get_split.register_fake
+            def _(x):
+                return torch.library.get_ctx().new_dynamic_size(min=0, max=x.shape[0])
+
+            W = torch.randn(64, 128, device="cuda")
+
+            def f(x):
+                y = x @ W
+                n = torch.ops.testlib.get_split(x)
+                torch._check(n >= 0)
+                torch._check(n <= x.shape[0])
+                z = x.narrow(0, 0, n) @ W
+                return y, z
+
+            inp = torch.randn(256, 64, device="cuda")
+
+            log_stream, log_ctx = logs_to_string(
+                "torch._inductor.scheduler", "cudagraphs"
+            )
+            with log_ctx():
+                compiled_f = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+                compiled_f(inp)
+
+            FileCheck().check("reason=non-input unbacked symints in output shapes").run(
+                log_stream.getvalue()
+            )
+
+            eager_out = f(inp)
+            compiled_out = compiled_f(inp)
+            for e, c in zip(eager_out, compiled_out):
+                self.assertEqual(e, c)
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_dynamic_scalar_inputs(self):
             def f(x, y, integer):

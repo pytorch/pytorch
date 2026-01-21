@@ -2890,6 +2890,8 @@ class Scheduler:
         # See [Note: Graph Partition Device Contexts]
         self.default_device_context: Optional[torch.device] = None
 
+        self.non_input_unbacked_symbols: set[sympy.Symbol] = set()
+
         self.name_to_donated_buffer: dict[str, SchedulerDonatedBuffer] = (
             self.get_donated_buffers()
         )
@@ -3282,6 +3284,12 @@ class Scheduler:
                 has_non_input_unbacked_defs = True
                 if s not in unbacked_symbol_to_origin_node:
                     unbacked_symbol_to_origin_node[s] = node.get_name()
+
+        self.non_input_unbacked_symbols = {
+            s
+            for s, origin in unbacked_symbol_to_origin_node.items()
+            if origin is not None
+        }
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
@@ -5812,6 +5820,25 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
+    def has_non_input_unbacked_symbols_in_layouts(
+        self, node: BaseSchedulerNode
+    ) -> bool:
+        if not self.non_input_unbacked_symbols:
+            return False
+
+        if isinstance(node, FusedSchedulerNode):
+            return any(
+                self.has_non_input_unbacked_symbols_in_layouts(snode)
+                for snode in node.snodes
+            )
+
+        assert node.node is not None
+        for ir_node in node.node.get_outputs():
+            layout_symbols = get_layout_symints(ir_node)
+            if layout_symbols & self.non_input_unbacked_symbols:
+                return True
+        return False
+        
     def should_partition(self, node: BaseSchedulerNode) -> Optional[str]:
         """
         Return the reason why we should partition the inductor graph on this node,
@@ -5869,6 +5896,9 @@ class Scheduler:
 
         if is_cudagraph_unsafe_op(node.node):
             return "CUDAGraph-unsafe custom ops"
+
+        if self.has_non_input_unbacked_symbols_in_layouts(node):
+            return "non-input unbacked symints in output shapes"
 
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
