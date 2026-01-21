@@ -14,6 +14,7 @@ import torch._inductor
 import torch._inductor.decomposition
 import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
@@ -114,6 +115,36 @@ class TestInvokeSubgraph(TestCase):
         res = aot_fn(x)
 
         self.assertEqual(ref, res)
+
+    def test_make_fx_without_shape_env(self):
+        """Test that make_fx with invoke_subgraph works without a ShapeEnv.
+
+        When using FakeTensorMode without a ShapeEnv (shape_env=None),
+        the invoke_subgraph HOP should not require a shape_env for inserting
+        deferred runtime asserts.
+        """
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def subgraph_fn(x, y):
+            return (x * 2 + y,)
+
+        def outer_fn(x, y):
+            return invoke_subgraph(subgraph_fn, "test_subgraph", x, y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        # Trace with make_fx using FakeTensorMode without a ShapeEnv
+        fake_mode = FakeTensorMode()
+        self.assertIsNone(fake_mode.shape_env)
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_y = fake_mode.from_tensor(y)
+            traced = make_fx(outer_fn)(fake_x, fake_y)
+
+        self.assertIn("invoke_subgraph", traced.code)
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -2969,6 +3000,107 @@ class GraphModule(torch.nn.Module):
             return (add,)
 """,
         )
+
+    def test_do_not_remove_used_output(self):
+        # Test that the ggn's outputs are not pruned.
+
+        @nested_compile_region
+        def ggn(x):
+            return torch.max(x, 0)
+
+        @nested_compile_region
+        def gn(x):
+            a, b = ggn(x)
+            return a, b
+
+        def fn(x):
+            _, b = ggn(x)
+            c, d = gn(x)
+            return b, c, d
+
+        x = torch.randn(64, 1)
+
+        ref = fn(x)
+        gm = dynamo_graph_capture_for_export(fn)(x)
+
+        res = gm(x)
+        self.assertEqual(ref, res)
+
+    def test_remove_unused_output(self):
+        # Test that the ggn's graph's output is pruned.
+
+        @nested_compile_region
+        def ggn(x):
+            return torch.max(x, 0)
+
+        @nested_compile_region
+        def gn(x):
+            a, b = ggn(x)
+            return a, b
+
+        def fn(x):
+            _, b = ggn(x)
+            _, d = gn(x)
+            return b, d
+
+        x = torch.randn(64, 1)
+
+        ref = fn(x)
+        gm = dynamo_graph_capture_for_export(fn)(x)
+
+        res = gm(x)
+        self.assertEqual(ref, res)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(gm.print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x):
+        _tree_leaf_0, = pytree.tree_leaves((x,))
+        L_x_, = self._in_shuffle_graph(_tree_leaf_0)
+        l_x_ = L_x_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = None
+        b: "i64[1]" = invoke_subgraph[1];  invoke_subgraph = None
+
+        subgraph_1 = self.subgraph_1
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', l_x_);  subgraph_1 = l_x_ = None
+        getitem_4: "i64[1]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, b, getitem_4), self._out_spec)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[64, 1]"):
+            max_1 = torch.max(l_x_, 0);  l_x_ = None
+            getitem: "f32[1]" = max_1[0]
+            getitem_1: "i64[1]" = max_1[1];  max_1 = None
+            return (getitem, getitem_1)
+
+    class subgraph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[64, 1]"):
+            subgraph_0 = self.subgraph_0
+            invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = l_x_ = None
+            a: "f32[1]" = invoke_subgraph[0];  a = None
+            b: "i64[1]" = invoke_subgraph[1];  invoke_subgraph = None
+            return (b,)
+
+        class subgraph_0(torch.nn.Module):
+            def forward(self, l_x_: "f32[64, 1]"):
+                max_1 = torch.max(l_x_, 0);  l_x_ = None
+                getitem: "f32[1]" = max_1[0]
+                getitem_1: "i64[1]" = max_1[1];  max_1 = None
+                return (getitem, getitem_1)
+
+    class _in_shuffle_graph(torch.nn.Module):
+        def forward(self, arg0_1: "f32[s75, 1]"):
+            return (arg0_1,)
+
+    class _out_shuffle_graph(torch.nn.Module):
+        def forward(self, arg0_1: "f32[64, 1]", arg1_1: "i64[1]", arg2_1: "i64[1]"):
+            return [arg1_1, arg2_1]
+""",
+            )
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
