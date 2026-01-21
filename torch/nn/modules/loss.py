@@ -1919,6 +1919,7 @@ class TripletMarginWithDistanceLoss(_Loss):
                 f"TripletMarginWithDistanceLoss: expected margin to be greater than 0, got {margin} instead"
             )
         self.distance_function: Callable[[Tensor, Tensor], Tensor] | None = (
+            # pyrefly: ignore [bad-assignment]
             distance_function if distance_function is not None else PairwiseDistance()
         )
         self.margin = margin

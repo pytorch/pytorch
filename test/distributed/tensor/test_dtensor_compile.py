@@ -376,6 +376,35 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_input_mutations(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x, y):
+            out = x.sin()
+            y.add_(2)
+            return out
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        x_ref = DTensor.from_local(
+            torch.randn(4), mesh, [Shard(0)], run_check=False
+        ).requires_grad_(True)
+        y_ref = DTensor.from_local(
+            torch.randn(4), mesh, [Shard(0)], run_check=False
+        ).requires_grad_(False)
+
+        x = x_ref.clone().detach().requires_grad_(True)
+        y = y_ref.clone().detach().requires_grad_(False)
+
+        ref = fn(x_ref.clone(), y_ref)
+        res = opt_fn(x.clone(), y)
+        self.assertEqual(res, ref)
+
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
     @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -1284,6 +1313,70 @@ def forward(self, primals_1):
     def test_tp_compile_comm_reordering_graph_partition(self):
         self._test_tp_compile_comm_reordering()
 
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_make_fx_with_invoke_subgraph_dtensor(self):
+        """Test that make_fx can trace over torch.compile with invoke_subgraph backend and DTensor.
+
+        This tests the scenario where:
+        1. An outer make_fx traces a function
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. The compiled function operates on DTensor inputs
+        4. The invoke_subgraph HOP should appear in the traced graph
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        torch._dynamo.reset()
+
+        def inner_fn(dt):
+            # Redistribute DTensor
+            return dt.redistribute(mesh, [Replicate()])
+
+        compiled_fn = torch.compile(inner_fn, backend="invoke_subgraph", fullgraph=True)
+
+        def outer_fn(x):
+            # Convert plain tensor to DTensor
+            dt = DTensor.from_local(x + 1, mesh, [Shard(0)], run_check=False)
+            # Call compiled function with DTensor
+            dt_out = compiled_fn(dt)
+            # Convert back to plain tensor
+            return dt_out.to_local()
+
+        x = torch.randn(4, 4, device="cpu")
+
+        # Trace with make_fx
+        traced = make_fx(
+            outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x)
+
+        # Verify the full graph structure including invoke_subgraph
+        graph_str = "\n".join(
+            line.rstrip()
+            for line in traced.print_readable(print_output=False).strip().split("\n")
+        )
+        self.assertExpectedInline(
+            graph_str,
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, x_1: "f32[4, 4]"):
+        # No stacktrace found for following nodes
+        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
+        view: "f32[4, 4]" = torch.ops.aten.view.default(add, [4, 4]);  add = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view);  repeated_subgraph0 = view = None
+        getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
+        view_1: "f32[8, 4]" = torch.ops.aten.view.default(getitem, [8, 4]);  getitem = None
+        return view_1
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 4]"):
+            # No stacktrace found for following nodes
+            all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
+            wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+            return (wait_tensor,)""",  # noqa: B950
+        )
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):
@@ -1524,6 +1617,32 @@ class TestDTensorCompileE2E(DTensorTestBase):
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_net(replicated_inp)
         self.assertEqual(output.full_tensor(), ref_out)
+
+    @with_comms
+    def test_split_with_symint_split_size(self):
+        """
+        Test that split works with symbolic integer split_size when using
+        torch.compile with dynamic=True.
+        """
+        mesh = self.build_device_mesh()
+        placements = [Replicate()]
+
+        global_tensor = torch.randn(8, 8, device=self.device_type)
+        input_dt = distribute_tensor(global_tensor, mesh, placements)
+
+        def split_fn(x, split_size):
+            return torch.split(x, split_size, dim=0)
+
+        compiled_split_fn = torch.compile(split_fn, dynamic=True)
+
+        # Test with different split sizes: evenly divisible and not evenly divisible
+        for split_size in [2, 3, 4]:
+            expected = split_fn(global_tensor, split_size)
+            result = compiled_split_fn(input_dt, split_size)
+
+            self.assertEqual(len(result), len(expected))
+            for dt_chunk, tensor_chunk in zip(result, expected):
+                self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
 
 if __name__ == "__main__":
