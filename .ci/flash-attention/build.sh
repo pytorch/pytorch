@@ -107,13 +107,23 @@ if [[ "${CUDA_VERSION:-12.6}" == 13.* ]]; then
     fi
 fi
 
-sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version >= Version("12.3") and bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")/' \
-    "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
+if ! [[ "${CUDA_VERSION:-12.6}" == 13.* && "$(uname -m)" == "aarch64" ]]; then
+    sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version >= Version("12.3") and bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")/' \
+        "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
+fi
+
+BUILD_DATE=$(date +%Y%m%d)
+if [[ "${WHEEL_PLAT}" == "aarch64" ]]; then
+    ARCH_TAG="arm"
+else
+    ARCH_TAG="x86"
+fi
+export FLASH_ATTN_LOCAL_VERSION="${BUILD_DATE}.cu${CUDA_SHORT}.${ARCH_TAG}"
 
 "$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
     -k \
-    --plat-name "manylinux_2_28_${WHEEL_PLAT}"
+    --plat-name "${WHEEL_PLAT}"
 
 echo "wheel built: "
 find "$FA_FINAL_PACKAGE_DIR" -name '*.whl' -exec ls -la {} \;
