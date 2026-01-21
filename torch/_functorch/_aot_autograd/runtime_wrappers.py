@@ -617,6 +617,17 @@ def _create_runtime_wrapper(
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
                         original_inpt.detach().copy_(updated_inpt)
                     else:
+                        # Check if we have stream index information for this mutated input
+                        if (
+                            runtime_metadata.mutated_inp_stream_indices is not None
+                            and i < len(runtime_metadata.mutated_inp_stream_indices)
+                            and runtime_metadata.mutated_inp_stream_indices[i]
+                            is not None
+                        ):
+                            raise RuntimeError(
+                                "Mutations on inputs with user-specified streams are not yet supported. "
+                                "See: https://github.com/pytorch/pytorch/issues/172522"
+                            )
                         original_inpt.copy_(updated_inpt)
         else:
             fw_outs = all_outs
