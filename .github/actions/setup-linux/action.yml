@@ -50,7 +50,7 @@ runs:
         fi
 
     - name: Install uv
-      uses: pytorch/test-infra/.github/actions/setup-uv@main
+      uses: pytorch/test-infra/.github/actions/setup-uv@seemethere/setup-uv-wrapper
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       with:
         python-version: "3.12"
