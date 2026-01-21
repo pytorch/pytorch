@@ -83,9 +83,10 @@ from .ctx_manager import (
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
-from .distributed import DistributedVariable, ProcessGroupVariable
+from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
+from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -1231,16 +1232,16 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             def handle_constant_processgroup_functions(
                 self, tx: "InstructionTranslator", *args: VariableTracker
             ) -> VariableTracker:
-                # because the input is a "ProcessGroupVariable", we'll be guarding on its
-                # ID_MATCH based on how it was constructed.
-
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
                 if len(args) == 1:
                     # group or group name
-                    assert (
-                        isinstance(args[0], ProcessGroupVariable)
-                        or args[0].is_python_constant()
+                    assert args[0].is_python_constant() or (
+                        isinstance(args[0], TorchScriptObjectVariable)
+                        and args[
+                            0
+                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
+                        == "torch.distributed.distributed_c10d.ProcessGroup"
                     )
                 elif len(args) == 2:
                     # ranks + tag
