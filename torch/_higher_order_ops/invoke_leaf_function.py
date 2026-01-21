@@ -1,20 +1,80 @@
 import contextlib
 import functools
 from collections.abc import Callable, Generator, Sequence
-from typing import Any
+from typing import Any, NamedTuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet
-from torch._higher_order_ops.utils import reconstruct_original_args, register_fake
+from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
+from torch.autograd.graph import get_gradient_edge
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.nn.utils.stateless import _reparametrize_module
 
 from .flat_apply import func_to_graphable
 
 
+# Callback for retrieving nn.Module instances by index for leaf_function.
+# This is set by Dynamo's graph_bytecode_inputs module to avoid the HOP
+# importing from Dynamo (which would be a layering violation).
+_leaf_function_module_retriever: Callable[[int], Any] | None = None
+
+
+def set_leaf_function_module_retriever(retriever: Callable[[int], Any]) -> None:
+    """
+    Set the callback for retrieving nn.Module instances by index.
+
+    This is called by torch._dynamo.graph_bytecode_inputs to register
+    its get_external_object_by_index function, allowing invoke_leaf_function
+    to retrieve nn.Module instances without importing from Dynamo.
+    """
+    global _leaf_function_module_retriever
+    _leaf_function_module_retriever = retriever
+
+
+class LeafModuleState(NamedTuple):
+    """
+    A pytree representation of an nn.Module for use in invoke_leaf_function.
+
+    In dynamo, nn.Module arguments to leaf functions are converted to this
+    pytree format (index, parameters, buffers). This structure is then
+    flattened to produce the actual inputs to invoke_leaf_function. At
+    runtime, the original module is reconstructed via pytree unflatten and
+    _reparametrize_module.
+
+    Fields:
+    - nn_module_index: Index to retrieve the original nn module at runtime.
+      Objects are registered by Dynamo during tracing and retrieved via
+      the external object retriever callback (set by Dynamo at import time).
+    - named_parameters: Named parameters of the module, used to reparametrize
+    - named_buffers: Named buffers of the module, used to reparametrize
+    """
+
+    nn_module_index: int
+    named_parameters: dict[str, torch.nn.Parameter]
+    named_buffers: dict[str, torch.Tensor]
+
+
 def unwrap_fn_spec(fn_spec: pytree.TreeSpec) -> Callable:
     return pytree.tree_unflatten((), fn_spec)
+
+
+def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
+    if _leaf_function_module_retriever is None:
+        raise RuntimeError(
+            "Leaf function module retriever not set. This typically means "
+            "torch._dynamo.graph_bytecode_inputs was not imported before "
+            "invoke_leaf_function was called with nn.Module arguments."
+        )
+
+    mod = _leaf_function_module_retriever(nn_module_index)
+    if not isinstance(mod, torch.nn.Module):
+        raise TypeError(
+            f"Expected nn.Module at index {nn_module_index} for leaf function invocation, "
+            f"but got {type(mod).__name__}. This may indicate the module index is invalid."
+        )
+    return mod
 
 
 def _detach_tensors(tree: Any) -> Any:
@@ -24,6 +84,141 @@ def _detach_tensors(tree: Any) -> Any:
         lambda t: t.detach().requires_grad_(t.requires_grad),
         tree,
     )
+
+
+def check_escaped_gradients(
+    outputs: Any,
+    inputs: Sequence[Any],
+    requires_grad_indices: set[int],
+) -> None:
+    """
+    Check if computation graph depends on tensors not passed as explicit inputs.
+
+    When a leaf_function closes over a tensor with requires_grad=True, gradients
+    won't flow back to it because backward only computes gradients for explicit
+    inputs. This function walks the autograd graph from outputs and raises an
+    error if it finds leaf tensors not in our input set.
+
+    Controlled by torch._dynamo.config.leaf_function_check_escaped_gradients.
+
+    Args:
+        outputs: Function outputs (tensor or tuple of tensors)
+        inputs: Function inputs
+        requires_grad_indices: Indices of inputs that require gradients
+
+    Raises:
+        RuntimeError: If closure-captured tensors with requires_grad are detected
+    """
+    # Early exit if no inputs require grad
+    if not requires_grad_indices:
+        return
+
+    # Lazy import to avoid overhead when check is disabled
+    import torch._dynamo.config as config
+
+    if not config.leaf_function_check_escaped_gradients:
+        return
+
+    # Collect autograd nodes for tracked inputs - these form the traversal boundary
+    input_nodes: set[torch.autograd.graph.Node] = set()
+    for i, inp in enumerate(inputs):
+        if (
+            isinstance(inp, torch.Tensor)
+            and i in requires_grad_indices
+            and inp.requires_grad
+        ):
+            edge = get_gradient_edge(inp)
+            if edge.node is not None:
+                input_nodes.add(edge.node)
+
+    # Get output grad_fns as starting points for graph traversal
+    flat_outputs = outputs if isinstance(outputs, tuple) else (outputs,)
+    start_nodes: set[torch.autograd.graph.Node] = {
+        out.grad_fn
+        for out in flat_outputs
+        if isinstance(out, torch.Tensor)
+        and out.requires_grad
+        and out.grad_fn is not None
+    }
+    if not start_nodes:
+        return
+
+    # Walk graph to find leaf nodes not in our input set
+    escaped: set[torch.autograd.graph.Node] = set()
+    visited: set[torch.autograd.graph.Node] = set()
+    stack = list(start_nodes)
+
+    while stack:
+        node = stack.pop()
+        if node in visited or node in input_nodes:
+            continue
+        visited.add(node)
+
+        for next_node, _ in node.next_functions:
+            if next_node is None or next_node in input_nodes:
+                continue
+            # Empty next_functions means this is a leaf node (AccumulateGrad)
+            if not next_node.next_functions:
+                escaped.add(next_node)
+            else:
+                stack.append(next_node)
+
+    if escaped:
+        # Build detailed info about escaped tensors
+        tensor_info = []
+        for node in escaped:
+            if hasattr(node, "variable"):
+                t = node.variable
+                tensor_info.append(
+                    f"  - Tensor(shape={list(t.shape)}, dtype={t.dtype})"
+                )
+        tensor_details = (
+            "\n".join(tensor_info) if tensor_info else "  (tensor details unavailable)"
+        )
+
+        raise RuntimeError(
+            f"@leaf_function detected {len(escaped)} tensor(s) with requires_grad=True "
+            f"that are not passed as explicit inputs:\n{tensor_details}\n"
+            f"Gradients will not flow back to closure-captured or global tensors. "
+            f"Pass them as explicit arguments to the leaf function."
+        )
+
+
+@contextlib.contextmanager
+def reconstruct_original_args(
+    input_spec: pytree.TreeSpec | None, flat_args: tuple[Any, ...]
+) -> Generator[tuple[list[Any] | tuple[Any, ...], dict[str, Any]], None, None]:
+    """
+    Reconstruct original (args, kwargs) from flattened arguments.
+
+    Handles LeafModuleState by retrieving the original module and reparametrizing
+    it with the parameters/buffers arguments.
+    """
+    if input_spec is None:
+        yield flat_args, {}
+        return
+
+    args, kwargs = pytree.tree_unflatten(flat_args, input_spec)
+
+    with contextlib.ExitStack() as stack:
+
+        def process_module_state(state: LeafModuleState) -> torch.nn.Module:
+            orig_module = _retrieve_module_by_index(state.nn_module_index)
+            stack.enter_context(
+                _reparametrize_module(
+                    orig_module,
+                    {**state.named_parameters, **state.named_buffers},
+                )
+            )
+            return orig_module
+
+        new_args, new_kwargs = pytree.tree_map_only(
+            LeafModuleState,
+            process_module_state,
+            (args, kwargs),
+            is_leaf=lambda x: isinstance(x, LeafModuleState),
+        )
+        yield new_args, new_kwargs
 
 
 def autograd_grad_with_mixed_inputs(
@@ -122,6 +317,12 @@ def _make_forward(
                     new_kwargs,
                 ):
                     state["outputs"] = fn(*new_args, **new_kwargs)
+
+                # Check for escaped gradients (must be inside enable_grad for get_gradient_edge)
+                check_escaped_gradients(
+                    state["outputs"], state["inputs"], requires_grad_indices
+                )
+
         return state["outputs"]
 
     return forward, state
@@ -171,11 +372,11 @@ def make_tracing_wrappers(
     )
 
     def backward(*grads):
-        if state["inputs"] is None or state["outputs"] is None:
+        if state["inputs"] is None:
             raise RuntimeError(
-                "invoke_leaf_function backward expects inputs/outputs to be set in forward."
+                "invoke_leaf_function backward expects inputs to be set in forward."
             )
-        # Return fake gradients for tracing
+        # Return fake gradients for tracing (shapes match inputs)
         return tuple(
             torch.empty_like(state["inputs"][i]) if i in requires_grad_indices else None
             for i in range(len(state["inputs"]))
