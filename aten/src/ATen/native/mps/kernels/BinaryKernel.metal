@@ -379,6 +379,41 @@ struct igammac_functor {
   }
 };
 
+struct gcd_functor {
+  template <typename T>
+  inline T operator()(T a, T b) {
+    a = a >= 0 ? a : -a;
+    b = b >= 0 ? b : -b;
+    while (b != 0) {
+      T t = b;
+      b = a % b;
+      a = t;
+    }
+    return a;
+  }
+};
+
+struct lcm_functor {
+  template <typename T>
+  inline T operator()(T a, T b) {
+    T abs_a = a >= 0 ? a : -a;
+    T abs_b = b >= 0 ? b : -b;
+    if (abs_a == 0 || abs_b == 0) {
+      return 0;
+    }
+    // Calculate gcd
+    T ga = abs_a;
+    T gb = abs_b;
+    while (gb != 0) {
+      T t = gb;
+      gb = ga % gb;
+      ga = t;
+    }
+    // lcm = |a| / gcd * |b| to avoid overflow
+    return (abs_a / ga) * abs_b;
+  }
+};
+
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
   REGISTER_BINARY_OP(NAME, int, int);     \
@@ -461,6 +496,8 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(fmod);
 REGISTER_INTEGER_BINARY_OP(fmod);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
 REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
+REGISTER_INTEGER_BINARY_OP(gcd);
+REGISTER_INTEGER_BINARY_OP(lcm);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);
