@@ -340,7 +340,6 @@ if torch.backends.mps.is_available():
             "linalg.svdvals": None,
             "masked.median": None,
             "matrix_exp": None,
-            "mode": None,
             "normnuc": None,
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
