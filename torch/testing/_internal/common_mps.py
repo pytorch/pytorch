@@ -313,7 +313,6 @@ if torch.backends.mps.is_available():
             "linalg.eigvals": None,
             "put": None,
             "cholesky_solve": None,
-            "frexp": None,
             "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
