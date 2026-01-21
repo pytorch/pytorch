@@ -2626,7 +2626,7 @@ def compile(
           usage, as we will cache the workspace memory required for the invocation so that we
           do not have to reallocate it on subsequent runs.  Reduction of overhead is not guaranteed
           to work; today, we only reduce overhead for CUDA only graphs which do not mutate inputs.
-          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
+          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOGS=perf_hints
           to debug.
 
         - "max-autotune" is a mode that leverages Triton or template based matrix multiplications
