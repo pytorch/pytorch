@@ -54,6 +54,7 @@ runs:
       if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       with:
         python-version: 3.12
+        resolution-strategy: lowest
 
     - name: Install pip
       shell: bash

@@ -49,6 +49,7 @@ jobs:
           python-version: 3.12
           activate-environment: true
           ignore-empty-workdir: true
+          resolution-strategy: lowest
 
       - name: Checkout pytorch-integration-testing repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
