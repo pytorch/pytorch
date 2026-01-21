@@ -76,6 +76,7 @@ class TestDTensorDebugMode(TestCase):
             """\
   torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
+      -> output: S(0)
       redistribute_input(1, S(0) -> R)
         redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
           _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
@@ -88,7 +89,7 @@ class TestDTensorDebugMode(TestCase):
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
-        self.assertTrue(isinstance(debug_mode.operators[2], _RedistributeCall))
+        self.assertTrue(isinstance(debug_mode.operators[3], _RedistributeCall))
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
 
         # check stringification
@@ -279,6 +280,34 @@ class TestDTensorDebugMode(TestCase):
     aten::mm(t: f32[16, 8], t: f32[8, 128])
   aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
     aten::sum(t: f32[16, 128])""",
+        )
+
+    def test_output_placements(self):
+        """Test that output placements are recorded for multi-output DTensor ops."""
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # Use topk which returns multiple outputs (values, indices)
+        # Shard on dim=1 (the topk dimension) to trigger redistribution
+        x = torch.randn(8, 2, requires_grad=False)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
+
+        # Test with redistribution (slow path) - output placements should be recorded
+        with DebugMode(record_output=True) as debug_mode:
+            torch.topk(x_dtensor, k=4, dim=1)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  aten::topk(dt: f32[8, 16]| S(1), 4, 1)
+    -> output: ('R', 'R')
+    redistribute_input(0, S(1) -> R)
+      redistribute_input(t: f32[8, 2], trace: S(1)->R)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
+        _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
+        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
+        aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
+        aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
         )
 
     def test_debug_mode_einsum(self):
