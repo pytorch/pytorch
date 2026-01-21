@@ -61,7 +61,7 @@ from ._aot_autograd.descriptors import (
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.logging_utils import get_aot_graph_name
-from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
+from ._aot_autograd.utils import get_cuda_generator_meta_val
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
@@ -333,7 +333,8 @@ def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
 def _must_be_in_forward(node: fx.Node) -> bool:
     if _has_tag_must_be_in_forward(node):
         return True
-    is_mutable = is_with_effects(node) or (
+
+    is_mutable = (
         isinstance(node.target, torch._ops.OpOverload)
         and node.target._schema.is_mutable
     )
@@ -347,7 +348,7 @@ def _must_be_in_forward(node: fx.Node) -> bool:
 def _must_be_in_backward(node: fx.Node) -> bool:
     if _has_tag_must_be_in_backward(node):
         return True
-    is_mutable = is_with_effects(node) or (
+    is_mutable = (
         isinstance(node.target, torch._ops.OpOverload)
         and node.target._schema.is_mutable
     )
@@ -1244,6 +1245,19 @@ def default_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    # pyrefly: ignore [unbound-name]
+    if config.enable_activation_offloading:
+        from ._activation_offloading.activation_offloading import (
+            enable_activation_offloading,
+        )
+
+        enable_activation_offloading(
+            fw_module,
+            bw_module,
+            num_fwd_outputs,
+            static_lifetime_input_nodes,
+        )
 
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend
