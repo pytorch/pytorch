@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 ONNXProgram.__module__ = "torch.onnx"
 ExportableModule.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
+InputObserver.__module__ = "torch.onnx"
 
 # TODO(justinchuby): Remove these two properties
 producer_name = "pytorch"
