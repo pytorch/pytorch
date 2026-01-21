@@ -8,8 +8,10 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
-from ... import ir
+from ... import config, ir
+from ...codecache import PyCodeCache
 from ...ir import FixedLayout, FlexibleLayout
 from ...lowering import empty, empty_strided, lowerings
 from ...runtime.runtime_utils import ceildiv, is_power_of_2, next_power_of_2
@@ -34,6 +36,58 @@ aten = torch.ops.aten
 prims = torch.ops.prims
 
 log = logging.getLogger(__name__)
+
+
+def _compiled_shared_mem_bytes(choice: Any) -> int | None:
+    bmreq = getattr(choice, "bmreq", None)
+    if bmreq is None:
+        return None
+    module_cache_key = getattr(bmreq, "module_cache_key", None)
+    module_path = getattr(bmreq, "module_path", None)
+    kernel_name = getattr(bmreq, "kernel_name", None)
+    if module_cache_key is None or module_path is None or kernel_name is None:
+        return None
+
+    mod = PyCodeCache.load_by_key_path(module_cache_key, module_path)
+    kernel = getattr(mod, kernel_name, None)
+    if kernel is None:
+        return None
+
+    launchers = getattr(kernel, "launchers", None)
+    if isinstance(launchers, list) and launchers:
+        shared = getattr(launchers[0], "shared", None)
+        if shared is not None:
+            return int(shared)
+        binary = getattr(launchers[0], "bin", None)
+        if binary is None:
+            return None
+        if hasattr(binary, "shared"):
+            return int(binary.shared)
+        meta = getattr(binary, "metadata", None)
+        if meta is not None and hasattr(meta, "shared"):
+            return int(meta.shared)
+
+    return None
+
+
+def _device_shared_mem_limit_bytes(device: torch.device) -> int | None:
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return None
+    idx = device.index if device.index is not None else torch.cuda.current_device()
+    props = torch.cuda.get_device_properties(idx)
+    if hasattr(props, "shared_memory_per_block_optin"):
+        return int(props.shared_memory_per_block_optin)
+    if hasattr(props, "shared_memory_per_block"):
+        return int(props.shared_memory_per_block)
+    return None
+
+
+def _has_user_pinned_decode_tuning(kernel_options: dict[str, Any]) -> bool:
+    keys = OrderedSet(kernel_options.keys())
+    for name in ("BLOCK_M", "BLOCK_N", "num_warps", "num_stages", "USE_TMA"):
+        if name in keys or f"fwd_{name}" in keys:
+            return True
+    return False
 
 
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
@@ -270,6 +324,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
+    user_pinned = _has_user_pinned_decode_tuning(kernel_options)
     kernel_options.setdefault(
         "BLOCK_M",
         (
@@ -414,13 +469,53 @@ def create_flex_decoding_kernel(*args, **kwargs):
         8: create_indices_fake,
     }
 
-    buf_ACC = autotune_select_algorithm(
-        "flex_decoding",
-        choices,
-        inputs_for_flex_decoding,
-        layout_acc,
-        input_gen_fns=input_gen_fns,
-    )
+    if not config.max_autotune and len(choices) > 1 and not user_pinned:
+        compile_errors: list[str] = []
+        buf_ACC = None
+        for choice in choices[: max(config.flex_fallback_max_configs, 1)]:
+            try:
+                choice.precompile()
+            except Exception as e:
+                compile_errors.append(f"{choice}: {e}")
+                continue
+            limit = _device_shared_mem_limit_bytes(query.get_device())
+            shared = _compiled_shared_mem_bytes(choice)
+            if limit is not None and shared is not None and shared > limit:
+                compile_errors.append(
+                    f"{choice}: compiled shared memory {shared}B exceeds device limit {limit}B"
+                )
+                continue
+            buf_ACC = choice.output_node()
+            break
+        if buf_ACC is None:
+            raise RuntimeError(
+                "FlexDecoding could not find a compilable Triton config:\n"
+                + "\n".join(compile_errors)
+            )
+    elif not config.max_autotune and len(choices) > 0 and user_pinned:
+        choice = choices[0]
+        try:
+            choice.precompile()
+        except Exception as e:
+            raise RuntimeError(
+                "FlexDecoding config specified by kernel_options failed to compile."
+            ) from e
+        limit = _device_shared_mem_limit_bytes(query.get_device())
+        shared = _compiled_shared_mem_bytes(choice)
+        if limit is not None and shared is not None and shared > limit:
+            raise RuntimeError(
+                "FlexDecoding config specified by kernel_options is not runnable: "
+                f"compiled shared memory {shared}B exceeds device limit {limit}B."
+            )
+        buf_ACC = choice.output_node()
+    else:
+        buf_ACC = autotune_select_algorithm(
+            "flex_decoding",
+            choices,
+            inputs_for_flex_decoding,
+            layout_acc,
+            input_gen_fns=input_gen_fns,
+        )
 
     # need subgraph inputs and outputs to analyze all symints used in flex attention
     buf_ACC.data.data.subgraph_inps = list(score_mod_other_buffers) + list(

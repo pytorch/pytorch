@@ -853,6 +853,147 @@ class TestFlexDecoding(InductorTestCase):
         )
         self.run_test(score_mod, dtype, block_mask=block_mask, device=device)
 
+    @supported_platform
+    @unittest.skipIf(test_device[0] == "cpu", "Skip on CPU")
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_decode_fallback_on_postcompile_validation(self, device):
+        import unittest.mock as mock
+
+        import torch._inductor.kernel.flex.flex_decoding as decode_lowering
+        from torch._inductor.select_algorithm import TritonTemplateCaller
+
+        checked: list[str] = []
+        selected: list[str] = []
+
+        def compiled_shared_mem_bytes_override(choice):
+            checked.append(choice.description)
+            return 2 if len(checked) == 1 else 0
+
+        def shared_mem_limit_override(_device):
+            return 1
+
+        original_output_node = TritonTemplateCaller.output_node
+
+        def wrapped_output_node(self):
+            selected.append(self.description)
+            return original_output_node(self)
+
+        q, k, v = (
+            torch.randn(1, 1, 64, 64, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+
+        with (
+            mock.patch.object(
+                decode_lowering,
+                "_compiled_shared_mem_bytes",
+                new=compiled_shared_mem_bytes_override,
+            ),
+            mock.patch.object(
+                decode_lowering,
+                "_device_shared_mem_limit_bytes",
+                new=shared_mem_limit_override,
+            ),
+            mock.patch.object(
+                TritonTemplateCaller, "output_node", new=wrapped_output_node
+            ),
+        ):
+            torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, _identity, kernel_options=kernel_options
+            )
+
+        self.assertGreaterEqual(len(checked), 2)
+        self.assertEqual(selected[0], checked[1])
+
+    @supported_platform
+    @unittest.skipIf(test_device[0] == "cpu", "Skip on CPU")
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_no_decode_fallback_when_user_pins(self, device):
+        import unittest.mock as mock
+
+        import torch._inductor.kernel.flex.flex_decoding as decode_lowering
+
+        checked: list[str] = []
+
+        def compiled_shared_mem_bytes_override(choice):
+            checked.append(choice.description)
+            return 2 if len(checked) == 1 else 0
+
+        def shared_mem_limit_override(_device):
+            return 1
+
+        q, k, v = (
+            torch.randn(1, 1, 64, 64, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+        kernel_options = {"BACKEND": "TRITON_DECODE", "fwd_BLOCK_N": 64}
+
+        with (
+            mock.patch.object(
+                decode_lowering,
+                "_compiled_shared_mem_bytes",
+                new=compiled_shared_mem_bytes_override,
+            ),
+            mock.patch.object(
+                decode_lowering,
+                "_device_shared_mem_limit_bytes",
+                new=shared_mem_limit_override,
+            ),
+            self.assertRaisesRegex(RuntimeError, "specified by kernel_options"),
+        ):
+            torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, _identity, kernel_options=kernel_options
+            )
+
+        self.assertEqual(len(checked), 1)
+
+    @supported_platform
+    @unittest.skipIf(test_device[0] == "cpu", "Skip on CPU")
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_decode_fallback_respects_max_configs(self, device):
+        import unittest.mock as mock
+
+        import torch._inductor.kernel.flex.flex_decoding as decode_lowering
+
+        checked: list[str] = []
+
+        def compiled_shared_mem_bytes_override(choice):
+            checked.append(choice.description)
+            return 2 if len(checked) == 1 else 0
+
+        def shared_mem_limit_override(_device):
+            return 1
+
+        q, k, v = (
+            torch.randn(1, 1, 64, 64, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+
+        with (
+            mock.patch.object(
+                decode_lowering,
+                "_compiled_shared_mem_bytes",
+                new=compiled_shared_mem_bytes_override,
+            ),
+            mock.patch.object(
+                decode_lowering,
+                "_device_shared_mem_limit_bytes",
+                new=shared_mem_limit_override,
+            ),
+            patch.object(torch._inductor.config, "flex_fallback_max_configs", 1),
+            self.assertRaisesRegex(RuntimeError, "could not find a compilable"),
+        ):
+            torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, _identity, kernel_options=kernel_options
+            )
+
+        self.assertEqual(len(checked), 1)
+
     @unittest.skipIf(not has_triton_tma_device(), "Skip when TMA is not available")
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_tma_decoding(self, device, dtype: torch.dtype):
