@@ -91,7 +91,9 @@ worker_log_path = (
 )
 
 # precompilation timeout
-precompilation_timeout_seconds: int = 60 * 60
+precompilation_timeout_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_PRECOMPILATION_TIMEOUT_SECONDS", 60 * 5)
+)
 
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
@@ -961,6 +963,22 @@ _fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
 ]
 
 _micro_pipeline_tp: bool = False
+
+
+# Enable/disable partitioned scatter optimization for atomic add kernels
+# this will improve kernel performance at cost of memory usage.
+partitioned_scatter_enabled = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+)
+
+# Min partitions for scatter optimization
+partitioned_scatter_min_partitions: int = 2
+
+# Max partitions for scatter optimization
+partitioned_scatter_max_partitions: int = 128
+
+# Memory budget fraction for scatter buffers
+partitioned_scatter_memory_budget: float = 0.10
 
 
 class _collective:
