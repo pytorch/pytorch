@@ -676,9 +676,9 @@ class RecordOptimizationContext:
 
 
 def decltype_promoted(*args):
-    assert not any(
-        isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args
-    ), "Promotion of vector types is not supported"
+    assert not any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args), (
+        "Promotion of vector types is not supported"
+    )
 
     if (dt := get_promote_dtype(args)) is not None:
         return DTYPE_TO_CPP[dt]
@@ -3543,8 +3543,8 @@ class CppVecKernel(CppKernel):
         elif src_dtype != dtype:
             expr = ""
             if (
-                rounding 
-                and src_dtype in [torch.float, torch.double] 
+                rounding
+                and src_dtype in [torch.float, torch.double]
                 and dtype in [torch.int8, torch.uint8]
             ):
                 expr = "at::vec::round_convert"
@@ -3554,7 +3554,7 @@ class CppVecKernel(CppKernel):
                 expr = expr + f"<{dst_cpp_type}>({src})"
             else:
                 expr = (
-                    expr 
+                    expr
                     + f"<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})")
         return expr
 
