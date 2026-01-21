@@ -56,6 +56,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
@@ -103,6 +104,7 @@ from .exc import (
 )
 from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
+from .graph_id_filter import get_backend_override_for_compile_id
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
@@ -2528,14 +2530,21 @@ class OutputGraph(OutputGraphCommon):
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
         gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
+        # Check for per-graph backend override (for debugging/bisecting)
+        compiler_fn = (
+            get_backend_override_for_compile_id(
+                self.dynamo_compile_id, config.debug_backend_override
+            )
+            or self.compiler_fn
+        )
+
         name = (
-            self.compiler_fn.__name__
-            if hasattr(self.compiler_fn, "__name__")
+            compiler_fn.__name__
+            if hasattr(compiler_fn, "__name__")
             else "<unknown compiler_fn>"
         )
         try:
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
             compiled_fn = compiler_fn(gm, example_inputs)
@@ -2578,7 +2587,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore [unbound-name]
+        # pyrefly: ignore [unbound-name, bad-return]
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
@@ -3606,9 +3615,12 @@ class SubgraphTracer(fx.Tracer):
             self.parent.lift_tracked_freevar_to_input(proxy)
 
         example_value = proxy.node.meta["example_value"]
-        new_proxy = self.create_graph_input(
-            proxy.node.name, type(example_value), example_value
+        type_expr = (
+            type(example_value.real_obj)
+            if isinstance(example_value, FakeScriptObject)
+            else type(example_value)
         )
+        new_proxy = self.create_graph_input(proxy.node.name, type_expr, example_value)
         self.lifted_freevars[proxy] = new_proxy
         return new_proxy
 
