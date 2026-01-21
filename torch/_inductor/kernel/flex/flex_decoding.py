@@ -8,7 +8,6 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
 
 from ... import config, ir
 from ...codecache import PyCodeCache
@@ -83,11 +82,37 @@ def _device_shared_mem_limit_bytes(device: torch.device) -> int | None:
 
 
 def _has_user_pinned_decode_tuning(kernel_options: dict[str, Any]) -> bool:
-    keys = OrderedSet(kernel_options.keys())
     for name in ("BLOCK_M", "BLOCK_N", "num_warps", "num_stages", "USE_TMA"):
-        if name in keys or f"fwd_{name}" in keys:
+        if name in kernel_options or f"fwd_{name}" in kernel_options:
             return True
     return False
+
+
+def _compiled_choice_validation_error(choice: Any, device: torch.device) -> str | None:
+    limit = _device_shared_mem_limit_bytes(device)
+    shared = _compiled_shared_mem_bytes(choice)
+    if limit is None or shared is None or shared <= limit:
+        return None
+    return f"compiled shared memory {shared}B exceeds device limit {limit}B"
+
+
+def _pick_first_valid_choice(
+    choices: list[Any],
+    device: torch.device,
+    max_attempts: int,
+) -> tuple[Any | None, list[str]]:
+    errors: list[str] = []
+    for choice in choices[:max_attempts]:
+        try:
+            choice.precompile()
+        except Exception as e:
+            errors.append(f"{choice}: {e}")
+            continue
+        if reason := _compiled_choice_validation_error(choice, device):
+            errors.append(f"{choice}: {reason}")
+            continue
+        return choice, errors
+    return None, errors
 
 
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
@@ -470,28 +495,18 @@ def create_flex_decoding_kernel(*args, **kwargs):
     }
 
     if not config.max_autotune and len(choices) > 1 and not user_pinned:
-        compile_errors: list[str] = []
-        buf_ACC = None
-        for choice in choices[: max(config.flex_fallback_max_configs, 1)]:
-            try:
-                choice.precompile()
-            except Exception as e:
-                compile_errors.append(f"{choice}: {e}")
-                continue
-            limit = _device_shared_mem_limit_bytes(query.get_device())
-            shared = _compiled_shared_mem_bytes(choice)
-            if limit is not None and shared is not None and shared > limit:
-                compile_errors.append(
-                    f"{choice}: compiled shared memory {shared}B exceeds device limit {limit}B"
-                )
-                continue
-            buf_ACC = choice.output_node()
-            break
-        if buf_ACC is None:
+        max_attempts = max(int(config.flex_fallback_max_configs), 1)
+        choice, errors = _pick_first_valid_choice(
+            choices,
+            query.get_device(),
+            max_attempts,
+        )
+        if choice is None:
             raise RuntimeError(
                 "FlexDecoding could not find a compilable Triton config:\n"
-                + "\n".join(compile_errors)
+                + "\n".join(errors)
             )
+        buf_ACC = choice.output_node()
     elif not config.max_autotune and len(choices) > 0 and user_pinned:
         choice = choices[0]
         try:
@@ -500,12 +515,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
             raise RuntimeError(
                 "FlexDecoding config specified by kernel_options failed to compile."
             ) from e
-        limit = _device_shared_mem_limit_bytes(query.get_device())
-        shared = _compiled_shared_mem_bytes(choice)
-        if limit is not None and shared is not None and shared > limit:
+        if reason := _compiled_choice_validation_error(choice, query.get_device()):
             raise RuntimeError(
                 "FlexDecoding config specified by kernel_options is not runnable: "
-                f"compiled shared memory {shared}B exceeds device limit {limit}B."
+                f"{reason}."
             )
         buf_ACC = choice.output_node()
     else:

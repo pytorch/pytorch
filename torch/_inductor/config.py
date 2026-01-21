@@ -590,8 +590,9 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
-flex_fallback_max_configs: int = int(
-    os.environ.get("TORCHINDUCTOR_FLEX_FALLBACK_MAX_CONFIGS", "5")
+flex_fallback_max_configs: int = max(
+    int(os.environ.get("TORCHINDUCTOR_FLEX_FALLBACK_MAX_CONFIGS", "5")),
+    1,
 )
 
 
@@ -908,6 +909,15 @@ optimize_scatter_upon_const_tensor = (
 # options in caffe2/torch/_inductor/fx_passes/pre_grad.py
 add_pre_grad_passes: Optional[str] = None
 remove_pre_grad_passes: Optional[str] = None
+
+# Comma-separated list of pass names to disable. Passes disabled via this config
+# will be skipped when they go through GraphTransformObserver.
+# Can be set via TORCHINDUCTOR_DISABLED_PASSES env var.
+# Use uppercase pass names (e.g., "PASS1,PASS2").
+disabled_passes: str = Config(
+    env_name_force="TORCHINDUCTOR_DISABLED_PASSES",
+    default="",
+)
 
 
 # The multiprocessing start method to use for inductor workers in the codecache.

@@ -14,7 +14,6 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
-from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...codecache import PyCodeCache
@@ -105,7 +104,6 @@ def _device_shared_mem_limit_bytes(device: torch.device) -> int | None:
 
 
 def _has_user_pinned_fwd_tuning(kernel_options: dict[str, Any]) -> bool:
-    keys = OrderedSet(kernel_options.keys())
     for name in (
         "BLOCK_M",
         "BLOCK_N",
@@ -115,13 +113,12 @@ def _has_user_pinned_fwd_tuning(kernel_options: dict[str, Any]) -> bool:
         "num_consumer_groups",
         "num_buffers_warp_spec",
     ):
-        if name in keys or f"fwd_{name}" in keys:
+        if name in kernel_options or f"fwd_{name}" in kernel_options:
             return True
     return False
 
 
 def _has_user_pinned_bwd_tuning(kernel_options: dict[str, Any]) -> bool:
-    keys = OrderedSet(kernel_options.keys())
     for name in (
         "BLOCK_M1",
         "BLOCK_N1",
@@ -133,9 +130,36 @@ def _has_user_pinned_bwd_tuning(kernel_options: dict[str, Any]) -> bool:
         "num_consumer_groups",
         "num_buffers_warp_spec",
     ):
-        if name in keys or f"bwd_{name}" in keys:
+        if name in kernel_options or f"bwd_{name}" in kernel_options:
             return True
     return False
+
+
+def _compiled_choice_validation_error(choice: Any, device: torch.device) -> str | None:
+    limit = _device_shared_mem_limit_bytes(device)
+    shared = _compiled_shared_mem_bytes(choice)
+    if limit is None or shared is None or shared <= limit:
+        return None
+    return f"compiled shared memory {shared}B exceeds device limit {limit}B"
+
+
+def _pick_first_valid_choice(
+    choices: list[Any],
+    device: torch.device,
+    max_attempts: int,
+) -> tuple[Any | None, list[str]]:
+    errors: list[str] = []
+    for choice in choices[:max_attempts]:
+        try:
+            choice.precompile()
+        except Exception as e:
+            errors.append(f"{choice}: {e}")
+            continue
+        if reason := _compiled_choice_validation_error(choice, device):
+            errors.append(f"{choice}: {reason}")
+            continue
+        return choice, errors
+    return None, errors
 
 
 def _sanitize_kernel_options_for_triton(
@@ -559,44 +583,32 @@ def flex_attention(
         8: create_indices_fake,
     }
     user_pinned = _has_user_pinned_fwd_tuning(original_kernel_options)
-    if not config.max_autotune and len(choices) > 1 and not user_pinned:
-        compile_errors: list[str] = []
-        out = None
-        for choice in choices[: max(config.flex_fallback_max_configs, 1)]:
+    if not config.max_autotune and len(choices) > 0:
+        max_attempts = max(int(config.flex_fallback_max_configs), 1)
+        if user_pinned:
+            choice = choices[0]
             try:
                 choice.precompile()
             except Exception as e:
-                compile_errors.append(f"{choice}: {e}")
-                continue
-            limit = _device_shared_mem_limit_bytes(query.get_device())
-            shared = _compiled_shared_mem_bytes(choice)
-            if limit is not None and shared is not None and shared > limit:
-                compile_errors.append(
-                    f"{choice}: compiled shared memory {shared}B exceeds device limit {limit}B"
+                raise RuntimeError(
+                    "FlexAttention config specified by kernel_options failed to compile."
+                ) from e
+            if reason := _compiled_choice_validation_error(choice, query.get_device()):
+                raise RuntimeError(
+                    "FlexAttention config specified by kernel_options is not runnable: "
+                    f"{reason}."
                 )
-                continue
-            out = choice.output_node()
-            break
-        if out is None:
-            raise RuntimeError(
-                "FlexAttention could not find a compilable Triton config:\n"
-                + "\n".join(compile_errors)
+        else:
+            choice, errors = _pick_first_valid_choice(
+                choices,
+                query.get_device(),
+                max_attempts,
             )
-    elif not config.max_autotune and len(choices) > 0 and user_pinned:
-        choice = choices[0]
-        try:
-            choice.precompile()
-        except Exception as e:
-            raise RuntimeError(
-                "FlexAttention config specified by kernel_options failed to compile."
-            ) from e
-        limit = _device_shared_mem_limit_bytes(query.get_device())
-        shared = _compiled_shared_mem_bytes(choice)
-        if limit is not None and shared is not None and shared > limit:
-            raise RuntimeError(
-                "FlexAttention config specified by kernel_options is not runnable: "
-                f"compiled shared memory {shared}B exceeds device limit {limit}B."
-            )
+            if choice is None:
+                raise RuntimeError(
+                    "FlexAttention could not find a compilable Triton config:\n"
+                    + "\n".join(errors)
+                )
         out = choice.output_node()
     else:
         out = autotune_select_algorithm(
@@ -1092,44 +1104,32 @@ def flex_attention_backward(*args, **kwargs):
         15: create_indices_fake,
     }
     user_pinned = _has_user_pinned_bwd_tuning(original_kernel_options)
-    if not config.max_autotune and len(choices) > 1 and not user_pinned:
-        compile_errors: list[str] = []
-        broadcasted_grad_key = None
-        for choice in choices[: max(config.flex_fallback_max_configs, 1)]:
+    if not config.max_autotune and len(choices) > 0:
+        max_attempts = max(int(config.flex_fallback_max_configs), 1)
+        if user_pinned:
+            choice = choices[0]
             try:
                 choice.precompile()
             except Exception as e:
-                compile_errors.append(f"{choice}: {e}")
-                continue
-            limit = _device_shared_mem_limit_bytes(query.get_device())
-            shared = _compiled_shared_mem_bytes(choice)
-            if limit is not None and shared is not None and shared > limit:
-                compile_errors.append(
-                    f"{choice}: compiled shared memory {shared}B exceeds device limit {limit}B"
+                raise RuntimeError(
+                    "FlexAttention backward config specified by kernel_options failed to compile."
+                ) from e
+            if reason := _compiled_choice_validation_error(choice, query.get_device()):
+                raise RuntimeError(
+                    "FlexAttention backward config specified by kernel_options is not runnable: "
+                    f"{reason}."
                 )
-                continue
-            broadcasted_grad_key = choice.output_node()
-            break
-        if broadcasted_grad_key is None:
-            raise RuntimeError(
-                "FlexAttention backward could not find a compilable Triton config:\n"
-                + "\n".join(compile_errors)
+        else:
+            choice, errors = _pick_first_valid_choice(
+                choices,
+                query.get_device(),
+                max_attempts,
             )
-    elif not config.max_autotune and len(choices) > 0 and user_pinned:
-        choice = choices[0]
-        try:
-            choice.precompile()
-        except Exception as e:
-            raise RuntimeError(
-                "FlexAttention backward config specified by kernel_options failed to compile."
-            ) from e
-        limit = _device_shared_mem_limit_bytes(query.get_device())
-        shared = _compiled_shared_mem_bytes(choice)
-        if limit is not None and shared is not None and shared > limit:
-            raise RuntimeError(
-                "FlexAttention backward config specified by kernel_options is not runnable: "
-                f"compiled shared memory {shared}B exceeds device limit {limit}B."
-            )
+            if choice is None:
+                raise RuntimeError(
+                    "FlexAttention backward could not find a compilable Triton config:\n"
+                    + "\n".join(errors)
+                )
         broadcasted_grad_key = choice.output_node()
     else:
         broadcasted_grad_key = autotune_select_algorithm(
