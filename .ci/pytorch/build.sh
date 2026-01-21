@@ -55,6 +55,10 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+  # Build for z15 to enable full ZVECTOR support
+  export CFLAGS="$CFLAGS -march=z15"
+fi
 
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
