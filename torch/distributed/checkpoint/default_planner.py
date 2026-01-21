@@ -363,7 +363,8 @@ class DefaultLoadPlanner(LoadPlanner):
             is_non_primary = self.replicate_group.rank() > 0
 
             if is_non_primary:
-                filtered_items = []
+                # Non-primary ranks skip loading non-CPU tensors from checkpoint
+                items_to_load = []
 
             for item in plan.items:
                 obj = find_state_dict_object(self.state_dict, item.dest_index)
@@ -374,10 +375,10 @@ class DefaultLoadPlanner(LoadPlanner):
                 ):
                     self.tensors_to_broadcast.append(obj)
                 elif is_non_primary:
-                    filtered_items.append(item)
+                    items_to_load.append(item)
 
             if is_non_primary:
-                plan.items = filtered_items
+                plan.items = items_to_load
 
         return plan
 
