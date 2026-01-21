@@ -9736,6 +9736,7 @@
   dispatch:
     CPU: _cholesky_solve_helper_cpu
     CUDA: _cholesky_solve_helper_cuda
+    MPS: _cholesky_solve_helper_mps
   autogen: _cholesky_solve_helper.out
 
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor

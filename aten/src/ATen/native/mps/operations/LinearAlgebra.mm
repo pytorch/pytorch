@@ -18,6 +18,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_linalg_solve_ex_native.h>
+#include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr_native.h>
@@ -1659,6 +1660,34 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 
 TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
+}
+
+// Solve A @ X = B where A = L @ L^T (lower Cholesky) or A = U^T @ U (upper Cholesky)
+// Uses two triangular solves:
+// If upper=False (L @ L^T @ X = B):
+//   1. L @ Y = B (forward substitution)
+//   2. L^T @ X = Y (backward substitution)
+// If upper=True (U^T @ U @ X = B):
+//   1. U^T @ Y = B (forward substitution)
+//   2. U @ X = Y (backward substitution)
+Tensor _cholesky_solve_helper_mps(const Tensor& self, const Tensor& A, bool upper) {
+  // Use linalg_solve_triangular for the two triangular solves
+  // For lower Cholesky (A = L @ L^T): solve L @ Y = B, then L^T @ X = Y
+  // For upper Cholesky (A = U^T @ U): solve U^T @ Y = B, then U @ X = Y
+
+  if (upper) {
+    // A = U^T @ U where U is upper triangular
+    // Step 1: Solve U^T @ Y = B (U^T is lower triangular)
+    Tensor Y = at::linalg_solve_triangular(A.mT(), self, /*upper=*/false, /*left=*/true, /*unitriangular=*/false);
+    // Step 2: Solve U @ X = Y
+    return at::linalg_solve_triangular(A, Y, /*upper=*/true, /*left=*/true, /*unitriangular=*/false);
+  } else {
+    // A = L @ L^T where L is lower triangular
+    // Step 1: Solve L @ Y = B
+    Tensor Y = at::linalg_solve_triangular(A, self, /*upper=*/false, /*left=*/true, /*unitriangular=*/false);
+    // Step 2: Solve L^T @ X = Y (L^T is upper triangular)
+    return at::linalg_solve_triangular(A.mT(), Y, /*upper=*/true, /*left=*/true, /*unitriangular=*/false);
+  }
 }
 
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
