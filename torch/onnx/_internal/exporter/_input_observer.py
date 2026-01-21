@@ -56,7 +56,7 @@ def flatten_unflatten_for_dynamic_shapes(
         start = end
     if use_dict:
         if spec.type is dict:
-            # This a dictionary.
+            # This is a dictionary.
             return dict(zip(spec.context, subtrees))
         if spec.type is tuple:
             return tuple(subtrees)
