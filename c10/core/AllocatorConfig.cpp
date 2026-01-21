@@ -223,7 +223,7 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
     } else {
       // If a device-specific configuration parser hook is registered, it will
       // check if the key is unrecognized.
-      if (device_config_parser_hook()) {
+      if (getConfigParserHook()) {
         TORCH_CHECK_VALUE(
             getKeys().find(key) != getKeys().end(),
             "Unrecognized key '",

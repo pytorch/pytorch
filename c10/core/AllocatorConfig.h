@@ -250,6 +250,14 @@ class C10_API AcceleratorAllocatorConfig {
     return getMutableKeys();
   }
 
+  // Optional hook for parsing additional device-specific allocator settings.
+  // This allows backends (e.g., CUDA, XPU) to register a custom parser for
+  // their own environment configuration extensions.
+  static std::function<void(const std::string&)>& getConfigParserHook() {
+    static std::function<void(const std::string&)> hook{nullptr};
+    return hook;
+  }
+
   // Registers a device-specific configuration parser hook and its key. This
   // allows backends to parse additional device-specific configuration options
   // from the environment variable. The hook should be a function that takes a
@@ -260,7 +268,7 @@ class C10_API AcceleratorAllocatorConfig {
   static void registerDeviceConfigParserHook(
       std::function<void(const std::string&)>&& hook,
       const std::unordered_set<std::string>& keys) {
-    device_config_parser_hook() = std::move(hook);
+    getConfigParserHook() = std::move(hook);
     auto& mutable_keys = getMutableKeys();
     for (auto& key : keys) {
       TORCH_CHECK_VALUE(
@@ -276,8 +284,8 @@ class C10_API AcceleratorAllocatorConfig {
   // device-specific configuration options from the environment variable.
   // If no hook is registered, this function does nothing.
   static void callDeviceConfigParserHook(const std::string& env) {
-    if (device_config_parser_hook()) {
-      device_config_parser_hook()(env);
+    if (getConfigParserHook()) {
+      getConfigParserHook()(env);
     }
   }
 
@@ -344,13 +352,6 @@ class C10_API AcceleratorAllocatorConfig {
   // Record the last allocator config environment setting.
   std::mutex last_allocator_settings_mutex_;
   std::string last_allocator_settings_;
-  // Optional hook for parsing additional device-specific allocator settings.
-  // This allows backends (e.g., CUDA, XPU) to register a custom parser for
-  // their own environment configuration extensions.
-  static std::function<void(const std::string&)>& device_config_parser_hook() {
-    static std::function<void(const std::string&)> hook{nullptr};
-    return hook;
-  }
 };
 
 C10_API inline void setAllocatorSettings(const std::string& env) {
