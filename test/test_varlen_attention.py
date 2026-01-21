@@ -64,7 +64,6 @@ class AttentionBlock(nn.Module):
         x_packed: torch.Tensor,
         cu_seq: torch.Tensor,
         max_len: int,
-        is_causal: bool = False,
         scale: float | None = None,
         window_size: tuple[int, int] = (-1, -1),
     ):
@@ -78,7 +77,6 @@ class AttentionBlock(nn.Module):
             cu_seq,
             max_len,
             max_len,
-            is_causal=is_causal,
             scale=scale,
             window_size=window_size,
         )
@@ -90,7 +88,6 @@ class AttentionBlock(nn.Module):
         self,
         x_padded: torch.Tensor,
         seq_lengths: torch.Tensor,
-        is_causal: bool = False,
         scale: float | None = None,
         window_size: tuple[int, int] = (-1, -1),
     ):
@@ -108,7 +105,7 @@ class AttentionBlock(nn.Module):
             batch_size, self.num_heads, seq_len, seq_len
         )
 
-        if is_causal:
+        if window_size == (-1, 0):
             causal_mask = torch.tril(
                 torch.ones(seq_len, seq_len, device=x_padded.device, dtype=torch.bool)
             )
@@ -223,9 +220,7 @@ class TestVarlenAttention(NNTestCase):
             [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
         )
 
-        output = attention_block.forward_varlen(
-            x_packed, cu_seq, shape.max_seq_len, is_causal=False
-        )
+        output = attention_block.forward_varlen(x_packed, cu_seq, shape.max_seq_len)
 
         self.assertEqual(output.shape, (total_tokens, shape.embed_dim))
         self.assertEqual(output.device, torch.device(device))
@@ -338,9 +333,7 @@ class TestVarlenAttention(NNTestCase):
             attention_block.forward_varlen, backend="eager", fullgraph=True
         )
         with OpLoggingMode() as mode:
-            output = compiled_forward(
-                x_packed, cu_seq, shape.max_seq_len, is_causal=False
-            )
+            output = compiled_forward(x_packed, cu_seq, shape.max_seq_len)
 
             varlen_grad_out = torch.ones_like(output)
             _ = torch.autograd.grad(
@@ -366,10 +359,24 @@ class TestVarlenAttention(NNTestCase):
         TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("is_causal", [False, True])
     @parametrize("scale", [None, 0.1])
-    @parametrize("window_size", [(-1, -1), (-1, 0), (4, 0), (-1, 4)])
-    def test_varlen_vs_sdpa(self, device, dtype, is_causal, scale, window_size):
+    @parametrize(
+        "window_size",
+        [
+            (-1, -1),
+            (-1, 0),
+            (4, 0),
+            (-1, 4),
+            (0, 0),
+            (1, 0),
+            (0, 1),
+            (0, -1),
+            (4, 4),
+            (8, 2),
+            (1025, 1025),
+        ],
+    )
+    def test_varlen_vs_sdpa(self, device, dtype, scale, window_size):
         torch.manual_seed(42)
 
         shape = VarlenShape(
@@ -505,9 +512,24 @@ class TestVarlenAttention(NNTestCase):
         TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("is_causal", [False, True])
+    @parametrize(
+        "window_size",
+        [
+            (-1, -1),
+            (-1, 0),
+            (4, 0),
+            (-1, 4),
+            (0, 0),
+            (1, 0),
+            (0, 1),
+            (0, -1),
+            (4, 4),
+            (8, 2),
+            (1025, 1025),
+        ],
+    )
     @parametrize("num_perms", [1, 3, 5])
-    def test_batch_invariance(self, device, dtype, is_causal, num_perms):
+    def test_batch_invariance(self, device, dtype, window_size, num_perms):
         torch.manual_seed(42)
 
         batch_size, max_seq_len = 4, 128
@@ -544,7 +566,7 @@ class TestVarlenAttention(NNTestCase):
             cu_seq_orig,
             max_seq_len,
             max_seq_len,
-            is_causal=is_causal,
+            window_size=window_size,
         )
 
         original_grad_out = torch.randn_like(original_output)
@@ -578,7 +600,7 @@ class TestVarlenAttention(NNTestCase):
                 cu_seq_perm,
                 max_seq_len,
                 max_seq_len,
-                is_causal=is_causal,
+                window_size=window_size,
             )
 
             for i in range(batch_size):
