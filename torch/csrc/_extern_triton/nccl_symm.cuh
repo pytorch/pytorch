@@ -532,6 +532,299 @@ __device__ int64_t nccl_symm_signal_wait_until(
       nccl_ctx, signal_index, cmp, static_cast<uint64_t>(cmp_value)));
 }
 
+/**
+ * NCCL backend implementation of signal_reset.
+ *
+ * Resets a local signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms.
+ *
+ * Uses ncclGin::resetSignal to atomically reset the signal value.
+ *
+ * @param nccl_ctx NCCL context with dev_comm
+ * @param signal_index Index of the signal to reset
+ */
+__device__ void nccl_signal_reset_impl(
+    NCCLSymmContext* nccl_ctx,
+    int32_t signal_index) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Initialize GIN context (context ID 0 for simplicity)
+  int ginContext = 0;
+  ncclGin gin{*nccl_ctx->dev_comm, ginContext};
+
+  // Use ncclGin::resetSignal to reset the signal value to zero
+  gin.resetSignal(static_cast<ncclGinSignal_t>(signal_index));
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(
+      false, "NCCL signal_reset requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
+/**
+ * NCCL-specific wrapper for signal_reset operation.
+ *
+ * Resets a local signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms.
+ *
+ * Uses ncclGin::resetSignal to atomically reset the signal value.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to reset
+ * @return 0 on success
+ */
+__device__ int32_t
+nccl_symm_signal_reset(int64_t ctx_ptr, int32_t signal_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  nccl_signal_reset_impl(nccl_ctx, signal_index);
+  return 0;
+}
+
+/**
+ * NCCL backend implementation of put_async.
+ *
+ * Non-blocking one-sided put: copies count elements of element_size bytes
+ * from src_ptr (local) to dest_ptr (also a local pointer that maps to
+ * destination rank's buffer). Returns immediately without waiting for
+ * completion.
+ *
+ * The function uses NCCLSymmContext::resolve_window() to resolve both source
+ * and destination pointers to their corresponding ncclWindow_t handles and
+ * byte offsets. This allows the GIN put operation to work with any registered
+ * memory region.
+ *
+ * To ensure completion, call symm_quiet after issuing all put operations.
+ *
+ * @param nccl_ctx NCCL context with window registry and dev_comm
+ * @param dest_ptr Local pointer that maps to destination (symmetric address)
+ * @param src_ptr Local source pointer
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination rank number
+ */
+__device__ void nccl_put_async_impl(
+    NCCLSymmContext* nccl_ctx,
+    void* dest_ptr,
+    const void* src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Resolve destination pointer to window + offset
+  NCCLWindowResolution dest_res = nccl_ctx->resolve_window(dest_ptr);
+  TORCH_SYMM_CHECK(
+      dest_res.valid, "dest_ptr not found in any registered NCCL window");
+
+  // Resolve source pointer to window + offset
+  NCCLWindowResolution src_res = nccl_ctx->resolve_window(src_ptr);
+  TORCH_SYMM_CHECK(
+      src_res.valid, "src_ptr not found in any registered NCCL window");
+
+  // Calculate size in bytes
+  size_t byte_count =
+      static_cast<size_t>(count) * static_cast<size_t>(element_size);
+
+  // Initialize GIN context (context ID 0 for simplicity)
+  int ginContext = 0;
+  ncclGin gin{*nccl_ctx->dev_comm, ginContext};
+
+  // Use ncclGin::put with resolved windows and offsets for the data transfer
+  // The put operation is non-blocking and returns immediately
+  // Args: team, dest_rank, dest_window, dest_offset, src_window, src_offset,
+  // byte_count
+  gin.put(
+      ncclTeamWorld(*nccl_ctx->dev_comm),
+      dest_rank,
+      dest_res.window,
+      dest_res.offset,
+      src_res.window,
+      src_res.offset,
+      byte_count);
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(false, "NCCL put_async requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
+/**
+ * NCCL backend implementation of put_signal_async.
+ *
+ * Non-blocking one-sided put with remote signal: copies count elements of
+ * element_size bytes from src_ptr (local) to dest_ptr (symmetric address) on
+ * dest_rank's buffer. After the data transfer completes, atomically updates
+ * the remote signal at signal_index on dest_rank using the specified operation.
+ *
+ * This is a fused operation that combines data transfer with signaling,
+ * allowing the receiver to know when the data has arrived without polling.
+ * The signal update is guaranteed to be visible only after the data transfer
+ * is complete.
+ *
+ * Uses ncclGin::put followed by ncclGin::signal with appropriate remote action.
+ *
+ * To ensure completion, call symm_quiet after issuing all put operations.
+ *
+ * @param nccl_ctx NCCL context with window registry and dev_comm
+ * @param dest_ptr Local pointer that maps to destination (symmetric address)
+ * @param src_ptr Local source pointer
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination rank number
+ * @param signal_index Index into the signal pad to update on dest_rank
+ * @param signal_value Value to use in the signal operation (default=1)
+ * @param signal_op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ */
+__device__ void nccl_put_signal_async_impl(
+    NCCLSymmContext* nccl_ctx,
+    void* dest_ptr,
+    const void* src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank,
+    int32_t signal_index,
+    uint64_t signal_value,
+    int32_t signal_op) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // NCCL only supports ADD operations for signaling
+  TORCH_SYMM_CHECK(
+      signal_op == SIGNAL_OP_ADD,
+      "NCCL put_signal_async only supports SIGNAL_OP_ADD");
+
+  // Resolve destination pointer to window + offset
+  NCCLWindowResolution dest_res = nccl_ctx->resolve_window(dest_ptr);
+  TORCH_SYMM_CHECK(
+      dest_res.valid, "dest_ptr not found in any registered NCCL window");
+
+  // Resolve source pointer to window + offset
+  NCCLWindowResolution src_res = nccl_ctx->resolve_window(src_ptr);
+  TORCH_SYMM_CHECK(
+      src_res.valid, "src_ptr not found in any registered NCCL window");
+
+  // Calculate size in bytes
+  size_t byte_count =
+      static_cast<size_t>(count) * static_cast<size_t>(element_size);
+
+  // Initialize GIN context (context ID 0 for simplicity)
+  int ginContext = 0;
+  ncclGin gin{*nccl_ctx->dev_comm, ginContext};
+
+  // Use ncclGin::put with remote action to atomically update signal after data
+  // transfer
+  // ncclGin_SignalAdd provides the remote action that adds to the signal
+  // The signal is updated atomically on dest_rank after data transfer completes
+  if (signal_value == 1) {
+    // Use ncclGin_SignalInc for incrementing by 1
+    gin.put(
+        ncclTeamWorld(*nccl_ctx->dev_comm),
+        dest_rank,
+        dest_res.window,
+        dest_res.offset,
+        src_res.window,
+        src_res.offset,
+        byte_count,
+        ncclGin_SignalInc{static_cast<uint32_t>(signal_index)});
+  } else {
+    // Use ncclGin_SignalAdd for adding arbitrary value
+    gin.put(
+        ncclTeamWorld(*nccl_ctx->dev_comm),
+        dest_rank,
+        dest_res.window,
+        dest_res.offset,
+        src_res.window,
+        src_res.offset,
+        byte_count,
+        ncclGin_SignalAdd{static_cast<uint32_t>(signal_index), signal_value});
+  }
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(
+      false, "NCCL put_signal_async requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
+/**
+ * NCCL-specific wrapper for put_async operation.
+ *
+ * Non-blocking one-sided put: copies count elements of element_size bytes
+ * from src_ptr (local) to dest_ptr (symmetric address) on dest_rank's buffer.
+ *
+ * Returns immediately without waiting for completion. Use symm_quiet to
+ * ensure all prior put operations have completed.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param dest_ptr Destination pointer (symmetric address, as int64)
+ * @param src_ptr Source pointer (local address, as int64)
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination rank number
+ * @return 0 on success
+ */
+__device__ int32_t nccl_symm_put_async(
+    int64_t ctx_ptr,
+    int64_t dest_ptr,
+    int64_t src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  void* dest = reinterpret_cast<void*>(dest_ptr);
+  const void* src = reinterpret_cast<const void*>(src_ptr);
+  nccl_put_async_impl(nccl_ctx, dest, src, count, element_size, dest_rank);
+  return 0;
+}
+
+/**
+ * NCCL-specific wrapper for put_signal_async operation.
+ *
+ * Non-blocking one-sided put with remote signal: copies count elements of
+ * element_size bytes from src_ptr (local) to dest_ptr (symmetric address) on
+ * dest_rank's buffer. After the data transfer completes, atomically updates
+ * the remote signal at signal_index on dest_rank using the specified operation.
+ *
+ * This is a fused operation that combines data transfer with signaling,
+ * allowing the receiver to know when the data has arrived without polling.
+ *
+ * Returns immediately without waiting for completion. Use symm_quiet to
+ * ensure all prior put operations have completed.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param dest_ptr Destination pointer (symmetric address, as int64)
+ * @param src_ptr Source pointer (local address, as int64)
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination rank number
+ * @param signal_index Index into the signal pad to update on dest_rank
+ * @param signal_value Value to use in the signal operation
+ * @param signal_op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ * @return 0 on success
+ */
+__device__ int32_t nccl_symm_put_signal_async(
+    int64_t ctx_ptr,
+    int64_t dest_ptr,
+    int64_t src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank,
+    int32_t signal_index,
+    int64_t signal_value,
+    int32_t signal_op) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  void* dest = reinterpret_cast<void*>(dest_ptr);
+  const void* src = reinterpret_cast<const void*>(src_ptr);
+  nccl_put_signal_async_impl(
+      nccl_ctx,
+      dest,
+      src,
+      count,
+      element_size,
+      dest_rank,
+      signal_index,
+      static_cast<uint64_t>(signal_value),
+      signal_op);
+  return 0;
+}
+
 // =============================================================================
 // NCCL TEAM PRIMITIVES
 // =============================================================================

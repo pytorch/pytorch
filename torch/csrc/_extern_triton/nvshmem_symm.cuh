@@ -329,6 +329,161 @@ __device__ uint64_t nvshmem_signal_wait_until_impl(
   return nvshmem_signal_wait_until(target_signal, nvshmem_cmp, cmp_value);
 }
 
+/**
+ * NVSHMEM backend implementation of signal_reset.
+ *
+ * Resets a local signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms.
+ *
+ * The implementation uses nvshmem_signal_wait_until to ensure the signal
+ * has reached the expected value before resetting it to zero. This provides
+ * a memory fence and ensures proper ordering.
+ *
+ * Uses the gin_signal_pad from the context (same pad that symm_signal writes
+ * to and symm_signal_wait_until reads from).
+ *
+ * @param nvshmem_ctx NVSHMEM context with gin_signal_pad
+ * @param signal_index Index of the signal to reset
+ */
+__device__ void nvshmem_signal_reset_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    int32_t signal_index) {
+  // Get the GIN signal pad from the context (used for remote atomic signaling)
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->gin_signal_pad != nullptr, "gin_signal_pad is null");
+  uint64_t* signal_pad = nvshmem_ctx->gin_signal_pad;
+
+  // Calculate the address of the specific signal
+  uint64_t* target_signal = signal_pad + signal_index;
+
+  // Wait until the signal is non-zero (ensuring any pending signal has arrived)
+  // Using SIGNAL_CMP_NE (2) -> NVSHMEM_CMP_NE (1): Wait until signal != 0
+  nvshmem_signal_wait_until(target_signal, 1 /* NVSHMEM_CMP_NE */, 0);
+
+  // Reset the signal to zero
+  *target_signal = 0;
+}
+
+/**
+ * NVSHMEM backend implementation of put_async.
+ *
+ * Non-blocking one-sided put: copies count elements of element_size bytes
+ * from src_ptr (local) to dest_ptr (also a local pointer that maps to
+ * destination rank's symmetric buffer). Returns immediately without waiting
+ * for completion.
+ *
+ * The function resolves local pointers to remote pointers using nvshmem_ptr.
+ * The dest_ptr argument is treated as a local symmetric address, and this
+ * function computes the corresponding address on the destination PE.
+ *
+ * Uses nvshmem_putmem_nbi (non-blocking immediate) which returns immediately
+ * without any synchronization. To ensure completion, call symm_quiet after
+ * issuing all put operations.
+ *
+ * @param nvshmem_ctx NVSHMEM context
+ * @param dest_ptr Local pointer that maps to destination (symmetric address)
+ * @param src_ptr Local source pointer
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination PE number
+ */
+__device__ void nvshmem_put_async_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    void* dest_ptr,
+    const void* src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank) {
+  // Calculate size in bytes
+  size_t byte_count =
+      static_cast<size_t>(count) * static_cast<size_t>(element_size);
+
+  // Use nvshmem_putmem_nbi for non-blocking immediate put operation
+  // dest_ptr is a symmetric address (local pointer into symmetric memory)
+  // NVSHMEM will handle the address translation to the remote PE
+  // Returns immediately without waiting - use symm_quiet() to ensure completion
+  nvshmem_putmem_nbi(dest_ptr, src_ptr, byte_count, dest_rank);
+}
+
+/**
+ * NVSHMEM backend implementation of put_signal_async.
+ *
+ * Non-blocking one-sided put with remote signal: copies count elements of
+ * element_size bytes from src_ptr (local) to dest_ptr (symmetric address) on
+ * dest_rank's buffer. After the data transfer completes, atomically updates
+ * the remote signal at signal_index on dest_rank using the specified operation.
+ *
+ * This is a fused operation that combines data transfer with signaling,
+ * allowing the receiver to know when the data has arrived without polling.
+ * The signal update is guaranteed to be visible only after the data transfer
+ * is complete.
+ *
+ * Uses nvshmemx_putmem_signal_nbi (non-blocking immediate) which returns
+ * immediately without any synchronization. To ensure completion, call
+ * symm_quiet after issuing all put operations.
+ *
+ * @param nvshmem_ctx NVSHMEM context with gin_signal_pad for signaling
+ * @param dest_ptr Local pointer that maps to destination (symmetric address)
+ * @param src_ptr Local source pointer
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination PE number
+ * @param signal_index Index into the signal pad to update on dest_rank
+ * @param signal_value Value to use in the signal operation (default=1)
+ * @param signal_op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ */
+__device__ void nvshmem_put_signal_async_impl(
+    NVSHMEMSymmContext* nvshmem_ctx,
+    void* dest_ptr,
+    const void* src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank,
+    int32_t signal_index,
+    uint64_t signal_value,
+    int32_t signal_op) {
+  // Get the GIN signal pad from the context (used for remote atomic signaling)
+  TORCH_SYMM_CHECK(
+      nvshmem_ctx->gin_signal_pad != nullptr, "gin_signal_pad is null");
+  uint64_t* signal_pad = nvshmem_ctx->gin_signal_pad;
+
+  // Calculate the address of the specific signal on dest_rank
+  // The signal_pad is symmetric, so we can use it directly with the PE number
+  uint64_t* target_signal = signal_pad + signal_index;
+
+  // Calculate size in bytes
+  size_t byte_count =
+      static_cast<size_t>(count) * static_cast<size_t>(element_size);
+
+  // Map our signal operation constants to NVSHMEM's native constants
+  int nvshmem_sig_op;
+  switch (signal_op) {
+    case SIGNAL_OP_SET:
+      nvshmem_sig_op = NVSHMEM_SIGNAL_SET;
+      break;
+    case SIGNAL_OP_ADD:
+      nvshmem_sig_op = NVSHMEM_SIGNAL_ADD;
+      break;
+    default:
+      TORCH_SYMM_CHECK(false, "Invalid signal operation");
+      return;
+  }
+
+  // Use nvshmemx_putmem_signal_nbi for non-blocking immediate put with signal
+  // dest_ptr is a symmetric address (local pointer into symmetric memory)
+  // NVSHMEM will handle the address translation to the remote PE
+  // The signal is updated atomically on dest_rank after data transfer completes
+  // Returns immediately without waiting - use symm_quiet() to ensure completion
+  nvshmemx_putmem_signal_nbi(
+      dest_ptr,
+      src_ptr,
+      byte_count,
+      target_signal,
+      signal_value,
+      nvshmem_sig_op,
+      dest_rank);
+}
+
 // =============================================================================
 // NVSHMEM TRITON WRAPPERS
 // These are the entry points for Triton kernels via extern_elementwise.
@@ -475,6 +630,112 @@ __device__ int64_t nvshmem_symm_signal_wait_until(
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
   return static_cast<int64_t>(nvshmem_signal_wait_until_impl(
       nvshmem_ctx, signal_index, cmp, static_cast<uint64_t>(cmp_value)));
+}
+
+/**
+ * NVSHMEM-specific wrapper for signal_reset operation.
+ *
+ * Resets a local signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms.
+ *
+ * Uses nvshmem_signal_wait_until to ensure the signal has arrived before
+ * resetting it to zero.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to reset
+ * @return 0 on success
+ */
+__device__ int32_t
+nvshmem_symm_signal_reset(int64_t ctx_ptr, int32_t signal_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  nvshmem_signal_reset_impl(nvshmem_ctx, signal_index);
+  return 0;
+}
+
+/**
+ * NVSHMEM-specific wrapper for put_async operation.
+ *
+ * Non-blocking one-sided put: copies count elements of element_size bytes
+ * from src_ptr (local) to dest_ptr (symmetric address) on dest_rank's buffer.
+ *
+ * Returns immediately without waiting for completion. Use symm_quiet to
+ * ensure all prior put operations have completed.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param dest_ptr Destination pointer (symmetric address, as int64)
+ * @param src_ptr Source pointer (local address, as int64)
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination PE number
+ * @return 0 on success
+ */
+__device__ int32_t nvshmem_symm_put_async(
+    int64_t ctx_ptr,
+    int64_t dest_ptr,
+    int64_t src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  void* dest = reinterpret_cast<void*>(dest_ptr);
+  const void* src = reinterpret_cast<const void*>(src_ptr);
+  nvshmem_put_async_impl(
+      nvshmem_ctx, dest, src, count, element_size, dest_rank);
+  return 0;
+}
+
+/**
+ * NVSHMEM-specific wrapper for put_signal_async operation.
+ *
+ * Non-blocking one-sided put with remote signal: copies count elements of
+ * element_size bytes from src_ptr (local) to dest_ptr (symmetric address) on
+ * dest_rank's buffer. After the data transfer completes, atomically updates
+ * the remote signal at signal_index on dest_rank using the specified operation.
+ *
+ * This is a fused operation that combines data transfer with signaling,
+ * allowing the receiver to know when the data has arrived without polling.
+ *
+ * Returns immediately without waiting for completion. Use symm_quiet to
+ * ensure all prior put operations have completed.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param dest_ptr Destination pointer (symmetric address, as int64)
+ * @param src_ptr Source pointer (local address, as int64)
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination PE number
+ * @param signal_index Index into the signal pad to update on dest_rank
+ * @param signal_value Value to use in the signal operation
+ * @param signal_op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ * @return 0 on success
+ */
+__device__ int32_t nvshmem_symm_put_signal_async(
+    int64_t ctx_ptr,
+    int64_t dest_ptr,
+    int64_t src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank,
+    int32_t signal_index,
+    int64_t signal_value,
+    int32_t signal_op) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  void* dest = reinterpret_cast<void*>(dest_ptr);
+  const void* src = reinterpret_cast<const void*>(src_ptr);
+  nvshmem_put_signal_async_impl(
+      nvshmem_ctx,
+      dest,
+      src,
+      count,
+      element_size,
+      dest_rank,
+      signal_index,
+      static_cast<uint64_t>(signal_value),
+      signal_op);
+  return 0;
 }
 
 // =============================================================================

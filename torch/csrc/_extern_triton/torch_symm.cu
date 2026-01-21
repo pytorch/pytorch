@@ -337,6 +337,159 @@ __device__ uint64_t symm_signal_wait_until_impl(
   }
 }
 
+/**
+ * Unified signal_reset implementation.
+ *
+ * Resets a local signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms.
+ *
+ * For NVSHMEM, uses nvshmem_signal_wait_until to ensure the signal has arrived
+ * before resetting it to zero.
+ * For NCCL, uses ncclGin::resetSignal to atomically reset the signal value.
+ *
+ * @param ctx SymmContext pointer
+ * @param signal_index Index of the signal to reset
+ */
+__device__ void symm_signal_reset_impl(SymmContext* ctx, int32_t signal_index) {
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_signal_reset_impl(nccl_ctx, signal_index);
+      return;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_signal_reset_impl(nvshmem_ctx, signal_index);
+      return;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+  }
+}
+
+/**
+ * Unified put_async implementation.
+ *
+ * Non-blocking one-sided put: copies count elements of element_size bytes
+ * from src_ptr (local) to dest_ptr (symmetric address) on dest_rank's buffer.
+ *
+ * Returns immediately without waiting for completion. Use symm_quiet to
+ * ensure all prior put operations have completed.
+ *
+ * @param ctx SymmContext pointer
+ * @param dest_ptr Destination pointer (symmetric address)
+ * @param src_ptr Source pointer (local address)
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination rank/PE number
+ */
+__device__ void symm_put_async_impl(
+    SymmContext* ctx,
+    void* dest_ptr,
+    const void* src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank) {
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_put_async_impl(
+          nccl_ctx, dest_ptr, src_ptr, count, element_size, dest_rank);
+      return;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_put_async_impl(
+          nvshmem_ctx, dest_ptr, src_ptr, count, element_size, dest_rank);
+      return;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+  }
+}
+
+/**
+ * Unified put_signal_async implementation.
+ *
+ * Non-blocking one-sided put with remote signal: copies count elements of
+ * element_size bytes from src_ptr (local) to dest_ptr (symmetric address) on
+ * dest_rank's buffer. After the data transfer completes, atomically updates
+ * the remote signal at signal_index on dest_rank using the specified operation.
+ *
+ * This is a fused operation that combines data transfer with signaling,
+ * allowing the receiver to know when the data has arrived without polling.
+ * The signal update is guaranteed to be visible only after the data transfer
+ * is complete.
+ *
+ * Returns immediately without waiting for completion. Use symm_quiet to
+ * ensure all prior put operations have completed.
+ *
+ * @param ctx SymmContext pointer
+ * @param dest_ptr Destination pointer (symmetric address)
+ * @param src_ptr Source pointer (local address)
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination rank/PE number
+ * @param signal_index Index into the signal pad to update on dest_rank
+ * @param signal_value Value to use in the signal operation
+ * @param signal_op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ */
+__device__ void symm_put_signal_async_impl(
+    SymmContext* ctx,
+    void* dest_ptr,
+    const void* src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank,
+    int32_t signal_index,
+    uint64_t signal_value,
+    int32_t signal_op) {
+  TORCH_SYMM_CHECK(ctx != nullptr, "SymmContext is null");
+
+  switch (ctx->type) {
+#if NCCL_HAS_DEVICE_BITCODE
+    case SymmContext::Type::NCCL: {
+      NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
+      nccl_put_signal_async_impl(
+          nccl_ctx,
+          dest_ptr,
+          src_ptr,
+          count,
+          element_size,
+          dest_rank,
+          signal_index,
+          signal_value,
+          signal_op);
+      return;
+    }
+#endif
+    case SymmContext::Type::NVSHMEM: {
+      NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
+      nvshmem_put_signal_async_impl(
+          nvshmem_ctx,
+          dest_ptr,
+          src_ptr,
+          count,
+          element_size,
+          dest_rank,
+          signal_index,
+          signal_value,
+          signal_op);
+      return;
+    }
+    default:
+      TORCH_SYMM_CHECK(false, "Unknown SymmContext type");
+  }
+}
+
 // =============================================================================
 // TRITON EXTERN_ELEMENTWISE WRAPPERS
 // Single entry points for Triton kernels
@@ -473,6 +626,110 @@ __device__ int64_t symm_signal_wait_until(
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   return static_cast<int64_t>(symm_signal_wait_until_impl(
       ctx, signal_index, cmp, static_cast<uint64_t>(cmp_value)));
+}
+
+/**
+ * Unified wrapper for signal_reset operation for use with Triton.
+ *
+ * Resets a local signal at signal_index to zero. This is used to prepare
+ * a signal for the next round of signaling/waiting in iterative algorithms.
+ *
+ * For NVSHMEM, uses nvshmem_signal_wait_until to ensure the signal has arrived
+ * before resetting it to zero.
+ * For NCCL, uses ncclGin::resetSignal to atomically reset the signal value.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param signal_index Index of the signal to reset
+ * @return 0 on success
+ */
+__device__ int32_t symm_signal_reset(int64_t ctx_ptr, int32_t signal_index) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  symm_signal_reset_impl(ctx, signal_index);
+  return 0;
+}
+
+/**
+ * Unified wrapper for put_async operation for use with Triton.
+ *
+ * Non-blocking one-sided put: copies count elements of element_size bytes
+ * from src_ptr (local) to dest_ptr (symmetric address) on dest_rank's buffer.
+ *
+ * Returns immediately without waiting for completion. Use symm_quiet to
+ * ensure all prior put operations have completed.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param dest_ptr Destination pointer (symmetric address, as int64)
+ * @param src_ptr Source pointer (local address, as int64)
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination rank/PE number
+ * @return 0 on success
+ */
+__device__ int32_t symm_put_async(
+    int64_t ctx_ptr,
+    int64_t dest_ptr,
+    int64_t src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  void* dest = reinterpret_cast<void*>(dest_ptr);
+  const void* src = reinterpret_cast<const void*>(src_ptr);
+  symm_put_async_impl(ctx, dest, src, count, element_size, dest_rank);
+  return 0;
+}
+
+/**
+ * Unified wrapper for put_signal_async operation for use with Triton.
+ *
+ * Non-blocking one-sided put with remote signal: copies count elements of
+ * element_size bytes from src_ptr (local) to dest_ptr (symmetric address) on
+ * dest_rank's buffer. After the data transfer completes, atomically updates
+ * the remote signal at signal_index on dest_rank using the specified operation.
+ *
+ * This is a fused operation that combines data transfer with signaling,
+ * allowing the receiver to know when the data has arrived without polling.
+ * The signal update is guaranteed to be visible only after the data transfer
+ * is complete.
+ *
+ * Returns immediately without waiting for completion. Use symm_quiet to
+ * ensure all prior put operations have completed.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @param dest_ptr Destination pointer (symmetric address, as int64)
+ * @param src_ptr Source pointer (local address, as int64)
+ * @param count Number of elements to transfer
+ * @param element_size Size of each element in bytes
+ * @param dest_rank Destination rank/PE number
+ * @param signal_index Index into the signal pad to update on dest_rank
+ * @param signal_value Value to use in the signal operation
+ * @param signal_op Signal operation: SIGNAL_OP_SET (0) or SIGNAL_OP_ADD (1)
+ * @return 0 on success
+ */
+__device__ int32_t symm_put_signal_async(
+    int64_t ctx_ptr,
+    int64_t dest_ptr,
+    int64_t src_ptr,
+    int32_t count,
+    int32_t element_size,
+    int32_t dest_rank,
+    int32_t signal_index,
+    int64_t signal_value,
+    int32_t signal_op) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  void* dest = reinterpret_cast<void*>(dest_ptr);
+  const void* src = reinterpret_cast<const void*>(src_ptr);
+  symm_put_signal_async_impl(
+      ctx,
+      dest,
+      src,
+      count,
+      element_size,
+      dest_rank,
+      signal_index,
+      static_cast<uint64_t>(signal_value),
+      signal_op);
+  return 0;
 }
 
 // =============================================================================

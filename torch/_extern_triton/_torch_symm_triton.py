@@ -1944,6 +1944,77 @@ if TRITON_AVAILABLE:
             _semantic=_semantic,
         )
 
+    # =========================================================================
+    # SYMM_SIGNAL_RESET - RESET SIGNAL TO ZERO
+    # =========================================================================
+
+    @core.extern
+    def _symm_signal_reset_frontend(
+        ctx_ptr,
+        signal_index,
+        _semantic=None,
+    ):
+        """
+        Frontend signal_reset operation that dispatches based on SymmContext type.
+
+        Resets a local signal at signal_index to zero. This is used to prepare
+        a signal for the next round of signaling/waiting in iterative algorithms.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index],
+            {
+                # C function signature: (int64 ctx_ptr, int32 signal_index) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                ): ("symm_signal_reset", core.dtype("int32")),
+            },
+            is_pure=False,  # Has side effects (modifies signal)
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_signal_reset(
+        ctx_ptr,
+        signal_index,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific signal_reset operation.
+
+        Resets a local signal at signal_index to zero. This is used to prepare
+        a signal for the next round of signaling/waiting in iterative algorithms.
+
+        Uses the gin_signal_pad from the context and nvshmem_signal_wait_until
+        to ensure the signal has arrived before resetting it to zero.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, signal_index],
+            {
+                # C function signature: (int64 ctx_ptr, int32 signal_index) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int32"),  # signal_index
+                ): ("nvshmem_symm_signal_reset", core.dtype("int32")),
+            },
+            is_pure=False,  # Has side effects (modifies signal)
+            _semantic=_semantic,
+        )
+
     @triton.jit
     def symm_signal(
         ctx_ptr,
@@ -2134,6 +2205,525 @@ if TRITON_AVAILABLE:
             )
             return tl.zeros((1,), dtype=tl.int64)[0]  # Unreachable
 
+    @triton.jit
+    def symm_signal_reset(
+        ctx_ptr,
+        signal_index,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Reset a local signal to zero.
+
+        Resets the signal at signal_index to zero. This is used to prepare
+        a signal for the next round of signaling/waiting in iterative algorithms.
+
+        For NVSHMEM, this uses nvshmem_signal_wait_until to ensure the signal
+        has arrived before resetting it to zero, providing proper synchronization.
+        For NCCL, this uses ncclGin::resetSignal to atomically reset the signal.
+
+        Common usage patterns:
+          # After waiting for a signal, reset it for next iteration
+          symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, 1)
+          symm_signal_reset(ctx, idx)
+
+          # In a loop
+          for i in range(iterations):
+              # ... do work ...
+              symm_signal(ctx, idx, peer_rank, 1, SIGNAL_OP_SET)
+              symm_signal_wait_until(ctx, idx, SIGNAL_CMP_GE, 1)
+              symm_signal_reset(ctx, idx)  # Reset for next iteration
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmem_signal_wait_until + direct memory write
+        - NCCL: ncclGin::resetSignal
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            signal_index: Index into the signal buffer (int32)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_signal_reset_frontend(
+                ctx_ptr,
+                signal_index,
+            )
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_signal_reset(
+                ctx_ptr,
+                signal_index,
+            )
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    # =========================================================================
+    # SYMM_PUT_ASYNC - NON-BLOCKING ONE-SIDED PUT
+    # =========================================================================
+
+    @core.extern
+    def _symm_put_async_frontend(
+        ctx_ptr,
+        dest_ptr,
+        src_ptr,
+        count,
+        element_size,
+        dest_rank,
+        _semantic=None,
+    ):
+        """
+        Frontend put_async operation that dispatches based on SymmContext type.
+
+        Non-blocking one-sided put: copies count elements from src_ptr (local)
+        to dest_ptr (symmetric address) on dest_rank's buffer.
+
+        Returns immediately without waiting for completion. Use symm_quiet to
+        ensure all prior put operations have completed.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, dest_ptr, src_ptr, count, element_size, dest_rank],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int64 dest_ptr, int64 src_ptr,
+                #  int32 count, int32 element_size, int32 dest_rank) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int64"),  # dest_ptr
+                    core.dtype("int64"),  # src_ptr
+                    core.dtype("int32"),  # count
+                    core.dtype("int32"),  # element_size
+                    core.dtype("int32"),  # dest_rank
+                ): ("symm_put_async", core.dtype("int32")),
+            },
+            is_pure=False,  # Non-blocking data transfer has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_put_async(
+        ctx_ptr,
+        dest_ptr,
+        src_ptr,
+        count,
+        element_size,
+        dest_rank,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific put_async operation.
+
+        Non-blocking one-sided put using nvshmemx_putmem_block.
+        Copies count elements of element_size bytes from src_ptr to dest_ptr on dest_rank.
+
+        Returns immediately without waiting for completion. Use symm_quiet to
+        ensure all prior put operations have completed.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr, dest_ptr, src_ptr, count, element_size, dest_rank],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int64 dest_ptr, int64 src_ptr,
+                #  int32 count, int32 element_size, int32 dest_rank) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int64"),  # dest_ptr
+                    core.dtype("int64"),  # src_ptr
+                    core.dtype("int32"),  # count
+                    core.dtype("int32"),  # element_size
+                    core.dtype("int32"),  # dest_rank
+                ): ("nvshmem_symm_put_async", core.dtype("int32")),
+            },
+            is_pure=False,  # Non-blocking data transfer has side effects
+            _semantic=_semantic,
+        )
+
+    @triton.jit
+    def symm_put_async(
+        ctx_ptr,
+        dest_ptr,
+        src_ptr,
+        count,
+        dtype: tl.constexpr,
+        dest_rank,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Non-blocking one-sided put operation.
+
+        Copies count elements of the specified dtype from src_ptr (local) to
+        dest_ptr (symmetric address) on dest_rank's buffer. Returns immediately
+        without waiting for completion.
+
+        This is an asynchronous operation. To ensure the data has been delivered,
+        call symm_quiet() after issuing all put operations.
+
+        Common usage patterns:
+          # Simple put to a peer (float32)
+          symm_put_async(ctx, remote_buf_ptr, local_data_ptr, num_elements, tl.float32, peer_rank)
+          symm_quiet(ctx)  # Ensure data is delivered
+
+          # Multiple puts before syncing (bfloat16)
+          for peer in range(num_peers):
+              symm_put_async(ctx, dest_ptrs[peer], src_ptr, count, tl.bfloat16, peer)
+          symm_quiet(ctx)  # Ensure all puts complete
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmemx_putmem_block(dest_ptr, src_ptr, count * element_size, dest_rank)
+        - NCCL: ncclGin::put with window offset resolution
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            dest_ptr: Destination pointer (symmetric address, as int64)
+                      This should be a pointer to the destination in symmetric memory.
+            src_ptr: Source pointer (local address, as int64)
+                     This is the local data to be sent.
+            count: Number of elements to transfer (int32)
+            dtype: Triton data type (constexpr), e.g., tl.float32, tl.bfloat16, tl.int8
+                   The element size is automatically derived from this type.
+            dest_rank: Destination rank/PE number (int32)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Compute element size from dtype (primitive_bitwidth is in bits)
+        element_size: tl.constexpr = dtype.primitive_bitwidth // 8
+
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_put_async_frontend(
+                ctx_ptr,
+                dest_ptr,
+                src_ptr,
+                count,
+                element_size,
+                dest_rank,
+            )
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_put_async(
+                ctx_ptr,
+                dest_ptr,
+                src_ptr,
+                count,
+                element_size,
+                dest_rank,
+            )
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    # =========================================================================
+    # SYMM_PUT_SIGNAL_ASYNC - NON-BLOCKING PUT WITH REMOTE SIGNAL
+    # =========================================================================
+
+    @core.extern
+    def _symm_put_signal_async_frontend(
+        ctx_ptr,
+        dest_ptr,
+        src_ptr,
+        count,
+        element_size,
+        dest_rank,
+        signal_index,
+        signal_value,
+        signal_op,
+        _semantic=None,
+    ):
+        """
+        Frontend put_signal_async operation that dispatches based on SymmContext type.
+
+        Non-blocking one-sided put with remote signal: copies count elements from
+        src_ptr (local) to dest_ptr (symmetric address) on dest_rank's buffer.
+        After the data transfer completes, atomically updates the remote signal
+        at signal_index on dest_rank using the specified operation.
+
+        This is a fused operation that combines data transfer with signaling,
+        allowing the receiver to know when the data has arrived without polling.
+        The signal update is guaranteed to be visible only after the data transfer
+        is complete.
+
+        Returns immediately without waiting for completion. Use symm_quiet to
+        ensure all prior put operations have completed.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [
+                ctx_ptr,
+                dest_ptr,
+                src_ptr,
+                count,
+                element_size,
+                dest_rank,
+                signal_index,
+                signal_value,
+                signal_op,
+            ],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int64 dest_ptr, int64 src_ptr,
+                #  int32 count, int32 element_size, int32 dest_rank,
+                #  int32 signal_index, int64 signal_value, int32 signal_op) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int64"),  # dest_ptr
+                    core.dtype("int64"),  # src_ptr
+                    core.dtype("int32"),  # count
+                    core.dtype("int32"),  # element_size
+                    core.dtype("int32"),  # dest_rank
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int64"),  # signal_value
+                    core.dtype("int32"),  # signal_op
+                ): ("symm_put_signal_async", core.dtype("int32")),
+            },
+            is_pure=False,  # Non-blocking data transfer has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_put_signal_async(
+        ctx_ptr,
+        dest_ptr,
+        src_ptr,
+        count,
+        element_size,
+        dest_rank,
+        signal_index,
+        signal_value,
+        signal_op,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific put_signal_async operation.
+
+        Non-blocking one-sided put with remote signal using nvshmemx_putmem_signal_block.
+        Copies count elements of element_size bytes from src_ptr to dest_ptr on dest_rank.
+        After the data transfer completes, atomically updates the remote signal
+        at signal_index on dest_rank using the specified operation.
+
+        Returns immediately without waiting for completion. Use symm_quiet to
+        ensure all prior put operations have completed.
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [
+                ctx_ptr,
+                dest_ptr,
+                src_ptr,
+                count,
+                element_size,
+                dest_rank,
+                signal_index,
+                signal_value,
+                signal_op,
+            ],
+            {
+                # C function signature:
+                # (int64 ctx_ptr, int64 dest_ptr, int64 src_ptr,
+                #  int32 count, int32 element_size, int32 dest_rank,
+                #  int32 signal_index, int64 signal_value, int32 signal_op) -> int32
+                (
+                    core.dtype("int64"),  # ctx_ptr
+                    core.dtype("int64"),  # dest_ptr
+                    core.dtype("int64"),  # src_ptr
+                    core.dtype("int32"),  # count
+                    core.dtype("int32"),  # element_size
+                    core.dtype("int32"),  # dest_rank
+                    core.dtype("int32"),  # signal_index
+                    core.dtype("int64"),  # signal_value
+                    core.dtype("int32"),  # signal_op
+                ): ("nvshmem_symm_put_signal_async", core.dtype("int32")),
+            },
+            is_pure=False,  # Non-blocking data transfer has side effects
+            _semantic=_semantic,
+        )
+
+    @triton.jit
+    def symm_put_signal_async(
+        ctx_ptr,
+        dest_ptr,
+        src_ptr,
+        count,
+        dtype: tl.constexpr,
+        dest_rank,
+        signal_index,
+        signal_value: tl.constexpr = 1,
+        signal_op: tl.constexpr = 1,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Non-blocking one-sided put with remote signal.
+
+        Copies count elements of the specified dtype from src_ptr (local) to
+        dest_ptr (symmetric address) on dest_rank's buffer. After the data
+        transfer completes, atomically updates the remote signal at signal_index
+        on dest_rank using the specified operation.
+
+        This is a fused operation that combines data transfer with signaling,
+        allowing the receiver to know when the data has arrived without polling.
+        The signal update is guaranteed to be visible only after the data transfer
+        is complete.
+
+        This is an asynchronous operation. To ensure the data has been delivered
+        and the signal has been set, call symm_quiet() after issuing all operations.
+
+        Common usage patterns:
+          # Put data and signal completion (default: ADD 1)
+          symm_put_signal_async(ctx, remote_buf, local_data, count, tl.float32, peer, sig_idx)
+          # On the receiver side:
+          symm_signal_wait_until(ctx, sig_idx, SIGNAL_CMP_GE, 1)
+
+          # Put with explicit signal value and operation
+          symm_put_signal_async(ctx, dest, src, count, tl.float32, peer, sig_idx,
+                                signal_value=42, signal_op=SIGNAL_OP_SET)
+
+          # Multiple puts with counting signals
+          for i in range(num_chunks):
+              symm_put_signal_async(ctx, dest + i*chunk_size, src + i*chunk_size,
+                                    chunk_count, tl.float32, peer, sig_idx,
+                                    signal_value=1, signal_op=SIGNAL_OP_ADD)
+          # Receiver waits for all chunks:
+          symm_signal_wait_until(ctx, sig_idx, SIGNAL_CMP_GE, num_chunks)
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmemx_putmem_signal_block(dest, src, bytes, sig_addr, value, op, pe)
+        - NCCL: ncclGin::put with ncclGin_SignalAdd/ncclGin_SignalInc remote action
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            dest_ptr: Destination pointer (symmetric address, as int64)
+                      This should be a pointer to the destination in symmetric memory.
+            src_ptr: Source pointer (local address, as int64)
+                     This is the local data to be sent.
+            count: Number of elements to transfer (int32)
+            dtype: Triton data type (constexpr), e.g., tl.float32, tl.bfloat16, tl.int8
+                   The element size is automatically derived from this type.
+            dest_rank: Destination rank/PE number (int32)
+            signal_index: Index into the signal pad to update on dest_rank (int32)
+            signal_value: Value to use in the signal operation (constexpr, default=1)
+            signal_op: Signal operation (constexpr, default=SIGNAL_OP_ADD)
+                       - 0 (SIGNAL_OP_SET): Atomic set (replace value)
+                       - 1 (SIGNAL_OP_ADD): Atomic add (increment value)
+                       Note: NCCL only supports SIGNAL_OP_ADD.
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Validate signal_op at compile time
+        tl.static_assert(
+            signal_op == 0 or signal_op == 1,  # SIGNAL_OP_SET or SIGNAL_OP_ADD
+            "signal_op must be 0 (SIGNAL_OP_SET) or 1 (SIGNAL_OP_ADD)",
+        )
+
+        # Compute element size from dtype (primitive_bitwidth is in bits)
+        element_size: tl.constexpr = dtype.primitive_bitwidth // 8
+
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_put_signal_async_frontend(
+                ctx_ptr,
+                dest_ptr,
+                src_ptr,
+                count,
+                element_size,
+                dest_rank,
+                signal_index,
+                signal_value,
+                signal_op,
+            )
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_put_signal_async(
+                ctx_ptr,
+                dest_ptr,
+                src_ptr,
+                count,
+                element_size,
+                dest_rank,
+                signal_index,
+                signal_value,
+                signal_op,
+            )
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
 else:
     # Triton not available - provide stubs
 
@@ -2179,6 +2769,15 @@ else:
 
     def symm_signal_wait_until(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_signal_wait_until")
+
+    def symm_signal_reset(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_signal_reset")
+
+    def symm_put_async(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_put_async")
+
+    def symm_put_signal_async(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_put_signal_async")
 
 
 __all__ = [
@@ -2226,4 +2825,8 @@ __all__ = [
     # Signal primitives
     "symm_signal",
     "symm_signal_wait_until",
+    "symm_signal_reset",
+    # Data transfer primitives
+    "symm_put_async",
+    "symm_put_signal_async",
 ]

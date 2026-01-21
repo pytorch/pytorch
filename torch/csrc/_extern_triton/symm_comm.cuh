@@ -117,6 +117,68 @@ extern __device__ void nvshmemx_float_get_block(
     size_t nelems,
     int pe);
 
+// Block-level memory put (generic, byte-oriented)
+// dest: Symmetric address on the destination PE
+// source: Local address of data to send
+// nelems: Number of bytes to transfer
+// pe: Destination PE number
+extern __device__ void nvshmemx_putmem_block(
+    void* dest,
+    const void* source,
+    size_t nelems,
+    int pe);
+
+// Non-blocking immediate memory put (generic, byte-oriented)
+// dest: Symmetric address on the destination PE
+// source: Local address of data to send
+// nelems: Number of bytes to transfer
+// pe: Destination PE number
+// Returns immediately without waiting for completion. Use nvshmem_quiet() to
+// ensure delivery.
+extern __device__ void nvshmem_putmem_nbi(
+    void* dest,
+    const void* source,
+    size_t nelems,
+    int pe);
+
+// Block-level memory put with signal (generic, byte-oriented)
+// dest: Symmetric address on the destination PE
+// source: Local address of data to send
+// nelems: Number of bytes to transfer
+// sig_addr: Symmetric address of the signal variable on the destination PE
+// signal: Value to be used in the signal operation
+// sig_op: Signal operation type (NVSHMEM_SIGNAL_SET=9 or NVSHMEM_SIGNAL_ADD=10)
+// pe: Destination PE number
+// After copying data, atomically updates the remote signal at sig_addr
+extern __device__ void nvshmemx_putmem_signal_block(
+    void* dest,
+    const void* source,
+    size_t nelems,
+    uint64_t* sig_addr,
+    uint64_t signal,
+    int sig_op,
+    int pe);
+
+// Non-blocking immediate memory put with signal (generic, byte-oriented)
+// dest: Symmetric address on the destination PE
+// source: Local address of data to send
+// nelems: Number of bytes to transfer
+// sig_addr: Symmetric address of the signal variable on the destination PE
+// signal: Value to be used in the signal operation
+// sig_op: Signal operation type (NVSHMEM_SIGNAL_SET=9 or NVSHMEM_SIGNAL_ADD=10)
+// pe: Destination PE number
+// After copying data, atomically updates the remote signal at sig_addr.
+// Returns immediately without waiting for completion. Use nvshmem_quiet() to
+// ensure delivery.
+extern __device__ void nvshmemx_putmem_signal_nbi(
+    void* dest,
+    const void* source,
+    size_t nelems,
+    uint64_t* sig_addr,
+    uint64_t signal,
+    int sig_op,
+    int pe);
+
 // Quiet - ensures all prior NVSHMEM operations are complete
 extern __device__ void nvshmem_quiet();
 
@@ -258,34 +320,92 @@ struct SymmContext {
 // NCCL-SPECIFIC SYMMETRIC CONTEXT
 // =============================================================================
 
+// Maximum number of windows that can be registered in NCCLSymmContext
+#ifndef NCCL_SYMM_MAX_WINDOWS
+#define NCCL_SYMM_MAX_WINDOWS 8
+#endif
+
+/**
+ * Entry in the NCCL window registry.
+ * Maps a local memory region to its corresponding ncclWindow_t.
+ */
+struct NCCLWindowEntry {
+  void* base_ptr; // Base address of the registered memory region
+  size_t size; // Size of the region in bytes
+  ncclWindow_t window; // The NCCL window handle for this region
+
+  __host__ __device__ NCCLWindowEntry()
+      : base_ptr(nullptr), size(0), window(nullptr) {}
+
+  __host__ __device__ NCCLWindowEntry(void* ptr, size_t sz, ncclWindow_t win)
+      : base_ptr(ptr), size(sz), window(win) {}
+
+  /**
+   * Check if a pointer falls within this window's memory region.
+   */
+  __host__ __device__ bool contains(const void* ptr) const {
+    if (base_ptr == nullptr || size == 0) {
+      return false;
+    }
+    const char* p = reinterpret_cast<const char*>(ptr);
+    const char* base = reinterpret_cast<const char*>(base_ptr);
+    return p >= base && p < (base + size);
+  }
+
+  /**
+   * Calculate the byte offset of a pointer within this window.
+   * Caller must ensure ptr is within this window (use contains() first).
+   */
+  __host__ __device__ size_t offset_of(const void* ptr) const {
+    return reinterpret_cast<const char*>(ptr) -
+        reinterpret_cast<const char*>(base_ptr);
+  }
+};
+
+/**
+ * Result of resolving a pointer to a window.
+ */
+struct NCCLWindowResolution {
+  ncclWindow_t window; // The window containing the pointer
+  size_t offset; // Byte offset within the window
+  bool valid; // Whether the resolution was successful
+
+  __host__ __device__ NCCLWindowResolution()
+      : window(nullptr), offset(0), valid(false) {}
+
+  __host__ __device__ NCCLWindowResolution(ncclWindow_t win, size_t off)
+      : window(win), offset(off), valid(true) {}
+};
+
 /**
  * NCCL-specific symmetric communication context.
  *
  * This structure holds all NCCL-related data needed for LSA (Local Symmetric
  * Access) operations including:
- * - ncclWindow_t for the registered symmetric memory buffer
- * - ncclWindow_t for the signal pad (for synchronization)
+ * - A registry of ncclWindow_t handles for registered memory regions
  * - Pointer to the device communicator
+ *
+ * The window registry allows resolving any local pointer to its corresponding
+ * ncclWindow_t and offset, which is required for GIN put/get operations.
  *
  * LIMITATION: NCCL does not provide a device bitcode library, so this context
  * cannot be used with Triton extern_libs linking. It's included here for
  * completeness and potential future support.
  */
 struct NCCLSymmContext : public SymmContext {
-  // ncclWindow for the data buffer (registered with ncclCommWindowRegister)
-  ncclWindow_t buffer_window;
-
-  // ncclWindow for the signal pad (for put-with-signal operations)
-  ncclWindow_t signal_window;
+  // Window registry - maps local memory regions to ncclWindow_t handles
+  NCCLWindowEntry windows[NCCL_SYMM_MAX_WINDOWS];
+  int32_t num_windows;
 
   // Pointer to the NCCL device communicator (created via ncclDevCommCreate)
   ncclDevComm* dev_comm;
 
-  // Local buffer pointer (the base address of symmetric memory)
-  void* local_buffer;
-
-  // Size of the buffer in bytes
-  size_t buffer_size;
+  // Legacy fields for backward compatibility
+  // (buffer_window and local_buffer are now in windows[0])
+  ncclWindow_t buffer_window; // Primary data buffer window
+  ncclWindow_t signal_window; // Signal pad window
+  void* local_buffer; // Base address of primary symmetric buffer
+  size_t buffer_size; // Size of primary buffer in bytes
 
   // Signal pad pointers for each rank (device array of pointers)
   // signal_pad_ptrs[peer] gives the signal pad for that peer
@@ -297,13 +417,18 @@ struct NCCLSymmContext : public SymmContext {
 
   __host__ __device__ NCCLSymmContext()
       : SymmContext(Type::NCCL, 0, 0),
+        num_windows(0),
+        dev_comm(nullptr),
         buffer_window(nullptr),
         signal_window(nullptr),
-        dev_comm(nullptr),
         local_buffer(nullptr),
         buffer_size(0),
         signal_pad_ptrs(nullptr),
-        device_idx(-1) {}
+        device_idx(-1) {
+    for (int i = 0; i < NCCL_SYMM_MAX_WINDOWS; i++) {
+      windows[i] = NCCLWindowEntry();
+    }
+  }
 
   __host__ __device__ NCCLSymmContext(
       int32_t rank,
@@ -316,13 +441,58 @@ struct NCCLSymmContext : public SymmContext {
       uint64_t** sig_pads,
       int32_t dev_idx)
       : SymmContext(Type::NCCL, rank, world_size),
+        num_windows(0),
+        dev_comm(dcomm),
         buffer_window(buf_win),
         signal_window(sig_win),
-        dev_comm(dcomm),
         local_buffer(buf),
         buffer_size(size),
         signal_pad_ptrs(sig_pads),
-        device_idx(dev_idx) {}
+        device_idx(dev_idx) {
+    for (int i = 0; i < NCCL_SYMM_MAX_WINDOWS; i++) {
+      windows[i] = NCCLWindowEntry();
+    }
+    // Register the primary buffer window
+    if (buf != nullptr && size > 0 && buf_win != nullptr) {
+      register_window(buf, size, buf_win);
+    }
+  }
+
+  /**
+   * Register a memory region with its corresponding ncclWindow_t.
+   * Returns true if successful, false if registry is full.
+   */
+  __host__ __device__ bool register_window(
+      void* base_ptr,
+      size_t size,
+      ncclWindow_t window) {
+    if (num_windows >= NCCL_SYMM_MAX_WINDOWS) {
+      return false;
+    }
+    windows[num_windows] = NCCLWindowEntry(base_ptr, size, window);
+    num_windows++;
+    return true;
+  }
+
+  /**
+   * Resolve a local pointer to its corresponding ncclWindow_t and offset.
+   * Searches through all registered windows to find the one containing the
+   * pointer.
+   *
+   * @param ptr Local pointer to resolve
+   * @return NCCLWindowResolution with window, offset, and validity flag
+   */
+  __host__ __device__ NCCLWindowResolution
+  resolve_window(const void* ptr) const {
+    for (int i = 0; i < num_windows; i++) {
+      if (windows[i].contains(ptr)) {
+        return NCCLWindowResolution(
+            windows[i].window, windows[i].offset_of(ptr));
+      }
+    }
+    // Pointer not found in any registered window
+    return NCCLWindowResolution();
+  }
 };
 
 // =============================================================================
