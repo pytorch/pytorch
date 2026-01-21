@@ -711,6 +711,10 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @parametrize(
+        "sdpa_backend",
+        ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"],
+    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("num_splits", [1, None])
     @parametrize(
