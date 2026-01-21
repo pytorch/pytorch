@@ -102,7 +102,7 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.13 | 8 Jun 2026 | 8 Jul 2026 | (Aug 2026) | (Sept 2026) |
 | 2.14 | 3 Aug 2026 | 2 Sept 2026 | (Oct 2026) | (Nov 2026) |
 | 2.15 | 28 Sept 2026 | 28 Oct 2026 | (Nov 2026) | (Dec 2026) |
-| 2.16 | 2 Nov 2026 | 22 Dec 2026 | (Jan 2027) | (Feb 2027) |
+| 2.16 | 23 Nov 2026 | 22 Dec 2026 | (Jan 2027) | (Feb 2027) |
 
 ## General Overview
 
