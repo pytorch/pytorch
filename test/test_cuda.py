@@ -3447,6 +3447,25 @@ exit(2)
                 self.assertNotEqual(p.data_ptr(), pg.data_ptr())
                 self.assertNotEqual(p.grad.data_ptr(), pg.grad.data_ptr())
 
+    def test_cuda_graph_inference_mode(self):
+        # This test is to verify that capturing a CUDAGraph in inference mode
+        # doesn't create RNG State tensors as inference tensors which can't
+        # be inplace modified later.
+
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(10, 10, device="cuda")
+
+        with torch.inference_mode():
+            captured_fn = torch.cuda.make_graphed_callables(fn, (x,))
+            inp = torch.ones(10, 10, device="cuda")
+            self.assertEqual(captured_fn(inp), inp + 1)
+
+        torch.cuda.make_graphed_callables(fn, (x,))
+        inp = torch.ones(10, 10, device="cuda") * 10
+        self.assertEqual(fn(inp), inp + 1)
+
     def _test_graphed_optimizer(
         self, steps_warmup, steps_train, optimizer_ctor, kwargs
     ):
