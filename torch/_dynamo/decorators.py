@@ -609,13 +609,12 @@ def mark_unbacked(
         if not hasattr(t, "_dynamo_hint_overrides"):
             t._dynamo_hint_overrides = {}
 
-        if not hasattr(t, "_dynamo_shape_ids"):
-            t._dynamo_shape_ids = {}
-
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
 
         if shape_id is not None:
+            if not hasattr(t, "_dynamo_shape_ids"):
+                t._dynamo_shape_ids = {}
             t._dynamo_shape_ids[index] = shape_id
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
