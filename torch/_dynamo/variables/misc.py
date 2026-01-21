@@ -26,6 +26,7 @@ import re
 import sys
 import traceback
 import types
+import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
@@ -432,6 +433,9 @@ class FrameSummaryVariable(VariableTracker):
         super().__init__(**kwargs)
         self.frame_summary = frame_summary
 
+    def python_type(self) -> type:
+        return traceback.FrameSummary
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "lineno":
             return variables.ConstantVariable.create(self.frame_summary.lineno)
@@ -482,7 +486,7 @@ class TracebackVariable(VariableTracker):
             return [self.frame_summary]
         return [self.frame_summary] + self.tb_next.extract_tb()
 
-    def has_reference_cycle(self, tb: "TracebackVariable") -> bool:
+    def has_reference_cycle(self, tb: VariableTracker) -> bool:
         # checks if `tb` is in the chain of tb_next starting from `self`
         curr_tb: TracebackVariable | ConstantVariable = self
         while istype(curr_tb, TracebackVariable):
@@ -504,7 +508,7 @@ class TracebackVariable(VariableTracker):
         if name == "tb_next":
             if not self.is_valid_traceback(val):
                 raise_observed_exception(TypeError, tx)
-            assert isinstance(val, TracebackVariable)
+            assert isinstance(val, (TracebackVariable, ConstantVariable))
             if self.has_reference_cycle(val) or (
                 istype(val, TracebackVariable) and val.has_reference_cycle(self)
             ):
@@ -576,9 +580,9 @@ class ExceptionVariable(VariableTracker):
         self.__traceback__: VariableTracker = ConstantVariable(None)
         # The user stack at the time this exception was first raised.
         # Used to preserve the original exception location when re-raising.
-        self.python_stack = None
+        self.python_stack: traceback.StackSummary | None = None
 
-    def set_context(self, context: "ExceptionVariable") -> None:
+    def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -616,7 +620,8 @@ class ExceptionVariable(VariableTracker):
 
         name = name_var.as_python_constant()
         if name == "__context__":
-            assert isinstance(val, ExceptionVariable)
+            # Constant can be either an Exceptior or None
+            assert isinstance(val, (ExceptionVariable, ConstantVariable))
             self.set_context(val)
         elif name == "__cause__":
             if val.is_constant_none() or isinstance(
@@ -1492,8 +1497,11 @@ class MethodWrapperVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 class GetSetDescriptorVariable(VariableTracker):
@@ -1638,8 +1646,11 @@ class TypingVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 @functools.lru_cache(maxsize=1)
@@ -1826,8 +1837,11 @@ class NumpyVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
@@ -1914,6 +1928,16 @@ class StringFormatVariable(VariableTracker):
         }
         codegen(variables.ConstDictVariable(kwargs))
         codegen.extend_output(create_call_function_ex(True, False))
+
+
+class ObjectVariable(VariableTracker):
+    # placeholder for unknown / opaque values
+    def __init__(self, value: object, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self) -> type[object]:
+        return object
 
 
 class DebuggingVariable(VariableTracker):
@@ -2329,9 +2353,10 @@ class RandomVariable(VariableTracker):
 
 class WeakRefVariable(VariableTracker):
     @staticmethod
+    # pyrefly: ignore[bad-param-name-override]
     def build(
         tx: "InstructionTranslator",
-        weakref_value: Any,
+        weakref_value: weakref.ReferenceType[Any],
         source: Source | None,
         **options: Any,
     ) -> "WeakRefVariable":
@@ -2347,7 +2372,7 @@ class WeakRefVariable(VariableTracker):
 
     def __init__(
         self, referent_vt: VariableTracker, callback_vt: VariableTracker, **options: Any
-    ):
+    ) -> None:
         super().__init__(**options)
         self.referent_vt = referent_vt
         self.callback_vt = callback_vt
@@ -2373,7 +2398,7 @@ class WeakRefVariable(VariableTracker):
         # weakref relies on the referent's hash
         return self.referent_vt.get_python_hash()
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
+    def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, WeakRefVariable):
             return False
         return self.referent_vt.is_python_equal(other.referent_vt)
