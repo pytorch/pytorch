@@ -129,6 +129,9 @@ Error.__qualname__ = "Error"
 def annotate(the_type, the_value):
     """Use to give type of `the_value` in TorchScript compiler.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     This method is a pass-through function that returns `the_value`, used to hint TorchScript
     compiler the type of `the_value`. It is a no-op when running outside of TorchScript.
 
@@ -171,12 +174,19 @@ def annotate(the_type, the_value):
     Returns:
         `the_value` is passed back as return value.
     """
+    warnings.warn(
+        "`torch.jit.annotate` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return the_value
 
 
 def script_if_tracing(fn):
     """
     Compiles ``fn`` when it is first called during tracing.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     ``torch.jit.script`` has a non-negligible start up time when it is first called due to
     lazy-initializations of many compiler builtins. Therefore you should not use
@@ -192,6 +202,10 @@ def script_if_tracing(fn):
         If called during tracing, a :class:`ScriptFunction` created by `torch.jit.script` is returned.
         Otherwise, the original function `fn` is returned.
     """
+    warnings.warn(
+        "`torch.jit.script_if_tracing` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return _script_if_tracing(fn)
 
 
@@ -199,6 +213,9 @@ def script_if_tracing(fn):
 def isinstance(obj, target_type):
     """
     Provide container type refinement in TorchScript.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     It can refine parameterized containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
     ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also
@@ -236,12 +253,19 @@ def isinstance(obj, target_type):
         y = {"key1":"val1","key2":"val2"}
         m(y)
     """
+    warnings.warn(
+        "`torch.jit.isinstance` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return _isinstance(obj, target_type)
 
 
 class strict_fusion:
     """
     Give errors if not all nodes have been fused in inference, or symbolically differentiated in training.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     Example:
     Forcing fusion of additions.
@@ -280,12 +304,28 @@ def _hide_source_ranges() -> Iterator[None]:
 
 
 def enable_onednn_fusion(enabled: bool) -> None:
-    """Enable or disables onednn JIT fusion based on the parameter `enabled`."""
+    """Enable or disables onednn JIT fusion based on the parameter `enabled`.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+    """
+    warnings.warn(
+        "`torch.jit.enable_onednn_fusion` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     torch._C._jit_set_llga_enabled(enabled)
 
 
 def onednn_fusion_enabled():
-    """Return whether onednn JIT fusion is enabled."""
+    """Return whether onednn JIT fusion is enabled.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+    """
+    warnings.warn(
+        "`torch.jit.onednn_fusion_enabled` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return torch._C._jit_llga_enabled()
 
 

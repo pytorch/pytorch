@@ -758,6 +758,10 @@ def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # exception raised
             m(torch.rand(100))
     """
+    warnings.warn(
+        "`torch.jit.unused` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     if isinstance(fn, property):
         prop = fn
         setattr(  # noqa: B010
