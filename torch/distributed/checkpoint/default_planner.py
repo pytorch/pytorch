@@ -11,6 +11,7 @@ from collections import ChainMap
 from typing import Any, cast
 
 import torch
+import torch.distributed as dist
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint._nested_dict import (
@@ -277,6 +278,7 @@ class DefaultLoadPlanner(LoadPlanner):
     flatten_state_dict: Handle state_dict with nested dicts
     flatten_sharded_tensors: For FSDP in 2D parallel mode
     allow_partial_load: If False, will raise a runtime error if a key is present in state_dict, but not in the checkpoint.
+    replicate_group: ProcessGroup for HSDP. If set, only rank 0 loads and broadcasts to others.
     """
 
     original_state_dict: STATE_DICT_TYPE
@@ -287,12 +289,15 @@ class DefaultLoadPlanner(LoadPlanner):
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
         allow_partial_load: bool = False,
+        replicate_group: dist.ProcessGroup | None = None,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
         self.allow_partial_load = allow_partial_load
+        self.replicate_group = replicate_group
+        self.tensors_to_broadcast: list[torch.Tensor | DTensor] = []
 
     def set_up_planner(
         self,
@@ -349,9 +354,33 @@ class DefaultLoadPlanner(LoadPlanner):
                 # Set it back to None so that later we can save to a new version.
                 _version._derived_version = None
 
-        return create_default_local_load_plan(
+        plan = create_default_local_load_plan(
             self.state_dict, self.metadata, not self.allow_partial_load
         )
+
+        if self.replicate_group is not None:
+            self.tensors_to_broadcast = []
+            is_non_primary = self.replicate_group.rank() > 0
+
+            if is_non_primary:
+                # Non-primary ranks skip loading non-CPU tensors from checkpoint
+                items_to_load = []
+
+            for item in plan.items:
+                obj = find_state_dict_object(self.state_dict, item.dest_index)
+
+                if (
+                    isinstance(obj, (torch.Tensor, DTensor))
+                    and obj.device.type != "cpu"
+                ):
+                    self.tensors_to_broadcast.append(obj)
+                elif is_non_primary:
+                    items_to_load.append(item)
+
+            if is_non_primary:
+                plan.items = items_to_load
+
+        return plan
 
     def create_global_plan(self, global_plan: list[LoadPlan]) -> list[LoadPlan]:
         return create_default_global_load_plan(global_plan)
@@ -385,6 +414,17 @@ class DefaultLoadPlanner(LoadPlanner):
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
         """Extension from the planner interface to make it easy to extend the default planner."""
         return narrow_tensor_by_index(tensor, read_item.dest_offsets, read_item.lengths)
+
+    def finish_load(self) -> None:
+        if self.replicate_group is None:
+            return
+        for tensor in self.tensors_to_broadcast:
+            local_tensor = tensor.to_local() if isinstance(tensor, DTensor) else tensor
+            dist.broadcast(
+                local_tensor,
+                src=dist.get_global_rank(self.replicate_group, 0),
+                group=self.replicate_group,
+            )
 
 
 class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
