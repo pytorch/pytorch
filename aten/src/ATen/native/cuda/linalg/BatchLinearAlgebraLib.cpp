@@ -80,7 +80,7 @@ void apply_ldl_factor_cusolver(
     bool upper) {
   auto batch_size = batchCount(A);
   auto n = cuda_int_cast(A.size(-2), "A.size(-2)");
-  auto lda = cuda_int_cast(A.stride(-1), "A.stride(-1)");
+  auto lda = std::max<int>(1, cuda_int_cast(A.stride(-1), "A.stride(-1)"));
   auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
 
   auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
