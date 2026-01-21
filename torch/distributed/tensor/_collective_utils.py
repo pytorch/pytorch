@@ -63,10 +63,10 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         ]
         return out.contiguous()
 
-    group_name = funcol._resolve_group((mesh, mesh_dim))
+    group = funcol._resolve_group((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
     return torch.ops._dtensor.shard_dim_alltoall(
-        input, gather_dim, shard_dim, group_name
+        input, gather_dim, shard_dim, group.group_name
     )
 
 

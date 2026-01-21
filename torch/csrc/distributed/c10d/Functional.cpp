@@ -262,7 +262,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   return outputs;
 }
 
-std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
+static std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
@@ -279,18 +279,18 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
   return outputs;
 }
 
-std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
-    std::vector<at::Tensor> inputs,
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string reduce_op,
-    int64_t group_size,
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    std::string group_name,
-    std::vector<at::Tensor>& outputs) {
-  auto group = c10d::resolve_process_group(std::move(group_name));
-  return reduce_scatter_tensor_coalesced_out(
-      inputs, std::move(reduce_op), group_size, group, outputs);
-}
+// static std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
+//     std::vector<at::Tensor> inputs,
+//     // NOLINTNEXTLINE(performance-unnecessary-value-param)
+//     std::string reduce_op,
+//     int64_t group_size,
+//     // NOLINTNEXTLINE(performance-unnecessary-value-param)
+//     std::string group_name,
+//     std::vector<at::Tensor>& outputs) {
+//   auto group = c10d::resolve_process_group(std::move(group_name));
+//   return reduce_scatter_tensor_coalesced_out(
+//       inputs, std::move(reduce_op), group_size, group, outputs);
+// }
 
 at::Tensor reduce_scatter_tensor(
     const at::Tensor& input,

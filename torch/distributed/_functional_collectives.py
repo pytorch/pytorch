@@ -149,7 +149,9 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
         tag (str, optional): A unique identifier for the collective. Default: empty string
     """
     group = _resolve_group(group, tag)
-    tensor = torch.ops._c10d_functional.broadcast(self, src, group)
+    tensor = torch.ops._c10d_functional.broadcast(
+        self, src, _group_or_group_name(group)
+    )
     return _maybe_wrap_tensor(tensor)
 
 
@@ -171,7 +173,9 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group = _resolve_group(group, tag)
-    tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp.lower(), group)
+    tensor = torch.ops._c10d_functional.all_reduce(
+        self, reduceOp.lower(), _group_or_group_name(group)
+    )
     return _maybe_wrap_tensor(tensor)
 
 
@@ -200,8 +204,10 @@ def all_gather_tensor(
     if not self.is_contiguous():
         raise AssertionError("Tensor must be contiguous for all_gather_tensor")
     group = _resolve_group(group, tag)
-    group_size = group.size()
-    tensor = torch.ops._c10d_functional.all_gather_into_tensor(self, group_size, group)
+    group_size = c10d._get_group_size_by_name(group)
+    tensor = torch.ops._c10d_functional.all_gather_into_tensor(
+        self, group_size, _group_or_group_name(group)
+    )
     res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
@@ -231,10 +237,10 @@ def all_gather_tensor_autograd(
     See all_gather_tensor for more details on usage.
     """
     group = _resolve_group(group, tag)
-    group_size = group.size()
+    group_size = c10d._get_group_size_by_name(group)
 
     tensor = torch.ops._c10d_functional_autograd.all_gather_into_tensor(
-        self, group_size, group
+        self, group_size, _group_or_group_name(group)
     )
     res = _FromTorchTensor.apply(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
@@ -270,7 +276,7 @@ def reduce_scatter_tensor(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group = _resolve_group(group, tag)
-    group_size = group.size()
+    group_size = c10d._get_group_size_by_name(group)
 
     if self.size(scatter_dim) % group_size != 0:
         raise AssertionError(
@@ -284,7 +290,7 @@ def reduce_scatter_tensor(
         self,
         reduceOp.lower(),
         group_size,
-        group,
+        _group_or_group_name(group),
     )
     res = _maybe_wrap_tensor(tensor)
     return res
@@ -310,7 +316,7 @@ def reduce_scatter_tensor_autograd(
     """
 
     group = _resolve_group(group, tag)
-    group_size = group.size()
+    group_size = c10d._get_group_size_by_name(group)
 
     if self.size(scatter_dim) % group_size != 0:
         raise AssertionError(
@@ -324,7 +330,7 @@ def reduce_scatter_tensor_autograd(
         self,
         reduceOp.lower(),
         group_size,
-        group,
+        _group_or_group_name(group),
     )
     res = _FromTorchTensor.apply(tensor)
     return res
@@ -353,7 +359,7 @@ def all_reduce_coalesced(
     tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
         self,
         reduceOp.lower(),
-        group,
+        _group_or_group_name(group),
     )
     return list(map(_maybe_wrap_tensor, tensor_list))
 
@@ -378,11 +384,11 @@ def all_gather_into_tensor_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group = _resolve_group(group, tag)
-    group_size = group.size()
+    group_size = c10d._get_group_size_by_name(group)
     tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(  # type: ignore[attr-defined]
         self,
         group_size,
-        group,
+        _group_or_group_name(group),
     )
     return list(map(_maybe_wrap_tensor, tensor_list))
 
@@ -410,7 +416,7 @@ def reduce_scatter_tensor_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group = _resolve_group(group, tag)
-    group_size = group.size()
+    group_size = c10d._get_group_size_by_name(group)
 
     if len(scatter_dim) != len(inputs):
         raise AssertionError(
@@ -429,7 +435,7 @@ def reduce_scatter_tensor_coalesced(
         inputs,
         reduceOp.lower(),
         group_size,
-        group,
+        _group_or_group_name(group),
     )
 
     return list(map(_maybe_wrap_tensor, tensor_list))
@@ -488,7 +494,7 @@ def all_to_all_single(
                 f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
             )
     group = _resolve_group(group, tag)
-    group_size = group.size()
+    group_size = c10d._get_group_size_by_name(group)
     if output_split_sizes is None or input_split_sizes is None:
         if not (output_split_sizes is None and input_split_sizes is None):
             raise AssertionError(
@@ -501,7 +507,7 @@ def all_to_all_single(
         self,
         output_split_sizes,
         input_split_sizes,
-        group,
+        _group_or_group_name(group),
     )
     return _maybe_wrap_tensor(tensor)
 
@@ -530,7 +536,7 @@ def all_to_all_single_autograd(
             )
 
     group = _resolve_group(group, tag)
-    group_size = group.size()
+    group_size = c10d._get_group_size_by_name(group)
     if output_split_sizes is None or input_split_sizes is None:
         if not (output_split_sizes is None and input_split_sizes is None):
             raise AssertionError(
@@ -543,7 +549,7 @@ def all_to_all_single_autograd(
         self,
         output_split_sizes,
         input_split_sizes,
-        group,
+        _group_or_group_name(group),
     )
     return _FromTorchTensor.apply(tensor)
 
@@ -1178,7 +1184,9 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
     return (tag, rankset, group_size)
 
 
-def _resolve_group(group: RANK_TYPES, tag: str = "") -> dist.ProcessGroup:
+def _resolve_group(
+    group: RANK_TYPES, tag: str = ""
+) -> dist.ProcessGroup | c10d.GroupName:
     """
     Given group in RANK_TYPES, return the group name.
     """
@@ -1192,7 +1200,7 @@ def _resolve_group(group: RANK_TYPES, tag: str = "") -> dist.ProcessGroup:
         # literally the underlying type so this is fine). I haven't been able to
         # reproduce it in isolation (see T247631668).
         group_name = cast(c10d.GroupName, group)  # c10d.GroupName(group)
-        return _resolve_process_group(group_name)
+        return group_name
     elif isinstance(group, DeviceMesh):
         if group.ndim != 1:
             raise AssertionError(
@@ -1236,7 +1244,11 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
     """
     Given group in RANK_TYPES, return the group name.
     """
-    return c10d.GroupName(_resolve_group(group, tag=tag).name())
+    group = _resolve_group(group, tag)
+    if isinstance(group, str):
+        return c10d.GroupName(group)
+    else:
+        return group.group_name
 
 
 class _FromTorchTensor(torch.autograd.Function):
@@ -1702,6 +1714,15 @@ def all_gather_inplace(
     for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
     return tensor_list
+
+
+def _group_or_group_name(
+    group: dist.ProcessGroup | c10d.GroupName,
+) -> dist.ProcessGroup | c10d.GroupName:
+    if isinstance(group, str):
+        return group
+    else:
+        return group.group_name
 
 
 from torch.distributed.distributed_c10d import (
