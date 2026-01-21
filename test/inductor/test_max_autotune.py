@@ -57,7 +57,7 @@ from torch._inductor.template_heuristics.triton import (
     XPUMMTemplateConfigHeuristic,
     XPUPersistentTMATemplateConfigHeuristic,
 )
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -2398,6 +2398,9 @@ class TestMaxAutotune(TestCase):
     @fresh_cache()
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @unittest.skipIf(
+        not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
+    )
     @largeTensorTest("10 GB", device=GPU_TYPE)
     def test_max_autotune_mm_large_input_tensor_int64_indexing(self):
         """
@@ -2429,6 +2432,9 @@ class TestMaxAutotune(TestCase):
     @fresh_cache()
     @skipIfXpu
     @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @unittest.skipIf(
+        not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
+    )
     @largeTensorTest("10 GB", device=GPU_TYPE)
     def test_max_autotune_mm_large_output_tensor_int32_overflow(self):
         """
@@ -2456,6 +2462,40 @@ class TestMaxAutotune(TestCase):
             result = compiled_mm(a, b)
 
         expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+
+    @fresh_cache()
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @unittest.skipIf(
+        not SM90OrLater, "Requires SM90+ (H100/B200) for sufficient GPU memory"
+    )
+    @largeTensorTest("10 GB", device=GPU_TYPE)
+    def test_max_autotune_bmm_large_input_tensor_int64_indexing(self):
+        """
+        Test bmm with input tensor exceeding 2^31 elements.
+        Regression test for https://github.com/pytorch/pytorch/issues/171389
+        When input tensor storage exceeds 2^31 elements, tl.arange() must be
+        cast to INDEX_DTYPE (int64) to avoid integer overflow in pointer arithmetic.
+        """
+
+        def bmm(a, b):
+            return torch.bmm(a, b)
+
+        B, M, K, N = 1, 1280, 65536, 65536
+        a = torch.randn(B, M, K, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(B, K, N, device=GPU_TYPE, dtype=torch.float16)
+
+        self.assertTrue(
+            b.numel() > 2**31 - 1,
+            f"Test requires tensor with >2^31 elements, got {b.numel()}",
+        )
+
+        with config.patch({"max_autotune": True}):
+            compiled_bmm = torch.compile(bmm)
+            result = compiled_bmm(a, b)
+
+        expected = torch.bmm(a, b)
         torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
 
 
