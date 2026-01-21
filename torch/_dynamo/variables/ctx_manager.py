@@ -1411,14 +1411,14 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return "_sdpa_kernel_variadic"
 
 
-class FxTracebackAnnotateVariable(ContextWrappingVariable):
+class FxTracebackAnnotateBaseVariable(ContextWrappingVariable):
     """
-    fx.traceback.annotate is a context manager that allows users to annotate the
-    fx graph nodes with custom metadata. In the context of Dynamo, we don't have
-    to trace the body of the context manager. Instead we want to directly run
-    the body of the context manager, so the Dynamo created Fx graphs have the
-    right custom metadata. This variable tracker just runs __enter__ and
-    __exit__ method (instead of tracing).
+    Base class for fx.traceback annotation context managers (annotate and annotate_rqn).
+    These context managers allow users to annotate fx graph nodes with metadata.
+    In the context of Dynamo, we don't trace the body of the context manager.
+    Instead we directly run the body, so the Dynamo created Fx graphs have the
+    right metadata. This variable tracker just runs __enter__ and __exit__ method
+    (instead of tracing).
     """
 
     def __init__(
@@ -1428,6 +1428,11 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
 
+    def _get_context_manager(self) -> Callable:
+        """Return the appropriate context manager function from torch.fx.traceback"""
+        fn_name = self.fn_name()
+        return getattr(torch.fx.traceback, fn_name)
+
     def enter(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
@@ -1435,7 +1440,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         # preserve_node_meta context manager is setup. This is important to pass
         # on the metadata to the create_proxy nodes.
         stack = ExitStack()
-        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
+        stack.enter_context(self._get_context_manager()(self.target_values))
         stack.enter_context(torch.fx.traceback.preserve_node_meta())
         self.set_cleanup_hook(tx, lambda: stack.close())
         return variables.ConstantVariable.create(None)
@@ -1444,17 +1449,38 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "torch.fx.traceback"
 
     def fn_name(self) -> str:
-        return "annotate"
+        raise NotImplementedError("Subclasses must implement fn_name()")
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        fn_name = self.fn_name()
         unimplemented(
-            gb_type="torch.fx.traceback.annotate escaped from compiled region",
+            gb_type=f"annotation context manager torch.fx.traceback.{fn_name} escaped from compiled region",
             context=str(self),
-            explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
+            explanation=f"Dynamo doesn't support graph break on torch.fx.traceback.{fn_name}.",
             hints=[
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
+
+
+class FxTracebackAnnotateVariable(FxTracebackAnnotateBaseVariable):
+    """
+    fx.traceback.annotate is a context manager that allows users to annotate the
+    fx graph nodes with custom metadata.
+    """
+
+    def fn_name(self) -> str:
+        return "annotate"
+
+
+class FxTracebackAnnotateRqnVariable(FxTracebackAnnotateBaseVariable):
+    """
+    fx.traceback.annotate_rqn is a context manager that allows users to annotate the
+    fx graph nodes with relatively qualified name (RQN) metadata.
+    """
+
+    def fn_name(self) -> str:
+        return "annotate_rqn"
 
 
 class DynamoConfigPatchVariable(ContextWrappingVariable):

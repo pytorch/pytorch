@@ -917,7 +917,16 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # NB: invoke_subgraph subgraph re-trace seq_nr
             # The joint graph seq_nr will get wrong in the subsequent re-trace (all nodes will have the same seq_nr),
             # so we preserve the original graph's seq_nr here.
-            with torch.fx.traceback._preserve_node_seq_nr():
+            #
+            # NB: annotation in invoke_subgraph
+            # The subgraph should not inherit the annotation from parent context.
+            # We trace the subgraph once and the subgraph can be used in different calls,
+            # so the parent annotation is not well-defined.
+            # This resets both annotate() and annotate_rqn().
+            with (
+                torch.fx.traceback.preserve_node_seq_nr(),
+                torch.fx.traceback.reset_current_annotation(),
+            ):
                 graph = reenter_make_fx(
                     subgraph, subgraph_decomp_table=subgraph_decomp_table
                 )(*operands)
