@@ -3023,5 +3023,86 @@ float erfcx(T x) {
   }
 }
 
+// Laguerre polynomial L_n(x)
+// Uses the recurrence relation: L_{n+1}(x) = ((2n+1-x)*L_n(x) - n*L_{n-1}(x)) / (n+1)
+template <typename T>
+inline float laguerre_polynomial_l_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0f;
+  }
+
+  if (::metal::abs(float(x)) == 0.0f) {
+    return 1.0f;
+  }
+
+  if (n == 0) {
+    return 1.0f;
+  }
+
+  if (n == 1) {
+    return 1.0f - float(x);
+  }
+
+  float p = 1.0f;
+  float q = 1.0f - float(x);
+  float r = 0.0f;
+
+  for (int64_t k = 1; (k < n) && !::metal::isnan(q); k++) {
+    r = (((k + k) + (1.0f - float(x))) * q - k * p) / (k + 1);
+    p = q;
+    q = r;
+  }
+
+  return r;
+}
+
+template <typename T>
+inline float laguerre_polynomial_l_forward(T x, T n) {
+  return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
+}
+
+// Legendre polynomial P_n(x)
+// Uses the recurrence relation: P_{n+1}(x) = ((2n+1)*x*P_n(x) - n*P_{n-1}(x)) / (n+1)
+template <typename T>
+inline float legendre_polynomial_p_forward(T x, int64_t n) {
+  if (n < 0) {
+    return 0.0f;
+  }
+
+  float fx = float(x);
+
+  if (::metal::abs(fx) == 1.0f) {
+    if (fx > 0.0f || n % 2 == 0) {
+      return 1.0f;
+    }
+    return -1.0f;
+  }
+
+  if (n == 0) {
+    return 1.0f;
+  }
+
+  if (n == 1) {
+    return fx;
+  }
+
+  float p = 1.0f;
+  float q = fx;
+  float r = 0.0f;
+
+  for (int64_t k = 1; (k < n) && !::metal::isnan(q); k++) {
+    r = ((k + k + 1) * fx * q - k * p) / (k + 1);
+    p = q;
+    q = r;
+  }
+
+  return r;
+}
+
+template <typename T>
+inline float legendre_polynomial_p_forward(T x, T n) {
+  return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
+}
+
 } // namespace metal
 } // namespace c10
