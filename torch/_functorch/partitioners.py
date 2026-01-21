@@ -110,6 +110,7 @@ class NodeInfo:
     inputs: list[fx.Node]
     _required_fw_nodes: OrderedSet[fx.Node]
     required_bw_nodes: OrderedSet[fx.Node]
+    tangents_closure: OrderedSet[fx.Node]
     unclaimed_nodes: OrderedSet[fx.Node]
     fw_order: dict[fx.Node, int]
     # Effectively maps to which of our primals are parameters
@@ -2060,7 +2061,15 @@ def solve_min_cut(
             continue
 
         if node in node_info.required_bw_nodes:
-            if node not in node_info.inputs:
+            # See Note: [tangents_closure vs required_bw_nodes]
+            if node not in node_info.tangents_closure:
+                nx_graph.add_edge(
+                    node.name + "_out",
+                    "sink",
+                    capacity=math.inf,
+                    reason="must be available for backward: input required for gradient",
+                )
+            else:
                 nx_graph.add_edge(
                     node.name + "_in",
                     "sink",
@@ -2068,20 +2077,6 @@ def solve_min_cut(
                     reason="must be computed in backward: required for gradient",
                 )
                 continue
-            # If someone saves a input for backward as-is and backward
-            # returns that tensor as-is as a grad input, then the node x would
-            # be both a required_bw_node and an input. In this case we
-            # (1) connect x_in to the source, (2) x_out to the sink, and
-            # (3) assign the proper weight to the x_in-x_out edge, so that
-            # x would be part of cut nodes. A case where this happens is if
-            # NestedTensor saves a offset tensor as part of the singleton int
-            # in sizes.
-            nx_graph.add_edge(
-                node.name + "_out",
-                "sink",
-                capacity=math.inf,
-                reason="must be available for backward: input required for gradient",
-            )
 
         if must_recompute(node):
             # If user explicitly says they want to recompute a node, we honor it
@@ -3247,6 +3242,13 @@ def classify_nodes(joint_module, static_lifetime_input_indices, num_fwd_outputs)
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
+    # Note: [tangents_closure vs required_bw_nodes]
+    #
+    # required_bw_nodes is used to determine which nodes need edges to
+    # the sink. It is important to also track tangents closure because
+    # that determines whether you can save that tensor, i.e., whether you
+    # want to connect x_in or x_out to the sink.
+    tangents_closure = required_bw_nodes.copy()
     required_bw_nodes.update(
         o for o in bwd_outputs if o is not None and o.op != "output"
     )
@@ -3276,6 +3278,7 @@ def classify_nodes(joint_module, static_lifetime_input_indices, num_fwd_outputs)
         inputs,
         required_fw_nodes,
         required_bw_nodes,
+        tangents_closure,
         unclaimed_nodes,
         fw_order,
         static_lifetime_input_nodes,
