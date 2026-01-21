@@ -26,6 +26,24 @@ macro(set_bool OUT IN)
   endif()
 endmacro()
 
+function(rocm_generate_ck_conf SRC DST)
+  set(CK_ENABLE_INT8  "ON")
+  set(CK_ENABLE_FP16  "ON")
+  set(CK_ENABLE_FP32  "ON")
+  set(CK_ENABLE_FP64  "ON")
+  set(CK_ENABLE_BF16  "ON")
+  set(CK_ENABLE_FP8   "ON")
+  set(CK_ENABLE_BF8   "ON")
+  set(CK_USE_XDL  "ON")
+  set(CK_USE_WMMA "ON")
+
+  configure_file(
+    "${SRC}"
+    "${DST}"
+    @ONLY
+  )
+endfunction()
+
 set_bool(AT_BUILD_WITH_BLAS USE_BLAS)
 set_bool(AT_BUILD_WITH_LAPACK USE_LAPACK)
 set_bool(AT_BLAS_F2C BLAS_F2C)
@@ -308,6 +326,12 @@ IF(USE_FBGEMM_GENAI)
     list(APPEND ATen_CUDA_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
     list(APPEND ATen_CUDA_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
   elseif(USE_ROCM)
+    # Path to vendored CK
+    set(FBGEMM_CK_DIR "${FBGEMM_THIRD_PARTY}/composable_kernel")
+    rocm_generate_ck_conf(
+      "${FBGEMM_CK_DIR}/include/ck/config.h.in"
+      "${FBGEMM_CK_DIR}/include/ck/config.h"
+    )
     # Only include the kernels we want to build to avoid increasing binary size.
     file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
       "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
@@ -491,33 +515,21 @@ endif()
 
 if(USE_ROCM)
   if((USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA) OR USE_ROCM_CK_GEMM)
-    # NOTE: The PyTorch build does not actually add_subdirectory
-    # third_party/composable_kernel or use it as a CMake library. What is used
-    # is header only, so this should be ok, except that the CMake build generates
-    # a ck/config.h. We just do that part here. Without this, the ck.h from the
-    # ROCM SDK may get accidentally used instead.
-    function(_pytorch_rocm_generate_ck_conf)
-      set(CK_ENABLE_INT8 "ON")
-      set(CK_ENABLE_FP16 "ON")
-      set(CK_ENABLE_FP32 "ON")
-      set(CK_ENABLE_FP64 "ON")
-      set(CK_ENABLE_BF16 "ON")
-      set(CK_ENABLE_FP8 "ON")
-      set(CK_ENABLE_BF8 "ON")
-      set(CK_USE_XDL "ON")
-      set(CK_USE_WMMA "ON")
-      configure_file(
-        "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
-        )
-    endfunction()
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/example/ck_tile/01_fmha)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
-    _pytorch_rocm_generate_ck_conf()
+    # NOTE: The PyTorch build does not actually add_subdirectory
+    # third_party/composable_kernel or use it as a CMake library. What is used
+    # is header only, so this should be ok, except that the CMake build generates
+    # a ck/config.h. We just do that part here. Without this, the ck.h from the
+    # ROCM SDK may get accidentally used instead.
+    rocm_generate_ck_conf(
+      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+      "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
+    )
   endif()
 
   # Next two lines are needed because TunableOp uses third-party/fmt
