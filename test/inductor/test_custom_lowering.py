@@ -134,7 +134,7 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("add_custom", add_custom)
 
         def add_custom_lowering(a, b):
-            if torch.version.hip is not None:
+            if torch.version.hip:
                 # ROCm GCN assembly
                 fn = partial(
                     ops.inline_asm_elementwise,
