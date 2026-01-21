@@ -1,9 +1,4 @@
-# /// script
-# requires-python = ">=3.10"
-# dependencies = [
-#   "libcst",
-# ]
-# ///
+#!/usr/bin/env python3
 """
 This lint verifies that every Python test file (file that matches test_*.py or
 *_test.py in the test folder) has a main block which raises an exception or
