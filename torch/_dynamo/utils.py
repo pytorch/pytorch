@@ -688,6 +688,14 @@ def compile_time_record_function(name: str) -> Generator[Any, None, None]:
         yield
 
 
+# Events to capture for the trace profiler API (torch._dynamo.profiler)
+# These events are recorded to provide per-function compile time breakdown
+_TRACE_PROFILER_EVENTS = frozenset({
+    "bytecode_tracing",
+    "entire_frame_compile",
+})
+
+
 @contextmanager
 def dynamo_timed(
     key: str,
@@ -802,6 +810,12 @@ def dynamo_timed(
         chromium_log.log_event_end(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
         )
+
+        # Record to trace profiler for allowlisted events
+        if event_name in _TRACE_PROFILER_EVENTS:
+            from . import profiler as trace_profiler
+
+            trace_profiler._record_trace_timing(event_name, time_spent_ns // 1000)
         if dynamo_compile_column_us:
             # TODO: the events that we capture in calculate_time_spent() seem a little
             # arbitrary. Currently, it's only those fields that are present in
@@ -1779,6 +1793,17 @@ def record_compilation_metrics(
     # Finally log the compilation metrics.
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
+
+    # Flush trace profiler timing data
+    from . import profiler as trace_profiler
+
+    trace_profiler._flush_trace_timing(
+        compile_id=str(compile_id) if compile_id else "",
+        co_name=metrics.get("co_name", ""),
+        co_filename=metrics.get("co_filename", ""),
+        co_firstlineno=metrics.get("co_firstlineno", 0),
+        cache_size=metrics.get("cache_size", 0),
+    )
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
