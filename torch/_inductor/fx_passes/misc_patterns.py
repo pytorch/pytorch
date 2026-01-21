@@ -106,10 +106,14 @@ def _misc_patterns_init():
             )
 
         register_replacement(
+            # pyrefly: ignore [bad-argument-type]
             e8m0_rceil_pattern,
+            # pyrefly: ignore [bad-argument-type]
             e8m0_rceil_replacement,
             [torch.randn(32, device="cuda", dtype=torch.float32)],
+            # pyrefly: ignore [bad-argument-type]
             fwd_only,
+            # pyrefly: ignore [bad-argument-type]
             [post_grad_patterns],
             extra_check=e8m0_extra_check,
         )
@@ -132,10 +136,14 @@ def _misc_patterns_init():
             return inductor_prims.cvt_e8m0_rceil(inp)
 
         register_replacement(
+            # pyrefly: ignore [bad-argument-type]
             e8m0_rceil_log2_pattern,
+            # pyrefly: ignore [bad-argument-type]
             e8m0_rceil_log2_replacement,
             [torch.randn(32, device="cuda", dtype=torch.float32).abs() + 1e-10],
+            # pyrefly: ignore [bad-argument-type]
             fwd_only,
+            # pyrefly: ignore [bad-argument-type]
             [post_grad_patterns],
             extra_check=e8m0_extra_check,
         )
