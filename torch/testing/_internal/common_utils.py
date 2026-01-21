@@ -7,6 +7,7 @@ no CUDA calls shall be made, including torch.cuda.device_count(), etc.
 torch.testing._internal.common_cuda.py can freely initialize CUDA context when imported.
 """
 
+import sysconfig
 import argparse
 import contextlib
 import copy
@@ -1731,6 +1732,11 @@ def xfailIfWindows(func):
 
 def xfailIfROCm(func):
     return unittest.expectedFailure(func) if torch.version.hip is not None else func
+
+
+def skipIfFreeThreaded(msg="Test doesn't work with free-threaded python"):
+    assert isinstance(msg, str), "Are you using skipIfFreeThreaded correctly?"
+    return unittest.skipIf(sysconfig.get_config_var("Py_GIL_DISABLED") == 1, msg)
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
