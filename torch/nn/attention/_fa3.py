@@ -88,10 +88,10 @@ def _fa3_import_module(module_path: str) -> None:
 def _fa3_register_kernels() -> Library:
     lib = Library("aten", "IMPL", "CUDA")  # noqa: TOR901
     lib.impl(
-        "_flash_attention_forward.low_p", _fa3_flash_attention_forward_impl, "CUDA"
+        "_flash_attention_forward.quantized", _fa3_flash_attention_forward_impl, "CUDA"
     )
     lib.impl(
-        "_scaled_dot_product_flash_attention.low_p",
+        "_scaled_dot_product_flash_attention.quantized",
         _fa3_scaled_dot_product_flash_attention_forward_impl,
         "CUDA",
     )
@@ -125,18 +125,6 @@ def _fa3_common_support_error(
     if dropout_p != 0.0:
         return "dropout_p must be 0"
 
-    def _check_descale(
-        descale: torch.Tensor | None,
-        name: str,
-    ) -> str | None:
-        if descale is None:
-            return None
-        if descale.dtype != torch.float32:
-            return f"{name}_descale must be float32"
-        if not descale.is_cuda:
-            return f"{name}_descale must be CUDA"
-        return None
-
     if not all(t.is_cuda for t in tensors):
         return "inputs must be CUDA tensors"
     if len({t.device for t in tensors}) != 1:
@@ -147,16 +135,10 @@ def _fa3_common_support_error(
         warnings.warn(
             "When using SDPA with fp8, descale tensor should always be used"
             " for accurate dequantization. Please use "
-            "F.scaled_dot_product_attention_fp8 and "
+            "_scaled_dot_product_attention_quantized and "
             "provide the descale tensors.",
             UserWarning,
         )
-    if (err := _check_descale(q_descale, "q")) is not None:
-        return err
-    if (err := _check_descale(k_descale, "k")) is not None:
-        return err
-    if (err := _check_descale(v_descale, "v")) is not None:
-        return err
     if cum_seq_q is None and query.dim() != 4:
         return "dense query must be 4D"
     if cum_seq_q is not None and query.dim() != 3:
