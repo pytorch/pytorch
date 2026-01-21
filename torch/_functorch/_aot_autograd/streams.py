@@ -353,6 +353,13 @@ def wrap_sync_control_deps(gm: torch.fx.GraphModule, sync_node: Node) -> None:
     2. Wraps the sync node in a control_deps HOP with those nodes as dependencies
     3. Passes through the dependency values so downstream nodes use them
     4. This prevents the sync from being reordered around other ops on the same stream
+
+    Args:
+        gm: The GraphModule containing the sync node
+        sync_node: Must be a record_event or wait_event node
+
+    Raises:
+        ValueError: If sync_node is not a supported sync operation
     """
     from torch._inductor.fx_passes.control_dependencies import (
         _create_subgraph_for_node,
@@ -362,16 +369,21 @@ def wrap_sync_control_deps(gm: torch.fx.GraphModule, sync_node: Node) -> None:
 
     graph = gm.graph
 
+    # Validate sync_node is a supported sync operation
+    supported_sync_ops = (
+        torch.ops.streams.record_event.default,
+        torch.ops.streams.wait_event.default,
+    )
+    if sync_node.target not in supported_sync_ops:
+        raise ValueError(
+            f"wrap_sync_control_deps only supports sync nodes "
+            f"(record_event, wait_event), got {sync_node.target}"
+        )
+
     # For record_event/wait_event, the stream index is the second argument
     # record_event(event_index, stream_index)
     # wait_event(event_index, stream_index)
-    if sync_node.target in (
-        torch.ops.streams.record_event.default,
-        torch.ops.streams.wait_event.default,
-    ):
-        sync_stream = sync_node.args[1]  # stream_index is second arg
-    else:
-        sync_stream = get_stream_or_current_stream(sync_node)
+    sync_stream = sync_node.args[1]  # stream_index is second arg
 
     # Collect all nodes before sync_node on the same stream
     # Nodes without explicit stream annotation are on the "current" stream,
