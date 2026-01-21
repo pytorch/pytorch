@@ -82,7 +82,7 @@ jobs:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts
 
-      - uses: pytorch/test-infra/.github/actions/setup-uv@main
+      - uses: pytorch/test-infra/.github/actions/setup-uv@seemethere/setup-uv-wrapper
         with:
           python-version: "3.12"
           activate-environment: "true"
