@@ -2226,6 +2226,9 @@ class rocm:
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)
 cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 
+# Whether to reuse CUDA events across different stream synchronizations
+reuse_cuda_event: bool = True
+
 # Backend to use for CUDA codegen either
 # "triton", "halide" (experimental) or "pallas" (experimental)
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
