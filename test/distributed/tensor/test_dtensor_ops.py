@@ -817,7 +817,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
         with DebugMode(store_original_args=True) as debug_mode:
             try:
                 torch_op(*args, **kwargs)
-            except:
+            except Exception:
                 self.skipTest(f"Op {torch_op} failed on replicated DTensors")
 
         for op in debug_mode.operators:
@@ -835,7 +835,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
 
         try:
             samples = list(op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=False))
-        except:
+        except Exception:
             self.skipTest(f"Failed to get sample inputs for {op.name}")
         if not samples:
             self.skipTest(f"No sample inputs for {op.name}")
@@ -850,7 +850,7 @@ class TestSingleDimStrategies(DTensorOpTestBase):
                 lambda t: distribute_tensor(t, mesh, (Replicate(),)),
                 (args, sample.kwargs),
             )
-        except:
+        except Exception:
             self.skipTest(f"Failed to create replicate DTensors for {op.name}")
 
         # extract aten op/args/kwargs
