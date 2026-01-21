@@ -57,6 +57,13 @@ debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", 
 # [@compile_ignored: debug]
 leaf_function_validate_outputs = False
 
+# Check for escaped gradients in @leaf_function. When a leaf_function closes over
+# a tensor with requires_grad=True, gradients won't flow back to it. This check
+# walks the autograd graph to detect such cases and raises an error.
+# Disabled by default to avoid runtime overhead. Enable for debugging.
+# [@compile_ignored: debug]
+leaf_function_check_escaped_gradients = False
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
