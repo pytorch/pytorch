@@ -110,7 +110,7 @@ def _get_total_norm(
             if use_powsum:
                 norms.extend(
                     # pyrefly: ignore[missing-attribute]
-                    [torch.linalg.powsum(g, norm_type) for g in device_tensors]
+                    [torch.linalg._powsum(g, norm_type) for g in device_tensors]
                 )
             else:
                 norms.extend(
