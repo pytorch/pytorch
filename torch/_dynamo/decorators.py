@@ -157,9 +157,9 @@ class set_stance(_DecoratorContextManager):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
         _set_stance(self.prev)
 
@@ -539,7 +539,7 @@ def _apply_func_to_inner_tensors_of_same_dim(
             func(inner, *args, **kwargs)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DimRange:
     """
     This represents an dimension of a tensor and the corresponding

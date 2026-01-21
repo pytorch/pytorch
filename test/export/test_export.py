@@ -3185,15 +3185,12 @@ def forward(self, x, y):
     foo = torch.ops.export.foo.default(x, y);  x = None
     sym_size_int = torch.ops.aten.sym_size.int(foo, 0)
     sym_size_int_1 = torch.ops.aten.sym_size.int(foo, 1)
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int);  sym_constrain_range_for_size_default = None
     ge = sym_size_int >= 0;  sym_size_int = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default_1 = None
     ge_1 = sym_size_int_1 >= 0;  sym_size_int_1 = None
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
     bar = torch.ops.export.bar.default(y);  y = None
     sym_size_int_2 = torch.ops.aten.sym_size.int(bar, 0)
-    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_2);  sym_constrain_range_for_size_default_2 = None
     ge_2 = sym_size_int_2 >= 0;  sym_size_int_2 = None
     _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_default_2 = None
     return (foo, bar)""",
@@ -5285,6 +5282,49 @@ def forward(self, x):
             ),
         ):
             ref(torch.randn(4, 4), torch.randn(4, 4))
+
+    def test_detect_leak_nonstrict_buffer_in_hook(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.buffer.sum() + x.sum()
+
+        class Pipeline:
+            def __init__(self, model):
+                self.model = model
+                self.bank = []
+
+            def __call__(self, x):
+                def log(model, inps, outputs):
+                    for n, b in model.named_buffers():
+                        self.bank.append(b)
+
+                self.model.register_forward_hook(log)
+                ep = export(self.model, (x,), strict=False).module()
+                return ep(x)
+
+        # Real one
+        # Detected 1 fake tensors that are still alive after export.
+        # This is likely result of torch.export.export not being able to track side effects that is happening outside of model scope.
+        # Leaked tensors: FakeTensor(shape=torch.Size([4, 4]), dtype=torch.float32) from node 'b_buffer': Used by 'sum_1':
+        # test/export/test_export.py", line 5293, in forward return self.buffer.sum() + x.sum()
+
+        pattern = re.compile(
+            r"Detected\s+1\s+fake tensor.*?"
+            r"Used by\s+'.*?':.*?"
+            r"return\s+self\.buffer\.sum\(\)\s*\+\s*x\.sum\(\)",
+            re.DOTALL,
+        )
+
+        with (
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
+            self.assertWarnsRegex(UserWarning, pattern),
+        ):
+            p = Pipeline(model=Model())
+            p(torch.randn(4, 4))
 
     def test_detect_leak_nonstrict_with_stacktrace(self):
         global_list = []
@@ -8127,6 +8167,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @requires_gpu
     @skipIfRocm
+    @skipIfXpu
     @testing.expectedFailureSerDer
     @testing.expectedFailureSerDerNonStrict
     def test_export_lstm_gpu(self):
@@ -8153,6 +8194,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @requires_gpu
     @skipIfRocm
+    @skipIfXpu
     @testing.expectedFailureSerDer
     @testing.expectedFailureSerDerNonStrict
     def test_export_gru_gpu(self):
@@ -8179,6 +8221,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @requires_gpu
     @skipIfRocm
+    @skipIfXpu
     @testing.expectedFailureSerDer
     @testing.expectedFailureSerDerNonStrict
     def test_export_rnn_flatten_parameters_gpu(self):
@@ -18013,7 +18056,6 @@ class TestExportCustomClass(TorchTestCase):
 def forward(self, x, mask):
     masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
     ge = sym_size_int_1 >= 0
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
     le = sym_size_int_1 <= 1188864
