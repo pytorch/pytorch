@@ -1,6 +1,7 @@
 # Owner(s): ["module: onnx"]
 
 import itertools
+
 import torch
 from torch.onnx import InputObserver
 from torch.onnx._internal._input_observer import infer_dynamic_dimensions
