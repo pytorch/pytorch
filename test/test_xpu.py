@@ -1172,7 +1172,7 @@ if __name__ == "__main__":
 
         self.assertEqual(b.sum().item(), 11000.0)
 
-    @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+    @unittest.skipIf(True, "Enable after graphsafe_get_state is available")
     def test_memory_stats_of_multiple_generators_and_graphs(self):
         # Function to clear XPU cache and collect garbage
         def clear_xpu_cache():
