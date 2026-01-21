@@ -50,7 +50,6 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
-using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::AllocatorTraceTracker;
 using c10::CachingDeviceAllocator::BlockInfo;
 using c10::CachingDeviceAllocator::CreateContextFn;

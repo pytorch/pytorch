@@ -168,8 +168,8 @@ std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
     priority_order_init = true;
     const std::vector<int64_t> priority_order = {
         static_cast<int64_t>(at::SDPBackend::overrideable),
-        static_cast<int64_t>(at::SDPBackend::math),
         static_cast<int64_t>(at::SDPBackend::flash_attention),
+        static_cast<int64_t>(at::SDPBackend::math),
         static_cast<int64_t>(at::SDPBackend::efficient_attention),
         static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
     at::globalContext().setSDPPriorityOrder(priority_order);
