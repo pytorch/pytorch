@@ -63,6 +63,10 @@ def lower_cpu(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        _,  # kv_offsets (varlen)
+        _,  # kv_limits (varlen)
+        _,  # q_offsets (varlen)
+        _,  # q_limits (varlen)
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
