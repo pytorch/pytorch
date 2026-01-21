@@ -1,6 +1,6 @@
 'use strict';
 
-import * as d3 from "https://cdn.skypack.dev/d3@5";
+import * as d3 from "https://cdn.skypack.dev/d3@7";
 import {axisLeft} from "https://cdn.skypack.dev/d3-axis@1";
 import {scaleLinear} from "https://cdn.skypack.dev/d3-scale@1";
 import {zoom, zoomIdentity} from "https://cdn.skypack.dev/d3-zoom@1";
