@@ -9484,11 +9484,13 @@
 - func: take.out(Tensor self, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: take_out
+    MPS: take_out_mps
 
 - func: take(Tensor self, Tensor index) -> Tensor
   variants: method, function
   dispatch:
     CPU, CUDA: take
+    MPS: take_mps
 
 - func: take_along_dim.out(Tensor self, Tensor indices, int? dim=None, *, Tensor(a!) out) -> Tensor(a!)
 

@@ -40,6 +40,7 @@
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/take_native.h>
 #include <ATen/ops/view_as_real.h>
 #endif
 
@@ -975,6 +976,68 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Scalar& source) {
   return self.index_fill_(dim, index, mps::wrapped_scalar_tensor_mps(source, self.device()));
+}
+
+Tensor& take_out_mps(const Tensor& self, const Tensor& index, Tensor& out) {
+  // Type and device checks
+  TORCH_CHECK(
+      index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+      "take(): Expected a long or int tensor for index, but got ",
+      index.scalar_type());
+  TORCH_CHECK(
+      self.scalar_type() == out.scalar_type(),
+      "take(): self and out expected to have the same dtype, but got self.dtype = ",
+      self.scalar_type(),
+      " and out.dtype = ",
+      out.scalar_type());
+  TORCH_CHECK(
+      self.device() == out.device() && self.device() == index.device(),
+      "take(): self, index and out expected to be in the same device, but got self.device = ",
+      self.device(),
+      ", index.device = ",
+      index.device(),
+      ", and out.device = ",
+      out.device());
+
+  // Index checks
+  TORCH_CHECK_INDEX(
+      !(self.numel() == 0 && index.numel() != 0),
+      "take(): tried to take from an empty tensor");
+
+  at::assert_no_internal_overlap(out);
+  at::assert_no_overlap(out, index);
+  at::assert_no_overlap(out, self);
+
+  // Resize output to match index shape
+  at::native::resize_output(out, index.sizes());
+
+  // Early return for empty index
+  if (index.numel() == 0) {
+    return out;
+  }
+
+  // Flatten self to 1D and use index_select on dimension 0
+  auto self_flat = self.reshape({-1});
+  auto index_flat = index.reshape({-1});
+
+  // Convert index to long if needed
+  auto index_long = index_flat.scalar_type() == ScalarType::Long
+      ? index_flat
+      : index_flat.to(ScalarType::Long);
+
+  // Create temporary output for the flat result
+  auto out_flat = out.reshape({-1});
+
+  // Use index_select on the flattened tensor
+  index_select_out_mps(self_flat, 0, index_long, out_flat);
+
+  return out;
+}
+
+Tensor take_mps(const Tensor& self, const Tensor& index) {
+  auto out = at::empty(index.sizes(), self.options());
+  take_out_mps(self, index, out);
+  return out;
 }
 
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
