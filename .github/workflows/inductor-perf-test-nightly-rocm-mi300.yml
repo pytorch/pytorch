@@ -119,10 +119,10 @@ jobs:
     needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
     with:
       build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-maxautotune-true-freezing_cudagraphs-true
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
-      timeout-minutes: 720
+      timeout-minutes: 1440
       # Disable monitor in perf tests for more investigation
       disable-monitor: true
       monitor-log-interval: 10
