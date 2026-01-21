@@ -73,7 +73,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
     ck_tile::index_t nhead_stride_k = k.stride(1);
     ck_tile::index_t nhead_stride_v = v.stride(1);
     ck_tile::index_t nhead_stride_o = out.stride(1);
-    ck_tile::index_t nhead_stride_lse = has_lse ? softmax_lse.stride(1) : 0;
+    ck_tile::index_t nhead_stride_lse = has_lse ? softmax_lse.stride(0) : 0;
     ck_tile::index_t nhead_stride_randval = has_dropout_randval ? dropout_randval.stride(0) : 0;
 
     ck_tile::index_t batch_stride_q = 0;
@@ -81,7 +81,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
     ck_tile::index_t batch_stride_v = 0;
     ck_tile::index_t batch_stride_o = 0;
 
-    ck_tile::index_t batch_stride_lse = has_lse ? softmax_lse.stride(0) : 0;
+    ck_tile::index_t batch_stride_lse = 0;
     ck_tile::index_t batch_stride_randval = 0;
 
     void *attn_bias_ptr = nullptr;
@@ -287,7 +287,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 
     at::Tensor softmax_lse;
     // TODO - check gradient, only training require lse
-    softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+    softmax_lse = at::empty({num_heads, total_q}, opts.dtype(at::kFloat));
 
     at::Tensor p;
     if (return_dropout_randval) {
