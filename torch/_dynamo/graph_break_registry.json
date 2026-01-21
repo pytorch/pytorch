@@ -142,7 +142,7 @@
       "Context": "str(value)",
       "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
       "Hints": [
-        "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+        "Set torch._dynamo.config.allow_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     },
@@ -2927,18 +2927,6 @@
       "Explanation": "Detected a call to `setattr` of a user-defined object with a non-constant name.",
       "Hints": [
         "Ensure that the name is a string."
-      ]
-    }
-  ],
-  "GB8445": [
-    {
-      "Gb_type": "DeviceMesh with torchcomms must be a graph input",
-      "Context": "Calling get_comm_object on DeviceMesh",
-      "Explanation": "When using torch.compile with torchcomms-backed DeviceMesh, the mesh must be passed as an argument to the compiled function. This allows dynamo to properly track the TorchComm objects.",
-      "Hints": [
-        "Pass the mesh as an argument to your compiled function: ",
-        "def fn(tensor, mesh): ... ; compiled_fn = torch.compile(fn); compiled_fn(t, mesh)",
-        "Do not capture the mesh from a closure or global variable."
       ]
     }
   ],
