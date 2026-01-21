@@ -995,7 +995,6 @@ kernel void ternary_dense_cast(
           constant long* other1_strides,                                       \
           constant long* other2_strides,                                       \
           constant uint& ndim,                                                 \
-          constant uint4& types,                                               \
           uint tid);                                                           \
   template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
       metal::ternary_strided_cast<DTYPEI, NAME##_functor, OMT>(                \
