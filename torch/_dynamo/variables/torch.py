@@ -2651,7 +2651,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         """
         import torch.utils._pytree as pytree
         from torch._dynamo.graph_bytecode_inputs import register_user_object
-        from torch._higher_order_ops.utils import LeafModuleState
+        from torch._higher_order_ops.invoke_leaf_function import LeafModuleState
 
         from .higher_order_ops import _make_inlined
         from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
