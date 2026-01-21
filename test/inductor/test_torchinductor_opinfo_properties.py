@@ -550,6 +550,10 @@ class TestOpInfoProperties(TestCase):
         3. Verifies the sliced output matches the corresponding slice of the full output
 
         All tensor inputs with matching batch dimensions are sliced together.
+
+        Note: We disable split-k GEMM accumulation to ensure consistent results
+        across batch sizes, as split-k can produce different rounding based on
+        how the work is partitioned.
         """
         torch._dynamo.reset()
         device_type = torch.device(device).type
@@ -559,6 +563,27 @@ class TestOpInfoProperties(TestCase):
             self.skipTest(f"No samples for {op.name}")
 
         fn = op.get_op()
+
+        # Disable split-k accumulation in GEMM to ensure batch-invariant results.
+        # Split-k can produce different rounding based on how work is partitioned.
+        # We need to save both the reduced precision and split_k settings.
+        prev_fp16 = (
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k,
+        )
+        prev_bf16 = (
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k,
+        )
+        # Disable both reduced precision and split-k
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            False,
+            False,
+        )
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+            False,
+            False,
+        )
 
         def run_test():
             tested_any = False
@@ -627,9 +652,17 @@ class TestOpInfoProperties(TestCase):
             if not tested_any:
                 self.skipTest("No suitable samples found for batch invariance test")
 
-        self._run_with_expected_failure(
-            device_type, op.name, backend, "batch_invariance", dtype, run_test
-        )
+        try:
+            self._run_with_expected_failure(
+                device_type, op.name, backend, "batch_invariance", dtype, run_test
+            )
+        finally:
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                prev_fp16
+            )
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                prev_bf16
+            )
 
     # =========================================================================
     # Run-to-Run Determinism Tests
@@ -645,7 +678,8 @@ class TestOpInfoProperties(TestCase):
         For enhanced determinism testing, this test:
         1. Resets dynamo and uses fresh inductor cache between compilations
         2. Uses distort_benchmarking_result config to perturb autotuning choices
-        3. Tests multiple runs and verifies bitwise identical outputs
+        3. Enables deterministic algorithms to ensure reliable determinism
+        4. Tests multiple runs and verifies bitwise identical outputs
         """
         torch._dynamo.reset()
         device_type = torch.device(device).type
@@ -655,6 +689,10 @@ class TestOpInfoProperties(TestCase):
             self.skipTest(f"No samples for {op.name}")
 
         fn = op.get_op()
+
+        # Enable deterministic algorithms for reliable determinism testing
+        prev_deterministic = torch.are_deterministic_algorithms_enabled()
+        torch.use_deterministic_algorithms(True)
 
         def run_test():
             import torch._inductor.config as inductor_config
@@ -691,9 +729,12 @@ class TestOpInfoProperties(TestCase):
                 self.assertEqual(out1, out2, rtol=0, atol=0)
                 self.assertEqual(out2, out3, rtol=0, atol=0)
 
-        self._run_with_expected_failure(
-            device_type, op.name, backend, "determinism", dtype, run_test
-        )
+        try:
+            self._run_with_expected_failure(
+                device_type, op.name, backend, "determinism", dtype, run_test
+            )
+        finally:
+            torch.use_deterministic_algorithms(prev_deterministic)
 
     # =========================================================================
     # Bitwise Equivalence with Eager Mode Tests
