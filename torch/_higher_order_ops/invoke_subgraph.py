@@ -744,6 +744,33 @@ def _(subgraph, identifier, *operands):
     return autograd_fn_callable(*operands)
 
 
+def invoke_subgraph_dtensor(subgraph, identifier, *operands):
+    # This means that some of the inputs in the operands are DTensors.
+    from torch.distributed.tensor import DTensor
+
+    assert isinstance(operands, tuple), "operands are expected to be a tuple or list."
+
+    mesh = None
+    for operand in operands:
+        if isinstance(operand, DTensor):
+            if mesh is None:
+                mesh = operand.device_mesh
+            assert mesh == operand.device_mesh, (
+                f"All DTensor operands must have the same mesh but got {mesh} and {operand.device_mesh}"
+            )
+
+    assert mesh is not None, "No DTensor operands found in cond's inputs"
+    local_operands = pytree.tree_map_only(DTensor, lambda x: x._local_tensor, operands)
+
+
+    # Get the output spec
+    output = subgraph(*operands)
+
+    breakpoint()
+    print(output)
+
+
+
 @invoke_subgraph.py_impl(DebugMode)
 def _(debug_mode, subgraph, identifier, *operands):
     # record HOP call
