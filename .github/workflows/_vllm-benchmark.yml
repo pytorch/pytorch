@@ -86,6 +86,7 @@ jobs:
         with:
           python-version: 3.12
           activate-environment: true
+          resolution-strategy: lowest
 
       - name: Install build artifacts
         shell: bash
