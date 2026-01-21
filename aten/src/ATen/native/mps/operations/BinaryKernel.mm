@@ -222,6 +222,10 @@ static void hypot_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hypot");
 }
 
+static void heaviside_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "heaviside");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(maximum_stub, &maximum_mps_kernel)
@@ -254,4 +258,5 @@ REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
 REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
 REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
 REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
+REGISTER_DISPATCH(heaviside_stub, &heaviside_mps_kernel)
 } // namespace at::native
