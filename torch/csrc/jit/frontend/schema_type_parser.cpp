@@ -57,6 +57,11 @@ void registerOpaqueType(const std::string& type_name) {
   }
 }
 
+void unregisterOpaqueType(const std::string& type_name) {
+  auto& global_opaque_types = getOpaqueTypes();
+  global_opaque_types.erase(type_name);
+}
+
 bool isRegisteredOpaqueType(const std::string& type_name) {
   auto& global_opaque_types = getOpaqueTypes();
   return global_opaque_types.find(type_name) != global_opaque_types.end();
