@@ -540,7 +540,7 @@ def collect_fw_donated_buffer_idxs(
     fw_ins: list[Optional[FakeTensor]],
     user_fw_outs: list[Optional[FakeTensor]],
     bw_outs: list[Optional[FakeTensor]],
-    saved_tensors: list[FakeTensor],
+    saved_tensors: list[FakeTensor | None],
 ) -> list[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
