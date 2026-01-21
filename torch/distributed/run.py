@@ -690,7 +690,7 @@ def get_args_parser() -> ArgumentParser:
         "--shutdown_timeout",
         action=env,
         type=int,
-        default=-1,
+        default=None,
         help="Time in seconds to wait for graceful shutdown of worker processes before "
         "sending SIGKILL. If not specified, uses TORCH_ELASTIC_SHUTDOWN_TIMEOUT environment "
         "variable or defaults to 30 seconds.",
