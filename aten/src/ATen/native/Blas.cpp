@@ -123,7 +123,7 @@ Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   //it's not a hard error, because we allow resizing result, but it becomes a hard error
   //in addmv, because addmv expects self to satisfy proper conditions
   //to avoid this, supply correctly sized self, its contents doesn't matter because beta is 0
-  if (result.dim() > 1 || (result.numel() != self.size(0) || result.numel() !=1)) {
+  if (result.dim() > 1 || (result.numel() != self.size(0) && result.numel() != 1)) {
     Tensor self_addmv = at::empty({self.size(0)}, vec.options());
     return at::addmv_out(result, self_addmv, self, vec, 0, 1);
   }
@@ -267,7 +267,7 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
-  float output_scale = float(1.0);
+  float output_scale = 1.0f;
   if (scale_result.has_value() &&
       (*out_dtype == ScalarType::Float8_e4m3fn ||
        *out_dtype == ScalarType::Float8_e5m2)) {

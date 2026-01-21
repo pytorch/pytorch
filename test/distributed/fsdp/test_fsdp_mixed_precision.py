@@ -498,7 +498,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                     for name, tensor in state_dict.items():
                         # Parameters and buffers are checkpointed in their
                         # original dtypes, which may be different.
-                        if name in named_buffers.keys():
+                        if name in named_buffers:
                             self.assertEqual(tensor.dtype, _BUFFER_ORIG_DTYPE)
                         else:
                             self.assertEqual(

@@ -12,11 +12,12 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx import _constants as onnx_constants
-from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx, onnx_ir as ir, onnxscript_apis
 from torch.onnx._internal.exporter import (
     _constants,
     _core,
     _dynamic_shapes,
+    _exportable_module,
     _onnx_program,
     _registration,
 )
@@ -73,6 +74,28 @@ def export_compat(
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
         opset_version = onnx_constants.ONNX_DEFAULT_OPSET
+
+    if isinstance(model, torch.nn.Module):
+        if model.training:
+            warnings.warn(
+                "Exporting a model while it is in training mode. "
+                "Please ensure that this is intended, as it may lead to "
+                "different behavior during inference. "
+                "Calling model.eval() before export is recommended.",
+                UserWarning,
+                stacklevel=3,
+            )
+
+    if isinstance(model, _exportable_module.ExportableModule):
+        # Skip argument extraction if args or kwargs are provided
+        if not args and not kwargs:
+            args, kwargs = model.example_arguments()
+            if input_names is None:
+                input_names = model.input_names()
+            if output_names is None:
+                output_names = model.output_names()
+            if dynamic_shapes is None:
+                dynamic_shapes = model.dynamic_shapes()
 
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes

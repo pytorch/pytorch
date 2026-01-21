@@ -12,6 +12,7 @@ __all__ = [
     # Base error
     "OnnxExporterError",
     "ONNXProgram",
+    "ExportableModule",
 ]
 
 from typing import Any, TYPE_CHECKING
@@ -25,6 +26,7 @@ from torch._C._onnx import (  # Deprecated members that are excluded from __all_
 )
 
 from . import errors, ops
+from ._internal.exporter._exportable_module import ExportableModule
 from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.torchscript_exporter import (  # Deprecated members that are excluded from __all__
     symbolic_helper,
@@ -49,6 +51,7 @@ if TYPE_CHECKING:
 
 # Set namespace for exposed private names
 ONNXProgram.__module__ = "torch.onnx"
+ExportableModule.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
 
 # TODO(justinchuby): Remove these two properties
@@ -278,7 +281,9 @@ def export(
     .. versionchanged:: 2.9
         *dynamo* is now True by default.
     """
-    if dynamo is True or isinstance(model, torch.export.ExportedProgram):
+    if dynamo is True or isinstance(
+        model, (torch.export.ExportedProgram, ExportableModule)
+    ):
         from torch.onnx._internal.exporter import _compat
 
         if isinstance(args, torch.Tensor):
@@ -324,12 +329,10 @@ def export(
 
         warnings.warn(
             "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
-            "the new torch.export-based ONNX exporter will be the default. To switch now, set "
-            "dynamo=True in torch.onnx.export. This new exporter supports features like exporting "
-            "LLMs with DynamicCache. We encourage you to try it and share feedback to help improve "
-            "the experience. Learn more about the new export logic: "
-            "https://pytorch.org/docs/stable/onnx_dynamo.html. For exporting control flow: "
-            "https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html.",
+            "the new torch.export-based ONNX exporter has become the default. "
+            "Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. "
+            "For exporting control flow: "
+            "https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html",
             category=DeprecationWarning,
             stacklevel=2,
         )

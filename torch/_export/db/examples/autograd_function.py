@@ -3,12 +3,12 @@ import torch
 
 class MyAutogradFunction(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(ctx, x):
         return x.clone()
 
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         return grad_output + 1
 

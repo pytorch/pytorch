@@ -10,7 +10,7 @@ import os
 import struct
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import distributed as dist
@@ -257,11 +257,11 @@ def _process_output_file(
             )
 
             # Process each input safetensors file
-            for safetensors_file in input_files_data.keys():
+            for safetensors_file in input_files_data:
                 file_metadata = input_files_data[safetensors_file].metadata
                 input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-                if tensor_fqn not in file_metadata.keys():
+                if tensor_fqn not in file_metadata:
                     continue
 
                 metadata = file_metadata[tensor_fqn]
@@ -277,6 +277,7 @@ def _process_output_file(
                 )
 
                 # Get the offsets of this tensor shard within the full tensor
+                # pyrefly: ignore [unsupported-operation]
                 fqn_custom_metadata = _get_dcp_custom_metadata(file_metadata)[
                     tensor_fqn
                 ]  # type: ignore[index]
@@ -620,7 +621,7 @@ def consolidate_safetensors_files_on_every_rank(
     output_dir: str,
     fqn_to_index_mapping: dict[str, int],
     num_threads: int = 1,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
 ) -> None:
     """
     Consolidate sharded safetensors files across multiple ranks, with each rank handling a subset of output files.
@@ -684,6 +685,7 @@ def consolidate_safetensors_files_on_every_rank(
         if idx in indices_for_this_rank
     }
 
+    output_files_data: dict[str, _OutputFileData] = {}
     if filtered_mapping:
         # Convert index mapping to filename mapping
         max_index = max(unique_indices)
@@ -693,7 +695,7 @@ def consolidate_safetensors_files_on_every_rank(
             filtered_filename_mapping[fqn] = filename
 
         # Call the existing consolidation function with the filtered mapping
-        _consolidate_safetensors_files(
+        output_files_data = _consolidate_safetensors_files(
             input_dir=input_dir,
             output_dir=output_dir,
             fqn_to_file_mapping=filtered_filename_mapping,
@@ -707,10 +709,26 @@ def consolidate_safetensors_files_on_every_rank(
         time.time() - start_time,
     )
 
-    # Wait for all ranks to complete
+    # Wait for all ranks to complete and gather output_files_data on rank 0
     if dist.is_available() and dist.is_initialized():
-        logger.info("Rank %d: Waiting for all ranks to complete...", rank)
-        dist.barrier()
-        logger.info("Rank %d: All ranks have completed.", rank)
+        gathered_output_files_data: list[dict[str, _OutputFileData]] | None = (
+            [{} for _ in range(world_size)] if rank == 0 else None
+        )
+        dist.gather_object(
+            output_files_data,
+            gathered_output_files_data,
+            dst=0,
+            group=process_group,
+        )
+
         if rank == 0:
+            # Merge all output_files_data from all ranks
+            all_output_files_data: dict[str, _OutputFileData] = {}
+            assert gathered_output_files_data is not None
+            for rank_data in gathered_output_files_data:
+                all_output_files_data.update(rank_data)
+
+            _write_overall_metadata_file(output_dir, all_output_files_data)
+            logger.info("Rank 0: Wrote overall metadata file.")
             logger.info("Total time taken: %.2f secs.", time.time() - start_time)
+        dist.barrier(group=process_group)

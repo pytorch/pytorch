@@ -19,8 +19,8 @@ optimization of both forward and backward passes.
 import contextlib
 import functools
 import logging
-from collections.abc import Iterable
-from typing import Any, Callable
+from collections.abc import Callable, Iterable
+from typing import Any
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -70,6 +70,7 @@ class AotAutograd:
         if use_fallback:
             log.debug("Unable to use AOT Autograd because graph has mutation")
             counters["aot_autograd"]["not_ok"] += 1
+            # pyrefly: ignore [bad-return]
             return gm
 
         def wrap_bw_compiler(bw_compiler_fn: Callable[P, R]) -> Callable[..., R]:
@@ -78,6 +79,7 @@ class AotAutograd:
                 # The two disables here:
                 # - stop TorchDynamo from trying to compile the bw_compiler function itself
                 # - stop TorchDynamo from trying to compile our the generated backwards pass bw_compiler produces
+
                 return disable(
                     disable(
                         bw_compiler_fn, reason="do not trace backward compiler function"
@@ -85,12 +87,17 @@ class AotAutograd:
                     reason="do not trace generated backwards pass",
                 )
 
+            _wrapped_bw_compiler._is_wrapped_bw_compiler = (  # pyrefly: ignore [missing-attribute]
+                True
+            )
             return _wrapped_bw_compiler
 
         bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
 
         if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
             bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
+        elif getattr(bw_compiler, "_is_wrapped_bw_compiler", False):
+            bw_compiler.compiler_fn = bw_compiler
         else:
             bw_compiler = wrap_bw_compiler(bw_compiler)
 
@@ -104,7 +111,7 @@ class AotAutograd:
 
         # debug asserts slow down compile time noticeably,
         # So only default them on when the aot_eager backend is used.
-        if self.kwargs.get("fw_compiler", None) == nop:
+        if self.kwargs.get("fw_compiler", None) is nop:
             patch_config: contextlib.AbstractContextManager[Any] = patch(
                 "functorch.compile.config.debug_assert", True
             )

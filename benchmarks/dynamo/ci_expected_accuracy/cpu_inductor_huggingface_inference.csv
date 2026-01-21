@@ -107,31 +107,3 @@ XLNetLMHeadModel,pass,0
 
 
 YituTechConvBert,pass,0
-
-
-
-meta-llama/Llama-3.2-1B,pass_due_to_skip,0
-
-
-
-google/gemma-2-2b,pass_due_to_skip,0
-
-
-
-google/gemma-3-4b-it,pass_due_to_skip,0
-
-
-
-openai/whisper-tiny,pass_due_to_skip,0
-
-
-
-Qwen/Qwen3-0.6B,pass_due_to_skip,0
-
-
-
-mistralai/Mistral-7B-Instruct-v0.3,pass_due_to_skip,0
-
-
-
-openai/gpt-oss-20b,pass_due_to_skip,0

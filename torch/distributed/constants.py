@@ -1,5 +1,4 @@
 from datetime import timedelta
-from typing import Optional
 
 from torch._C._distributed_c10d import _DEFAULT_PG_TIMEOUT
 
@@ -19,7 +18,7 @@ default_pg_timeout: timedelta = _DEFAULT_PG_TIMEOUT
 try:
     from torch._C._distributed_c10d import _DEFAULT_PG_NCCL_TIMEOUT
 
-    default_pg_nccl_timeout: Optional[timedelta] = _DEFAULT_PG_NCCL_TIMEOUT
+    default_pg_nccl_timeout: timedelta | None = _DEFAULT_PG_NCCL_TIMEOUT
 except ImportError:
     # if C++ NCCL support is not compiled, we don't have access to the default nccl value.
     # if anyone is actually trying to use nccl in this state, it should error.

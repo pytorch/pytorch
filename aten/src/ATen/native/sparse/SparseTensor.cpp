@@ -65,6 +65,10 @@
 #include <ATen/ops/to_sparse_native.h>
 #include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
+#include <ATen/ops/view_as_real.h>
+#include <ATen/ops/view_as_real_native.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_complex_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/ones.h>
 #endif
@@ -895,6 +899,54 @@ Tensor _pin_memory_sparse_coo(const Tensor& self, std::optional<Device> device) 
       self._values().pin_memory(device),
       options,
       self.is_coalesced());
+}
+
+Tensor view_as_real_sparse(const Tensor& self) {
+  TORCH_CHECK(self.is_sparse() && self.is_complex(), "view_as_real_sparse is only supported for complex sparse tensors");
+  TORCH_CHECK(!self.is_conj(), "view_as_real_sparse doesn't work on unresolved conjugated tensors.  To resolve the conjugate tensor so you can view it as real, use self.resolve_conj(); however, be warned that the resulting tensor will NOT alias the original.");
+
+  auto new_sizes = self.sym_sizes().vec();
+  // last dimension will always have two elements containing the real and imag vals
+  new_sizes.push_back(2);
+
+  auto real_values = at::view_as_real(self._values());
+  const auto float_type = c10::toRealValueType(self.scalar_type());
+  auto options = self.options().dtype(float_type);
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
+      self.sparse_dim(),
+      self.dense_dim() + 1,  // Add one dense dimension for real/imag
+      new_sizes,
+      self._indices(),
+      real_values,
+      options,
+      self.is_coalesced()
+  );
+}
+
+Tensor view_as_complex_sparse(const Tensor& self) {
+  TORCH_CHECK(self.is_sparse() &&
+    (self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf),
+    "view_as_complex_sparse is only supported for half, float, and double sparse tensors");
+  TORCH_CHECK(self.dense_dim() > 0 && self.size(-1) == 2, "view_as_complex_sparse is only supported for sparse tensors with the last dim == 2 and dense_dim > 0.");
+
+  auto new_sizes = self.sym_sizes().vec();
+  // remove the last dimension. They will be combined to one complex dimension.
+  new_sizes.pop_back();
+
+  auto comlpex_values = at::view_as_complex(self._values());
+  const auto complex_type = c10::toComplexType(self.scalar_type());
+  auto options = self.options().dtype(complex_type);
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors_symint(
+      self.sparse_dim(),
+      self.dense_dim() - 1,
+      new_sizes,
+      self._indices(),
+      comlpex_values,
+      options,
+      self.is_coalesced()
+  );
 }
 
 } // namespace at::native

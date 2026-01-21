@@ -12,7 +12,7 @@ class load:
     mmap: bool = False
     endianness: _Optional["_LoadEndianess"] = None
     # MAP_PRIVATE = 2
-    mmap_flags: _Optional[int] = None if sys.platform == "win32" else 2
+    mmap_flags: int | None = None if sys.platform == "win32" else 2
     calculate_storage_offsets: bool = False
 
 

@@ -1,3 +1,10 @@
+"""Stream utilities for Inductor codegen.
+
+This module provides utilities for managing CUDA streams in Inductor when
+nodes have user-annotated stream assignments. It includes constants for
+stream/event naming and a stream pool for runtime stream management.
+"""
+
 from __future__ import annotations
 
 import functools
@@ -17,6 +24,7 @@ __all__ = [
     "STREAM_NAME_TEMPLATE",
     "CUDAStreamPool",
     "get_cuda_stream_pool",
+    "get_stream_name",
 ]
 
 DEFAULT_STREAM: str = "default_stream"
