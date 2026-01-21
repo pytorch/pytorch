@@ -2909,6 +2909,25 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(result.shape, (0, 2))
 
     @override_qengines
+    def test_zero_dim_interpolate(self):
+        """
+        Verifies the correctness of interpolate with zero input height or input width.
+        """
+        X_height = torch.ones((8, 6, 0, 7), dtype=torch.float32)
+        X_width = torch.ones((8, 6, 7, 0), dtype=torch.float32)
+        X_channels = torch.ones((8, 0, 7, 7), dtype=torch.float32)
+        qX_height = torch.quantize_per_tensor(X_height, scale=0.07663195986552764, zero_point=85, dtype=torch.quint8)
+        qX_width = torch.quantize_per_tensor(X_width, scale=0.07663195986552764, zero_point=85, dtype=torch.quint8)
+        qX_channels = torch.quantize_per_tensor(X_channels, scale=0.07663195986552764, zero_point=85, dtype=torch.quint8)
+        for mode in ["nearest", "bilinear", "nearest-exact"]:
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.interpolate(qX_height, size=202, mode=mode)
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.interpolate(qX_width, size=202, mode=mode)
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.interpolate(qX_channels, size=202, mode=mode)
+
+    @override_qengines
     def test_linear_bias_unpack(self):
         """
         Verifies the correctness of bias() and unpack() API for LinearPackedParamBase.
