@@ -24,9 +24,11 @@ from torch._higher_order_ops.utils import (
     redirect_to_mode,
     reenter_make_fx,
     register_fake,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
 )
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
@@ -122,11 +124,14 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         assert all(
-            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
+            isinstance(
+                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+            )
+            or is_opaque_type(type(o))
             for o in operands
             if o is not None
         ), (
-            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
+            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator/opaque objects {operands}"
         )
 
         # pyrefly: ignore [missing-attribute]
@@ -164,6 +169,69 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
 
 invoke_subgraph = InvokeSubgraphHOP()
+
+
+def invoke_subgraph_infer(
+    subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
+    *operands,
+):
+    """Inference-only entrypoint for invoke_subgraph that auto-generates identifier.
+
+    This is intended for use cases where we are building an inference graph and
+    don't need the forward/backward caching that requires a stable identifier.
+    The identifier is automatically computed based on the current proxy mode's
+    tracer state.
+
+    If no proxy mode is active, the subgraph is called directly.
+    """
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    proxy_mode = get_proxy_mode()
+    if proxy_mode is None:
+        # No tracing active, just call the subgraph directly
+        if getattr(subgraph, "_boxed_call", False):
+            return subgraph(list(operands))
+        else:
+            return subgraph(*operands)
+
+    from torch._dynamo.utils import get_unique_name_wrt
+
+    # How exactly should we allocate names for the HOP invoke_subgraph we
+    # are going to put into the graph?  This is a bit tricky.  In the
+    # original design of invoke_subgraph, this HOP never shows up in the
+    # wild: it is only generated Dynamo, so Dynamo can take sure of
+    # ensuring it picks unique names in the context of the particular
+    # Dynamo compilation.  However, these invoke_subgraph are different:
+    # they live as Dynamo compiled code that can potentially get traced
+    # multiple times!  If they get retraced several times in the same
+    # trace, deduplication occurs; but if I make_fx a function f once,
+    # and then do a separate new trace, there's no relationship between
+    # these.  Additionally, we also want the name we put in the graph to
+    # be deterministic, and for it to be indifferent to how many
+    # unrelated invoke_subgraphs/make_fxs we've done, prior to THIS
+    # particular make_fx.
+    #
+    # To satisfy all of these constraints, it's impossible to preallocate
+    # a name before tracing actually goes through us (since those names
+    # would have to all be unique even if a subgraph never gets used.)
+    # So we allocate the subgraph a fresh name PER proxy mode, and then
+    # consistently reuse it if it hits again.
+    #
+    # Note we do NOT do equality comparison subgraph, since it has
+    # reference equality semantics.
+
+    if subgraph in proxy_mode._invoke_subgraph_cache:
+        name = proxy_mode._invoke_subgraph_cache[subgraph]
+    else:
+        name = get_unique_name_wrt(
+            "invoke_subgraph",
+            proxy_mode._invoke_subgraph_names,
+            requires_suffix=True,
+        )
+        proxy_mode._invoke_subgraph_names.add(name)
+        proxy_mode._invoke_subgraph_cache[subgraph] = name
+
+    return invoke_subgraph(subgraph, name, *operands)
 
 
 # Registers dispatches for SAC
@@ -524,7 +592,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
 
-        save_tensors_and_symints_for_backward(ctx, operands)
+        save_values_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
@@ -550,7 +618,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
-        primals = saved_tensors_and_symints(ctx)
+        primals = saved_values(ctx)
 
         # Filter out grads that are None or do not require_grad. This was
         # the assumption we made during the tracing of joint_graph.
