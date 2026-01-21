@@ -58,6 +58,7 @@ from torch._inductor.template_heuristics.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
@@ -2393,6 +2394,69 @@ class TestMaxAutotune(TestCase):
 
         self.assertObjectIn(k, (15, 16))
         self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
+
+    @fresh_cache()
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @largeTensorTest("10 GB", device=GPU_TYPE)
+    def test_max_autotune_mm_large_input_tensor_int64_indexing(self):
+        """
+        Test mm with input tensor exceeding 2^31 elements.
+        Regression test for https://github.com/pytorch/pytorch/issues/171389
+        When input tensor storage exceeds 2^31 elements, tl.arange() must be
+        cast to INDEX_DTYPE (int64) to avoid integer overflow in pointer arithmetic.
+        """
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        M, K, N = 1280, 65536, 65536
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+
+        self.assertTrue(
+            b.numel() > 2**31 - 1,
+            f"Test requires tensor with >2^31 elements, got {b.numel()}",
+        )
+
+        with config.patch({"max_autotune": True}):
+            compiled_mm = torch.compile(mm)
+            result = compiled_mm(a, b)
+
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+
+    @fresh_cache()
+    @skipIfXpu
+    @unittest.skipIf(TEST_WITH_ROCM, "Test requires CUDA")
+    @largeTensorTest("10 GB", device=GPU_TYPE)
+    def test_max_autotune_mm_large_output_tensor_int32_overflow(self):
+        """
+        Test mm with output tensor exceeding 2^32 elements.
+        Regression test for https://github.com/pytorch/pytorch/issues/171389
+        When M * N >= 2^32, the early exit check `if M * N == 0` can overflow
+        to 0 in int32 arithmetic, causing the kernel to return immediately
+        with all-zero output.
+        """
+
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        M, K, N = 65536, 32, 65536
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+
+        self.assertTrue(
+            M * N >= 2**32,
+            f"Test requires M*N >= 2^32 for overflow, got {M * N}",
+        )
+
+        with config.patch({"max_autotune": True}):
+            compiled_mm = torch.compile(mm)
+            result = compiled_mm(a, b)
+
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
 
 
 @instantiate_parametrized_tests
