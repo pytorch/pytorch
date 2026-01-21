@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from pickle import (
     _getattribute,  # pyrefly: ignore [missing-module-attribute]
     _Pickler,
-    whichmodule as _pickle_whichmodule,  # pyrefly: ignore  # missing-module-attribute
+    whichmodule as _pickle_whichmodule,  # pyrefly: ignore [missing-module-attribute]
 )
 from types import ModuleType
 from typing import Any

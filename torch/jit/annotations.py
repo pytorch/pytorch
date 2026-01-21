@@ -33,7 +33,7 @@ from torch._C import (
     TupleType,
     UnionType,
 )
-from torch._jit_internal import (  # type: ignore[attr-defined]; pyrefly: ignore [missing-module-attribute]
+from torch._jit_internal import (
     _Await,
     _qualified_name,
     Any,
