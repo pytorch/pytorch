@@ -6454,6 +6454,99 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
                 f"Document {i} output contains Inf values",
             )
 
+    @skip_on_cpu
+    def test_varlen_block_mask_backward(self, device):
+        """Test backward pass for varlen block mask attention.
+
+        Verifies that gradients flow correctly through varlen attention.
+        """
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+
+        # Document lengths
+        doc_lens = [300, 200, 500]
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # Create packed version with varlen_block_mask
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Physical tensor size (compact)
+        physical_len = q_seq_lens.sum().item()
+
+        # Create packed query, key, value with requires_grad
+        query_packed = torch.randn(
+            1,
+            1,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        key_packed = torch.randn(
+            1,
+            1,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        value_packed = torch.randn(
+            1,
+            1,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+
+        # Forward with torch.compile
+        compiled_flex = torch.compile(flex_attention)
+        out_packed = compiled_flex(
+            query_packed, key_packed, value_packed, block_mask=block_mask
+        )
+
+        # Create gradient signal
+        grad_out = torch.randn_like(out_packed)
+
+        # Backward pass
+        out_packed.backward(grad_out)
+
+        # Check that gradients exist and have the right shape
+        self.assertEqual(query_packed.grad.shape, query_packed.shape)
+        self.assertEqual(key_packed.grad.shape, key_packed.shape)
+        self.assertEqual(value_packed.grad.shape, value_packed.shape)
+
+        # Check for NaN in gradients
+        self.assertFalse(
+            torch.isnan(query_packed.grad).any(),
+            "Query gradient contains NaN values",
+        )
+        self.assertFalse(
+            torch.isnan(key_packed.grad).any(),
+            "Key gradient contains NaN values",
+        )
+        self.assertFalse(
+            torch.isnan(value_packed.grad).any(),
+            "Value gradient contains NaN values",
+        )
+
     @supported_platform
     def test_create_varlen_block_mask(self, device):
         """Test create_varlen_block_mask creates correct block mask structure."""
