@@ -106,6 +106,170 @@ def _extract_varlen_params(
     )
 
 
+def _expand_physical_to_logical(
+    physical_tensor: Tensor,
+    offsets: Tensor,
+    limits: Tensor,
+    logical_len: int,
+    block_size: int,
+) -> Tensor:
+    """Expand physical tensor to logical size using vectorized operations.
+
+    Args:
+        physical_tensor: Shape [B, H, physical_seq_len, D]
+        offsets: Shape [B, H, num_blocks] - offset per block (can be negative)
+        limits: Shape [B, H, num_blocks] - valid positions per block
+        logical_len: Target logical sequence length
+        block_size: Block size for padding alignment
+
+    Returns:
+        Logical tensor of shape [B, H, logical_len, D]
+    """
+    B, H, physical_len, D = physical_tensor.shape
+    device = physical_tensor.device
+    dtype = physical_tensor.dtype
+    num_blocks = offsets.shape[-1]
+
+    # Create output initialized to zeros
+    logical_tensor = torch.zeros(B, H, logical_len, D, device=device, dtype=dtype)
+
+    # Create position mapping tensors
+    logical_positions = torch.arange(logical_len, device=device)
+    block_indices = logical_positions // block_size
+    local_positions = logical_positions % block_size
+
+    # Clamp block indices for safety (shouldn't exceed num_blocks - 1)
+    block_indices = block_indices.clamp(max=num_blocks - 1)
+
+    # Expand to [B, H, logical_len]
+    block_indices_exp = block_indices.unsqueeze(0).unsqueeze(0).expand(B, H, -1)
+    local_positions_exp = local_positions.unsqueeze(0).unsqueeze(0).expand(B, H, -1)
+
+    # Gather offsets and limits for each logical position
+    gathered_offsets = torch.gather(offsets, dim=2, index=block_indices_exp)
+    gathered_limits = torch.gather(limits, dim=2, index=block_indices_exp)
+
+    # Physical positions = logical positions + offset
+    logical_positions_exp = logical_positions.unsqueeze(0).unsqueeze(0).expand(B, H, -1)
+    physical_positions = logical_positions_exp + gathered_offsets
+
+    # Validity mask: position is within block limit and within physical tensor bounds
+    valid_mask = (
+        (local_positions_exp < gathered_limits)
+        & (physical_positions >= 0)
+        & (physical_positions < physical_len)
+    )
+
+    # Clamp for safe indexing
+    physical_positions_clamped = physical_positions.clamp(0, physical_len - 1)
+
+    # Gather from physical tensor
+    physical_positions_4d = physical_positions_clamped.unsqueeze(-1).expand(
+        -1, -1, -1, D
+    )
+    gathered_values = torch.gather(physical_tensor, dim=2, index=physical_positions_4d)
+
+    # Apply mask
+    valid_mask_4d = valid_mask.unsqueeze(-1).expand(-1, -1, -1, D)
+    logical_tensor = torch.where(valid_mask_4d, gathered_values, logical_tensor)
+
+    return logical_tensor
+
+
+def _contract_logical_to_physical(
+    logical_tensor: Tensor,
+    offsets: Tensor,
+    limits: Tensor,
+    physical_len: int,
+    block_size: int,
+) -> Tensor:
+    """Contract logical tensor back to physical size.
+
+    Args:
+        logical_tensor: Shape [B, H, logical_len, D]
+        offsets: Shape [B, H, num_blocks]
+        limits: Shape [B, H, num_blocks]
+        physical_len: Target physical sequence length
+        block_size: Block size
+
+    Returns:
+        Physical tensor of shape [B, H, physical_len, D]
+    """
+    B, H, logical_len, D = logical_tensor.shape
+    device = logical_tensor.device
+    dtype = logical_tensor.dtype
+    num_blocks = offsets.shape[-1]
+
+    # Create output
+    physical_tensor = torch.zeros(B, H, physical_len, D, device=device, dtype=dtype)
+
+    # Position mapping (same as expand)
+    logical_positions = torch.arange(logical_len, device=device)
+    block_indices = (logical_positions // block_size).clamp(max=num_blocks - 1)
+    local_positions = logical_positions % block_size
+
+    block_indices_exp = block_indices.unsqueeze(0).unsqueeze(0).expand(B, H, -1)
+    local_positions_exp = local_positions.unsqueeze(0).unsqueeze(0).expand(B, H, -1)
+
+    gathered_offsets = torch.gather(offsets, dim=2, index=block_indices_exp)
+    gathered_limits = torch.gather(limits, dim=2, index=block_indices_exp)
+
+    logical_positions_exp = logical_positions.unsqueeze(0).unsqueeze(0).expand(B, H, -1)
+    physical_positions = logical_positions_exp + gathered_offsets
+
+    valid_mask = (
+        (local_positions_exp < gathered_limits)
+        & (physical_positions >= 0)
+        & (physical_positions < physical_len)
+    )
+
+    # Only scatter valid positions to avoid overwriting with zeros from padding
+    # Use index_put_ which allows us to scatter only valid indices
+    valid_logical_indices = valid_mask.nonzero(
+        as_tuple=True
+    )  # (batch_idx, head_idx, logical_idx)
+    valid_physical_indices = physical_positions[valid_logical_indices].long()
+
+    # Create the output index tuple: (batch_idx, head_idx, physical_idx)
+    output_indices = (
+        valid_logical_indices[0],
+        valid_logical_indices[1],
+        valid_physical_indices,
+    )
+
+    # Gather valid values and scatter to physical positions
+    valid_values = logical_tensor[valid_logical_indices]  # [num_valid, D]
+    physical_tensor.index_put_(output_indices, valid_values)
+
+    return physical_tensor
+
+
+def _expand_physical_to_logical_1d(
+    physical_tensor: Tensor,
+    offsets: Tensor,
+    limits: Tensor,
+    logical_len: int,
+    block_size: int,
+) -> Tensor:
+    """Expand 1D per-position tensor (e.g., logsumexp). Shape: [B, H, seq_len]"""
+    return _expand_physical_to_logical(
+        physical_tensor.unsqueeze(-1), offsets, limits, logical_len, block_size
+    ).squeeze(-1)
+
+
+def _contract_logical_to_physical_1d(
+    logical_tensor: Tensor,
+    offsets: Tensor,
+    limits: Tensor,
+    physical_len: int,
+    block_size: int,
+) -> Tensor:
+    """Contract 1D tensor. Shape: [B, H, seq_len]"""
+    return _contract_logical_to_physical(
+        logical_tensor.unsqueeze(-1), offsets, limits, physical_len, block_size
+    ).squeeze(-1)
+
+
 class FlexAttentionHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flex_attention", cacheable=True)
@@ -241,11 +405,16 @@ def math_attention(
     score_mod_other_buffers: tuple = (),
     mask_mod_other_buffers: tuple = (),
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Eager implementation
+    """Eager implementation with varlen support.
 
     This implementation uses vmap to vectorize the score_mod function over the batch, head, m, and n dimensions.
     We then apply the vectorized score_mod function to the scores matrix. Each wrap of vmap applies one of the
     batch, head, m, or n dimensions. We need to apply vmap 4 times to vectorized over all 4 dimensions.
+
+    For varlen sequences (when block_mask contains offsets/limits), this function:
+    1. Expands physical (compact) tensors to logical (padded) size
+    2. Runs attention computation in logical space
+    3. Contracts output back to physical size
 
     Args:
         query: The query tensor
@@ -258,22 +427,57 @@ def math_attention(
         Query and Keys are dtype cast up to float64 (if query.dtype is float64) and float32 otherwise.
         Scores and Values are dtype cast to input query.dtype at the end.
     """
-    # broadcast query & key along head dim for GQA
-    G = query.size(1) // key.size(1)
-    value = torch.repeat_interleave(value, G, dim=1)
-    key = torch.repeat_interleave(key, G, dim=1)
+    # Check for varlen mode - store contraction params if varlen
+    varlen_contraction_params = None
 
-    Bq, Bkv = query.size(0), key.size(0)
+    if _has_varlen_offsets(block_mask):
+        (
+            logical_q_len,
+            logical_kv_len,
+            q_offsets,
+            kv_offsets,
+            q_limits,
+            kv_limits,
+            Q_BLOCK_SIZE,
+            KV_BLOCK_SIZE,
+        ) = _extract_varlen_params(block_mask)
+
+        physical_q_len = query.size(2)
+
+        # Expand physical tensors to logical size
+        query_logical = _expand_physical_to_logical(
+            query, q_offsets, q_limits, logical_q_len, Q_BLOCK_SIZE
+        )
+        key_logical = _expand_physical_to_logical(
+            key, kv_offsets, kv_limits, logical_kv_len, KV_BLOCK_SIZE
+        )
+        value_logical = _expand_physical_to_logical(
+            value, kv_offsets, kv_limits, logical_kv_len, KV_BLOCK_SIZE
+        )
+
+        # Save params needed for contracting output back to physical size
+        varlen_contraction_params = (q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE)
+    else:
+        query_logical = query
+        key_logical = key
+        value_logical = value
+
+    # broadcast query & key along head dim for GQA
+    G = query_logical.size(1) // key_logical.size(1)
+    value_logical = torch.repeat_interleave(value_logical, G, dim=1)
+    key_logical = torch.repeat_interleave(key_logical, G, dim=1)
+
+    Bq, Bkv = query_logical.size(0), key_logical.size(0)
     if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
         raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
 
-    key = key.expand((Bq, *key.size()[1:]))
-    value = value.expand((Bq, *value.size()[1:]))
+    key_logical = key_logical.expand((Bq, *key_logical.size()[1:]))
+    value_logical = value_logical.expand((Bq, *value_logical.size()[1:]))
 
     _, post_mod_scores = _math_attention_inner(
-        query,
-        key,
-        value,
+        query_logical,
+        key_logical,
+        value_logical,
         score_mod,
         block_mask,
         scale,
@@ -292,11 +496,29 @@ def math_attention(
 
     post_mod_scores = torch._safe_softmax(post_mod_scores, dim=-1)
 
+    # Compute output in logical space
+    out_logical = post_mod_scores.to(query.dtype) @ value_logical.to(query.dtype)
+
+    if varlen_contraction_params is not None:
+        # Contract back to physical size
+        q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE = varlen_contraction_params
+        out = _contract_logical_to_physical(
+            out_logical, q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE
+        )
+        logsumexp = _contract_logical_to_physical_1d(
+            logsumexp, q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE
+        )
+        max_scores = _contract_logical_to_physical_1d(
+            max_scores, q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE
+        )
+    else:
+        out = out_logical
+
     # NB: kernel computes in ln2 space, we always convert back at the top level op, so
     # for math impl we divide by log(2) because we will multiply by log(2)
 
     return (
-        post_mod_scores.to(query.dtype) @ value.to(query.dtype),
+        out,
         logsumexp / math.log(2),
         max_scores / math.log(2),
     )
@@ -981,18 +1203,62 @@ def sdpa_dense_backward(
         )
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-    Bq, Hq, seq_len_q, qk_head_dim = query.shape
-    Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
+    # Check for varlen mode - store contraction params if varlen
+    varlen_contraction_params = None
 
-    # Get outputs before calling repeat interleave and permute to input stride orders
-    actual_grad_query = query.new_empty((Bq, Hq, seq_len_q, qk_head_dim))
-    actual_grad_query = _permute_strides(actual_grad_query, query.stride())
+    # Save original physical sizes before any expansion
+    Bq_orig, Hq_orig, physical_q_len, qk_head_dim = query.shape
+    Bkv_orig, Hkv_orig, physical_kv_len, v_head_dim = value.shape
 
-    actual_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
-    actual_grad_key = _permute_strides(actual_grad_key, key.stride())
+    if _has_varlen_offsets(block_mask):
+        (
+            logical_q_len,
+            logical_kv_len,
+            q_offsets,
+            kv_offsets,
+            q_limits,
+            kv_limits,
+            Q_BLOCK_SIZE,
+            KV_BLOCK_SIZE,
+        ) = _extract_varlen_params(block_mask)
 
-    actual_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
-    actual_grad_value = _permute_strides(actual_grad_value, value.stride())
+        # Expand all inputs to logical size
+        query = _expand_physical_to_logical(
+            query, q_offsets, q_limits, logical_q_len, Q_BLOCK_SIZE
+        )
+        key = _expand_physical_to_logical(
+            key, kv_offsets, kv_limits, logical_kv_len, KV_BLOCK_SIZE
+        )
+        value = _expand_physical_to_logical(
+            value, kv_offsets, kv_limits, logical_kv_len, KV_BLOCK_SIZE
+        )
+        out = _expand_physical_to_logical(
+            out, q_offsets, q_limits, logical_q_len, Q_BLOCK_SIZE
+        )
+        grad_out = _expand_physical_to_logical(
+            grad_out, q_offsets, q_limits, logical_q_len, Q_BLOCK_SIZE
+        )
+        logsumexp = _expand_physical_to_logical_1d(
+            logsumexp, q_offsets, q_limits, logical_q_len, Q_BLOCK_SIZE
+        )
+        grad_logsumexp = _expand_physical_to_logical_1d(
+            grad_logsumexp, q_offsets, q_limits, logical_q_len, Q_BLOCK_SIZE
+        )
+
+        # Save params needed for contracting gradients back to physical size
+        varlen_contraction_params = (
+            q_offsets,
+            kv_offsets,
+            q_limits,
+            kv_limits,
+            physical_q_len,
+            physical_kv_len,
+            Q_BLOCK_SIZE,
+            KV_BLOCK_SIZE,
+        )
+
+    Bq, Hq, seq_len_q, _ = query.shape
+    Bkv, Hkv, seq_len_kv, _ = value.shape
 
     def _maybe_new_buffer(
         buffer: Union[torch.Tensor, torch.SymInt, int],
@@ -1103,10 +1369,40 @@ def sdpa_dense_backward(
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
-    # Fill to correctly strided outputs
-    actual_grad_query.copy_(grad_query)
-    actual_grad_key.copy_(grad_key)
-    actual_grad_value.copy_(grad_value)
+    if varlen_contraction_params is not None:
+        # Contract gradients back to physical size
+        (
+            q_offsets,
+            kv_offsets,
+            q_limits,
+            kv_limits,
+            physical_q_len,
+            physical_kv_len,
+            Q_BLOCK_SIZE,
+            KV_BLOCK_SIZE,
+        ) = varlen_contraction_params
+        actual_grad_query = _contract_logical_to_physical(
+            grad_query, q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE
+        )
+        actual_grad_key = _contract_logical_to_physical(
+            grad_key, kv_offsets, kv_limits, physical_kv_len, KV_BLOCK_SIZE
+        )
+        actual_grad_value = _contract_logical_to_physical(
+            grad_value, kv_offsets, kv_limits, physical_kv_len, KV_BLOCK_SIZE
+        )
+    else:
+        # Non-varlen: allocate outputs with correct strides and fill
+        actual_grad_query = query.new_empty((Bq, Hq, seq_len_q, qk_head_dim))
+        actual_grad_query = _permute_strides(actual_grad_query, query.stride())
+        actual_grad_query.copy_(grad_query)
+
+        actual_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
+        actual_grad_key = _permute_strides(actual_grad_key, key.stride())
+        actual_grad_key.copy_(grad_key)
+
+        actual_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
+        actual_grad_value = _permute_strides(actual_grad_value, value.stride())
+        actual_grad_value.copy_(grad_value)
 
     if Bq != Bkv:
         assert Bq > 1 and Bkv == 1, (
