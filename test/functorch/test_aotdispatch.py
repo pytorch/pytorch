@@ -6452,7 +6452,6 @@ def forward(self, primals_1, tangents_1):
         self.assertIsNotNone(data_dep_edge)
         self.assertEqual(data_dep_edge[2], "data dependency")
 
-
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_getitem_of_banned_multi_output(self):
         """Test that getitem from a banned multi-output node doesn't cause NetworkXUnbounded.
