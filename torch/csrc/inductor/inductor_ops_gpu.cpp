@@ -1,6 +1,7 @@
 #include <c10/core/SymInt.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
+#include <tuple>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -11,9 +12,7 @@
 #endif
 
 #if defined(USE_CUDA) || defined(USE_ROCM)
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
-#include <tuple>
 #endif
 
 namespace torch::inductor {
@@ -23,7 +22,7 @@ using namespace at;
 
 TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
   m.def(
-      "inductor_reserve_rng_state(Generator generator, SymInt increment) "
+      "inductor_reserve_rng_state(Generator? generator, SymInt increment) "
       "-> (Tensor, Tensor, Tensor)");
 }
 
@@ -44,7 +43,7 @@ TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
 // -param increment The number of RNG values to reserve.
 // -return A tuple of (Seed Tensor, Offset Tensor, Intragraph Offset CPU
 // Tensor).
-static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
+static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state_impl(
     const Generator& generator,
     c10::SymInt increment) {
   auto* gen_impl = at::check_generator<at::CUDAGeneratorImpl>(generator);
@@ -62,7 +61,8 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
         static_cast<void*>(st.seed_.ptr), {1}, [](void*) {}, dev_opts);
     auto off_t = at::from_blob(
         static_cast<void*>(st.offset_.ptr), {1}, [](void*) {}, dev_opts);
-    auto intra_t = at::scalar_tensor({static_cast<int64_t>(st.offset_intragraph_)}, cpu_opts)
+    auto intra_t = at::scalar_tensor(
+                       static_cast<int64_t>(st.offset_intragraph_), cpu_opts)
                        .unsqueeze(0);
     return {seed_t, off_t, intra_t};
   }
@@ -76,15 +76,15 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, BackendSelect, m) {
-  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state));
+  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, CUDA, m) {
-  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state));
+  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, HIP, m) {
-  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state));
+  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
 }
 
 #endif
