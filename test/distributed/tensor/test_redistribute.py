@@ -1358,7 +1358,8 @@ class TransformInfoTest(TestCase):
         local_cases = [
             (Replicate(), Shard(0)),  # local split
             (Replicate(), Partial("sum")),  # local partition
-            (Replicate(), Replicate()),  # noop
+            # Note: (Replicate(), Replicate()) is a no-op and _TransformInfo
+            # rejects no-ops in __post_init__, so we don't test it here
         ]
         for placements in local_cases:
             info = _TransformInfo(0, placements, [8, 8])

@@ -8,7 +8,7 @@ import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast, NamedTuple
+from typing import cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -103,11 +103,18 @@ def use_min_cost_redistribution_plan(enabled: bool = True):
         _FORCE_MIN_COST_REDISTRIBUTION_PLAN = old_value
 
 
-class _TransformInfo(NamedTuple):
+@dataclasses.dataclass(frozen=True, slots=True)
+class _TransformInfo:
     mesh_dim: int
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
+
+    def __post_init__(self):
+        assert self.mesh_dim >= 0
+        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
+            "TransformInfo should only be created if it is an op with some effect, not a no-op"
+        )
 
     def _comm_type_key(self) -> str | None:
         """
@@ -130,18 +137,16 @@ class _TransformInfo(NamedTuple):
             return None
 
 
-class _FlattenedTransformInfo(NamedTuple):
+@dataclasses.dataclass(frozen=True, slots=True)
+class _FlattenedTransformInfo(_TransformInfo):
     """
     Represents a flattened transform that combines multiple mesh dimensions
     into a single collective operation using a flattened DeviceMesh.
+
+    Note: inherits the fields from _TransformInfo. Gets an __init__ with parent fields, followed by child fields,
+    and runs parent validation (post_init)
     """
 
-    # Always 0 for flattened 1D mesh
-    mesh_dim: int
-    # Source and target placements (should be same type across all dims)
-    src_dst_placements: tuple[Placement, Placement]
-    # logical_shape (combined from all dims)
-    logical_shape: list[int]
     # The flattened DeviceMesh to use for the collective operation
     mesh: DeviceMesh
     # The mesh dimensions from the original mesh that are being flattened (for debugging)
@@ -201,7 +206,10 @@ def _optimize_transform_infos(
     a single flattened operation when a matching flattened DeviceMesh exists.
 
     Merging requirements:
-    - Operations must be consecutive in the transform list (no reordering)
+    - Operations must be consecutive in the transform list (no reordering).
+      Notably, redistributing from P, P, P -> R, S, R is not optimized here and cannot be optimized due to
+      optimization needing to fuse non-contiguous reductions, leaving this pattern vulnerable to numerics issues and
+      suboptimal perf
     - Operations must have the same comm type (e.g., all allgather or all reduce_scatter)
     - Operations must have identical src_dst_placements (e.g., can't merge
       Partial->Shard(0) with Partial->Shard(1))
@@ -213,7 +221,8 @@ def _optimize_transform_infos(
     global tensor shape needed for correct padding/unpadding.
 
     TODO:
-    all_to_all operations are excluded from merging, but it may be possible to merge them in some cases.
+    - all_to_all operations are excluded from merging, but it may be possible to merge them in some cases.
+
     """
     if not transform_infos:
         return []
@@ -243,9 +252,7 @@ def _optimize_transform_infos(
         # All transforms must have the same src_dst_placements to be merged
         # (e.g., can't merge Partial->Shard(0) with Partial->Shard(1))
         first_placements = infos[0].src_dst_placements
-        if not all(info.src_dst_placements == first_placements for info in infos):
-            return None
-
+        assert all(info.src_dst_placements == first_placements for info in infos)
         mesh_dims = tuple(sorted(info.mesh_dim for info in infos))
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
         if flattened_mesh is None:
