@@ -1646,7 +1646,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
     @with_comms
-    @parametrize("compile_on_one_rank", [False])
+    @parametrize("compile_on_one_rank", [True, False])
     def test_dtensor_processgroup_extraction(self, compile_on_one_rank):
         """Test ProcessGroup handling with compile_on_one_rank config.
 
@@ -1714,7 +1714,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 )
 
     @with_comms
-    @parametrize("compile_on_one_rank", [False])
+    @parametrize("compile_on_one_rank", [True, False])
     def test_dtensor_processgroup_deduplication(self, compile_on_one_rank):
         """Test that multiple DTensors sharing the same ProcessGroup only pass it once."""
         with patch("torch.distributed.config.compile_on_one_rank", compile_on_one_rank):
@@ -1776,7 +1776,7 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 )
 
     @with_comms
-    @parametrize("compile_on_one_rank", [False])
+    @parametrize("compile_on_one_rank", [True, False])
     def test_dtensor_processgroup_backward(self, compile_on_one_rank):
         """Test that ProcessGroups are correctly handled in backward graph."""
         with patch("torch.distributed.config.compile_on_one_rank", compile_on_one_rank):
@@ -1840,6 +1840,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 )
 
     @with_comms
+    # TODO: Not yet working with compile-on-one-rank - needs to hoist the PG out
+    # of the mesh into the args. We might need to teach dynamo to do this as a
+    # special case...
     @parametrize("compile_on_one_rank", [False])
     def test_dtensor_process_groups_2d_mesh(self, compile_on_one_rank):
         """Test ProcessGroups are correctly extracted for 2D mesh (multiple groups)."""
@@ -1853,6 +1856,9 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
             local_tensor = torch.randn(4, 8, device=self.device_type)
 
+            # Run eager first to get expected result
+            expected = fn(local_tensor)
+
             fw_graph_cell = [None]
 
             def extract_graph(fx_g, _):
@@ -1860,28 +1866,27 @@ class TestDTensorCompileE2E(DTensorTestBase):
                 return fx_g
 
             compiled_fn = aot_function(
-                fn, fw_compiler=extract_graph, bw_compiler=lambda fx_g, _: fx_g
+                fn,
+                fw_compiler=extract_graph,
+                bw_compiler=lambda fx_g, _: fx_g,
+                dynamic=compile_on_one_rank,
             )
-            compiled_fn(local_tensor)
+            result = compiled_fn(local_tensor)
+
+            # Verify correctness - both cases should produce the same result
+            self.assertEqual(result, expected)
 
             fw_graph = fw_graph_cell[0]
             self.assertIsNotNone(fw_graph)
 
             graph_code = fw_graph.code
-            placeholders = [n for n in fw_graph.graph.nodes if n.op == "placeholder"]
 
             # In both cases, there should be NO opaque objects in the graph.
-            # When compile_on_one_rank=True: ProcessGroups are placeholders.
-            # When compile_on_one_rank=False: Target name strings are used.
             self.assertNotIn(
                 "_opaque_obj",
                 graph_code,
                 f"Graph should not contain opaque objects. Graph:\n{graph_code}",
             )
-
-            if compile_on_one_rank:
-                # Should have tensor + 2 ProcessGroups (one per mesh dim)
-                self.assertGreaterEqual(len(placeholders), 3)
 
     @with_comms
     def test_dtensor_torch_compile_with_processgroups(self):
@@ -1901,6 +1906,25 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
         # Verify the result is correct
         self.assertEqual(result, ref)
+
+    @with_comms
+    def test_flatten_process_groups_method(self):
+        """Test DTensor._flatten_process_groups() returns correct ProcessGroups."""
+        mesh = self.build_device_mesh()
+        local_tensor = torch.randn(4, 4, device=self.device_type)
+        x = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        pgs = x._flatten_process_groups()
+        self.assertEqual(len(pgs), mesh.ndim)
+        for mesh_dim, pg in pgs.items():
+            self.assertEqual(pg, mesh.get_group(mesh_dim))
+
+    def test_process_group_registered_as_opaque(self):
+        """Test that ProcessGroup and DeviceMesh are registered as opaque reference types."""
+        from torch._library.opaque_object import is_opaque_reference_type
+
+        self.assertTrue(is_opaque_reference_type(dist.ProcessGroup))
+        self.assertTrue(is_opaque_reference_type(DeviceMesh))
 
 
 if __name__ == "__main__":

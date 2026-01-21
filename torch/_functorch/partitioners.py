@@ -61,6 +61,7 @@ from ._aot_autograd.descriptors import (
     SavedForBackwardsNoVcCheckAOTOutput,
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
+from ._aot_autograd.graph_compile import is_opaque_node
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
@@ -898,6 +899,7 @@ def _extract_fwd_bwd_modules(
     joint_module: fx.GraphModule,
     saved_values: list[fx.Node],
     saved_sym_nodes: list[fx.Node],
+    saved_opaque_nodes: list[fx.Node],
     *,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
@@ -914,7 +916,11 @@ def _extract_fwd_bwd_modules(
 
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        saved_sym_nodes
+        + saved_opaque_nodes
+        + saved_values
+        + tangent_inputs
+        + bwd_seed_offset_inputs,
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
@@ -927,6 +933,7 @@ def _extract_fwd_bwd_modules(
         if not node.users:
             _remove_by_name(saved_values, node.name)
             _remove_by_name(saved_sym_nodes, node.name)
+            _remove_by_name(saved_opaque_nodes, node.name)
         # wait_tensor is a bit special: if we have a "dead activation" that is not used in the bw,
         # but this dead activation is actually a collective,
         # then the collective will generally by followed by a wait_tensor() call.
@@ -938,6 +945,7 @@ def _extract_fwd_bwd_modules(
         ):
             _remove_by_name(saved_values, node.name)
             _remove_by_name(saved_sym_nodes, node.name)
+            _remove_by_name(saved_opaque_nodes, node.name)
         elif _is_backward_state(node):
             # BackwardState is saved directly
             _remove_by_name(saved_values, node.name)
@@ -995,11 +1003,11 @@ def _extract_fwd_bwd_modules(
     # Opaque objects should be placed after tensors in the forward outputs.
     saved_values_with_vc_check = []
     saved_values_no_vc_check = []
-    saved_opaque_objects = []
+    saved_fake_script_object = []
     for node in saved_values:
         # Check if this is an opaque object
         if isinstance(node.meta.get("val"), FakeScriptObject):
-            saved_opaque_objects.append(node)
+            saved_fake_script_object.append(node)
         elif node.meta.get("saved_tensor_with_no_vc_check", False):
             saved_values_no_vc_check.append(node)
         else:
@@ -1022,14 +1030,21 @@ def _extract_fwd_bwd_modules(
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_opaque_objects + saved_sym_nodes,
+        fwd_outputs
+        + saved_values
+        + saved_fake_script_object
+        + saved_sym_nodes
+        + saved_opaque_nodes,
         fwd_outputs_descs
         + [
             SavedForBackwardsNoVcCheckAOTOutput(i)
             if i >= no_vc_check_start_idx and i < len(saved_values)
             else SavedForBackwardsAOTOutput(i)
             for i in range(
-                len(saved_values) + len(saved_opaque_objects) + len(saved_sym_nodes)
+                len(saved_values)
+                + len(saved_fake_script_object)
+                + len(saved_sym_nodes)
+                + len(saved_opaque_nodes)
             )
         ],
         "forward",
@@ -1038,7 +1053,8 @@ def _extract_fwd_bwd_modules(
         joint_module.graph,
         saved_sym_nodes
         + saved_values
-        + saved_opaque_objects
+        + saved_opaque_nodes
+        + saved_fake_script_object
         + tangent_inputs
         + bwd_seed_offset_inputs
         + backward_state_inputs,
@@ -1133,6 +1149,7 @@ def default_partition(
 
     saved_values = []
     saved_sym_nodes = []
+    saved_opaque_nodes = []
 
     distributed_enabled = torch.distributed.is_available()
 
@@ -1188,6 +1205,11 @@ def default_partition(
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
             continue
+        if is_opaque_node(node):
+            # Opaques (like ProcessGroups) must be kept separate from tensors
+            # so they can be stashed in autograd .ctx like symints
+            saved_opaque_nodes.append(node)
+            continue
         if is_multi_output(node):
             # Must be ordered before MUST_SAVE tags to avoid saving tuples marked MUST_SAVE.
             continue
@@ -1222,6 +1244,7 @@ def default_partition(
 
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
+    saved_opaque_nodes = list(dict.fromkeys(saved_opaque_nodes).keys())
 
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_module.graph, saved_values)
@@ -1232,6 +1255,7 @@ def default_partition(
         joint_module,
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
+        saved_opaque_nodes=saved_opaque_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
     )
@@ -3378,6 +3402,7 @@ def min_cut_rematerialization_partition(
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
+    saved_opaque_nodes = list(filter(is_opaque_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
@@ -3386,6 +3411,7 @@ def min_cut_rematerialization_partition(
         saved_values,
         # pyrefly: ignore [bad-argument-type]
         saved_sym_nodes=saved_sym_nodes,
+        saved_opaque_nodes=saved_opaque_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
     )
