@@ -20,12 +20,6 @@ using namespace at;
 
 #if defined(USE_CUDA) || defined(USE_ROCM)
 
-TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
-  m.def(
-      "inductor_reserve_rng_state(Generator? generator, SymInt increment) "
-      "-> (Tensor, Tensor, Tensor)");
-}
-
 // Reserves RNG state for Inductor with CUDA Graph support.
 //
 // This function allows Inductor to reserve a specific amount of RNG offset
@@ -61,9 +55,9 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state_impl(
         static_cast<void*>(st.seed_.ptr), {1}, [](void*) {}, dev_opts);
     auto off_t = at::from_blob(
         static_cast<void*>(st.offset_.ptr), {1}, [](void*) {}, dev_opts);
-    auto intra_t = at::scalar_tensor(
-                       static_cast<int64_t>(st.offset_intragraph_), cpu_opts)
-                       .unsqueeze(0);
+    auto intra_t =
+        at::scalar_tensor(static_cast<int64_t>(st.offset_intragraph_), cpu_opts)
+            .unsqueeze(0);
     return {seed_t, off_t, intra_t};
   }
 
@@ -76,15 +70,18 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state_impl(
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, BackendSelect, m) {
-  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
+  m.impl(
+      "inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, CUDA, m) {
-  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
+  m.impl(
+      "inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, HIP, m) {
-  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
+  m.impl(
+      "inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state_impl));
 }
 
 #endif
