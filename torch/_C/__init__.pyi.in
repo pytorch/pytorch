@@ -940,7 +940,7 @@ class Argument:
         name: str,
         type: JitType,
         N: _int | None,
-        defualt_value: Any | None,
+        default_value: Any | None,
         kwarg_only: _bool,
         alias_info: AliasInfo | None,
     ) -> None: ...

@@ -1152,6 +1152,7 @@ if __name__ == "__main__":
             z[0] = z[0] + 1.0
             self.assertEqual(z, x)
 
+
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
     @suppress_warnings

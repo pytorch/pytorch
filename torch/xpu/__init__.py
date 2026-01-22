@@ -548,7 +548,6 @@ from .random import (
 )
 
 
-_POOL_HANDLE = NewType("_POOL_HANDLE", tuple[int, int])
 __all__ = [
     "Event",
     "Stream",
