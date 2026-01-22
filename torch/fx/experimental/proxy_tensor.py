@@ -85,6 +85,7 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from torch._higher_order_ops.invoke_subgraph import DTensorSubgraphWrapper
     from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
     from torch._ops import OpOverload
     from torch.fx._symbolic_trace import PHBase
@@ -1733,7 +1734,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # See invoke_subgraph
         self._invoke_subgraph_names: set[str] = set()
         self._invoke_subgraph_cache: dict[
-            torch.fx.GraphModule | FunctionalizeCtxWrapper, str
+            torch.fx.GraphModule | FunctionalizeCtxWrapper | DTensorSubgraphWrapper, str
         ] = {}
         from torch._inductor import config
 

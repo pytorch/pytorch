@@ -81,6 +81,56 @@ class NestedCompileRegionOptions:
     decompositions: Optional[dict[str, Any]] = None
 
 
+class DTensorSubgraphWrapper:
+    """
+    A wrapper that handles DTensor input reconstruction and output extraction.
+
+    Similar to FunctionalizeCtxWrapper, this wrapper is hashable based on the
+    inner subgraph, enabling fake tensor caching. It wraps a subgraph and
+    captures input/output specs for DTensor conversion.
+    """
+
+    def __init__(self, inner_subgraph, input_specs: list[Any]):
+        self.subgraph = inner_subgraph
+        self.input_specs = input_specs
+        self.output_specs: list[Any] = []
+
+    def __hash__(self):
+        return id(self.subgraph)
+
+    def __repr__(self):
+        return f"DTensorSubgraphWrapper({self.subgraph})"
+
+    def __call__(self, *local_operands):
+        from torch.distributed.tensor import DTensor
+
+        # Reconstruct DTensors from local tensors using captured input specs
+        reconstructed_operands = [
+            DTensor(  # pyrefly: ignore [bad-argument-type]
+                local_op,  # pyrefly: ignore [bad-argument-count]
+                spec,
+                requires_grad=local_op.requires_grad,  # pyrefly: ignore [unexpected-keyword]
+            )
+            if spec is not None
+            else local_op
+            for local_op, spec in zip(local_operands, self.input_specs)
+        ]
+
+        # Call the original subgraph with DTensors
+        result = self.subgraph(*reconstructed_operands)
+
+        # Process outputs: capture specs and extract local tensors
+        def extract_spec_and_local(x):
+            if isinstance(x, DTensor):
+                return x._spec, x._local_tensor
+            return None, x
+
+        specs_and_locals = [extract_spec_and_local(r) for r in result]
+        self.output_specs = [spec for spec, _ in specs_and_locals]
+        local_results = [local for _, local in specs_and_locals]
+        return tuple(local_results)
+
+
 def _extract_nested_region_config(fn):
     """
     Extract the NestedCompileRegionOptions from the HOP subgraph gm.meta["nested_region_config"]
@@ -119,7 +169,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
+        subgraph: Union[GraphModule, FunctionalizeCtxWrapper, DTensorSubgraphWrapper],
         identifier: Optional[str],
         *operands,
     ):
@@ -176,7 +226,7 @@ invoke_subgraph = InvokeSubgraphHOP()
 
 
 def invoke_subgraph_infer(
-    subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
+    subgraph: Union[GraphModule, FunctionalizeCtxWrapper, DTensorSubgraphWrapper],
     *operands,
 ):
     """Inference-only entrypoint for invoke_subgraph that auto-generates identifier.
@@ -752,7 +802,7 @@ def invoke_subgraph_dtensor(subgraph, identifier, *operands):
     """
     Handle invoke_subgraph when some inputs are DTensors.
 
-    This creates a wrapper subgraph that:
+    This creates a DTensorSubgraphWrapper that:
     1. Reconstructs DTensors from local tensors using captured input specs
     2. Calls the original subgraph with DTensors
     3. Extracts local tensors from DTensor outputs
@@ -777,45 +827,12 @@ def invoke_subgraph_dtensor(subgraph, identifier, *operands):
     # Capture input specs (None for non-DTensors)
     input_specs = [op._spec if isinstance(op, DTensor) else None for op in operands]
 
-    # Will be set by wrapper_subgraph during execution
-    output_specs: list[Any] = []
-
-    def wrapper_subgraph(*local_operands):
-        nonlocal output_specs
-        # Reconstruct DTensors from local tensors using captured input specs
-        reconstructed_operands = [
-            DTensor(  # pyrefly: ignore [bad-argument-type]
-                local_op,  # pyrefly: ignore [bad-argument-count]
-                spec,
-                requires_grad=local_op.requires_grad,  # pyrefly: ignore [unexpected-keyword]
-            )
-            if spec is not None
-            else local_op
-            for local_op, spec in zip(local_operands, input_specs)
-        ]
-
-        # Call the original subgraph with DTensors
-        result = subgraph(*reconstructed_operands)
-
-        # Process outputs: capture specs and extract local tensors
-        def extract_spec_and_local(x):
-            if isinstance(x, DTensor):
-                return x._spec, x._local_tensor
-            return None, x
-
-        specs_and_locals = [extract_spec_and_local(r) for r in result]
-        output_specs = [spec for spec, _ in specs_and_locals]
-        local_results = [local for _, local in specs_and_locals]
-        return tuple(local_results)
+    wrapper_subgraph = DTensorSubgraphWrapper(subgraph, input_specs)
 
     # Extract local tensors from DTensor inputs
     local_operands = pytree.tree_map_only(DTensor, lambda x: x._local_tensor, operands)
 
     # Call invoke_subgraph with the wrapper and local tensors
-    # pyrefly: ignore [bad-argument-type]
-    # TODO: One issue is that wrapper_subgraph is just a rando function, and
-    # therfore fake tensor caching wont work, because it expects to hash the
-    # function.
     local_result = invoke_subgraph(wrapper_subgraph, identifier, *local_operands)
 
     # Wrap results back to DTensors using captured output specs
@@ -827,7 +844,7 @@ def invoke_subgraph_dtensor(subgraph, identifier, *operands):
         )
         if spec is not None and isinstance(r, torch.Tensor)
         else r
-        for r, spec in zip(local_result, output_specs)
+        for r, spec in zip(local_result, wrapper_subgraph.output_specs)
     ]
     return tuple(wrapped)
 
