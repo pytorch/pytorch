@@ -52,10 +52,10 @@ allows the user to systematically ignore any elements they'd like during computa
 
 There are already a number of existing tutorials that we've written to help users onboard, such as:
 
-- [Overview – the place to start for new users, discusses how to use MaskedTensors and why they're useful](https://docs.pytorch.org/tutorials/unstable/maskedtensor_overview.html)
+- [Overview – the place to start for new users, discusses how to use MaskedTensors and why they're useful](https://docs.pytorch.org/tutorials/unstable/maskedtensor_overview)
 - [Sparsity – MaskedTensor supports sparse COO and CSR data and mask Tensors](https://docs.pytorch.org/tutorials/unstable/maskedtensor_sparsity)
 - [Adagrad sparse semantics – a practical example of how MaskedTensor can simplify sparse semantics and implementations](https://docs.pytorch.org/tutorials/unstable/maskedtensor_adagrad)
-- [Advanced semantics – discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics](https://docs.pytorch.org/tutorials/unstable/maskedtensor_advanced_semantics.html)
+- [Advanced semantics – discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics](https://docs.pytorch.org/tutorials/unstable/maskedtensor_advanced_semantics)
 
 ## Supported Operators
 
