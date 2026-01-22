@@ -146,6 +146,11 @@ jobs:
         run: |
           "pytorch/.ci/pytorch/windows/arm64/bootstrap_python.bat"
 
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "pytorch/.ci/pytorch/windows/arm64/bootstrap_apl.bat"
+
       - name: Bootstrap Rust
         shell: cmd
         run: |
