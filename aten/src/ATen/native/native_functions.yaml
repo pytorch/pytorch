@@ -12458,6 +12458,7 @@
     CPU: adaptive_avg_pool3d_out_cpu
     CUDA: adaptive_avg_pool3d_out_cuda
     QuantizedCPU: adaptive_avg_pool3d_out_quantized_cpu
+    MPS: adaptive_avg_pool3d_out_mps
 
 - func: adaptive_avg_pool3d(Tensor self, SymInt[3] output_size) -> Tensor
   python_module: nn
@@ -12469,6 +12470,7 @@
     CPU: adaptive_avg_pool3d_cpu
     CUDA: adaptive_avg_pool3d_cuda
     QuantizedCPU: adaptive_avg_pool3d_quantized_cpu
+    MPS: adaptive_avg_pool3d_mps
   autogen: _adaptive_avg_pool3d.out
   tags: core
 
@@ -12483,6 +12485,7 @@
   dispatch:
     CPU: adaptive_avg_pool3d_backward_cpu
     CUDA: adaptive_avg_pool3d_backward_cuda
+    MPS: adaptive_avg_pool3d_backward_mps
   autogen: _adaptive_avg_pool3d_backward.out
 
 # Return: (Tensor output, Tensor indices)
