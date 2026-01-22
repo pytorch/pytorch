@@ -1569,6 +1569,10 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
+    # recompute_fn should respect the device context of the original forward
+    fwd_default_device = torch.get_default_device()
+    device_ctx = torch.device(fwd_default_device)
+
     def recompute_fn(*inputs) -> None:
         kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables
@@ -1587,7 +1591,7 @@ def _checkpoint_without_reentrant_generator(
             device_autocast_ctx = torch.amp.autocast(
                 device_type=device_type, **device_autocast_kwargs
             ) if torch.amp.is_autocast_available(device_type) else contextlib.nullcontext()
-            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context:  # type: ignore[attr-defined]
+            with device_autocast_ctx, torch.amp.autocast("cpu", **cpu_autocast_kwargs), recompute_context, device_ctx:  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(
@@ -1604,7 +1608,7 @@ def _checkpoint_without_reentrant_generator(
         yield
         return
 
-    with _checkpoint_hook(new_frame), forward_context:
+    with _checkpoint_hook(new_frame), forward_context, device_ctx:
         yield
     new_frame.forward_completed = True
 
