@@ -100,47 +100,16 @@ struct CRecursionLimitRAII {
 
 #endif
 
-py::handle get_fail_callback(py::handle callback) {
-  py::handle fail_callback =
-      py::getattr(callback, "_dynamo_fail_callback", py::none());
-  if (!fail_callback.is_none()) {
-    return fail_callback;
-  }
-
-  // Capture callback as py::object to prevent dangling reference
-  py::object callback_obj = py::reinterpret_borrow<py::object>(callback);
-  py::object fail_callback_obj = py::cpp_function([callback_obj](
-                                                      py::handle frame,
-                                                      py::handle cache_entry,
-                                                      py::handle frame_state) {
-    auto result = callback_obj(frame, cache_entry, frame_state);
-    py::handle guarded_code = result.attr("guarded_code");
-    if (!guarded_code.is_none()) {
-      throw std::runtime_error(
-          "Dynamo: expected not to compile nested code - this happens because "
-          "a Dynamo callback was triggered and succeeded in compiling "
-          "when running fullgraph=True compiled code.");
-    }
-    return result;
-  });
-  py::setattr(callback, "_dynamo_fail_callback", fail_callback_obj);
-  return fail_callback_obj.release();
-}
-
 EvalFrameOverride eval_frame_override = EvalFrameOverride::NONE;
+
+EvalFrameOverride get_eval_frame_override() {
+  return eval_frame_override;
+}
 
 EvalFrameOverride set_eval_frame_override(EvalFrameOverride override) {
   EvalFrameOverride prev = eval_frame_override;
   eval_frame_override = override;
   return prev;
-}
-
-void maybe_override_callback(py::handle& callback) {
-  if (eval_frame_override == EvalFrameOverride::SKIP) {
-    callback = py::none();
-  } else if (eval_frame_override == EvalFrameOverride::ERROR) {
-    callback = get_fail_callback(callback);
-  }
 }
 
 // frame and callback are borrowed references.
@@ -219,12 +188,15 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    // Only maybe_override_callback in eval_custom since we're attempting to
-    // run dynamo-generated code.
-    if (!recursive_callback.is_none() &&
-        !recursive_callback.is(py::bool_(false))) {
-      maybe_override_callback(recursive_callback);
+    // If we're attempting to run dynamo-generated code and eval frame override
+    // is set to SKIP, then we should set the callback to None to skip.
+    // NB: we could potentially allow RUN_ONLY recursive_callback
+    if (eval_frame_override == EvalFrameOverride::SKIP) {
+      recursive_callback = py::none();
     }
+    // NOTE: EvalFrameOverride::ERROR is handled in convert_frame.py.
+    // We check for the eval_frame_override right before running the
+    // InstructionTranslator, after all the Python-level skip checks.
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
     eval_result = dynamo_eval_custom_code(

@@ -30,9 +30,10 @@ int32_t dynamo_get_c_recursion_limit();
 enum class EvalFrameOverride {
   NONE, // Run regular set callback
   SKIP, // skip frames recursively
-  ERROR, // error if the callback is used (unintentionally)
+  ERROR, // error if Dynamo attempts to trace code
 };
 
 EvalFrameOverride set_eval_frame_override(EvalFrameOverride override);
+EvalFrameOverride get_eval_frame_override();
 
 #endif
