@@ -169,6 +169,9 @@ class Counter(OpaqueBase):
     def __hash__(self):
         return hash((self.start, self.end))
 
+    def get_start_tensor(self):
+        return torch.scalar_tensor(self.start, dtype=torch.int64)
+
     @property
     def counter(self):
         return torch.scalar_tensor(self.start, dtype=torch.int64)
@@ -181,6 +184,11 @@ class NestedCounters(OpaqueBase):
     def __init__(self, c):
         self.c = c
 
+    def __eq__(self, other):
+        if not isinstance(other, NestedCounters):
+            return False
+        return self.c == other.c
+
     def get_c(self):
         return self.c
 
@@ -189,6 +197,11 @@ class NestedCounters(OpaqueBase):
             return [c.start for c in self.c]
         else:
             return self.c.start
+
+    def __getitem__(self, idx):
+        counter = self.c[idx]
+        # Create a new counter to match device mesh's __getitem__
+        return Counter(counter.start, counter.end)
 
 
 class AddModule(OpaqueBase, torch.nn.Module):
@@ -271,7 +284,7 @@ register_opaque_type(
     Counter,
     typ="reference",
     guard_fn=lambda obj: [obj.start],
-    members={"start": MemberType.USE_REAL},
+    members={"start": MemberType.USE_REAL, "get_start_tensor": MemberType.INLINED},
 )
 register_opaque_type(
     NestedCounters,
@@ -280,6 +293,7 @@ register_opaque_type(
         "c": MemberType.USE_REAL,
         "get_c": MemberType.USE_REAL,
         "get_starts": MemberType.INLINED,
+        "__getitem__": MemberType.INLINED,
     },
 )
 register_opaque_type(
@@ -1679,6 +1693,47 @@ def forward(self, arg0_1):
         opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
         x = torch.randn(3, 3)
         self.assertEqual(opt_f(x), foo(x))
+
+    def test_getitem(self):
+        def foo(x):
+            y = x * 2 + 1
+            nested_counter = y.get_counter()
+            s = y.size_store
+            counter = nested_counter[s.size]
+            return y * counter.get_start_tensor()
+
+        x = TensorWithCounter(
+            torch.tensor(1),
+            torch.tensor(1),
+            NestedCounters([Counter(1, 5), Counter(2, 5)]),
+            SizeStore(1),
+        )
+
+        inp = (x,)
+        backend = AotEagerAndRecordGraphs()
+        res = torch.compile(foo, fullgraph=True, backend=backend)(*inp)
+        self.assertEqual(res, torch.tensor(6))
+
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "TensorWithCounter(i64[])"):
+        l_x_ = L_x_
+
+        mul: "TensorWithCounter(i64[])" = l_x_ * 2;  l_x_ = None
+        y: "TensorWithCounter(i64[])" = mul + 1;  mul = None
+
+        get_counter = y.get_counter()
+
+        getitem = get_counter.__getitem__(1);  get_counter = None
+
+        get_start_tensor: "i64[]" = getitem.get_start_tensor();  getitem = None
+        mul_1: "TensorWithCounter(i64[])" = y * get_start_tensor;  y = get_start_tensor = None
+        return (mul_1,)
+""",  # noqa: B950
+        )
 
     def test_tensor_subclass_with_opaque_attr(self):
         def fn(x):
