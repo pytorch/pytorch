@@ -53,6 +53,7 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -153,6 +154,10 @@ from torch.testing._internal.triton_utils import (
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
+
+def get_warp_size(device=torch.device("cuda")):    
+    dev_props = DeviceProperties.create(device)
+    return dev_props.warp_size
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 
@@ -16644,7 +16649,7 @@ if RUN_GPU:
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
-            hidden_size = 512 if torch.version.hip is not None else 256
+            hidden_size = 512 if torch.version.hip is not None and get_warp_size() > 32 else 256
 
             inp = torch.randn(
                 batch_size,
