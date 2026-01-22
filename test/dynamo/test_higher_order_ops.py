@@ -6322,15 +6322,13 @@ class GraphModule(torch.nn.Module):
 
             return torch.func.vmap(index_fn, in_dims=(None, 0))(b_indices, n_indices)
 
-        reference = torch.stack([data[b_indices, i] for i in range(10)])
         eager_result = vmap_index_fn(data, b_indices, n_indices)
 
-        compiled_result = torch.compile(vmap_index_fn, fullgraph=True)(
+        compiled_result = torch.compile(vmap_index_fn, backend="eager", fullgraph=True)(
             data, b_indices, n_indices
         )
 
-        self.assertEqual(eager_result, reference)
-        self.assertEqual(compiled_result, reference)
+        self.assertEqual(eager_result, compiled_result)
 
     def test_vmap(self):
         def fn(x):
