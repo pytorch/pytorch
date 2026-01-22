@@ -7,6 +7,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/linspace_native.h>
+#include <ATen/ops/logspace_native.h>
 #include <ATen/ops/range_native.h>
 #include <cmath>
 #include <limits>
@@ -47,6 +48,48 @@ struct RangeCachedGraph : public mps::MPSCachedGraph {
   MPSGraphTensor* startTensor = nil;
   MPSGraphTensor* endTensor = nil;
   MPSGraphTensor* multiplyTensor = nil;
+  MPSGraphTensor* outputTensor = nil;
+};
+
+struct LogspaceCachedGraph : public mps::MPSCachedGraph {
+  API_AVAILABLE(macosx(12.3))
+  LogspaceCachedGraph(MPSGraph* mpsGraph,
+                      MPSDataType dataType,
+                      int32_t shapeVal,
+                      bool startLessEnd = false)
+      : MPSCachedGraph(mpsGraph) {
+    @autoreleasepool {
+      auto shapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:&shapeVal length:sizeof(int32_t)]
+                                              shape:@[ @1 ]
+                                           dataType:MPSDataTypeInt32];
+      auto coordsTensor = [mpsGraph coordinateAlongAxis:0 withShapeTensor:shapeTensor name:nil];
+      coordsTensor = [mpsGraph castTensor:coordsTensor toType:dataType name:@"coords"];
+
+      startTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, dataType, @[ @1 ]);
+      endTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, dataType, @[ @1 ]);
+      multiplyTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, dataType, @[ @1 ]);
+      baseTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, dataType, @[ @1 ]);
+
+      // Compute linear interpolation: start + coords * step
+      auto scaledCoords = [mpsGraph multiplicationWithPrimaryTensor:coordsTensor
+                                                    secondaryTensor:multiplyTensor
+                                                               name:nil];
+      auto linearOutput = [mpsGraph additionWithPrimaryTensor:scaledCoords secondaryTensor:startTensor name:nil];
+
+      // Clamp to ensure numerical stability
+      linearOutput = [mpsGraph clampWithTensor:linearOutput
+                                minValueTensor:startLessEnd ? startTensor : endTensor
+                                maxValueTensor:startLessEnd ? endTensor : startTensor
+                                          name:nil];
+
+      // Compute base^linearOutput
+      outputTensor = [mpsGraph powerWithPrimaryTensor:baseTensor secondaryTensor:linearOutput name:nil];
+    }
+  }
+  MPSGraphTensor* startTensor = nil;
+  MPSGraphTensor* endTensor = nil;
+  MPSGraphTensor* multiplyTensor = nil;
+  MPSGraphTensor* baseTensor = nil;
   MPSGraphTensor* outputTensor = nil;
 };
 
@@ -241,6 +284,75 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
       feeds[cachedGraph->endTensor] = getMPSGraphTensorFromScalar(stream, endScalar);
       MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
       feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
+
+      runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+    }
+
+    if (!result.is_contiguous()) {
+      result.copy_(r);
+    }
+  }
+  return result;
+}
+
+Tensor& logspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
+  using namespace mps;
+
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+
+  if (result.numel() != steps) {
+    result.resize_({steps});
+  }
+
+  if (steps == 0) {
+    // skip
+  } else if (steps == 1) {
+    result.fill_(std::pow(base, start.to<double>()));
+  } else {
+    Tensor r = !mps::needsGather(result) ? result : result.contiguous();
+
+    // Do the MPSGraph computation
+    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+    MPSStream* stream = getCurrentMPSStream();
+
+    bool start_less_end = (start.to<double>() <= end.to<double>());
+
+    @autoreleasepool {
+      std::string key = "logspace_out_mps:" + getTensorsStringKey({result}) + ":" + std::to_string(steps) + ":" +
+          std::to_string(base) + ":" + std::to_string(start_less_end);
+      auto cachedGraph = cache_->LookUpAs<LogspaceCachedGraph>(key);
+
+      if (!cachedGraph) {
+        cachedGraph = cache_->CreateCachedGraphAs<LogspaceCachedGraph>(key, ^MPSCachedGraph*() {
+          LogspaceCachedGraph* newCachedGraph = nil;
+
+          @autoreleasepool {
+            MPSGraph* mpsGraph = make_mps_graph();
+            newCachedGraph = new LogspaceCachedGraph(mpsGraph, MPSDataTypeFloat32, steps, start_less_end);
+
+            if (getMPSDataType(result) != MPSDataTypeFloat32) {
+              newCachedGraph->outputTensor = [mpsGraph castTensor:newCachedGraph->outputTensor
+                                                           toType:getMPSDataType(result)
+                                                             name:@"output"];
+            }
+          }
+          return newCachedGraph;
+        });
+      }
+
+      NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
+      auto multiply = (end.to<double>() - start.to<double>()) / ((double)steps - 1.0f);
+      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
+
+      // Create dictionary of inputs and outputs
+      MPSScalar startScalar = getMPSScalar(start, ScalarType::Float);
+      feeds[cachedGraph->startTensor] = getMPSGraphTensorFromScalar(stream, startScalar);
+      MPSScalar endScalar = getMPSScalar(end, ScalarType::Float);
+      feeds[cachedGraph->endTensor] = getMPSGraphTensorFromScalar(stream, endScalar);
+      MPSScalar multiplyScalar = getMPSScalar(multiply, ScalarType::Float);
+      feeds[cachedGraph->multiplyTensor] = getMPSGraphTensorFromScalar(stream, multiplyScalar);
+      MPSScalar baseScalar = getMPSScalar(base, ScalarType::Float);
+      feeds[cachedGraph->baseTensor] = getMPSGraphTensorFromScalar(stream, baseScalar);
 
       runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
     }
