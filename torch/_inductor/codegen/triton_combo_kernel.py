@@ -598,6 +598,9 @@ class ComboKernel(Kernel):
         argdefs: list[ArgName],
         pointwise_with_reduce: bool = False,
     ) -> str:
+        """
+        Generate the Triton JIT decorator line for the combo kernel.
+        """
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         for i, sub in enumerate(self.sub_kernels):
@@ -664,6 +667,9 @@ class ComboKernel(Kernel):
                 )
                 @triton.jit
             """
+
+        self.triton_meta = triton_meta
+        self.inductor_meta = inductor_meta
 
         return heuristics_line
 
@@ -1001,6 +1007,8 @@ class ComboKernel(Kernel):
             call_args,
             triton=True,
             arg_types=arg_types,
+            triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
         )
 
     def combo_grid_meta(self) -> dict[str, Any]:
