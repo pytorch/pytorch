@@ -1557,19 +1557,19 @@ class TestViewOps3D(DTensorTestBase):
                         mesh, batch_size, seq_len, dim1, dim2, dim3
                     )
 
-        for seq_len in [2 * mesh.size(0) - 1, 2 * mesh.size(0) + 1]:
-            for dim1 in [2 * mesh.size(1)]:
-                for dim2 in [2 * mesh.size(2)]:
-                    pass
-                    # expect error
-                    # self._test_dtensor_unflatten_3d(mesh, batch_size, seq_len, dim1, dim2, dim3)
+        # for seq_len in [2 * mesh.size(0) - 1, 2 * mesh.size(0) + 1]:
+        #     for dim1 in [2 * mesh.size(1)]:
+        #         for dim2 in [2 * mesh.size(2)]:
+        #             pass
+        #             # expect error
+        #             # self._test_dtensor_unflatten_3d(mesh, batch_size, seq_len, dim1, dim2, dim3)
 
-        for seq_len in [2 * mesh.size(0)]:
-            for dim1 in [2 * mesh.size(1) - 1, 2 * mesh.size(1) + 1]:
-                for dim2 in [2 * mesh.size(2)]:
-                    pass
-                    # expect error
-                    # self._test_dtensor_unflatten_3d(mesh, batch_size, seq_len, dim1, dim2, dim3)
+        # for seq_len in [2 * mesh.size(0)]:
+        #     for dim1 in [2 * mesh.size(1) - 1, 2 * mesh.size(1) + 1]:
+        #         for dim2 in [2 * mesh.size(2)]:
+        #             pass
+        #             # expect error
+        #             # self._test_dtensor_unflatten_3d(mesh, batch_size, seq_len, dim1, dim2, dim3)
 
     def _test_dtensor_unflatten_3d(self, mesh, batch_size, seq_len, dim1, dim2, dim3):
         # S1, S2, S3
@@ -1579,9 +1579,6 @@ class TestViewOps3D(DTensorTestBase):
         expected_placements = (Shard(1), Shard(2), Shard(3))
         inps = distribute_tensor(
             global_inps,
-            mesh,
-            (Replicate(), Replicate(), Replicate()),
-        ).redistribute(
             mesh,
             (
                 _StridedShard(dim=0, split_factor=batch_size),
@@ -1595,6 +1592,7 @@ class TestViewOps3D(DTensorTestBase):
                     * (dim1 // mesh.size(1)),
                 ),
             ),
+            src_data_rank=None,
         )
         expected_inp_viewed = distribute_tensor(
             global_inps.view(batch_size, seq_len, dim1, dim2, dim3),
