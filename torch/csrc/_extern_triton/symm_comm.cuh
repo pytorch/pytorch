@@ -185,6 +185,13 @@ extern __device__ void nvshmem_quiet();
 // Fence - ensures ordering of memory operations
 extern __device__ void nvshmem_fence();
 
+// Team-scoped barrier - block-level synchronization within a team
+// team: nvshmem_team_t (int32) - the team to synchronize with
+// Use NVSHMEM_TEAM_SHARED (1) for LSA domain (same-node PEs)
+// Use NVSHMEM_TEAM_WORLD (0) for all PEs
+// Returns 0 on success
+extern __device__ int nvshmemx_barrier_block(int32_t team);
+
 // Multicast pointer - returns multicast address for broadcasting to all PEs
 // Returns nullptr if multicast is not supported
 // team: nvshmem_team_t (int32) - the team to use for multicast
@@ -525,7 +532,8 @@ struct NCCLSymmContext : public SymmContext {
  *   Used for remote signaling via nvshmemx_signal_op()
  *
  * The symm_signal primitive uses gin_signal_pad (for remote atomic signals),
- * while symm_signal_ptr returns pointers to lsa_signal_pad (for P2P access).
+ * while symm_lsa_signal_ptr returns pointers to lsa_signal_pad (for P2P
+ * access).
  *
  * This context is created on the host and passed to device kernels.
  * NVSHMEM provides libnvshmem_device.bc which can be linked with Triton
@@ -541,7 +549,7 @@ struct NVSHMEMSymmContext : public SymmContext {
 
   // LSA signal pad pointer (symmetric address for P2P load/store signaling)
   // This is accessible via nvshmem_ptr() for direct memory access
-  // Used by symm_signal_ptr to get peer's signal pad address
+  // Used by symm_lsa_signal_ptr to get peer's signal pad address
   uint64_t* lsa_signal_pad;
 
   // GIN signal pad pointer (symmetric address for remote atomic signaling)

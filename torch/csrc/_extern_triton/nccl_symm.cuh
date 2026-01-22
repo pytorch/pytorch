@@ -237,12 +237,42 @@ __device__ void nccl_fence_impl(NCCLSymmContext* nccl_ctx, int32_t scope) {
 }
 
 /**
- * NCCL backend implementation of remote_ptr.
+ * NCCL backend implementation of lsa_barrier.
+ *
+ * Performs barrier synchronization among ranks in the same LSA (Local Symmetric
+ * Access) domain using ncclLsaBarrierSession with ncclTeamTagLsa.
+ *
+ * The ncclTeamTagLsa tag selects the LSA team which contains only ranks that
+ * can directly access each other's memory via load/store operations.
+ *
+ * @param nccl_ctx NCCL context with device communicator
  */
-__device__ int64_t nccl_remote_ptr_impl(
-    NCCLSymmContext* nccl_ctx,
-    int64_t local_ptr,
-    int32_t peer) {
+__device__ void nccl_lsa_barrier_impl(NCCLSymmContext* nccl_ctx) {
+#if defined(NCCL_SYMM_TYPES_AVAILABLE)
+  // Use ncclLsaBarrierSession with ncclTeamTagLsa for LSA domain barrier
+  // This synchronizes only with ranks in the same LSA domain (same node with
+  // NVLink connectivity)
+  // Barrier index 0 is used for LSA barriers, use_multimem = false
+  ncclLsaBarrierSession<ncclCoopCta> barrier(
+      ncclCoopCta{},
+      *nccl_ctx->dev_comm,
+      ncclTeamTagLsa{},
+      0, // barrier_index
+      false // use_multimem
+  );
+  barrier.sync(ncclCoopCta{}, cuda::memory_order_seq_cst);
+#else
+  // NCCL device types are not available
+  TORCH_SYMM_CHECK(
+      false, "NCCL lsa_barrier requires NCCL_SYMM_TYPES_AVAILABLE");
+#endif
+}
+
+/**
+ * NCCL backend implementation of lsa_ptr.
+ */
+__device__ int64_t
+nccl_lsa_ptr_impl(NCCLSymmContext* nccl_ctx, int64_t local_ptr, int32_t peer) {
   size_t byte_offset = reinterpret_cast<char*>(local_ptr) -
       reinterpret_cast<char*>(nccl_ctx->local_buffer);
   void* peer_ptr =
@@ -251,10 +281,10 @@ __device__ int64_t nccl_remote_ptr_impl(
 }
 
 /**
- * NCCL backend implementation of multicast_ptr.
+ * NCCL backend implementation of lsa_multicast_ptr.
  */
 __device__ int64_t
-nccl_multicast_ptr_impl(NCCLSymmContext* nccl_ctx, int64_t local_ptr) {
+nccl_lsa_multicast_ptr_impl(NCCLSymmContext* nccl_ctx, int64_t local_ptr) {
   size_t byte_offset = reinterpret_cast<char*>(local_ptr) -
       reinterpret_cast<char*>(nccl_ctx->local_buffer);
   void* mc_ptr = ncclGetLsaMultimemPointer(
@@ -317,7 +347,7 @@ __device__ void nccl_signal_impl(
 }
 
 /**
- * NCCL backend implementation of signal_ptr.
+ * NCCL backend implementation of lsa_signal_ptr.
  *
  * Returns a device pointer to a peer's signal pad, if accessible via P2P.
  * For NCCL, this uses the LSA window to get the peer's signal pad address.
@@ -327,7 +357,7 @@ __device__ void nccl_signal_impl(
  * @return Device pointer to peer's signal pad, or 0 if not accessible
  */
 __device__ int64_t
-nccl_signal_ptr_impl(NCCLSymmContext* nccl_ctx, int32_t peer) {
+nccl_lsa_signal_ptr_impl(NCCLSymmContext* nccl_ctx, int32_t peer) {
 #if defined(NCCL_SYMM_TYPES_AVAILABLE)
   // Use ncclGetLsaPointer with signal_window to get peer's signal pad
   // Offset 0 gives the base of the signal pad
@@ -335,7 +365,8 @@ nccl_signal_ptr_impl(NCCLSymmContext* nccl_ctx, int32_t peer) {
   return reinterpret_cast<int64_t>(peer_signal_pad);
 #else
   // NCCL device types are not available
-  TORCH_SYMM_CHECK(false, "NCCL signal_ptr requires NCCL_SYMM_TYPES_AVAILABLE");
+  TORCH_SYMM_CHECK(
+      false, "NCCL lsa_signal_ptr requires NCCL_SYMM_TYPES_AVAILABLE");
   return 0;
 #endif
 }
@@ -448,23 +479,42 @@ __device__ int32_t nccl_symm_fence(int64_t ctx_ptr, int32_t scope) {
 }
 
 /**
- * NCCL-specific wrapper for remote_ptr operation.
+ * NCCL-specific wrapper for lsa_barrier operation.
+ *
+ * Performs barrier synchronization among ranks in the same LSA (Local Symmetric
+ * Access) domain. Only ranks that can directly access each other's memory via
+ * load/store operations participate in this barrier.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @return 0 on success
  */
-__device__ int64_t
-nccl_symm_remote_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+__device__ int32_t nccl_symm_lsa_barrier(int64_t ctx_ptr) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
-  return nccl_remote_ptr_impl(nccl_ctx, local_ptr, peer);
+  nccl_lsa_barrier_impl(nccl_ctx);
+  return 0;
 }
 
 /**
- * NCCL-specific wrapper for multicast_ptr operation.
+ * NCCL-specific wrapper for lsa_ptr operation.
  */
 __device__ int64_t
-nccl_symm_multicast_ptr(int64_t ctx_ptr, int64_t local_ptr, int64_t team_ptr) {
+nccl_symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
-  return nccl_multicast_ptr_impl(nccl_ctx, local_ptr);
+  return nccl_lsa_ptr_impl(nccl_ctx, local_ptr, peer);
+}
+
+/**
+ * NCCL-specific wrapper for lsa_multicast_ptr operation.
+ */
+__device__ int64_t nccl_symm_lsa_multicast_ptr(
+    int64_t ctx_ptr,
+    int64_t local_ptr,
+    int64_t team_ptr) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
+  return nccl_lsa_multicast_ptr_impl(nccl_ctx, local_ptr);
 }
 
 /**
@@ -493,7 +543,7 @@ __device__ int32_t nccl_symm_signal(
 }
 
 /**
- * NCCL-specific wrapper for signal_ptr operation.
+ * NCCL-specific wrapper for lsa_signal_ptr operation.
  *
  * Returns a device pointer to a peer's signal pad, if accessible via P2P.
  *
@@ -501,10 +551,10 @@ __device__ int32_t nccl_symm_signal(
  * @param peer Peer rank to get signal pad pointer for
  * @return Device pointer to peer's signal pad, or 0 if not accessible
  */
-__device__ int64_t nccl_symm_signal_ptr(int64_t ctx_ptr, int32_t peer) {
+__device__ int64_t nccl_symm_lsa_signal_ptr(int64_t ctx_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
-  return nccl_signal_ptr_impl(nccl_ctx, peer);
+  return nccl_lsa_signal_ptr_impl(nccl_ctx, peer);
 }
 
 /**

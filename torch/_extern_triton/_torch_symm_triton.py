@@ -694,6 +694,77 @@ if TRITON_AVAILABLE:
         )
 
     # =========================================================================
+    # SYMM_LSA_BARRIER - LSA DOMAIN BARRIER SYNCHRONIZATION
+    # =========================================================================
+
+    @core.extern
+    def _symm_lsa_barrier_frontend(
+        ctx_ptr,
+        _semantic=None,
+    ):
+        """
+        Frontend LSA barrier operation that dispatches based on SymmContext type.
+
+        Performs barrier synchronization among ranks in the same LSA (Local
+        Symmetric Access) domain. Only ranks that can directly access each
+        other's memory via load/store operations participate in this barrier.
+
+        This calls the unified frontend function that dynamically dispatches to
+        either NCCL or NVSHMEM backend based on the SymmContext type field.
+
+        For NVSHMEM, uses nvshmemx_team_barrier_block with the LSA team.
+        For NCCL, uses ncclLsaBarrierSession with ncclTeamTagLsa.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): (
+                    "symm_lsa_barrier",
+                    core.dtype("int32"),
+                ),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    @core.extern
+    def _nvshmem_symm_lsa_barrier(
+        ctx_ptr,
+        _semantic=None,
+    ):
+        """
+        NVSHMEM-specific LSA barrier operation.
+
+        Performs barrier synchronization among ranks in the same LSA (Local
+        Symmetric Access) domain using NVSHMEM.
+        Maps to nvshmemx_team_barrier_block(lsa_team).
+
+        This calls the NVSHMEM backend directly, bypassing runtime dispatch.
+        Use this when you know the context is NVSHMEM type.
+
+        Asserts on invalid context.
+        """
+        return core.extern_elementwise(
+            "",  # libname - not used when extern_libs is provided
+            "",  # libpath - not used when extern_libs is provided
+            [ctx_ptr],
+            {
+                # C function signature: (int64) -> int32
+                (core.dtype("int64"),): (
+                    "nvshmem_symm_lsa_barrier",
+                    core.dtype("int32"),
+                ),
+            },
+            is_pure=False,  # Collective operation has side effects
+            _semantic=_semantic,
+        )
+
+    # =========================================================================
     # SYMM_FENCE - MEMORY FENCE FOR ORDERING
     # =========================================================================
 
@@ -852,12 +923,12 @@ if TRITON_AVAILABLE:
             )
 
     @triton.jit
-    def _symm_signal_ptr_frontend(
+    def _symm_lsa_signal_ptr_frontend(
         ctx_ptr,
         peer,
     ):
         """
-        [INTERNAL] Unified frontend for signal_ptr operation.
+        [INTERNAL] Unified frontend for lsa_signal_ptr operation.
         Uses runtime dispatch based on SymmContext type.
         """
         return core.extern_elementwise(
@@ -870,19 +941,19 @@ if TRITON_AVAILABLE:
                 (
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int32"),  # peer
-                ): ("symm_signal_ptr", core.dtype("int64")),
+                ): ("symm_lsa_signal_ptr", core.dtype("int64")),
             },
             is_pure=True,  # Returns pointer without side effects
             _semantic=_semantic,
         )
 
     @triton.jit
-    def _nvshmem_symm_signal_ptr(
+    def _nvshmem_symm_lsa_signal_ptr(
         ctx_ptr,
         peer,
     ):
         """
-        [INTERNAL] NVSHMEM-specific signal_ptr implementation.
+        [INTERNAL] NVSHMEM-specific lsa_signal_ptr implementation.
 
         Get a device pointer to peer's LSA signal pad (if accessible via P2P).
         Uses nvshmem_ptr() to get the remote address.
@@ -902,20 +973,20 @@ if TRITON_AVAILABLE:
                 (
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int32"),  # peer
-                ): ("nvshmem_symm_signal_ptr", core.dtype("int64")),
+                ): ("nvshmem_symm_lsa_signal_ptr", core.dtype("int64")),
             },
             is_pure=True,  # Returns pointer without side effects
             _semantic=_semantic,
         )
 
     @triton.jit
-    def symm_signal_ptr(
+    def symm_lsa_signal_ptr(
         ctx_ptr,
         peer,
         backend: tl.constexpr = 0,
     ):
         """
-        Get a device pointer to peer's signal pad (if accessible via P2P).
+        Get a device pointer to peer's signal pad (if accessible via P2P/LSA).
 
         Returns a device pointer to the peer's signal pad that can be used for
         direct load/store operations. This is useful for implementing custom
@@ -932,7 +1003,7 @@ if TRITON_AVAILABLE:
 
         Example usage:
             # Get pointer to peer's signal pad
-            peer_signal_pad = symm_signal_ptr(ctx_ptr, peer)
+            peer_signal_pad = symm_lsa_signal_ptr(ctx_ptr, peer)
 
             # If accessible, can use direct load/store
             if peer_signal_pad != 0:
@@ -958,10 +1029,10 @@ if TRITON_AVAILABLE:
         # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
         if backend == 0:  # BACKEND_DEFAULT
             # Runtime dispatch based on SymmContext type
-            return _symm_signal_ptr_frontend(ctx_ptr, peer)
+            return _symm_lsa_signal_ptr_frontend(ctx_ptr, peer)
         elif backend == 2:  # BACKEND_NVSHMEM
             # Direct NVSHMEM dispatch
-            return _nvshmem_symm_signal_ptr(ctx_ptr, peer)
+            return _nvshmem_symm_lsa_signal_ptr(ctx_ptr, peer)
         else:
             # BACKEND_NCCL (1) or unknown - not supported
             # NCCL does not provide device bitcode library
@@ -1078,6 +1149,67 @@ if TRITON_AVAILABLE:
             )
 
     @triton.jit
+    def symm_lsa_barrier(
+        ctx_ptr,
+        backend: tl.constexpr = 0,
+    ):
+        """
+        Perform LSA (Local Symmetric Access) domain barrier synchronization.
+
+        All ranks in the same LSA domain block until everyone has reached this point.
+        LSA domain contains peers that can directly access each other's memory via
+        load/store operations (e.g., NVLink-connected GPUs on the same node).
+
+        This is a collective operation that must be called by all ranks in the LSA domain.
+
+        Unlike symm_barrier (which synchronizes all ranks in the team), symm_lsa_barrier
+        only synchronizes ranks within the same LSA domain. This is useful for:
+        - Synchronizing intra-node GPUs after direct P2P memory operations
+        - Avoiding the overhead of global synchronization when only local sync is needed
+        - Implementing hierarchical synchronization patterns
+
+        Common usage pattern:
+          1. All ranks in LSA domain perform local operations (P2P loads/stores)
+          2. Call symm_lsa_barrier to ensure all LSA-local operations are visible
+          3. Proceed with operations that depend on data from LSA peers
+
+        This function dispatches to either the unified frontend (runtime dispatch)
+        or a backend-specific implementation based on the backend hint.
+
+        Maps to:
+        - NVSHMEM: nvshmemx_team_barrier_block(lsa_team)
+        - NCCL: ncclLsaBarrierSession with ncclTeamTagLsa
+
+        Args:
+            ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
+            backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
+                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
+                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
+                      - 2 (BACKEND_NVSHMEM): Direct NVSHMEM dispatch
+
+        Note:
+            When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
+            When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
+
+            This function asserts on invalid context.
+        """
+        # Use integer literals for comparison since Triton can't access globals
+        # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
+        if backend == 0:  # BACKEND_DEFAULT
+            # Runtime dispatch based on SymmContext type
+            _symm_lsa_barrier_frontend(ctx_ptr)
+        elif backend == 2:  # BACKEND_NVSHMEM
+            # Direct NVSHMEM dispatch
+            _nvshmem_symm_lsa_barrier(ctx_ptr)
+        else:
+            # BACKEND_NCCL (1) or unknown - not supported
+            # NCCL does not provide device bitcode library
+            tl.static_assert(
+                False,
+                "NCCL backend not supported (no device bitcode library available)",
+            )
+
+    @triton.jit
     def symm_fence(
         ctx_ptr,
         scope: tl.constexpr,
@@ -1148,18 +1280,18 @@ if TRITON_AVAILABLE:
             )
 
     # =========================================================================
-    # SYMM_REMOTE_PTR - GET DEVICE POINTER TO PEER'S SYMMETRIC BUFFER
+    # SYMM_LSA_PTR - GET DEVICE POINTER TO PEER'S SYMMETRIC BUFFER
     # =========================================================================
 
     @core.extern
-    def _symm_remote_ptr_frontend(
+    def _symm_lsa_ptr_frontend(
         ctx_ptr,
         local_ptr,
         peer,
         _semantic=None,
     ):
         """
-        Frontend remote pointer operation that dispatches based on SymmContext type.
+        Frontend LSA pointer operation that dispatches based on SymmContext type.
 
         Gets a device pointer to the peer's symmetric buffer. This pointer can be
         used for direct P2P access via tl.load/tl.store if the peer is accessible
@@ -1178,21 +1310,21 @@ if TRITON_AVAILABLE:
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int64"),  # local_ptr
                     core.dtype("int32"),  # peer
-                ): ("symm_remote_ptr", core.dtype("int64")),
+                ): ("symm_lsa_ptr", core.dtype("int64")),
             },
             is_pure=True,  # Pure function - just returns a pointer
             _semantic=_semantic,
         )
 
     @core.extern
-    def _nvshmem_symm_remote_ptr(
+    def _nvshmem_symm_lsa_ptr(
         ctx_ptr,
         local_ptr,
         peer,
         _semantic=None,
     ):
         """
-        NVSHMEM-specific remote pointer operation.
+        NVSHMEM-specific LSA pointer operation.
 
         Gets a device pointer to the peer's symmetric buffer using NVSHMEM.
         Maps to nvshmem_ptr().
@@ -1210,25 +1342,25 @@ if TRITON_AVAILABLE:
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int64"),  # local_ptr
                     core.dtype("int32"),  # peer
-                ): ("nvshmem_symm_remote_ptr", core.dtype("int64")),
+                ): ("nvshmem_symm_lsa_ptr", core.dtype("int64")),
             },
             is_pure=True,  # Pure function - just returns a pointer
             _semantic=_semantic,
         )
 
     # =========================================================================
-    # SYMM_MULTICAST_PTR - GET MULTICAST POINTER FOR BROADCASTING
+    # SYMM_LSA_MULTICAST_PTR - GET MULTICAST POINTER FOR BROADCASTING
     # =========================================================================
 
     @core.extern
-    def _symm_multicast_ptr_frontend(
+    def _symm_lsa_multicast_ptr_frontend(
         ctx_ptr,
         local_ptr,
         team_ptr,
         _semantic=None,
     ):
         """
-        Frontend multicast pointer operation that dispatches based on SymmContext type.
+        Frontend LSA multicast pointer operation that dispatches based on SymmContext type.
 
         Gets a multicast pointer for broadcasting to all peers. This is used for
         efficient one-to-many communication where the same data is sent to all
@@ -1249,21 +1381,21 @@ if TRITON_AVAILABLE:
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int64"),  # local_ptr
                     core.dtype("int64"),  # team_ptr (pointer to SymmTeam)
-                ): ("symm_multicast_ptr", core.dtype("int64")),
+                ): ("symm_lsa_multicast_ptr", core.dtype("int64")),
             },
             is_pure=True,  # Pure function - just returns a pointer
             _semantic=_semantic,
         )
 
     @core.extern
-    def _nvshmem_symm_multicast_ptr(
+    def _nvshmem_symm_lsa_multicast_ptr(
         ctx_ptr,
         local_ptr,
         team_ptr,
         _semantic=None,
     ):
         """
-        NVSHMEM-specific multicast pointer operation.
+        NVSHMEM-specific LSA multicast pointer operation.
 
         Gets a multicast pointer for broadcasting to all peers using NVSHMEM.
         Requires hardware support (e.g., NVSwitch with multicast capability).
@@ -1283,21 +1415,21 @@ if TRITON_AVAILABLE:
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int64"),  # local_ptr
                     core.dtype("int64"),  # team_ptr (pointer to NVSHMEMSymmTeam)
-                ): ("nvshmem_symm_multicast_ptr", core.dtype("int64")),
+                ): ("nvshmem_symm_lsa_multicast_ptr", core.dtype("int64")),
             },
             is_pure=True,  # Pure function - just returns a pointer
             _semantic=_semantic,
         )
 
     @triton.jit
-    def symm_remote_ptr(
+    def symm_lsa_ptr(
         ctx_ptr,
         local_ptr,
         peer,
         backend: tl.constexpr = 0,
     ):
         """
-        Get a device pointer to peer's symmetric buffer for direct P2P access.
+        Get a device pointer to peer's symmetric buffer for direct P2P/LSA access.
 
         This function returns a device pointer that can be used for direct
         tl.load/tl.store operations to access the peer's symmetric buffer.
@@ -1305,7 +1437,7 @@ if TRITON_AVAILABLE:
         returns 0 (null pointer).
 
         Usage pattern:
-          peer_ptr = symm_remote_ptr(ctx, my_local_ptr, peer_rank)
+          peer_ptr = symm_lsa_ptr(ctx, my_local_ptr, peer_rank)
           if peer_ptr != 0:
               data = tl.load(peer_ptr + offset)  # Direct P2P read
               tl.store(peer_ptr + offset, value)  # Direct P2P write
@@ -1337,10 +1469,10 @@ if TRITON_AVAILABLE:
         # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
         if backend == 0:  # BACKEND_DEFAULT
             # Runtime dispatch based on SymmContext type
-            return _symm_remote_ptr_frontend(ctx_ptr, local_ptr, peer)
+            return _symm_lsa_ptr_frontend(ctx_ptr, local_ptr, peer)
         elif backend == 2:  # BACKEND_NVSHMEM
             # Direct NVSHMEM dispatch
-            return _nvshmem_symm_remote_ptr(ctx_ptr, local_ptr, peer)
+            return _nvshmem_symm_lsa_ptr(ctx_ptr, local_ptr, peer)
         else:
             # BACKEND_NCCL (1) or unknown - not supported
             # NCCL does not provide device bitcode library
@@ -1351,14 +1483,14 @@ if TRITON_AVAILABLE:
             return 0
 
     @triton.jit
-    def symm_multicast_ptr(
+    def symm_lsa_multicast_ptr(
         ctx_ptr,
         local_ptr,
         team_ptr,
         backend: tl.constexpr = 0,
     ):
         """
-        Get a multicast pointer for broadcasting to all peers.
+        Get a multicast pointer for broadcasting to all peers via LSA.
 
         This function returns a multicast pointer that can be used for efficient
         one-to-many communication. When data is stored to this pointer, it is
@@ -1368,7 +1500,7 @@ if TRITON_AVAILABLE:
         with multicast capability).
 
         Usage pattern:
-          mc_ptr = symm_multicast_ptr(ctx, my_local_ptr, team_ptr)
+          mc_ptr = symm_lsa_multicast_ptr(ctx, my_local_ptr, team_ptr)
           if mc_ptr != 0:
               tl.store(mc_ptr + offset, value)  # Broadcast to all peers
 
@@ -1399,10 +1531,10 @@ if TRITON_AVAILABLE:
         # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
         if backend == 0:  # BACKEND_DEFAULT
             # Runtime dispatch based on SymmContext type
-            return _symm_multicast_ptr_frontend(ctx_ptr, local_ptr, team_ptr)
+            return _symm_lsa_multicast_ptr_frontend(ctx_ptr, local_ptr, team_ptr)
         elif backend == 2:  # BACKEND_NVSHMEM
             # Direct NVSHMEM dispatch
-            return _nvshmem_symm_multicast_ptr(ctx_ptr, local_ptr, team_ptr)
+            return _nvshmem_symm_lsa_multicast_ptr(ctx_ptr, local_ptr, team_ptr)
         else:
             # BACKEND_NCCL (1) or unknown - not supported
             # NCCL does not provide device bitcode library
@@ -1679,7 +1811,7 @@ if TRITON_AVAILABLE:
         load/store operations (e.g., NVLink-connected GPUs on the same node).
 
         This is useful for optimizing communication patterns:
-        - Peers in LSA domain: Use direct memory access (symm_remote_ptr + tl.load/store)
+        - Peers in LSA domain: Use direct memory access (symm_lsa_ptr + tl.load/store)
         - Peers outside LSA: Use explicit put/get operations
 
         Args:
@@ -1717,13 +1849,13 @@ if TRITON_AVAILABLE:
         Check if a peer rank is in the same LSA domain as the caller.
 
         Returns 1 (true) if the peer can be accessed via direct load/store operations
-        (e.g., via symm_remote_ptr), 0 (false) if explicit communication is required.
+        (e.g., via symm_lsa_ptr), 0 (false) if explicit communication is required.
 
         Usage pattern:
           is_lsa = symm_team_lsa(team, peer)
           if is_lsa == 1:
               # Direct memory access available
-              peer_ptr = symm_remote_ptr(ctx, local_ptr, peer)
+              peer_ptr = symm_lsa_ptr(ctx, local_ptr, peer)
               data = tl.load(peer_ptr + offset)
           else:
               # Use explicit get operation
@@ -2740,14 +2872,17 @@ else:
     def symm_barrier(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_barrier")
 
+    def symm_lsa_barrier(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_lsa_barrier")
+
     def symm_fence(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_fence")
 
-    def symm_remote_ptr(*args, **kwargs):  # type: ignore[misc]
-        raise ImportError("Triton is required for symm_remote_ptr")
+    def symm_lsa_ptr(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_lsa_ptr")
 
-    def symm_multicast_ptr(*args, **kwargs):  # type: ignore[misc]
-        raise ImportError("Triton is required for symm_multicast_ptr")
+    def symm_lsa_multicast_ptr(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_lsa_multicast_ptr")
 
     def symm_team_size(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_team_size")
@@ -2764,8 +2899,8 @@ else:
     def symm_signal(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_signal")
 
-    def symm_signal_ptr(*args, **kwargs):  # type: ignore[misc]
-        raise ImportError("Triton is required for symm_signal_ptr")
+    def symm_lsa_signal_ptr(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_lsa_signal_ptr")
 
     def symm_signal_wait_until(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_signal_wait_until")
@@ -2812,11 +2947,12 @@ __all__ = [
     # Ordering primitives
     "symm_quiet",
     "symm_barrier",
+    "symm_lsa_barrier",
     "symm_fence",
     # Memory primitives
-    "symm_remote_ptr",
-    "symm_multicast_ptr",
-    "symm_signal_ptr",
+    "symm_lsa_ptr",
+    "symm_lsa_multicast_ptr",
+    "symm_lsa_signal_ptr",
     # Team primitives
     "symm_team_size",
     "symm_team_rank",

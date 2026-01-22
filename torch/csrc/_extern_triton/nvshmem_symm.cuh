@@ -184,9 +184,33 @@ __device__ void nvshmem_fence_impl(
 }
 
 /**
- * NVSHMEM backend implementation of remote_ptr.
+ * NVSHMEM backend implementation of lsa_barrier.
+ *
+ * Performs barrier synchronization among ranks in the same LSA (Local Symmetric
+ * Access) domain. Only ranks that can directly access each other's memory via
+ * load/store operations participate in this barrier.
+ *
+ * This is useful for synchronizing within a local group (e.g., GPUs on the same
+ * node with NVLink connectivity) without waiting for remote ranks.
+ *
+ * Uses nvshmemx_barrier_block(NVSHMEM_TEAM_SHARED) for synchronization within
+ * the LSA domain. NVSHMEM_TEAM_SHARED (value 1) represents PEs that share
+ * memory on the same node.
+ *
+ * @param nvshmem_ctx NVSHMEM context (unused, for API consistency)
  */
-__device__ int64_t nvshmem_remote_ptr_impl(
+__device__ void nvshmem_lsa_barrier_impl(NVSHMEMSymmContext* nvshmem_ctx) {
+  // NVSHMEM_TEAM_SHARED (value 1) represents PEs that share memory (same node)
+  constexpr int32_t NVSHMEM_TEAM_SHARED = 1;
+
+  // Use nvshmemx_barrier_block with NVSHMEM_TEAM_SHARED for LSA domain barrier
+  nvshmemx_barrier_block(NVSHMEM_TEAM_SHARED);
+}
+
+/**
+ * NVSHMEM backend implementation of lsa_ptr.
+ */
+__device__ int64_t nvshmem_lsa_ptr_impl(
     NVSHMEMSymmContext* nvshmem_ctx,
     int64_t local_ptr,
     int32_t peer) {
@@ -196,9 +220,9 @@ __device__ int64_t nvshmem_remote_ptr_impl(
 }
 
 /**
- * NVSHMEM backend implementation of multicast_ptr.
+ * NVSHMEM backend implementation of lsa_multicast_ptr.
  */
-__device__ int64_t nvshmem_multicast_ptr_impl(
+__device__ int64_t nvshmem_lsa_multicast_ptr_impl(
     NVSHMEMSymmContext* nvshmem_ctx,
     int64_t local_ptr,
     NVSHMEMSymmTeam* nvshmem_team) {
@@ -258,7 +282,7 @@ __device__ void nvshmem_signal_impl(
 }
 
 /**
- * NVSHMEM backend implementation of signal_ptr.
+ * NVSHMEM backend implementation of lsa_signal_ptr.
  *
  * Returns a device pointer to a peer's LSA signal pad, if accessible via P2P.
  * This allows direct load/store access to the peer's signal memory.
@@ -272,7 +296,7 @@ __device__ void nvshmem_signal_impl(
  * @return Device pointer to peer's LSA signal pad, or 0 if not accessible
  */
 __device__ int64_t
-nvshmem_signal_ptr_impl(NVSHMEMSymmContext* nvshmem_ctx, int32_t peer) {
+nvshmem_lsa_signal_ptr_impl(NVSHMEMSymmContext* nvshmem_ctx, int32_t peer) {
   // Get the LSA signal pad from the context (used for P2P load/store)
   TORCH_SYMM_CHECK(
       nvshmem_ctx->lsa_signal_pad != nullptr, "lsa_signal_pad is null");
@@ -541,19 +565,36 @@ __device__ int32_t nvshmem_symm_fence(int64_t ctx_ptr, int32_t scope) {
 }
 
 /**
- * NVSHMEM-specific wrapper for remote_ptr operation.
+ * NVSHMEM-specific wrapper for lsa_barrier operation.
+ *
+ * Performs barrier synchronization among ranks in the same LSA (Local Symmetric
+ * Access) domain. Only ranks that can directly access each other's memory via
+ * load/store operations participate in this barrier.
+ *
+ * @param ctx_ptr Pointer to SymmContext (as int64)
+ * @return 0 on success
  */
-__device__ int64_t
-nvshmem_symm_remote_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+__device__ int32_t nvshmem_symm_lsa_barrier(int64_t ctx_ptr) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
-  return nvshmem_remote_ptr_impl(nvshmem_ctx, local_ptr, peer);
+  nvshmem_lsa_barrier_impl(nvshmem_ctx);
+  return 0;
 }
 
 /**
- * NVSHMEM-specific wrapper for multicast_ptr operation.
+ * NVSHMEM-specific wrapper for lsa_ptr operation.
  */
-__device__ int64_t nvshmem_symm_multicast_ptr(
+__device__ int64_t
+nvshmem_symm_lsa_ptr(int64_t ctx_ptr, int64_t local_ptr, int32_t peer) {
+  SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
+  NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
+  return nvshmem_lsa_ptr_impl(nvshmem_ctx, local_ptr, peer);
+}
+
+/**
+ * NVSHMEM-specific wrapper for lsa_multicast_ptr operation.
+ */
+__device__ int64_t nvshmem_symm_lsa_multicast_ptr(
     int64_t ctx_ptr,
     int64_t local_ptr,
     int64_t team_ptr) {
@@ -561,7 +602,7 @@ __device__ int64_t nvshmem_symm_multicast_ptr(
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
   SymmTeam* team = reinterpret_cast<SymmTeam*>(team_ptr);
   NVSHMEMSymmTeam* nvshmem_team = cast_to_nvshmem_team(team);
-  return nvshmem_multicast_ptr_impl(nvshmem_ctx, local_ptr, nvshmem_team);
+  return nvshmem_lsa_multicast_ptr_impl(nvshmem_ctx, local_ptr, nvshmem_team);
 }
 
 /**
@@ -591,7 +632,7 @@ __device__ int32_t nvshmem_symm_signal(
 }
 
 /**
- * NVSHMEM-specific wrapper for signal_ptr operation.
+ * NVSHMEM-specific wrapper for lsa_signal_ptr operation.
  *
  * Returns a device pointer to a peer's LSA signal pad, if accessible via P2P.
  * This allows direct load/store access to the peer's signal memory.
@@ -600,10 +641,10 @@ __device__ int32_t nvshmem_symm_signal(
  * @param peer Peer PE number to get signal pad pointer for
  * @return Device pointer to peer's LSA signal pad, or 0 if not accessible
  */
-__device__ int64_t nvshmem_symm_signal_ptr(int64_t ctx_ptr, int32_t peer) {
+__device__ int64_t nvshmem_symm_lsa_signal_ptr(int64_t ctx_ptr, int32_t peer) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
-  return nvshmem_signal_ptr_impl(nvshmem_ctx, peer);
+  return nvshmem_lsa_signal_ptr_impl(nvshmem_ctx, peer);
 }
 
 /**
