@@ -9,6 +9,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._ltensor import (
     _get_dim_name_from_group,
     LTensor,
+    ltensor_custom_function_call,
     register_variance_tracking_strategy,
 )
 from torch.distributed.tensor.placement_types import Replicate, Shard
@@ -231,7 +232,7 @@ def _custom_all_reduce_variance(
             f"Could not find mesh dim for group {group_name}. "
             f"Available dims: {mesh.mesh_dim_names}"
         )
-    return input_variant_dims - {dim_name}
+    return input_variant_dims - {dim_name}, input_reduced_dims
 
 
 class TestRegisterVarianceForFunction(MultiThreadedTestCase):
@@ -322,6 +323,108 @@ class TestRegisterVarianceForFunction(MultiThreadedTestCase):
         # Result should be LTensor with same variant dims (union = original)
         self.assertIsInstance(result, LTensor)
         self.assertEqual(result.variant_dims, {"dp"})
+
+
+class TestLTensorFunctionCall(MultiThreadedTestCase):
+    """Tests for ltensor_custom_function_call with custom autograd.Function."""
+
+    @property
+    def world_size(self):
+        return 4
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def test_ltensor_custom_function_call_with_strategy(self):
+        """Test ltensor_custom_function_call with a registered variance strategy."""
+        mesh = DeviceMesh(
+            DEVICE,
+            torch.arange(self.world_size),
+            mesh_dim_names=("dp",),
+        )
+
+        # Create variant LTensor
+        local_tensor = torch.randn(4, 8, device=DEVICE)
+        ltensor = LTensor(local_tensor, {"dp"}, set(), mesh)
+
+        # Use the existing CustomAllReduceFunction which has a registered strategy
+        group_name = mesh.get_group("dp").group_name
+        result = ltensor_custom_function_call(
+            CustomAllReduceFunction, ltensor, "sum", group_name
+        )
+
+        # Strategy removes 'dp' from variant dims
+        self.assertIsInstance(result, LTensor)
+        self.assertEqual(result.variant_dims, set())
+        # Context should be reset after call
+        self.assertEqual(ltensor.custom_function_context, False)
+        self.assertEqual(result.custom_function_context, False)
+
+    def test_ltensor_custom_function_call_passthrough(self):
+        """Test ltensor_custom_function_call with all_reduce that preserves LTensor."""
+        mesh = DeviceMesh(
+            DEVICE,
+            torch.arange(self.world_size),
+            mesh_dim_names=("dp",),
+        )
+
+        class AllReducePassthrough(torch.autograd.Function):
+            """Custom all_reduce that operates on LTensor and returns LTensor.
+
+            This pattern is used when the autograd.Function internally handles
+            variance tracking by operating on LTensors directly. The variance
+            tracking strategy for all_reduce automatically updates variant dims.
+            """
+
+            @staticmethod
+            def forward(ctx, x, group_name):
+                ctx.group_name = group_name
+                # Perform all_reduce on the LTensor - this goes through
+                # LTensor.__torch_function__ which applies variance tracking
+                # strategy and wraps the result as LTensor with correct dims
+                result = all_reduce(x, "sum", group_name)
+                return torch.ops._c10d_functional.wait_tensor(result)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                # Identity backward - gradient is already reduced
+                return grad_output, None
+
+        local_tensor = torch.randn(4, 8, device=DEVICE)
+        ltensor = LTensor(local_tensor, {"dp"}, set(), mesh)
+
+        group_name = mesh.get_group("dp").group_name
+        result = ltensor_custom_function_call(AllReducePassthrough, ltensor, group_name)
+
+        # Result should be LTensor with 'dp' removed from variant dims
+        self.assertIsInstance(result, LTensor)
+        self.assertEqual(result.variant_dims, set())
+        self.assertEqual(result.custom_function_context, False)
+
+    def test_custom_function_context_skips_mark_varying(self):
+        """Test that mark_varying is skipped when in custom_function_context."""
+        mesh = DeviceMesh(
+            DEVICE,
+            torch.arange(self.world_size),
+            mesh_dim_names=("dp",),
+        )
+
+        # Create LTensors with different variant dims
+        tensor1 = torch.randn(4, 4, device=DEVICE)
+        tensor2 = torch.randn(4, 4, device=DEVICE)
+
+        ltensor1 = LTensor(tensor1, {"dp"}, set(), mesh, custom_function_context=True)
+        ltensor2 = LTensor(tensor2, set(), set(), mesh, custom_function_context=True)
+
+        # Normally adding these would insert mark_varying for ltensor2,
+        # but in custom_function_context it should be skipped
+        result = ltensor1 + ltensor2
+
+        self.assertIsInstance(result, LTensor)
+        self.assertEqual(result.variant_dims, {"dp"})
+        # custom_function_context should be preserved
+        self.assertEqual(result.custom_function_context, True)
 
 
 if __name__ == "__main__":
