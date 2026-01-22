@@ -428,6 +428,11 @@ def estimate_nccl_collective_runtime_from_fx_node(
     """
     from torch.distributed.distributed_c10d import _get_group_size_by_name
 
+    if fx_node.target is torch.ops._c10d_functional.all_to_all_single.default:
+        # TODO(ivankobzarev): Temporarily disabled - NCCL estimator returns internal error.
+        # for all_to_all during inductor compilation. Falls back to heuristic estimation.
+        use_nccl_estimator = False
+
     if override_size is None:
         tensor_storage_size_bytes = estimate_fx_collective_size(fx_node)
     else:
