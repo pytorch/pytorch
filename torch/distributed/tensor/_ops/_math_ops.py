@@ -17,7 +17,6 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops._pointwise_ops import linear_pointwise_strategy
 from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -484,9 +483,10 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
 
     Implements: dist(a, b, p) = linalg.vector_norm(a - b, ord=p)
 
-    Delegates to existing utilities:
-    - linear_pointwise_strategy for input alignment (subtraction)
-    - map_placements_after_reduction for placement logic
+    Uses linear_pointwise_strategy for input alignment (subtraction), then
+    applies full reduction to scalar. For Shard inputs, output is NormPartial.
+    For Partial inputs (norm is not linear over Partial), inputs are
+    redistributed to Replicate and output is Replicate.
     """
     args_schema = op_schema.args_schema
     input_strategy = cast(OpStrategy, args_schema[0])
@@ -494,11 +494,12 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
     norm_type = args_schema[2] if len(args_schema) > 2 else 2
 
     if not isinstance(norm_type, (int, float, str)):
-        raise AssertionError(
-            f"Expected int, float, or str for norm_type, got {type(norm_type)}"
-        )
+        raise AssertionError(f"Expected int/float/str, got {type(norm_type)}")
 
-    # Step 1: Align inputs via pointwise subtraction
+    # Lazy import to avoid circular dependency with _pointwise_ops
+    from torch.distributed.tensor._ops._pointwise_ops import linear_pointwise_strategy
+
+    # Align inputs via pointwise subtraction
     sub_schema = OpSchema(
         op=aten.sub.Tensor,
         args_schema=(input_strategy, other_strategy),
@@ -506,26 +507,43 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
     )
     aligned_strategy = cast(OpStrategy, linear_pointwise_strategy(sub_schema))
 
-    # Step 2: Apply reduction using existing placement logic
-    # NOTE: We can't delegate fully to common_reduction_strategy because:
-    # - linear_pointwise_strategy doesn't set tensor_meta on output specs
-    # - common_reduction_strategy needs tensor_meta to access .ndim
-    # - So we compute dimensions manually and reuse map_placements_after_reduction
-    common_shape = torch.broadcast_shapes(input_strategy.shape, other_strategy.shape)
-    result_ndim = len(common_shape)
-
-    reduce_dims = list(range(result_ndim))
-    reduce_dims_map = _infer_reduce_dims_map(reduce_dims, result_ndim, keep_dim=False)
-
+    norm_reduction = NormReduction(norm_type)
     output_strategy = OpStrategy([])
+
+    # Full reduction: all tensor dims are reduced
+    # Use broadcast shape to handle different-sized inputs correctly
+    broadcast_shape = torch.broadcast_shapes(
+        input_strategy.shape, other_strategy.shape
+    )
+    tensor_ndim = len(broadcast_shape)
+    reduce_dims = list(range(tensor_ndim))
+    reduce_dims_map = [-1] * tensor_ndim
+
     for aligned_spec in aligned_strategy.strategies:
-        # Reuse existing placement reduction logic (from common_reduction_strategy)
+        placements = aligned_spec.output_spec.placements
+        aligned_input_specs = aligned_spec.input_specs
+        assert aligned_input_specs is not None
+
+        # Check for incompatible Partial (same logic as common_reduction_strategy)
+        if any(isinstance(p, Partial) for p in placements):
+            # Redistribute Partial to Replicate before norm
+            placements = replicate_reduction_dims(placements, reduce_dims)
+            input_specs = tuple(
+                DTensorSpec(mesh=s.mesh, placements=placements)
+                for s in aligned_input_specs
+            )
+        else:
+            input_specs = tuple(aligned_input_specs)
+
         out_placements = map_placements_after_reduction(
-            aligned_spec.output_spec.placements,
-            reduce_dims,
-            reduce_dims_map,
-            NormReduction(norm_type),
+            placements, reduce_dims, reduce_dims_map, norm_reduction
         )
+
+        # Calculate redistribute costs for both inputs
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategy, input_specs[0]),
+            generate_redistribute_costs(other_strategy, input_specs[1]),
+        ]
 
         output_strategy.strategies.append(
             OpSpec(
@@ -533,8 +551,8 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
                     mesh=input_strategy.mesh,
                     placements=out_placements,
                 ),
-                input_specs=aligned_spec.input_specs,
-                redistribute_cost=aligned_spec.redistribute_cost,
+                input_specs=input_specs,
+                redistribute_cost=redistribute_cost,
             )
         )
 

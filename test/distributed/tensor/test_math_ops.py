@@ -26,6 +26,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -691,7 +692,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     def test_dist(self):
-        """Test torch.dist with DTensor (resolves TODO at line 740 in test_linalg_eigh)."""
+        """Test torch.dist with DTensor."""
         device_mesh = self.build_device_mesh()
 
         # Test with different shardings
@@ -722,7 +723,8 @@ class DistMathOpsTest(DTensorTestBase):
             dtensor_b_rep = distribute_tensor(tensor_b, device_mesh, [Replicate()])
 
             dtensor_dist_rep = torch.dist(dtensor_a_rep, dtensor_b_rep, p)
-            # With replicate inputs, result may still be partial or replicate
+            # With replicate inputs, result should be replicate (no reduction needed)
+            self.assertTrue(dtensor_dist_rep.placements[0].is_replicate())
             result_rep = dtensor_dist_rep.full_tensor()
             self.assertEqual(result_rep, ref_dist)
 
@@ -751,6 +753,30 @@ class DistMathOpsTest(DTensorTestBase):
         ref_partial_d = partial_d.full_tensor()
         ref_partial_dist = torch.dist(ref_partial_c, ref_partial_d, 2)
         self.assertEqual(dist_partial.full_tensor(), ref_partial_dist)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_dist_strided_shard(self):
+        """Test torch.dist with _StridedShard placements (2D FSDP+TP)."""
+        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+
+        tensor_a = torch.randn(8, 8, device=self.device_type)
+        tensor_b = torch.randn(8, 8, device=self.device_type)
+        ref_dist = torch.dist(tensor_a, tensor_b, 2)
+
+        # _StridedShard for right-to-left sharding order (TP first, then FSDP)
+        placements = [_StridedShard(0, split_factor=self.world_size // 2), Shard(0)]
+        dtensor_a = distribute_tensor(tensor_a, mesh_2d, placements)
+        dtensor_b = distribute_tensor(tensor_b, mesh_2d, placements)
+
+        # Verify input has _StridedShard placement
+        self.assertIsInstance(dtensor_a.placements[0], _StridedShard)
+
+        # dist should convert both Shard/_StridedShard to Partial
+        dtensor_dist = torch.dist(dtensor_a, dtensor_b, 2)
+        self.assertTrue(dtensor_dist.placements[0].is_partial())
+        self.assertTrue(dtensor_dist.placements[1].is_partial())
+        self.assertEqual(dtensor_dist.full_tensor(), ref_dist)
 
     @with_comms
     def test_foreach_norm(self):
