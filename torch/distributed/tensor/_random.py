@@ -18,25 +18,30 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
-    "ThreadBasedRNGTracker",
-    "_USE_THREAD_RNG_TRACKER",
-    "_use_thread_rng_tracker",
+    "set_use_thread_based_rng",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
 
-_USE_THREAD_RNG_TRACKER: bool = True
+# Config flag to select which RNG tracker to use
+# When True, use ThreadBasedRNGTracker (sharded kernel)
+# When False, use OffsetBasedRNGTracker (original kernel)
+_USE_THREAD_RNG_TRACKER: bool = False
 
 
-@contextlib.contextmanager
-def _use_thread_rng_tracker(enabled: bool = True):
+def set_use_thread_based_rng(
+    use_thread_based: bool, device: Optional[torch.device] = None
+) -> None:
+    """Sets whether to use ThreadBasedRNGTracker or OffsetBasedRNGTracker for random ops."""
     global _USE_THREAD_RNG_TRACKER
-    old_value = _USE_THREAD_RNG_TRACKER
-    _USE_THREAD_RNG_TRACKER = enabled
-    try:
-        yield
-    finally:
-        _USE_THREAD_RNG_TRACKER = old_value
+    _USE_THREAD_RNG_TRACKER = use_thread_based
+
+    # If device is provided and is CUDA, also set the flag on the generator
+    if device is not None and device.type == "cuda":
+        device_handle = _get_device_handle(device.type)
+        if device_handle is not None:
+            for generator in device_handle.default_generators:
+                generator.set_use_thread_based_rng(use_thread_based)
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -111,6 +116,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
             _rng_tracker = ThreadBasedRNGTracker(device_mesh)
         else:
             _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
+
 
     if device_mesh.get_coordinate() is None:
         raise RuntimeError(

@@ -12,6 +12,10 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/detail/XPUHooksInterface.h>
 
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAGeneratorImpl.h>
+#endif
+
 #include <structmember.h>
 #include <utility>
 
@@ -222,6 +226,48 @@ static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPGenerator_setUseThreadBasedRng(PyObject* _self, PyObject* value) {
+  HANDLE_TH_ERRORS
+  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto& gen = self->cdata;
+
+  TORCH_CHECK(
+      PyBool_Check(value),
+      "set_use_thread_based_rng expected a bool, but got ",
+      THPUtils_typename(value));
+  bool use_thread_based = (value == Py_True);
+
+  // Check if this is a CUDA generator
+  if (gen.device().type() == at::kCUDA) {
+    auto cuda_gen = at::check_generator<at::CUDAGeneratorImpl>(gen);
+    std::scoped_lock<std::mutex> lock(gen.mutex());
+    cuda_gen->set_use_thread_based_rng(use_thread_based);
+  } else {
+    TORCH_CHECK(false, "set_use_thread_based_rng is only supported for CUDA generators");
+  }
+
+  Py_INCREF(self);
+  return reinterpret_cast<PyObject*>(self);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPGenerator_getUseThreadBasedRng(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto& gen = self->cdata;
+
+  // Check if this is a CUDA generator
+  if (gen.device().type() == at::kCUDA) {
+    auto cuda_gen = at::check_generator<at::CUDAGeneratorImpl>(gen);
+    std::scoped_lock<std::mutex> lock(gen.mutex());
+    bool result = cuda_gen->use_thread_based_rng();
+    return PyBool_FromLong(result);
+  } else {
+    TORCH_CHECK(false, "use_thread_based_rng is only supported for CUDA generators");
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
@@ -304,6 +350,8 @@ static PyMethodDef THPGenerator_methods[] = {
     {"seed", THPGenerator_seed, METH_NOARGS, nullptr},
     {"initial_seed", THPGenerator_initialSeed, METH_NOARGS, nullptr},
     {"get_offset", THPGenerator_getOffset, METH_NOARGS, nullptr},
+    {"set_use_thread_based_rng", THPGenerator_setUseThreadBasedRng, METH_O, nullptr},
+    {"use_thread_based_rng", THPGenerator_getUseThreadBasedRng, METH_NOARGS, nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
