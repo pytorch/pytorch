@@ -1443,6 +1443,32 @@ Tensor min_mps(const Tensor& input_t) {
   return min_max_mps_impl(input_t, MPSReductionType::MIN, "min_mps");
 }
 
+// Max entire tensor into pre-allocated output
+Tensor& max_unary_out_mps(const Tensor& self, Tensor& out) {
+  TORCH_CHECK(self.device() == out.device(), "Expected self and out to be on the same device, but got ",
+              self.device(), " and ", out.device());
+  at::native::resize_output(out, {});
+  if (self.numel() == 0) {
+    return out;
+  }
+  Tensor result = min_max_mps_impl(self, MPSReductionType::MAX, "max_unary_out_mps");
+  out.copy_(result);
+  return out;
+}
+
+// Min entire tensor into pre-allocated output
+Tensor& min_unary_out_mps(const Tensor& self, Tensor& out) {
+  TORCH_CHECK(self.device() == out.device(), "Expected self and out to be on the same device, but got ",
+              self.device(), " and ", out.device());
+  at::native::resize_output(out, {});
+  if (self.numel() == 0) {
+    return out;
+  }
+  Tensor result = min_max_mps_impl(self, MPSReductionType::MIN, "min_unary_out_mps");
+  out.copy_(result);
+  return out;
+}
+
 // Max out with dim
 TORCH_IMPL_FUNC(max_out_mps)
 (const Tensor& input_t, int64_t dim, bool keepdim, const Tensor& output_t, const Tensor& indices_t) {

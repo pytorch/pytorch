@@ -10246,6 +10246,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: min_unary_out
+    MPS: min_unary_out_mps
     QuantizedCPU: min_quantized_unary_out
   tags: [reduction]
 
@@ -10316,6 +10317,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: max_unary_out
+    MPS: max_unary_out_mps
     QuantizedCPU: max_quantized_unary_out
   tags: [reduction]
 
