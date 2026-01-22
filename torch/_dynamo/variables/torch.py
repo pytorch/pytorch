@@ -45,6 +45,7 @@ from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
+from torch._ops import has_pytree_input
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -2127,6 +2128,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        import torch._higher_order_ops.flat_apply as flat_apply
+
         from . import ConstantVariable, SymNodeVariable
         from .builder import wrap_fx_proxy
 
@@ -2189,6 +2192,50 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             result = special_handler(self, tx, *args, **kwargs)
             if result:
                 return result
+
+        if isinstance(self.value, torch._ops.OpOverload):
+            op_overload = self.value
+        else:
+            assert isinstance(self.value, torch._ops.OpOverloadPacket)
+            op_overload = self.value.default
+
+        if has_pytree_input(op_overload._schema):
+            packed_input_vt = TupleVariable.build(
+                tx,
+                (
+                    variables.TupleVariable.build(tx, args),
+                    variables.ConstDictVariable.build(tx, kwargs),
+                ),
+            )
+            flat_args_and_spec = variables.UserFunctionVariable(
+                _pytree.tree_flatten
+            ).call_function(tx, [packed_input_vt], {})
+
+            assert isinstance(flat_args_and_spec, variables.TupleVariable)
+            flat_args_vt, in_spec_vt = flat_args_and_spec.items
+            assert isinstance(flat_args_vt, variables.ListVariable)
+            in_spec = in_spec_vt.as_python_constant()
+            in_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+                f"{op_overload._namespace}_{op_overload._opname}_input_spec", in_spec
+            )
+
+            proxified_flat_args = [
+                flat_arg_vt.as_proxy() for flat_arg_vt in flat_args_vt.items
+            ]
+
+            in_spec_proxy.node.type = type(in_spec)
+            all_args = (op_overload, in_spec_proxy, *proxified_flat_args)
+
+            out_vt = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    flat_apply,
+                    all_args,
+                    {},
+                ),
+            )
+            return out_vt
 
         any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
 

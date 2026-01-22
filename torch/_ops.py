@@ -1480,5 +1480,20 @@ class _Ops(types.ModuleType):
         self.loaded_libraries.add(path)
 
 
+def has_pytree_input(op_schema: torch.FunctionSchema) -> bool:
+    """
+    Check if an operator schema has any pytree input arguments.
+    """
+    for arg in op_schema.arguments:
+        if (
+            isinstance(
+                arg.type, torch.PyObjectType  # pyrefly: ignore[missing-attribute]
+            )
+            and pytree.is_pytree_type(str(arg.type))
+        ):
+            return True
+    return False
+
+
 # The ops "namespace"
 ops: _Ops = _Ops()

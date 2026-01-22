@@ -112,6 +112,15 @@ namespace {
           auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
           (*stack)[arguments_begin + idx] = t_new;
         }
+      } else if (ivalue.isPyObject()) {
+        // Handle PyObject arguments (e.g., pytree inputs like dict containing tensors).
+        // The PyObject may contain functional tensors that need to be synced and unwrapped.
+        auto py_obj_holder = ivalue.toPyObjectHolder();
+        auto [holder, has_tensor_inputs, has_functional_inputs] =
+            py_obj_holder->functionalizePyObject();
+        any_tensor_inputs |= has_tensor_inputs;
+        any_functional_inputs |= has_functional_inputs;
+        (*stack)[arguments_begin + idx] = c10::IValue(std::move(holder));
       }
     }
     // we should wrap the output if any inputs were wrapped,

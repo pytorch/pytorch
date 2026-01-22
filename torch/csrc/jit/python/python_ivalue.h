@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/core/ivalue.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -76,6 +77,25 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
       }
       throw std::runtime_error(err);
     }
+  }
+
+  std::tuple<c10::intrusive_ptr<PyObjectHolder>, bool, bool>
+  functionalizePyObject() override {
+    // Sync and unwrap functional tensors inside the PyObject using pytree.
+    // This is used by functionalization fallback for PyObject arguments.
+    pybind11::gil_scoped_acquire ag;
+    py::object fn = py::module_::import("torch._functorch.eager_transforms")
+                        .attr("_unwrap_functional_pytree");
+    bool reapply_views =
+        at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+    py::tuple result = fn(py_obj_, "reapply_views"_a = reapply_views);
+    py::object unwrapped = result[0];
+    bool any_tensor_inputs = result[1].cast<bool>();
+    bool any_functional_inputs = result[2].cast<bool>();
+    return {
+        ConcretePyObjectHolder::create(std::move(unwrapped)),
+        any_tensor_inputs,
+        any_functional_inputs};
   }
 
   // Note [Destructing py::object]

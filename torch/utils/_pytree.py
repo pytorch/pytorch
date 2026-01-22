@@ -176,6 +176,12 @@ class _SerializeNodeDef(NamedTuple):
 
 SUPPORTED_SERIALIZED_TYPES: dict[type[Any], _SerializeNodeDef] = {}
 SERIALIZED_TYPE_TO_PYTHON_TYPE: dict[str, type[Any]] = {}
+_PYTREE_CLASS_NAME_TO_TYPE: dict[str, type[Any]] = {}
+
+
+def is_pytree_type(class_name: str) -> bool:
+    return class_name in _PYTREE_CLASS_NAME_TO_TYPE
+
 
 # NB: we try really hard to not import _cxx_pytree (which depends on optree)
 # as much as possible. This is for isolation: a user who is not using C++ pytree
@@ -594,6 +600,7 @@ def _deregister_pytree_node(
         node_def = SUPPORTED_SERIALIZED_TYPES[cls]
         del SERIALIZED_TYPE_TO_PYTHON_TYPE[node_def.serialized_type_name]
         del SUPPORTED_SERIALIZED_TYPES[cls]
+        del _PYTREE_CLASS_NAME_TO_TYPE[node_def.class_name]
         CONSTANT_NODES.discard(cls)
 
         if torch._C._is_python_type_registered(node_def.class_name):
@@ -657,6 +664,7 @@ def _private_register_pytree_node(
         )
         SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
         SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
+        _PYTREE_CLASS_NAME_TO_TYPE[class_name] = cls
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
