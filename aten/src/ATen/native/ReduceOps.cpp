@@ -700,7 +700,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // here we compute
     // dy_j / dx_z1 = sum(cumprod(input[z1+1:z2] * grad[z1+1:z2])) * prod(output[z1-1])
     // relu_() necessary as gather does not support negative indices
-    // Compute gradient at the first zero position
+    // finally, we do grad_input[z1] = dy_j / dx_z1
     // Using at::where instead of masked_scatter_ for composite compliance
     auto grad_at_first_zero = input_conj.masked_fill(~mask, 1.).cumprod(dim)
                                   .mul_(grad.masked_fill(cumsum != 1, 0.))
