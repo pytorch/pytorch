@@ -235,6 +235,9 @@ class InductorChoices:
             ]:
                 return True
 
+        if config.origami:
+            # we always need to fix the layout
+            return True
         # Since the following backends are not using get_mm_configs yet through the singular call,
         if not (config.max_autotune or config.max_autotune_gemm):
             # no danger of using other backends than ATEN

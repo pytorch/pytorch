@@ -2346,6 +2346,17 @@ def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     )
 
 
+def use_origami_gemm_template(layout: Layout) -> bool:
+    if (torch.version.hip is not None) and (config.origami):
+        try:
+            import origami  # type: ignore
+        except ImportError:
+            print("Origami not imported")
+            return False
+        return use_triton_template(layout, check_max_autotune=False)
+    return False
+
+
 def use_ck_conv_template(layout: Layout) -> bool:
     return _use_conv_autotune_backend("CK") and use_ck_template(layout)
 
@@ -2447,7 +2458,7 @@ def use_cpp_gemm_template(
 
 def use_aten_gemm_kernels() -> bool:
     return not (
-        config.max_autotune or config.max_autotune_gemm
+        config.max_autotune or config.max_autotune_gemm or config.origami
     ) or _use_autotune_backend("ATEN")
 
 
