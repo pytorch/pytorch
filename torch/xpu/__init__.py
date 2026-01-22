@@ -11,7 +11,7 @@ import threading
 import traceback
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, NewType, Optional
+from typing import Any, Optional
 
 import torch
 import torch._C
@@ -19,7 +19,6 @@ from torch._utils import _dummy_type, _LazySeedTracker
 from torch.types import Device
 
 from ._utils import _get_device_index
-from .graphs import graph, XPUGraph
 from .streams import Event, Stream
 
 
@@ -555,7 +554,6 @@ __all__ = [
     "Stream",
     "StreamContext",
     "XPUPluggableAllocator",
-    "XPUGraph",
     "can_device_access_peer",
     "change_current_allocator",
     "current_device",
@@ -574,7 +572,6 @@ __all__ = [
     "get_rng_state",
     "get_rng_state_all",
     "get_stream_from_external",
-    "graph",
     "init",
     "initial_seed",
     "is_available",
