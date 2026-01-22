@@ -506,6 +506,10 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
 # Old behavior is to bubble up the graph break to the top level frame.
 nested_graph_breaks = False
 
+# Error if Dynamo gets called while running compiled code in fullgraph=True.
+# Set to false if force falling back to eager is desired.
+error_on_dynamo_callback_in_fullgraph_compiled_code = True
+
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.

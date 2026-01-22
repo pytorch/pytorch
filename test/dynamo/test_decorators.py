@@ -1033,6 +1033,89 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
 
+    def test_fullgraph_eval_frame_override(self):
+        # NOTE it is NOT enough to just call a torch.compile'd function in a compiled
+        # function returned by the backend - this is because we apply disable(recursive=True)
+        # to compiled functions and if we call a directly torch.compile'd function, that
+        # "overrides" the disable(recursive=True) - i.e. this behavior is intentional.
+
+        # Instead, we will patch symbolic_convert.InstructionTranslator.codegen_return_with_pops to
+        # append a bunch of additional bytecode that will run a function that is not disabled.
+        global inner
+
+        y = torch.ones(3)
+
+        def inner():
+            nonlocal y
+            y += 1
+
+        from torch._dynamo.bytecode_transformation import (
+            create_call_function,
+            create_instruction,
+            Instruction,
+        )
+        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+
+        old_codegen_return = InstructionTranslatorBase.codegen_return_with_pops
+
+        def codegen_return_with_pops(self, *args) -> list[Instruction]:
+            insts = old_codegen_return(*args)
+            assert insts[-1].opname.startswith("RETURN")
+            # to prevent infinite recursion
+            if self.f_code.co_name != "inner":
+                insts[-1:-1] = [
+                    create_instruction("LOAD_GLOBAL", argval="inner"),
+                    *create_call_function(0, True),
+                    create_instruction("POP_TOP"),
+                ]
+            return insts
+
+        def fn(x):
+            return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        with mock.patch(
+            "torch._dynamo.symbolic_convert.InstructionTranslatorBase.codegen_return_with_pops",
+            codegen_return_with_pops,
+        ):
+            # fullgraph=False will result in inner being traced!
+            opt_fn_1 = torch.compile(fn, backend=cnts, fullgraph=False)
+
+            # inner compiled
+            opt_fn_1(torch.ones(3))
+            self.assertEqual(cnts.frame_count, 2)
+            self.assertEqual(y, torch.ones(3) + 1)
+
+            torch._dynamo.eval_frame.reset_code(inner.__code__)
+            cnts.clear()
+            # NOTE do not fully reset dynamo - to ensure eval frame override is applied for cache hits
+            opt_fn_2 = torch.compile(fn, backend=cnts, fullgraph=True)
+
+            with torch._dynamo.config.patch(
+                error_on_dynamo_callback_in_fullgraph_compiled_code=False
+            ):
+                # fullgraph=True will result in inner being skipped!
+                opt_fn_2(torch.ones(3))
+                self.assertEqual(cnts.frame_count, 0)
+                self.assertEqual(y, torch.ones(3) + 2)
+
+            with torch._dynamo.config.patch(
+                error_on_dynamo_callback_in_fullgraph_compiled_code=True
+            ):
+                # fullgraph=True will result in error when attempting to compile inner
+                with self.assertRaisesRegex(
+                    RuntimeError, "Dynamo: expected not to compile nested code"
+                ):
+                    opt_fn_2(torch.ones(3))
+
+            torch._dynamo.eval_frame.reset_code(inner.__code__)
+            cnts.clear()
+            # if we run fullgraph=False again, inner is compiled again (because we reset_code)
+            opt_fn_1(torch.ones(3))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(y, torch.ones(3) + 3)
+
     def test_substitute_in_graph(self):
         counters.clear()
 
