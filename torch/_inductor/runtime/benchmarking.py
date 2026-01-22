@@ -12,10 +12,6 @@ import torch
 import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import (
-    use_experimental_benchmarker,
-    use_torch_profiler_benchmarker,
-)
 from torch.utils._debug_mode import DebugMode
 
 
@@ -24,7 +20,7 @@ use_experimental_benchmarker = (
     inductor_config.use_experimental_benchmarker and torch.cuda.is_available()
 )
 use_torch_profiler_benchmarker = (
-    use_torch_profiler_benchmarker and torch.cuda.is_available()
+    inductor_config.use_torch_profiler_benchmarker and torch.cuda.is_available()
 )
 
 
@@ -319,7 +315,7 @@ class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         Keyword Arguments:
         - warmup: Optionally, the number of warmup iterations to run before benchmarking.
         - rep: Optionally, the number of iterations to run during benchmarking.
-        - return_mode: Return mode for benchmark results. Options are "min", "mean" (default), 
+        - return_mode: Return mode for benchmark results. Options are "min", "mean" (default),
         or "max".
         - grad_to_none: Optionally, a list of tensors whose gradients should be cleared
         before each benchmark iteration.
@@ -356,7 +352,6 @@ class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
         torch.cuda.synchronize()
 
         # benchmark with profiler
-        timings = []
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CUDA],
             record_shapes=False,
@@ -369,7 +364,7 @@ class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 buffer.zero_()
                 _callable()
         torch.cuda.synchronize()
-        
+
         # Extract CUDA kernel time from profiler events
         # First, try to find Triton kernels (kernel names starting with "triton_")
         triton_kernel_time_us = sum(
@@ -378,7 +373,7 @@ class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             if event.device_type == torch.profiler.DeviceType.CUDA
             and event.key.startswith("triton_")
         )
-        
+
         # If no Triton kernels found, fall back to GEMM kernels from other backends
         # - "Cijk" prefix: rocBLAS/hipBLASLt GEMM kernels (rocBLAS/Tensile)
         # - Contains "gemm": CK GEMM kernels
@@ -390,7 +385,7 @@ class TorchProfilerBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
                 if event.device_type == torch.profiler.DeviceType.CUDA
                 and (event.key.startswith("Cijk") or "gemm" in event.key.lower())
             )
-        
+
         # Convert to milliseconds and compute the average time per iteration
         avg_time_ms = (triton_kernel_time_us / rep) / 1000.0
 
@@ -560,5 +555,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 benchmarker = (
     TorchProfilerBenchmarker()
     if use_torch_profiler_benchmarker
-    else (InductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker())
+    else (
+        InductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
+    )
 )
