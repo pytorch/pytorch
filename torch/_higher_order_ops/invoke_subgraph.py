@@ -918,10 +918,6 @@ def _(subgraph, identifier, *operands):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
 
-    # Check if any operands are tensor subclasses
-    if any(is_traceable_wrapper_subclass(op) for op in operands):
-        return invoke_subgraph_subclass(subgraph, identifier, *operands)
-
     if getattr(subgraph, "_boxed_call", False):
         return subgraph(list(operands))
     else:
