@@ -103,7 +103,7 @@ jobs:
         ADDITIONAL_LINTRUNNER_ARGS="--take PYREFLY --all-files" .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
-    uses: zklaus/test-infra/.github/workflows/linux_job_v2.yml@hot-fix-linux_job
+    uses: zklaus/test-infra/.github/workflows/linux_job_v2.yml@update-linux-job-v2
     name: lintrunner-noclang-${{ needs.get-changed-files.outputs.changed-files == '*' && 'all' || 'partial' }}
     needs: [get-label-type, get-changed-files]
     with:
