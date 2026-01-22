@@ -3359,5 +3359,77 @@ class TestInvokeSubgraphDTensor(TestCase):
         self.assertEqual(ref.to_local(), res.to_local())
 
 
+@skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphTwoTensor(TestCase):
+    """Tests for invoke_subgraph with TwoTensor inputs."""
+
+    def test_simple_two_tensor_input(self):
+        """Test nested_compile_region with TwoTensor input."""
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @nested_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x) + gn(x)
+
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        x = TwoTensor(a, b)
+
+        ref = fn(x)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref.a, res.a)
+        self.assertEqual(ref.b, res.b)
+
+    def test_multiple_inputs_outputs_two_tensor(self):
+        """Test nested_compile_region with multiple TwoTensor inputs and outputs."""
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @nested_compile_region
+        def gn(x, y):
+            return torch.sin(x) + y, torch.cos(y) * x
+
+        def fn(x, y):
+            a, b = gn(x, y)
+            c, d = gn(a, b)
+            return c, d
+
+        x = TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+        y = TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+
+        ref_c, ref_d = fn(x, y)
+        res_c, res_d = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        self.assertEqual(ref_c.a, res_c.a)
+        self.assertEqual(ref_c.b, res_c.b)
+        self.assertEqual(ref_d.a, res_d.a)
+        self.assertEqual(ref_d.b, res_d.b)
+
+    def test_mixed_two_tensor_and_regular_tensor(self):
+        """Test nested_compile_region with mixed TwoTensor and regular tensor inputs."""
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @nested_compile_region
+        def gn(x, y):
+            return x + y, x * y
+
+        def fn(x, y):
+            a, b = gn(x, y)
+            return a + b
+
+        # x is TwoTensor, y is regular tensor
+        x = TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+        y = torch.randn(4, 4)
+
+        ref = fn(x, y)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        self.assertEqual(ref.a, res.a)
+        self.assertEqual(ref.b, res.b)
+
+
 if __name__ == "__main__":
     run_tests()
