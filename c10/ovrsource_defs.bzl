@@ -127,11 +127,13 @@ def define_ovrsource_targets():
                 "-Wno-unused-variable",
             ],
         }),
+        include_directories = [".."],
         link_whole = True,
         preprocessor_flags = [
             "-DNO_EXPORT",
             "-DC10_CUDA_BUILD_MAIN_LIB=1",
         ],
+        public_include_directories = [".."],
         raw_headers = native.glob([
             "cuda/*.h",
             "cuda/impl/*.h",
