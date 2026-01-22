@@ -6368,6 +6368,90 @@ def forward(self, primals_1, tangents_1):
                     f"Quantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_unbounded_error_message(self):
+        """Test that NetworkXUnbounded errors produce user-friendly error messages."""
+        import math
+
+        import networkx as nx
+
+        from torch._functorch.partitioners import _find_infinite_capacity_path
+
+        # Test 1: Verify _find_infinite_capacity_path finds a path with edge reasons
+        nx_graph = nx.DiGraph()
+        # Create a simple graph with an infinite capacity path and reasons
+        nx_graph.add_edge(
+            "source", "node1_in", capacity=math.inf, reason="cannot recompute: banned"
+        )
+        nx_graph.add_edge(
+            "node1_in",
+            "node1_out",
+            capacity=math.inf,
+            reason="cannot save: non-tensor output",
+        )
+        nx_graph.add_edge(
+            "node1_out",
+            "sink",
+            capacity=math.inf,
+            reason="must be computed in backward: required for gradient",
+        )
+
+        path = _find_infinite_capacity_path(nx_graph)
+        self.assertIsNotNone(path)
+        # path is a list of (from_node, to_node, reason) tuples
+        self.assertEqual(len(path), 3)
+        self.assertEqual(path[0][0], "source")  # first edge starts from source
+        self.assertEqual(path[0][1], "node1_in")
+        self.assertIn("cannot recompute", path[0][2])
+        self.assertEqual(path[-1][1], "sink")  # last edge ends at sink
+        self.assertIn("must be computed in backward", path[-1][2])
+
+        # Test 2: Verify path not found when there's no infinite capacity path
+        nx_graph2 = nx.DiGraph()
+        nx_graph2.add_edge(
+            "source", "node1_in", capacity=math.inf, reason="cannot recompute: banned"
+        )
+        nx_graph2.add_edge(
+            "node1_in", "node1_out", capacity=1.0
+        )  # Finite capacity breaks the chain
+        nx_graph2.add_edge(
+            "node1_out",
+            "sink",
+            capacity=math.inf,
+            reason="must be computed in backward",
+        )
+
+        path2 = _find_infinite_capacity_path(nx_graph2)
+        self.assertIsNone(path2)
+
+        # Test 3: Verify data dependency edges have reasons
+        nx_graph3 = nx.DiGraph()
+        nx_graph3.add_edge(
+            "source", "node1_in", capacity=math.inf, reason="cannot recompute: primal"
+        )
+        nx_graph3.add_edge(
+            "node1_in", "node1_out", capacity=math.inf, reason="cannot save: view op"
+        )
+        nx_graph3.add_edge(
+            "node1_out", "node2_in", capacity=math.inf, reason="data dependency"
+        )
+        nx_graph3.add_edge(
+            "node2_in",
+            "sink",
+            capacity=math.inf,
+            reason="must be computed in backward: required for gradient",
+        )
+
+        path3 = _find_infinite_capacity_path(nx_graph3)
+        self.assertIsNotNone(path3)
+        self.assertEqual(len(path3), 4)
+        # Check that data dependency edge is captured
+        data_dep_edge = next(
+            (e for e in path3 if e[0] == "node1_out" and e[1] == "node2_in"), None
+        )
+        self.assertIsNotNone(data_dep_edge)
+        self.assertEqual(data_dep_edge[2], "data dependency")
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
