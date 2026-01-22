@@ -15,6 +15,8 @@ import torch
 from torch._inductor.virtualized import V
 from torch.nn.attention.flex_attention import _Backend
 
+from ... import config
+from ...codecache import PyCodeCache
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering
 from ...select_algorithm import (
@@ -55,6 +57,109 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 Expr = sympy.Expr
+
+
+def _compiled_shared_mem_bytes(choice: Any) -> int | None:
+    bmreq = getattr(choice, "bmreq", None)
+    if bmreq is None:
+        return None
+    module_cache_key = getattr(bmreq, "module_cache_key", None)
+    module_path = getattr(bmreq, "module_path", None)
+    kernel_name = getattr(bmreq, "kernel_name", None)
+    if module_cache_key is None or module_path is None or kernel_name is None:
+        return None
+
+    mod = PyCodeCache.load_by_key_path(module_cache_key, module_path)
+    kernel = getattr(mod, kernel_name, None)
+    if kernel is None:
+        return None
+
+    launchers = getattr(kernel, "launchers", None)
+    if isinstance(launchers, list) and launchers:
+        shared = getattr(launchers[0], "shared", None)
+        if shared is not None:
+            return int(shared)
+        binary = getattr(launchers[0], "bin", None)
+        if binary is None:
+            return None
+        if hasattr(binary, "shared"):
+            return int(binary.shared)
+        meta = getattr(binary, "metadata", None)
+        if meta is not None and hasattr(meta, "shared"):
+            return int(meta.shared)
+
+    return None
+
+
+def _device_shared_mem_limit_bytes(device: torch.device) -> int | None:
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return None
+    idx = device.index if device.index is not None else torch.cuda.current_device()
+    props = torch.cuda.get_device_properties(idx)
+    if hasattr(props, "shared_memory_per_block_optin"):
+        return int(props.shared_memory_per_block_optin)
+    if hasattr(props, "shared_memory_per_block"):
+        return int(props.shared_memory_per_block)
+    return None
+
+
+def _has_user_pinned_fwd_tuning(kernel_options: dict[str, Any]) -> bool:
+    for name in (
+        "BLOCK_M",
+        "BLOCK_N",
+        "num_warps",
+        "num_stages",
+        "USE_TMA",
+        "num_consumer_groups",
+        "num_buffers_warp_spec",
+    ):
+        if name in kernel_options or f"fwd_{name}" in kernel_options:
+            return True
+    return False
+
+
+def _has_user_pinned_bwd_tuning(kernel_options: dict[str, Any]) -> bool:
+    for name in (
+        "BLOCK_M1",
+        "BLOCK_N1",
+        "BLOCK_M2",
+        "BLOCK_N2",
+        "num_warps",
+        "num_stages",
+        "USE_TMA",
+        "num_consumer_groups",
+        "num_buffers_warp_spec",
+    ):
+        if name in kernel_options or f"bwd_{name}" in kernel_options:
+            return True
+    return False
+
+
+def _compiled_choice_validation_error(choice: Any, device: torch.device) -> str | None:
+    limit = _device_shared_mem_limit_bytes(device)
+    shared = _compiled_shared_mem_bytes(choice)
+    if limit is None or shared is None or shared <= limit:
+        return None
+    return f"compiled shared memory {shared}B exceeds device limit {limit}B"
+
+
+def _pick_first_valid_choice(
+    choices: list[Any],
+    device: torch.device,
+    max_attempts: int,
+) -> tuple[Any | None, list[str]]:
+    errors: list[str] = []
+    for choice in choices[:max_attempts]:
+        try:
+            choice.precompile()
+        except Exception as e:
+            errors.append(f"{choice}: {e}")
+            continue
+        if reason := _compiled_choice_validation_error(choice, device):
+            errors.append(f"{choice}: {reason}")
+            continue
+        return choice, errors
+    return None, errors
 
 
 def _sanitize_kernel_options_for_triton(
@@ -477,16 +582,48 @@ def flex_attention(
         7: create_num_blocks_fake_generator(full_kv_indices),
         8: create_indices_fake,
     }
-
-    out = autotune_select_algorithm(
-        "flex_attention",
-        choices,
-        # Need to filter out symbols since there is an invariant
-        # that all input_nodes are of type IRNode
-        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
-        layout,
-        input_gen_fns=input_gen_fns,
-    )
+    user_pinned = _has_user_pinned_fwd_tuning(original_kernel_options)
+    if not config.max_autotune and len(choices) > 0:
+        max_attempts = max(int(config.flex_fallback_max_configs), 1)
+        if user_pinned:
+            choice = choices[0]
+            try:
+                choice.precompile()
+            except Exception as e:
+                raise RuntimeError(
+                    "FlexAttention config specified by kernel_options failed to compile."
+                ) from e
+            if reason := _compiled_choice_validation_error(choice, query.get_device()):
+                raise RuntimeError(
+                    "FlexAttention config specified by kernel_options is not runnable: "
+                    f"{reason}."
+                )
+        else:
+            choice, errors = _pick_first_valid_choice(
+                choices,
+                query.get_device(),
+                max_attempts,
+            )
+            if choice is None:
+                raise RuntimeError(
+                    "FlexAttention could not find a compilable Triton config:\n"
+                    + "\n".join(errors)
+                )
+        out = choice.output_node()
+    else:
+        out = autotune_select_algorithm(
+            "flex_attention",
+            choices,
+            # Need to filter out symbols since there is an invariant
+            # that all input_nodes are of type IRNode
+            [
+                x
+                for x in inputs_for_autotuning
+                if isinstance(x, torch._inductor.ir.IRNode)
+            ],
+            layout,
+            input_gen_fns=input_gen_fns,
+        )
 
     # need subgraph inputs and outputs to analyze all symints used in flex attention
     out.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
@@ -966,14 +1103,46 @@ def flex_attention_backward(*args, **kwargs):
         14: create_num_blocks_fake_generator(full_q_indices),  # full_q_num_blocks
         15: create_indices_fake,
     }
-
-    broadcasted_grad_key = autotune_select_algorithm(
-        "flex_attention_backward",
-        choices,
-        [x for x in inputs_for_autotuning if isinstance(x, torch._inductor.ir.IRNode)],
-        layout_broadcasted_k,
-        input_gen_fns=input_gen_fns,
-    )  # [Bq, Hkv, seq_len_kv, k_head_dim]
+    user_pinned = _has_user_pinned_bwd_tuning(original_kernel_options)
+    if not config.max_autotune and len(choices) > 0:
+        max_attempts = max(int(config.flex_fallback_max_configs), 1)
+        if user_pinned:
+            choice = choices[0]
+            try:
+                choice.precompile()
+            except Exception as e:
+                raise RuntimeError(
+                    "FlexAttention backward config specified by kernel_options failed to compile."
+                ) from e
+            if reason := _compiled_choice_validation_error(choice, query.get_device()):
+                raise RuntimeError(
+                    "FlexAttention backward config specified by kernel_options is not runnable: "
+                    f"{reason}."
+                )
+        else:
+            choice, errors = _pick_first_valid_choice(
+                choices,
+                query.get_device(),
+                max_attempts,
+            )
+            if choice is None:
+                raise RuntimeError(
+                    "FlexAttention backward could not find a compilable Triton config:\n"
+                    + "\n".join(errors)
+                )
+        broadcasted_grad_key = choice.output_node()
+    else:
+        broadcasted_grad_key = autotune_select_algorithm(
+            "flex_attention_backward",
+            choices,
+            [
+                x
+                for x in inputs_for_autotuning
+                if isinstance(x, torch._inductor.ir.IRNode)
+            ],
+            layout_broadcasted_k,
+            input_gen_fns=input_gen_fns,
+        )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
     # need subgraph inputs and outputs to analyze all symints used in flex attention
     broadcasted_grad_key.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
