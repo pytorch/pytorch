@@ -559,3 +559,37 @@ def _iterate_state_dict(
         if isinstance(iter_object, tuple):
             ret = tuple(ret)  # type: ignore[assignment]
         return ret
+
+
+def _validate_hsdp_replicate_group(
+    tensor: torch.Tensor | DTensor, replicate_group: dist.ProcessGroup
+) -> None:
+    """
+    Validate that the DTensor is compatible with the HSDP replicate group.
+
+    Args:
+        tensor: The tensor to validate. If it's a regular Tensor, validation is skipped.
+        replicate_group: The HSDP replicate group.
+
+    Raises:
+        ValueError: If the DTensor's device mesh is not 2D or if the replicate group
+            is not a subset of the HSDP replicate group.
+    """
+    if not isinstance(tensor, DTensor):
+        return
+
+    device_mesh = tensor.device_mesh
+    if device_mesh.ndim != 2:
+        raise ValueError(
+            f"HSDP DTensor must have a 2D device mesh, got {device_mesh.ndim}D."
+        )
+
+    replicate_group_ranks = dist.get_process_group_ranks(replicate_group)
+    hsdp_replicate_group = device_mesh.get_group(mesh_dim=0)
+    hsdp_replicate_group_ranks = dist.get_process_group_ranks(hsdp_replicate_group)
+
+    if not set(replicate_group_ranks).issubset(set(hsdp_replicate_group_ranks)):
+        raise ValueError(
+            f"replicate group ranks {replicate_group_ranks} is not a subset of "
+            f"hsdp replicate group ranks {hsdp_replicate_group_ranks}."
+        )

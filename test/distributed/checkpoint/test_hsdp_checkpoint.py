@@ -73,6 +73,10 @@ class SimpleModelUneven(torch.nn.Module):
 
 class TestHSDPCheckpoint(DTensorTestBase):
     @property
+    def world_size(self) -> int:
+        return torch.cuda.device_count()
+
+    @property
     def backend(self):
         curr_backend = dist.get_default_backend_for_device(self.device_type)
         return f"cpu:gloo,{self.device_type}:{curr_backend}"
@@ -119,14 +123,25 @@ class TestHSDPCheckpoint(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
-    @parametrize("broadcast_replication", [False, True])
-    def test_hsdp_checkpoint(
-        self, is_even_sharded_model, broadcast_replication
-    ) -> None:
+    @parametrize("broadcast_count", [0, 1, 2, 3, 4])
+    def test_hsdp_checkpoint(self, is_even_sharded_model, broadcast_count) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
-        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        mesh_2d = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+
+        replicate_dim_size = mesh_2d.size(0)
+        # broadcast_count >= 2 requires replicate_dim_size > broadcast_count
+        # and divisible by broadcast_count
+        if broadcast_count >= 2 and (
+            replicate_dim_size <= broadcast_count
+            or replicate_dim_size % broadcast_count != 0
+        ):
+            self.skipTest(
+                f"Skipping broadcast_count={broadcast_count}: replicate dim size "
+                f"{replicate_dim_size} must be > {broadcast_count} and divisible by {broadcast_count}"
+            )
+
         model = FSDP(
             simple_model().to(self.device_type),
             sharding_strategy=ShardingStrategy.HYBRID_SHARD,
@@ -161,11 +176,20 @@ class TestHSDPCheckpoint(DTensorTestBase):
             state_dict_to_save["optim"], optim.state_dict(), check_equal=False
         )
 
-        if broadcast_replication:
+        if broadcast_count == 0:
+            loadplanner = DefaultLoadPlanner()
+        elif broadcast_count == 1:
             replicate_group = mesh_2d.get_group(mesh_dim=0)
             loadplanner = DefaultLoadPlanner(replicate_group=replicate_group)
-        else:
-            loadplanner = DefaultLoadPlanner()
+        else:  # broadcast_count >= 2
+            # Create a 3D mesh to get sub replicate group
+            # e.g., broadcast_count=2 with replicate_dim_size=4 -> (2, 2, shard_dim)
+            mesh_3d = init_device_mesh(
+                self.device_type,
+                (broadcast_count, replicate_dim_size // broadcast_count, 2),
+            )
+            sub_replicate_group = mesh_3d.get_group(mesh_dim=1)
+            loadplanner = DefaultLoadPlanner(replicate_group=sub_replicate_group)
 
         dist_cp.load(
             state_dict=state_dict_to_save,

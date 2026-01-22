@@ -47,6 +47,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_write_items,
     _init_state_dict,
     _merge_delta_local_plans,
+    _validate_hsdp_replicate_group,
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
 from torch.distributed.tensor import DTensor
@@ -373,6 +374,8 @@ class DefaultLoadPlanner(LoadPlanner):
                     isinstance(obj, (torch.Tensor, DTensor))
                     and obj.device.type != "cpu"
                 ):
+                    # NOTE: check the input replicate group is a subset of hsdp replicate group
+                    _validate_hsdp_replicate_group(obj, self.replicate_group)
                     self.tensors_to_broadcast.append(obj)
                 elif is_non_primary:
                     items_to_load.append(item)
@@ -416,6 +419,7 @@ class DefaultLoadPlanner(LoadPlanner):
         return narrow_tensor_by_index(tensor, read_item.dest_offsets, read_item.lengths)
 
     def finish_load(self) -> None:
+        """Broadcast tensors from rank 0 to other ranks in the replicate group."""
         if self.replicate_group is None:
             return
         for tensor in self.tensors_to_broadcast:
