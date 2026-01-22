@@ -210,6 +210,30 @@ if(CMAKE_HIP_COMPILER)
   message("HIP_VERSION_MINOR: ${HIP_VERSION_MINOR}")
   message("TORCH_HIP_VERSION: ${TORCH_HIP_VERSION}")
 
+  # Backup variables before searching to workaround FindHIP.cmake overriding HIP variables.
+  # FindHIP.cmake unconditionally overwrites these HIP toolchain variables which
+  # conflicts with CMake's native HIP language support (enable_language(HIP)).
+  set(_FindHIP_overridden_vars
+    CMAKE_HIP_ARCHIVE_CREATE
+    CMAKE_HIP_ARCHIVE_APPEND
+    CMAKE_HIP_ARCHIVE_FINISH
+    CMAKE_SHARED_LIBRARY_SONAME_HIP_FLAG
+    CMAKE_SHARED_LIBRARY_CREATE_HIP_FLAGS
+    CMAKE_SHARED_LIBRARY_HIP_FLAGS
+    CMAKE_SHARED_LIBRARY_RUNTIME_HIP_FLAG
+    CMAKE_SHARED_LIBRARY_RUNTIME_HIP_FLAG_SEP
+    CMAKE_SHARED_LIBRARY_LINK_STATIC_HIP_FLAGS
+    CMAKE_SHARED_LIBRARY_LINK_DYNAMIC_HIP_FLAGS
+    CMAKE_HIP_CREATE_SHARED_LIBRARY
+    CMAKE_HIP_CREATE_SHARED_MODULE
+    CMAKE_HIP_LINK_EXECUTABLE
+  )
+  foreach(_var ${_FindHIP_overridden_vars})
+    if(DEFINED ${_var})
+      set(_BACKUP_${_var} "${${_var}}")
+    endif()
+  endforeach()
+
   # Find ROCM components using Config mode
   # These components will be searced for recursively in ${ROCM_PATH}
   message("\n***** Library versions from cmake find_package *****\n")
@@ -244,6 +268,17 @@ if(CMAKE_HIP_COMPILER)
 
   # Optional components.
   find_package_and_print_version(hipsparselt)  # Will be required when ready.
+
+  # Restore HIP toolchain variables that FindHIP.cmake may have overwritten.
+  foreach(_var ${_FindHIP_overridden_vars})
+    if(DEFINED _BACKUP_${_var})
+      set(${_var} "${_BACKUP_${_var}}")
+      unset(_BACKUP_${_var})
+    else()
+      unset(${_var})
+    endif()
+  endforeach()
+  unset(_FindHIP_overridden_vars)
 
   list(REMOVE_DUPLICATES ROCM_INCLUDE_DIRS)
 
