@@ -4468,8 +4468,9 @@ class InstructionTranslatorBase(
             return False
 
         ip = self.instruction_pointer - 1
+
         pattern = get_comprehension_bytecode_prefix()
-        prefix = list(map(lambda x: x.opname, self.instructions[ip - len(pattern):ip]))
+        prefix = [inst.opname for inst in self.instructions[ip - len(pattern):ip]]
 
         return prefix == pattern
 
