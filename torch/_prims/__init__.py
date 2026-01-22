@@ -1293,6 +1293,13 @@ def _broadcast_in_dim_meta(
             f"broadcast_dimensions must be a Sequence, got {type(broadcast_dimensions)}"
         )
 
+    # Handle scalar input specially to match eager expand behavior.
+    # The general stride calculation produces different strides for scalars
+    # (e.g., (0, 0, 1, 0) instead of (0, 0, 0, 0) for scalar -> (3, 2, 1, 2)).
+    if a.ndim == 0 and len(broadcast_dimensions) == 0:
+        new_strides = [0] * len(shape)
+        return a.as_strided(shape, new_strides, a.storage_offset())
+
     # every dimension must be accounted for
     if a.ndim != len(broadcast_dimensions):
         raise AssertionError(
@@ -1362,6 +1369,12 @@ def _broadcast_in_dim_meta(
 
 
 def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
+    # Handle scalar input specially to match eager expand behavior.
+    # The general unsqueeze+expand path produces different strides for scalars
+    # (e.g., (0, 0, 1, 0) instead of (0, 0, 0, 0) for scalar -> (3, 2, 1, 2)).
+    if a.ndim == 0 and len(broadcast_dimensions) == 0:
+        return a.expand(shape)
+
     s = list(shape)
     for broadcast_dimension in broadcast_dimensions:
         s[broadcast_dimension] = -1
@@ -1594,6 +1607,13 @@ def expand_dims(
     new_shape = list(a.shape)
     for idx in dims:
         new_shape.insert(idx, 1)
+
+    # For scalar inputs, use contiguous strides.
+    # This matches eager unsqueeze behavior where scalar.unsqueeze(0) has
+    # stride (1,), not stride (0,) which broadcast_in_dim would produce.
+    if a.ndim == 0:
+        new_strides = utils.make_contiguous_strides_for(new_shape)
+        return a.as_strided(new_shape, new_strides, a.storage_offset())
 
     broadcast_dimensions = [
         idx for idx in range(len(new_shape)) if idx not in dimensions
