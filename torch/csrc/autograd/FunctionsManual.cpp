@@ -5638,6 +5638,14 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // excluding the main diagonal, hence the gradient is also lower-triangular.
   input_grad.tril_(-1);
 
+  // Match input strides if different.
+  if (!input_grad.strides().equals(input_.strides())) {
+    auto new_grad =
+        input_grad.new_empty_strided(input_.sizes(), input_.strides());
+    new_grad.copy_(input_grad);
+    input_grad = std::move(new_grad);
+  }
+
   return std::make_tuple(std::move(input_grad), std::move(tau_grad));
 }
 
