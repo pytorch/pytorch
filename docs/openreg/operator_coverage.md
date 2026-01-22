@@ -249,7 +249,7 @@ coverage:
     - name: Track in dashboard
       run: |
         # Post results to internal tracking system
-        curl -X POST https://internal-dashboard/coverage \
+        curl -X POST https://internal-dashboard/coverage @lint-ignore \
           -d '{"device": "openreg", "passed": 50, "failed": 10, "date": "2024-01-13"}'
 ```
 

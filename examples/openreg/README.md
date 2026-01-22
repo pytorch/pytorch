@@ -17,9 +17,7 @@ This directory contains working examples and helper scripts to understand and te
 - **`build_and_test.ps1`** (Windows) — PowerShell helper to build OpenReg extension and run tests
 - **`build_and_test.sh`** (Linux/macOS) — Bash helper for Unix-like systems
 
-## Quick Start
-
-### Windows
+See [../../docs/openreg/test_instantiation.md](../../docs/openreg/test_instantiation.md) for details.
 
 ```powershell
 # Run the example test
@@ -32,7 +30,7 @@ This directory contains working examples and helper scripts to understand and te
 .\build_and_test.ps1 test_device.py::TestDevice::test_device_count -Verbose
 
 # Force rebuild of the extension
-.\build_and_test.ps1 -Rebuild
+2. Check [../../docs/openreg/failure_interpretation.md](../../docs/openreg/failure_interpretation.md) for troubleshooting
 ```
 
 ### Linux / macOS
@@ -42,7 +40,7 @@ This directory contains working examples and helper scripts to understand and te
 ./build_and_test.sh example_test_instantiation.py
 
 # Run a specific test file
-./build_and_test.sh test_device.py
+See [../../docs/openreg/adding_tests.md](../../docs/openreg/adding_tests.md) for step-by-step guidance.
 
 # Run a single test with verbose output
 VERBOSE=true ./build_and_test.sh test_device.py::TestDevice::test_device_count
@@ -62,7 +60,7 @@ test_device_aware_cuda_float32 PASSED
 test_device_aware_cuda_float64 PASSED
 test_device_aware_privateuse1_float32 PASSED
 test_device_aware_privateuse1_float64 PASSED
-```
+See [../../docs/openreg/failure_interpretation.md](../../docs/openreg/failure_interpretation.md) for more debugging tips.
 
 Each line is a **separate instantiated test**. The test framework automatically generated 6 test cases from 1 template, covering the cross-product of:
 - **Devices:** CPU, CUDA, PrivateUse1 (OpenReg)

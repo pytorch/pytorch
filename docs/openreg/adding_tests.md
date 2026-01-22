@@ -300,8 +300,8 @@ Reference the parent issue and link to related documentation:
 ```
 Adds a comprehensive test for the add operation.
 
-See [test_instantiation.md](docs/openreg/test_instantiation.md) for background on parametrization.
-See [failure_interpretation.md](docs/openreg/failure_interpretation.md) for debugging failing tests.
+See [test_instantiation.md](test_instantiation.md) for background on parametrization.
+See [failure_interpretation.md](failure_interpretation.md) for debugging failing tests.
 
 Closes #1234
 ```

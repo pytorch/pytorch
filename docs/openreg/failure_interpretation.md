@@ -170,7 +170,7 @@ E   RuntimeError: add not implemented for device type openreg
 
 ```python
 # Step 1: Check if operation is supposed to be supported
-# See docs/openreg/operator_coverage.md for expected op support
+# See operator_coverage.md for expected op support
 
 # Step 2: Check if the kernel is registered
 # In the C++ code, search for REGISTER_OPENREG_KERNEL(add)
