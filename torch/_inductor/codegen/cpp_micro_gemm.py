@@ -1600,9 +1600,8 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
         store_dtype = self.output_dtype
         extra_options = {}
         if epilogue_nodes:
-            for buf in fake_buffers or []:
-                if "GemmOut" in buf.name:
-                    store_dtype = buf.get_layout().dtype
+            assert len(epilogue_nodes) > 0
+            store_dtype = epilogue_nodes[-1].get_layout().dtype
             extra_options = {
                 "store_t": DTYPE_TO_CPP[store_dtype],
             }
