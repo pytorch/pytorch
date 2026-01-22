@@ -649,6 +649,7 @@
     CUDA: addmv_out_cuda
     MPS: addmv_out_mps
     XPU: addmv_out_xpu
+    MTIA: addmv_out_mtia
     SparseCsrCPU: addmv_out_sparse_compressed
     SparseCsrCUDA: addmv_out_sparse_compressed_cuda
 
