@@ -2048,10 +2048,13 @@ class TritonTemplate(KernelTemplate):
         codegen_input_nodes = (
             tuple(input_nodes) + kernel_input_nodes[len(expected_input_args) :]
         )
-        extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, result.kernel_args_sizevars_keys),
-            fallback=config.unbacked_symint_fallback,
-            hint_override=hint_override,
+
+        extra_args = tuple(
+            V.graph.sizevars.optimization_hint_with_override(
+                sympy.expand(e),
+                hint_override=hint_override,
+            )
+            for e in result.kernel_args_sizevars_keys
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -2096,10 +2099,10 @@ class TritonTemplate(KernelTemplate):
 
         # create the BenchmarkRequest
         assert result.mod.__file__ is not None
+
         grid = self.grid(
-            *V.graph.sizevars.size_hints(
+            *V.graph.sizevars.optimization_hints_with_override(
                 call_sizes,
-                fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
             ),
             kwargs,
@@ -3101,13 +3104,13 @@ class AlgorithmSelectorCache(PersistentCache):
         if log.isEnabledFor(logging.DEBUG):
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
+
             shapes = [
                 "x".join(
                     map(
                         str,
-                        sizevars.size_hints(
+                        sizevars.optimization_hints_with_override(
                             node.get_size(),
-                            fallback=config.unbacked_symint_fallback,
                             hint_override=hint_override,
                         ),
                     )
@@ -3529,25 +3532,16 @@ class AlgorithmSelectorCache(PersistentCache):
                     storage_offset = generated_tensor.storage_offset()
                 else:
                     # Use IR node's shape resolved via size hints
-                    sizes = tuple(
-                        V.graph.sizevars.atomically_apply_size_hint(
-                            size,
-                            fallback=config.unbacked_symint_fallback,
-                            hint_override=hint_override,
-                        )
-                        for size in input_node.get_size()
+                    sizes = V.graph.sizevars.optimization_hints_with_override(
+                        input_node.get_size(),
+                        hint_override=hint_override,
                     )
-                    strides = tuple(
-                        V.graph.sizevars.atomically_apply_size_hint(
-                            stride,
-                            fallback=config.unbacked_symint_fallback,
-                            hint_override=hint_override,
-                        )
-                        for stride in input_node.get_stride()
+                    strides = V.graph.sizevars.optimization_hints_with_override(
+                        input_node.get_stride(),
+                        hint_override=hint_override,
                     )
-                    storage_offset = V.graph.sizevars.atomically_apply_size_hint(
+                    storage_offset = V.graph.sizevars.optimization_hint_with_override(
                         input_node.get_layout().offset,
-                        fallback=config.unbacked_symint_fallback,
                         hint_override=hint_override,
                     )
 
@@ -4177,14 +4171,14 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
+
         sizes = ", ".join(
             [
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.size_hints(
+                        V.graph.sizevars.optimization_hints_with_override(
                             n.get_size(),
-                            fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                             hint_override=hint_override,
                         ),
                     )
@@ -4292,36 +4286,23 @@ class AlgorithmSelectorCache(PersistentCache):
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    size,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                for size in node.get_size()
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_size(),
+                hint_override=hint_override,
             ),
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    stride,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                for stride in node.get_stride()
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_stride(),
+                hint_override=hint_override,
             ),
             node.get_device(),
             node.get_dtype(),
-            V.graph.sizevars.atomically_apply_size_hint(
+            V.graph.sizevars.optimization_hint_with_override(
                 node.layout.offset,
-                fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
             ),
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    size,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                for size in V.graph.get_allocation_size(node)
+            V.graph.sizevars.optimization_hints_with_override(
+                V.graph.get_allocation_size(node),
+                hint_override=hint_override,
             ),
         )
 
