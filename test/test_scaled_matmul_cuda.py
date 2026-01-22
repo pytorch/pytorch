@@ -1377,7 +1377,7 @@ class TestFP8Matmul(TestCase):
             test()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(not IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling requires SM90 (Hopper)")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
@@ -1604,7 +1604,7 @@ class TestFP8Matmul(TestCase):
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(not IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling requires SM90 (Hopper)")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
@@ -1672,7 +1672,7 @@ class TestFP8Matmul(TestCase):
     @skipIfRocm
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(IS_SM90, "cuBLAS blockwise scaling works on sm90")
+    @unittest.skipIf(IS_SM90, "DeepSeek style (1x128, 128x128) blockwise scaling works on SM90 (Hopper)")
     @unittest.skipIf(
         _get_torch_cuda_version() < (12, 9),
         "cuBLAS blockwise scaling added in CUDA 12.9",
