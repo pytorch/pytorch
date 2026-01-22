@@ -61,7 +61,7 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(const int64_t total_eleme
   return std::make_tuple(counter_offset, grid, dim_block);
 }
 
-// grid stride loop kernel for distributions (original, non-sharded version)
+// grid stride loop kernel for distributions
 template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t>
 C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
 __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
@@ -73,13 +73,13 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
   curandStatePhilox4_32_10_t state;
   curand_init(seed, idx, offset, &state);
 
-  int64_t rounded_size =
-      ((numel - 1) / (blockDim.x * gridDim.x * unroll_factor) + 1) * blockDim.x * gridDim.x * unroll_factor;
-  for (int linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
+  int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
+      blockDim.x * gridDim.x * unroll_factor;
+  for(int64_t linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
     auto rand = dist_func(&state);
-#pragma unroll
+    #pragma unroll
     for (int ii = 0; ii < unroll_factor; ii++) {
-      int li = linear_index + blockDim.x * gridDim.x * ii;
+      int64_t li = linear_index + blockDim.x * gridDim.x * ii;
       if (li < numel) {
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
