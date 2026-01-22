@@ -89,9 +89,9 @@ def _get_total_norm(
     )  # type: ignore[assignment]
 
     norms: list[Tensor] = []
-    # For p-norms (p not in {inf, -inf, 0, 1}), use powsum to accumulate sum(|x|^p)
+    # For p-norms (p not in {inf, -inf, 0}), use powsum to accumulate sum(|x|^p)
     # and apply the root once at the end. This avoids sqrt -> pow -> sqrt cycles.
-    use_powsum = norm_type not in (float("inf"), float("-inf"), 0.0, 1.0)
+    use_powsum = norm_type not in (float("inf"), float("-inf"), 0.0)
 
     for (device, _), ([device_tensors], _) in grouped_tensors.items():
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
@@ -123,7 +123,7 @@ def _get_total_norm(
         # norms are sum(|x|^p), just sum them and apply root once
         total_norm = stacked_norms.sum() ** (1.0 / norm_type)
     else:
-        # For inf/-inf/0/1 norms, use vector_norm directly
+        # For inf/-inf/0 norms, use vector_norm directly
         total_norm = torch.linalg.vector_norm(stacked_norms, norm_type)
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):

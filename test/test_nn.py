@@ -13826,7 +13826,7 @@ if __name__ == '__main__':
     def test_get_total_norm_powsum_numerics(self, device, foreach):
         """Test that _get_total_norm with powsum produces correct results.
 
-        For p-norms (p not in {inf, -inf, 0, 1}), _get_total_norm now uses
+        For p-norms (p not in {inf, -inf, 0}), _get_total_norm now uses
         powsum to accumulate sum(|x|^p) and applies the root once at the end.
         """
         from torch.nn.utils.clip_grad import _get_total_norm
@@ -13837,7 +13837,7 @@ if __name__ == '__main__':
             torch.randn(20, device=device),
         ]
 
-        # Test p-norms that use powsum (p > 1, p != inf)
+        # Test p-norms that use powsum (p > 0, p != inf)
         for norm_type in [2.0, 3.0, 4.0]:
             # Expected: (sum of sum(|x|^p) for each tensor)^(1/p)
             expected = sum(

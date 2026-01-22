@@ -57,7 +57,7 @@ ReductionOpType = Union[NormReduction, str]
 @dataclass(frozen=True)
 class _NormPartial(Partial):
     """
-    This placement is used for partial p-norm (p not in {inf, -inf, 0, 1}).
+    This placement is used for partial p-norm (p not in {inf, -inf, 0}).
 
     For p-norms, the p-norm over n elements computes (sum_i x_i^p)^(1/p).
     For example, consider 2 ranks, a (4,) tensor sharded on dim-0, and 2-norm:
@@ -402,14 +402,14 @@ def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
 def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
     """Get the reduction op for vector/foreach norm based on norm_type.
 
-    For inf/-inf/0/1 norms, returns simple reduction ops ("max", "min", "sum").
+    For inf/-inf/0 norms, returns simple reduction ops ("max", "min", "sum").
     For other p-norms, returns NormReduction which produces _NormPartial.
     """
     if norm_type in (float("inf"), "inf"):
         return "max"
     elif norm_type in (float("-inf"), "-inf"):
         return "min"
-    elif norm_type == 0 or norm_type == 1:
+    elif norm_type == 0:
         return "sum"
     else:
         assert isinstance(norm_type, (int, float))
