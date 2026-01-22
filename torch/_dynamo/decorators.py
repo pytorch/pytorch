@@ -341,7 +341,34 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         tracked for autograd. The module must exist outside the compile region.
 
         **Supported Outputs**: Must be a tuple of tensors: ``return (tensor,)`` for one tensor,
-        ``return (a, b)`` for multiple. PyTree support will be added soon.
+        ``return (a, b)`` for multiple. Primitive types (int, float, bool, str) can also be
+        included in outputs.
+
+        Note: We recommend leaf_functions only accept and return tensors. Though primitive
+        types (int, float, bool, str) are supported in inputs and outputs, they may cause
+        surprising behavior: primitive inputs are guarded and may trigger recompilation,
+        while primitive output values are captured from ``fake_impl`` at compile time and
+        remain fixed for all subsequent executions. Even though the real function runs
+        at runtime, its primitive return values are silently replaced with the compile-time
+        values from ``fake_impl``.
+
+        Example::
+
+            # BAD: primitive output varies at runtime
+            counter = 0
+
+            @leaf_function
+            def count_calls(x):
+                global counter
+                counter += 1
+                return (x, counter)
+
+            @count_calls.fake_impl
+            def count_calls_fake(x):
+                return (x, 999)  # placeholder value
+
+            # At runtime: real function runs (counter increments to 1, 2, 3, ...)
+            # But returned count is always 999 (from fake_impl at compile time)
 
         **fake_impl (required)**: Since the function body is not traced, you must
         provide a shape-inference function via ``@fn.fake_impl``. It runs at compile
