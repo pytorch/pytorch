@@ -4954,8 +4954,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
                     # Conditionalize pipelining on HIP for Triton due to
-                    # reports of numerical inaccuracies on older Triton
-                    if torch.version.hip and get_triton_version() > (3, 2):
+                    # reports of numerical inaccuracies on older Triton (<=3.2)
+                    # and Triton 3.6+ (see issue #169378)
+                    triton_ver = get_triton_version()
+                    if torch.version.hip and triton_ver > (3, 2) and triton_ver < (3, 6):
                         num_stages = ", num_stages = 2"
                     else:
                         num_stages = ""
