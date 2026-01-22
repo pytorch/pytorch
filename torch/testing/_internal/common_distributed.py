@@ -728,7 +728,7 @@ def cleanup_temp_dir() -> None:
 
 def retrieve_result_from_process_queue(
     process: torch.multiprocessing.Process,
-    queue: torch.multiprocessing.Queue,
+    completion_queue: torch.multiprocessing.Queue,
     timeout: Optional[int] = None,
 ) -> Any:
     """Get result from queue associated with process.
@@ -739,10 +739,10 @@ def retrieve_result_from_process_queue(
     # Periodically check the process for liveness
     while True:
         try:
-            return queue.get(timeout=queue_timeout)
+            return completion_queue.get(timeout=queue_timeout)
         except queue.Empty:
             # If not alive do a last check because the timeout might have happened just before completion
-            if not process.is_alive() and queue.empty():
+            if not process.is_alive() and completion_queue.empty():
                 return RuntimeError(f"Exited with {process.exitcode}")
         if timeout is not None:
             elapsed = time.time() - start_time
