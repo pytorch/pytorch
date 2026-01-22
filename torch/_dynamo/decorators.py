@@ -358,8 +358,7 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         boundary until outputs become predictable.
 
         To validate that your ``fake_impl`` matches the real function's outputs, set
-        ``torch._dynamo.config.leaf_function_validate_outputs = True``. For more
-        details, see :func:`torch.library.register_fake`.
+        ``torch._dynamo.config.leaf_function_validate_outputs = True``.
 
     Limitations:
         Currently, inductor backend and :func:`torch.export.export` are not yet supported.
