@@ -920,7 +920,7 @@ class Reduced(Replicate):
         return "Reduced()"
 
     def __str__(self) -> str:
-        return "Red"
+        return "R{p}"
 
     def __eq__(self, other) -> bool:
         return isinstance(other, Reduced)
