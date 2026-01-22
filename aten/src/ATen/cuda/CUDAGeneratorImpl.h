@@ -192,6 +192,19 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   std::array<uint64_t, MAX_DIMS> global_shape_{};
   std::array<uint64_t, MAX_DIMS> global_strides_{};
   std::atomic_flag no_reset_rnn_state_;
+  bool use_thread_based_rng_ = false;
+
+ public:
+  // Returns true if ThreadBasedRNGTracker is being used (sharded kernel),
+  // false for OffsetBasedRNGTracker (original kernel).
+  bool use_thread_based_rng() const {
+    return use_thread_based_rng_;
+  }
+
+  // Sets whether to use ThreadBasedRNGTracker (true) or OffsetBasedRNGTracker (false).
+  void set_use_thread_based_rng(bool value) {
+    use_thread_based_rng_ = value;
+  }
 };
 
 namespace cuda::detail {
