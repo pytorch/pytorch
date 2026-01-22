@@ -39,6 +39,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._debug_mode import DebugMode
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -77,54 +78,75 @@ class NestedCompileRegionOptions:
     decompositions: Optional[dict[str, Any]] = None
 
 
-class DTensorSubgraphWrapper:
+class TensorSubclassWrapper:
     """
-    A wrapper that handles DTensor input reconstruction and output extraction.
+    A wrapper that handles tensor subclass input reconstruction and output extraction.
 
     Similar to FunctionalizeCtxWrapper, this wrapper is hashable based on the
     inner subgraph, enabling fake tensor caching. It wraps a subgraph and
-    captures input/output specs for DTensor conversion.
+    uses __tensor_flatten__/__tensor_unflatten__ for generic tensor subclass support.
     """
 
-    def __init__(self, inner_subgraph, input_specs: list[Any]):
+    def __init__(self, inner_subgraph, input_flatten_info: list[Any]):
         self.subgraph = inner_subgraph
-        self.input_specs = input_specs
-        self.output_specs: list[Any] = []
+        # Each entry is (subclass_type, tensor_attr_names, flatten_spec) or None for non-subclass
+        self.input_flatten_info = input_flatten_info
+        self.output_flatten_info: list[Any] = []
 
     def __hash__(self):
         return id(self.subgraph)
 
     def __repr__(self):
-        return f"DTensorSubgraphWrapper({self.subgraph})"
+        return f"TensorSubclassWrapper({self.subgraph})"
 
-    def __call__(self, *local_operands):
-        from torch.distributed.tensor import DTensor
+    def __call__(self, *inner_operands):
+        # Reconstruct tensor subclasses from inner tensors using captured flatten info
+        reconstructed_operands = []
+        inner_idx = 0
+        for flatten_info in self.input_flatten_info:
+            if flatten_info is not None:
+                (
+                    subclass_type,
+                    tensor_attr_names,
+                    flatten_spec,
+                    outer_size,
+                    outer_stride,
+                ) = flatten_info
+                # Gather inner tensors for this subclass
+                inner_tensors = {
+                    name: inner_operands[inner_idx + i]
+                    for i, name in enumerate(tensor_attr_names)
+                }
+                inner_idx += len(tensor_attr_names)
+                # Reconstruct the subclass
+                reconstructed = subclass_type.__tensor_unflatten__(
+                    inner_tensors, flatten_spec, outer_size, outer_stride
+                )
+                reconstructed_operands.append(reconstructed)
+            else:
+                reconstructed_operands.append(inner_operands[inner_idx])
+                inner_idx += 1
 
-        # Reconstruct DTensors from local tensors using captured input specs
-        reconstructed_operands = [
-            DTensor(  # pyrefly: ignore [bad-argument-type]
-                local_op,  # pyrefly: ignore [bad-argument-count]
-                spec,
-                requires_grad=local_op.requires_grad,  # pyrefly: ignore [unexpected-keyword]
-            )
-            if spec is not None
-            else local_op
-            for local_op, spec in zip(local_operands, self.input_specs)
-        ]
-
-        # Call the original subgraph with DTensors
+        # Call the original subgraph with reconstructed subclasses
         result = self.subgraph(*reconstructed_operands)
 
-        # Process outputs: capture specs and extract local tensors
-        def extract_spec_and_local(x):
-            if isinstance(x, DTensor):
-                return x._spec, x._local_tensor
-            return None, x
+        # Process outputs: flatten subclasses and capture flatten info
+        output_inner_tensors = []
+        self.output_flatten_info = []
+        for r in result:
+            if is_traceable_wrapper_subclass(r):
+                tensor_attr_names, flatten_spec = r.__tensor_flatten__()
+                self.output_flatten_info.append(
+                    (type(r), tensor_attr_names, flatten_spec, r.shape, r.stride())
+                )
+                # Extract inner tensors
+                for name in tensor_attr_names:
+                    output_inner_tensors.append(getattr(r, name))
+            else:
+                self.output_flatten_info.append(None)
+                output_inner_tensors.append(r)
 
-        specs_and_locals = [extract_spec_and_local(r) for r in result]
-        self.output_specs = [spec for spec, _ in specs_and_locals]
-        local_results = [local for _, local in specs_and_locals]
-        return tuple(local_results)
+        return tuple(output_inner_tensors)
 
 
 def _extract_nested_region_config(fn):
@@ -165,7 +187,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: Union[GraphModule, FunctionalizeCtxWrapper, DTensorSubgraphWrapper],
+        subgraph: Union[GraphModule, FunctionalizeCtxWrapper, TensorSubclassWrapper],
         identifier: Optional[str],
         *operands,
     ):
@@ -222,7 +244,7 @@ invoke_subgraph = InvokeSubgraphHOP()
 
 
 def invoke_subgraph_infer(
-    subgraph: Union[GraphModule, FunctionalizeCtxWrapper, DTensorSubgraphWrapper],
+    subgraph: Union[GraphModule, FunctionalizeCtxWrapper, TensorSubclassWrapper],
     *operands,
 ):
     """Inference-only entrypoint for invoke_subgraph that auto-generates identifier.
@@ -794,43 +816,70 @@ def _(subgraph, identifier, *operands):
     return autograd_fn_callable(*operands)
 
 
-def invoke_subgraph_dtensor(subgraph, identifier, *operands):
+def invoke_subgraph_subclass(subgraph, identifier, *operands):
     """
-    Handle invoke_subgraph when some inputs are DTensors.
+    Handle invoke_subgraph when some inputs are tensor subclasses.
 
-    This creates a DTensorSubgraphWrapper that:
-    1. Reconstructs DTensors from local tensors using captured input specs
-    2. Calls the original subgraph with DTensors
-    3. Extracts local tensors from DTensor outputs
-    4. Captures output specs for wrapping results back to DTensors
+    This creates a TensorSubclassWrapper that uses __tensor_flatten__/__tensor_unflatten__
+    for generic tensor subclass support:
+    1. Flattens tensor subclasses to inner tensors using __tensor_flatten__
+    2. Calls the original subgraph with reconstructed subclasses
+    3. Flattens output subclasses back to inner tensors
+    4. Reconstructs output subclasses using __tensor_unflatten__
     """
-    from torch.distributed.tensor import DTensor
-
     assert isinstance(operands, tuple), "operands are expected to be a tuple"
 
-    # Capture input specs (None for non-DTensors)
-    input_specs = [op._spec if isinstance(op, DTensor) else None for op in operands]
+    # Capture flatten info and extract inner tensors for each operand
+    input_flatten_info = []
+    inner_operands = []
+    for op in operands:
+        if is_traceable_wrapper_subclass(op):
+            tensor_attr_names, flatten_spec = op.__tensor_flatten__()
+            input_flatten_info.append(
+                (type(op), tensor_attr_names, flatten_spec, op.shape, op.stride())
+            )
+            # Extract inner tensors
+            for name in tensor_attr_names:
+                inner_operands.append(getattr(op, name))
+        else:
+            input_flatten_info.append(None)
+            inner_operands.append(op)
 
-    wrapper_subgraph = DTensorSubgraphWrapper(subgraph, input_specs)
+    wrapper_subgraph = TensorSubclassWrapper(subgraph, input_flatten_info)
 
-    # Extract local tensors from DTensor inputs
-    local_operands = pytree.tree_map_only(DTensor, lambda x: x._local_tensor, operands)
+    # Call invoke_subgraph with the wrapper and inner tensors
+    inner_result = invoke_subgraph(wrapper_subgraph, identifier, *inner_operands)
 
-    # Call invoke_subgraph with the wrapper and local tensors
-    local_result = invoke_subgraph(wrapper_subgraph, identifier, *local_operands)
+    # Reconstruct output subclasses using captured flatten info
+    wrapped = []
+    inner_idx = 0
+    for flatten_info in wrapper_subgraph.output_flatten_info:
+        if flatten_info is not None:
+            subclass_type, tensor_attr_names, flatten_spec, outer_size, outer_stride = (
+                flatten_info
+            )
+            inner_tensors = {
+                name: inner_result[inner_idx + i]
+                for i, name in enumerate(tensor_attr_names)
+            }
+            inner_idx += len(tensor_attr_names)
+            reconstructed = subclass_type.__tensor_unflatten__(
+                inner_tensors, flatten_spec, outer_size, outer_stride
+            )
+            wrapped.append(reconstructed)
+        else:
+            wrapped.append(inner_result[inner_idx])
+            inner_idx += 1
 
-    # Wrap results back to DTensors using captured output specs
-    wrapped = [
-        DTensor(  # pyrefly: ignore [bad-argument-type]
-            r,  # pyrefly: ignore [bad-argument-count]
-            spec,
-            requires_grad=r.requires_grad,  # pyrefly: ignore [unexpected-keyword]
-        )
-        if spec is not None and isinstance(r, torch.Tensor)
-        else r
-        for r, spec in zip(local_result, wrapper_subgraph.output_specs)
-    ]
     return tuple(wrapped)
+
+
+# Register the traceable wrapper subclass fallback for generic tensor subclass support.
+# This allows invoke_subgraph to handle any traceable wrapper subclass (like DTensor)
+# without needing per-subclass registrations.
+@invoke_subgraph.py_impl_traceable_wrapper_subclass_fallback
+def _invoke_subgraph_subclass_fallback(subgraph, identifier, *operands):
+    return invoke_subgraph_subclass(subgraph, identifier, *operands)
 
 
 @invoke_subgraph.py_impl(DebugMode)
@@ -868,6 +917,10 @@ def _(subgraph, identifier, *operands):
 
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+
+    # Check if any operands are tensor subclasses
+    if any(is_traceable_wrapper_subclass(op) for op in operands):
+        return invoke_subgraph_subclass(subgraph, identifier, *operands)
 
     if getattr(subgraph, "_boxed_call", False):
         return subgraph(list(operands))

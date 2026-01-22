@@ -102,6 +102,11 @@ class OperatorBase:
         # HigherOrderOperator
         self.functorch_table = {}
 
+        # Fallback handler for traceable wrapper subclasses.
+        # If set, this handler will be called for any traceable wrapper subclass
+        # that doesn't have a specific registration in python_key_table.
+        self._traceable_wrapper_subclass_fallback: Callable[..., Any] | None = None
+
     def __call__(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -151,6 +156,24 @@ class OperatorBase:
             return fn
 
         return inner
+
+    def py_impl_traceable_wrapper_subclass_fallback(
+        self, fn: Callable[_P, _T]
+    ) -> Callable[_P, _T]:
+        """
+        Registers a fallback handler for all traceable wrapper subclasses.
+
+        This handler will be called for any traceable wrapper subclass that doesn't
+        have a specific registration via py_impl. This is useful for HOPs that want
+        to handle all tensor subclasses generically using __tensor_flatten__ and
+        __tensor_unflatten__.
+        """
+        if self._traceable_wrapper_subclass_fallback is not None:
+            raise AssertionError(
+                "traceable_wrapper_subclass_fallback already registered"
+            )
+        self._traceable_wrapper_subclass_fallback = fn
+        return fn
 
     # Registers an implementation to all **3** variants of functionalization that we have:
     # - DispatchKey.Functionalize
@@ -456,6 +479,21 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                     # "natural" calling convention: (*args, **kwargs)
                     # TODO(rzou): we should support torch_dispatch calling convention too.
                     result = handler(*args, **kwargs)
+                elif self._traceable_wrapper_subclass_fallback is not None:
+                    # Check if this is a traceable wrapper subclass that we can handle generically
+                    from torch.utils._python_dispatch import (
+                        is_traceable_wrapper_subclass_type,
+                    )
+
+                    if is_traceable_wrapper_subclass_type(subclass_type):
+                        result = self._traceable_wrapper_subclass_fallback(
+                            *args, **kwargs
+                        )
+                    else:
+                        raise NotImplementedError(
+                            f"There was no rule registered for HOP {self._name} and subclass {subclass_type}. "
+                            f"We recommend filing an issue."
+                        )
                 else:
                     raise NotImplementedError(
                         f"There was no rule registered for HOP {self._name} and subclass {subclass_type}. "

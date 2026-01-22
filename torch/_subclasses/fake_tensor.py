@@ -1739,7 +1739,7 @@ class FakeTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.auto_functionalize import (
             FunctionalCallableWithEpilogue,
         )
-        from torch._higher_order_ops.invoke_subgraph import DTensorSubgraphWrapper
+        from torch._higher_order_ops.invoke_subgraph import TensorSubclassWrapper
         from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
 
         if isinstance(args, (list, tuple, dict)):
@@ -1778,7 +1778,7 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(id(arg))
                 id_hashed_objects.append(arg)
             elif isinstance(arg, FunctionalizeCtxWrapper):
-                if isinstance(arg.subgraph, DTensorSubgraphWrapper):
+                if isinstance(arg.subgraph, TensorSubclassWrapper):
                     arg = arg.subgraph
                 # Special case for AOT Dispatcher first pass, where the fake
                 # tensor is called on the functional wrapper of the subgraph.
