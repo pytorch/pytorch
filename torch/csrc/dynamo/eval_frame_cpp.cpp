@@ -124,7 +124,7 @@ py::handle get_fail_callback(py::handle callback) {
     return result;
   });
   py::setattr(callback, "_dynamo_fail_callback", fail_callback_obj);
-  return fail_callback_obj;
+  return fail_callback_obj.release();
 }
 
 EvalFrameOverride eval_frame_override = EvalFrameOverride::NONE;
