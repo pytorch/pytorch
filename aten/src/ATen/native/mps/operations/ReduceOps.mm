@@ -11,10 +11,12 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_cdist_forward_native.h>
 #include <ATen/ops/all_native.h>
 #include <ATen/ops/amax_native.h>
 #include <ATen/ops/amin_native.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/aminmax_native.h>
 #include <ATen/ops/any_native.h>
 #include <ATen/ops/argmax_native.h>
@@ -1060,6 +1062,19 @@ TORCH_IMPL_FUNC(aminmax_out_mps)
                     max_t,
                     MPSReductionType::AMAX,
                     "aminmax_out_mps_max");
+}
+
+// DEPRECATED: _aminmax is deprecated, use aminmax instead
+std::tuple<Tensor, Tensor> _aminmax_all_mps(const Tensor& self) {
+  TORCH_WARN_ONCE("_aminmax is deprecated as of PyTorch 1.11 and will be removed in a future release. Use aminmax instead."
+                  " This warning will only appear once per process.");
+  return at::aminmax(self);
+}
+
+std::tuple<Tensor, Tensor> _aminmax_mps(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_WARN_ONCE("_aminmax is deprecated as of PyTorch 1.11 and will be removed in a future release. Use aminmax instead."
+                  " This warning will only appear once per process.");
+  return at::aminmax(self, dim, keepdim);
 }
 
 Tensor prod_mps(const Tensor& self, std::optional<ScalarType> opt_dtype) {

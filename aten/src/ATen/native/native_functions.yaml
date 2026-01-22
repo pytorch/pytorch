@@ -3868,12 +3868,14 @@
 - func: _aminmax(Tensor self) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: _aminmax_all
+    MPS: _aminmax_all_mps
   autogen: _aminmax.out
 
 # DEPRECATED: Use torch.aminmax instead
 - func: _aminmax.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: _aminmax
+    MPS: _aminmax_mps
   autogen: _aminmax.dim_out
 
 - func: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
