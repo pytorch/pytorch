@@ -188,6 +188,7 @@ class OperatorBase:
             if has_user_subclass(
                 args,
                 allowed_subclasses=(FakeTensor, FunctionalTensor),
+                kwargs=kwargs,
             ):
                 return NotImplemented
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)

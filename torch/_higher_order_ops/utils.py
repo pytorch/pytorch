@@ -1299,7 +1299,7 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
     return pytree.tree_unflatten(materialized_args, flat_spec)
 
 
-def has_user_subclass(args, allowed_subclasses):
+def has_user_subclass(args, allowed_subclasses, kwargs=None):
     """Check if any tensor arguments are user subclasses.
 
     This is used to determine if tensor subclasses should get a chance to run
@@ -1308,11 +1308,15 @@ def has_user_subclass(args, allowed_subclasses):
     Args:
         args: Arguments to check (will be flattened with pytree)
         allowed_subclasses: Tuple of allowed subclass types
+        kwargs: Optional keyword arguments to check (will be flattened with pytree)
 
     Returns:
         True if user tensor subclasses are found, False otherwise
     """
     flat_args, _ = pytree.tree_flatten(args)
+    if kwargs is not None:
+        flat_kwargs, _ = pytree.tree_flatten(kwargs)
+        flat_args = flat_args + flat_kwargs
 
     val = any(
         isinstance(a, torch.Tensor)
