@@ -21,6 +21,7 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
+from torch.distributed.tensor._utils import assert_no_mixed_partial_types
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -842,6 +843,12 @@ def redistribute_local_tensor(
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
+
+    # We do not see a valid use case for mixing different partial types in the same DTensor.
+    # in principle it could be supported, but since nonlinear reductions (e.g. max) exist, relative ordering
+    # of different partials would become semantically critical.  Without a motivating use case, we prohibit this.
+    assert_no_mixed_partial_types(current_spec.placements)
+    assert_no_mixed_partial_types(target_spec.placements)
 
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
