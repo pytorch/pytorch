@@ -6,8 +6,8 @@ import torch
 from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor import config, memory
-from torch._inductor.test_case import TestCase
 from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -20,10 +20,11 @@ try:
     TRITON_AVAILABLE = True
 except ImportError:
     TRITON_AVAILABLE = False
-def get_warp_size(device=torch.device("cuda")):    
+
+
+def get_warp_size(device=torch.device("cuda")):
     dev_props = DeviceProperties.create(device)
     return dev_props.warp_size
-
 
 
 class Foo(torch.nn.Module):
