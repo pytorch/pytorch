@@ -972,7 +972,9 @@ exclude_patterns = [
     'test/test_hub.py',
 ]
 command = [
-    'python3',
+    'uv',
+    'run',
+    '--script',
     'tools/linter/adapters/test_has_main_linter.py',
     '--',
     '@{{PATHSFILE}}',
