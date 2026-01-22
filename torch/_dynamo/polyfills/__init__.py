@@ -85,6 +85,10 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
+def impl_IS_MAPPING(a: Any) -> bool:
+    return isinstance(a, Mapping)
+
+
 def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # performs fallback "a in b"
     if hasattr(b, "__iter__"):
