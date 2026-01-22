@@ -3194,6 +3194,21 @@ class View(GenericView):
             or len(free_unbacked_symbols(new_size)) > 0
         ):
             unbacked_symbols_in_sizes = True
+        is_contiguous = is_contiguous_storage_and_layout(x)
+
+        def create_reinterpret_view(
+            inp: IRNode, new_size: Sequence[Expr], new_stride: Sequence[Expr]
+        ) -> ReinterpretView:
+            storage, old_layout = as_storage_and_layout(inp, want_contiguous=True)
+            new_layout = FixedLayout(
+                old_layout.device,
+                old_layout.dtype,
+                new_size,
+                new_stride,
+                old_layout.offset,
+                old_layout.is_pinned,
+            )
+            return ReinterpretView(data=storage, layout=new_layout)
 
         if 0 in new_size:
 
@@ -3202,26 +3217,54 @@ class View(GenericView):
 
             return cls(data=x, size=list(new_size), reindex=fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x) or unbacked_symbols_in_sizes:
-            if unbacked_symbols_in_sizes and (not is_contiguous_storage_and_layout(x)):
-                # realize x; otherwise, the dynamic_reshape_indexer below will fail
-                # due to the size_hint's inability to process unbacked SymInts
-                # TODO: unbacked should not diverge from backed in determining striding
-                # Need to require contiguous here instead of realize, see:
-                # https://github.com/pytorch/pytorch/issues/145561
-                x = ExternKernel.require_contiguous(x)
+        elif is_contiguous:
+            # Input is contiguous, output can use contiguous strides
+            return create_reinterpret_view(
+                x, new_size, FlexibleLayout.contiguous_strides(new_size)
+            )
 
-            storage, old_layout = as_storage_and_layout(x, want_contiguous=True)
+        # Input is non-contiguous. Try to compute valid output strides.
+        storage, old_layout = as_storage_and_layout(x, freeze=False)
+        old_stride = old_layout.stride
+
+        # Convert sympy exprs to SymInt for _compute_stride, then convert back
+        old_size_symint = V.graph.sizevars.to_symints(old_size)
+        old_stride_symint = V.graph.sizevars.to_symints(old_stride)
+        new_size_symint = V.graph.sizevars.to_symints(new_size)
+
+        from torch._subclasses.fake_impls import _compute_stride
+
+        new_stride_symint = _compute_stride(
+            old_size_symint, old_stride_symint, new_size_symint
+        )
+
+        if new_stride_symint is not None:
+            # Convert SymInt back to sympy expressions
+            new_stride = [
+                s.node.expr if hasattr(s, "node") else sympy.Integer(s)
+                for s in new_stride_symint
+            ]
+            # View is possible with computed strides
             new_layout = FixedLayout(
                 old_layout.device,
                 old_layout.dtype,
                 new_size,
-                FlexibleLayout.contiguous_strides(new_size),
+                new_stride,
                 old_layout.offset,
                 old_layout.is_pinned,
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
+        # View not possible with current strides, need to make contiguous copy
+        if unbacked_symbols_in_sizes:
+            # For unbacked symbols, we must require contiguous
+            # https://github.com/pytorch/pytorch/issues/145561
+            x = ExternKernel.require_contiguous(x)
+            return create_reinterpret_view(
+                x, new_size, FlexibleLayout.contiguous_strides(new_size)
+            )
+
+        # For backed symbols, fall back to dynamic_reshape_indexer
         reindex = cls.dynamic_reshape_indexer(old_size, new_size)
         return cls(data=x, size=list(new_size), reindex=reindex)
 
