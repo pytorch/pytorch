@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
@@ -1527,6 +1528,7 @@ class TestForeach(TestCase):
                     self.assertTrue(torch.equal(t, ref_t))
 
     @onlyCUDA
+    @serialTest()
     @largeTensorTest("40GB", device="cuda")
     def test_foreach_copy_with_multi_dtypes_large_input(self):
         # see https://github.com/pytorch/pytorch/issues/156261
