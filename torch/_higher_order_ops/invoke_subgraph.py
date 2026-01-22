@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -40,10 +40,6 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
-
-
-if TYPE_CHECKING:
-    from torch.distributed.device_mesh import DeviceMesh
 
 
 invoke_subgraph_counter = 0
@@ -811,18 +807,6 @@ def invoke_subgraph_dtensor(subgraph, identifier, *operands):
     from torch.distributed.tensor import DTensor
 
     assert isinstance(operands, tuple), "operands are expected to be a tuple"
-
-    # Validate all DTensors have the same mesh
-    mesh: DeviceMesh | None = None
-    for operand in operands:
-        if isinstance(operand, DTensor):
-            if mesh is None:
-                mesh = operand.device_mesh
-            assert mesh == operand.device_mesh, (
-                f"All DTensor operands must have the same mesh but got {mesh} and {operand.device_mesh}"
-            )
-
-    assert mesh is not None, "No DTensor operands found in inputs"
 
     # Capture input specs (None for non-DTensors)
     input_specs = [op._spec if isinstance(op, DTensor) else None for op in operands]
