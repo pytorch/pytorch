@@ -139,6 +139,7 @@ NVSHMEMSymmComm::NVSHMEMSymmComm(
       buffer_ptr_(nullptr),
       lsa_signal_pad_(nullptr),
       gin_signal_pad_(nullptr),
+      team_dev_(nullptr),
       context_dev_(nullptr) {
   initialize();
 }
@@ -169,6 +170,10 @@ int NVSHMEMSymmComm::get_world_size() const {
 
 int NVSHMEMSymmComm::get_device_idx() const {
   return device_idx_;
+}
+
+int64_t NVSHMEMSymmComm::get_team_ptr() const {
+  return reinterpret_cast<int64_t>(team_dev_);
 }
 
 void NVSHMEMSymmComm::initialize() {
@@ -248,6 +253,22 @@ void NVSHMEMSymmComm::initialize() {
       &context_host_,
       sizeof(NVSHMEMSymmContext),
       cudaMemcpyHostToDevice));
+
+  // Create host-side team structure with NVSHMEM_TEAM_WORLD
+  // This team includes all PEs and is used for multicast operations
+  team_host_ = NVSHMEMSymmTeam(
+      global_world_size, // size
+      global_rank, // rank
+      global_world_size, // lsa_size (all GPUs in same domain for single-node)
+      0, // lsa_base
+      0, // mask
+      NVSHMEM_TEAM_WORLD // nvshmem_team
+  );
+
+  // Copy team to device
+  C10_CUDA_CHECK(cudaMalloc(&team_dev_, sizeof(NVSHMEMSymmTeam)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      team_dev_, &team_host_, sizeof(NVSHMEMSymmTeam), cudaMemcpyHostToDevice));
 }
 
 void NVSHMEMSymmComm::cleanup() {
@@ -266,6 +287,12 @@ void NVSHMEMSymmComm::cleanup() {
     if (context_dev_ != nullptr) {
       cudaFree(context_dev_);
       context_dev_ = nullptr;
+    }
+
+    // Free device team structure
+    if (team_dev_ != nullptr) {
+      cudaFree(team_dev_);
+      team_dev_ = nullptr;
     }
 
     // Free symmetric memory using nvshmem_free

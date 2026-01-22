@@ -493,12 +493,14 @@ __device__ void nvshmem_put_signal_async_impl(
       return;
   }
 
-  // Use nvshmemx_putmem_signal_nbi for non-blocking immediate put with signal
+  // Use nvshmemx_putmem_signal_block for block-collective put with signal
+  // This is a block-collective operation that requires all threads in the block
+  // to participate for correct execution.
   // dest_ptr is a symmetric address (local pointer into symmetric memory)
   // NVSHMEM will handle the address translation to the remote PE
   // The signal is updated atomically on dest_rank after data transfer completes
   // Returns immediately without waiting - use symm_quiet() to ensure completion
-  nvshmemx_putmem_signal_nbi(
+  nvshmemx_putmem_signal_block(
       dest_ptr,
       src_ptr,
       byte_count,

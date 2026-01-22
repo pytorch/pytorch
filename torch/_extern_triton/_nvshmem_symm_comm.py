@@ -169,6 +169,19 @@ class NVSHMEMSymmComm:
             raise RuntimeError("NVSHMEMSymmComm not initialized")
         return self._comm.get_buffer_ptr()
 
+    def get_team_ptr(self) -> int:
+        """
+        Get pointer to the device-side team structure.
+
+        This pointer can be passed to Triton kernels for multicast operations.
+
+        Returns:
+            int64: Device pointer to NVSHMEMSymmTeam, or 0 if not available
+        """
+        if self._comm is None:
+            raise RuntimeError("NVSHMEMSymmComm not initialized")
+        return self._comm.get_team_ptr()
+
     def get_buffer_as_tensor(self, dtype: torch.dtype = torch.float32) -> torch.Tensor:
         """
         Get the local buffer as a PyTorch tensor.

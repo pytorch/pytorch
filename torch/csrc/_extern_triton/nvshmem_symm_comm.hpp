@@ -102,6 +102,14 @@ class TORCH_API NVSHMEMSymmComm {
    */
   int get_device_idx() const;
 
+  /**
+   * Get pointer to the device-side team structure.
+   * This pointer can be passed to Triton kernels for multicast operations.
+   *
+   * @return Device pointer to NVSHMEMSymmTeam as int64
+   */
+  int64_t get_team_ptr() const;
+
  private:
   void initialize();
   void cleanup();
@@ -117,6 +125,10 @@ class TORCH_API NVSHMEMSymmComm {
   void* buffer_ptr_; // Symmetric memory buffer allocated via nvshmem_malloc
   uint64_t* lsa_signal_pad_; // LSA signal pad for P2P load/store signaling
   uint64_t* gin_signal_pad_; // GIN signal pad for remote atomic signaling
+
+  // Team structure for multicast operations
+  NVSHMEMSymmTeam team_host_;
+  NVSHMEMSymmTeam* team_dev_;
 
   // Context
   NVSHMEMSymmContext context_host_;

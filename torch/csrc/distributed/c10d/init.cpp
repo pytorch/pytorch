@@ -4315,7 +4315,17 @@ Returns:
       .def(
           "get_device_idx",
           &::c10d::symmetric_memory::NVSHMEMSymmComm::get_device_idx,
-          "Get the device index.");
+          "Get the device index.")
+      .def(
+          "get_team_ptr",
+          &::c10d::symmetric_memory::NVSHMEMSymmComm::get_team_ptr,
+          R"(
+Get pointer to the device-side NVSHMEMSymmTeam structure.
+This pointer can be passed to Triton kernels for multicast operations.
+
+Returns:
+    int: Device pointer to NVSHMEMSymmTeam, or 0 if not available
+)");
 #endif // USE_NVSHMEM
 
 #endif
