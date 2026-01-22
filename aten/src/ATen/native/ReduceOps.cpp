@@ -677,7 +677,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     auto mask = cumsum == 0;
     // Compute gradient for positions before the first zero
     // Using at::where instead of masked_scatter_ for composite compliance
-    auto grad_before_first_zero = reversed_cumsum(w.masked_fill(~mask, 0.), dim).div(input_conj);
+    auto grad_before_first_zero = reversed_cumsum(w.masked_fill(~mask, 0.), dim).div_(input_conj);
     grad_input = at::where(mask, grad_before_first_zero, grad_input);
 
     // select everything from the first zero to the second zero [z1, z2)
