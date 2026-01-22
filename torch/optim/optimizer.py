@@ -63,6 +63,10 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
         # pyrefly: ignore [unsupported-operation]
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
+        needed_grad = self.defaults["differentiable"]
+        if needed_grad == prev_grad:
+            return func(*args, **kwargs)
+
         try:
             # Note on graph break below:
             # we need to graph break to ensure that aot respects the no_grad annotation.
@@ -76,7 +80,7 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
             # or 2) have a fully fused forward and backward graph, which will have no_grad by default, and we can remove this
             # graph break to allow the fully fused fwd-bwd-optimizer graph to be compiled.
             # see https://github.com/pytorch/pytorch/issues/104053
-            torch.set_grad_enabled(self.defaults["differentiable"])
+            torch.set_grad_enabled(needed_grad)
             torch._dynamo.graph_break()
             ret = func(*args, **kwargs)
         finally:
