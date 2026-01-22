@@ -30,7 +30,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
-from torch.distributed.tensor import DeviceMesh, DTensor, Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -3307,6 +3307,54 @@ class TestInvokeSubgraphDTensor(TestCase):
 
         ref = fn(x)
         res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref.to_local(), res.to_local())
+
+    def test_multiple_inputs_outputs_dtensor(self):
+        """Test nested_compile_region with multiple DTensor inputs and outputs."""
+
+        @nested_compile_region
+        def gn(x, y):
+            return torch.sin(x) + y, torch.cos(y) * x
+
+        def fn(x, y):
+            a, b = gn(x, y)
+            c, d = gn(a, b)
+            return c, d
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        local_tensor1 = torch.randn(4, 4)
+        local_tensor2 = torch.randn(4, 4)
+        x = DTensor.from_local(local_tensor1, mesh, [Shard(0)], run_check=False)
+        y = DTensor.from_local(local_tensor2, mesh, [Shard(0)], run_check=False)
+
+        ref_c, ref_d = fn(x, y)
+        res_c, res_d = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        self.assertEqual(ref_c.to_local(), res_c.to_local())
+        self.assertEqual(ref_d.to_local(), res_d.to_local())
+
+    def test_different_shardings_dtensor(self):
+        """Test nested_compile_region with DTensors having different shardings."""
+
+        @nested_compile_region
+        def gn(x, y):
+            return x + y, x * y
+
+        def fn(x, y):
+            a, b = gn(x, y)
+            return a + b
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        local_tensor1 = torch.randn(4, 4)
+        # Replicated tensor needs global shape [8, 4] to match sharded tensor
+        local_tensor2 = torch.randn(8, 4)
+        # One tensor sharded, one tensor replicated
+        x = DTensor.from_local(local_tensor1, mesh, [Shard(0)], run_check=False)
+        y = DTensor.from_local(local_tensor2, mesh, [Replicate()], run_check=False)
+
+        ref = fn(x, y)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
 
         self.assertEqual(ref.to_local(), res.to_local())
 
