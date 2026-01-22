@@ -1025,7 +1025,6 @@ inductor_skip_exact_stride = {
     "qr",
     "rot90",
     "stack",
-    "sum",
     "tensordot",
     "tril_indices",
     "triu_indices",

@@ -2330,8 +2330,10 @@ def _reduction(
     result = prim(a, dims)
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
-        broadcast_dims = [i for i in range(a.ndim) if i not in dims]
-        result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
+        # Use view instead of broadcast_in_dim to match eager strides.
+        # broadcast_in_dim produces broadcast strides (0s for size-1 dims),
+        # but eager reductions with keepdim produce contiguous strides.
+        result = result.view(output_shape)
 
     if out is not None:
         if result_dtype is None:
