@@ -31,7 +31,6 @@ jobs:
     name: "Build FA3 ${{ matrix.cuda_version }} ${{ matrix.arch }}"
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
-    environment: ${{ github.event_name == 'workflow_dispatch' && 'pytorchbot-env' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -74,14 +73,6 @@ jobs:
         with:
           submodules: true
 
-      - name: Configure AWS credentials
-        # Only configure AWS for workflow_dispatch with dry_run=false
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        uses: aws-actions/configure-aws-credentials@50ac8dd1e1b10d09dac7b8727528b91bed831ac0 # v3.0.2
-        with:
-          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
-          aws-region: us-east-1
-          
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
