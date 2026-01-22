@@ -60,6 +60,8 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_value
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
@@ -946,7 +948,9 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     elif val is None:
         pass
     # see Note: [Generator arguments in AOTDispatcher]
-    elif isinstance(val, torch.Generator):
+    elif isinstance(val, torch.Generator) or is_opaque_value(val):
+        pass
+    elif isinstance(val, FakeScriptObject):
         pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
@@ -5290,6 +5294,23 @@ class ShapeEnv:
         log.debug("add_backed_var_to_val %s %s", expr, val, stack_info=True)
         assert expr not in self.backed_var_to_val, f"{expr} already exists"
         self.backed_var_to_val[expr] = sympy.Integer(val)
+
+    @property
+    @deprecated(
+        "var_to_val is deprecated, use backed_var_to_val instead",
+        category=FutureWarning,
+    )
+    def var_to_val(self) -> dict[sympy.Symbol, sympy.Integer]:
+        """Deprecated: use backed_var_to_val instead."""
+        return self.backed_var_to_val
+
+    @deprecated(
+        "add_var_to_val is deprecated, use add_backed_var_to_val instead",
+        category=FutureWarning,
+    )
+    def add_var_to_val(self, expr: sympy.Symbol, val: int) -> None:
+        """Deprecated: use add_backed_var_to_val instead."""
+        return self.add_backed_var_to_val(expr, val)
 
     def _debug_name(self, source: Source) -> str:
         src_name = source.name

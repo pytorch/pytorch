@@ -73,6 +73,8 @@ class _ConvNd(WeightedQuantizedModule):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
 
+        if out_channels <= 0:
+            raise ValueError(f"out_channels must be greater than 0, got {out_channels}")
         if in_channels % groups != 0:
             raise ValueError("in_channels must be divisible by groups")
         if out_channels % groups != 0:
