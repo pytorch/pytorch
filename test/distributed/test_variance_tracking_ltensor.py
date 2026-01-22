@@ -9,6 +9,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._ltensor import (
     _get_dim_name_from_group,
     LTensor,
+    ltensor_custom_function_call,
     register_variance_tracking_strategy,
 )
 from torch.distributed.tensor.placement_types import Replicate, Shard
@@ -41,8 +42,8 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), set(), set(), mesh)
-        y = LTensor(torch.randn(4, 8), set(), set(), mesh)
+        x = LTensor(torch.randn(4, 8), set(), set(), mesh, False)
+        y = LTensor(torch.randn(4, 8), set(), set(), mesh, False)
 
         result = x + y
 
@@ -56,8 +57,8 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
-        y = LTensor(torch.randn(4, 8), set(), set(), mesh)
+        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
+        y = LTensor(torch.randn(4, 8), set(), set(), mesh, False)
 
         result = x + y
         self.assertEqual(result.variant_dims, {"dp"})
@@ -76,6 +77,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             {"dp"},
             set(),
             mesh,
+            False,
         )
 
         invariant_input = LTensor(
@@ -83,6 +85,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             set(),
             set(),
             mesh,
+            False,
         )
 
         output = variant_input + invariant_input
@@ -101,7 +104,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
+        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
         result = x.sin()
 
         self.assertEqual(result.variant_dims, {"dp"})
@@ -134,7 +137,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        data = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
+        data = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
         weight = torch.randn(8, 16)
         bias = torch.randn(16)
 
@@ -158,8 +161,8 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("pp", "dp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh1)
-        y = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh2)
+        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh1, False)
+        y = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh2, False)
 
         with self.assertRaisesRegex(
             AssertionError, "Cannot mix LTensors from different meshes"
@@ -174,7 +177,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp", "tp"}, set(), mesh)
+        x = LTensor(torch.randn(4, 8), {"dp", "tp"}, set(), mesh, False)
         self.assertEqual(x.variant_dims, {"dp", "tp"})
 
         import torch.distributed._functional_collectives as fcols
@@ -192,9 +195,9 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
-        y = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
-        z = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
+        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
+        y = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
+        z = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
 
         result = torch.cat((x, y, z), dim=0)
 
@@ -231,7 +234,7 @@ def _custom_all_reduce_variance(
             f"Could not find mesh dim for group {group_name}. "
             f"Available dims: {mesh.mesh_dim_names}"
         )
-    return input_variant_dims - {dim_name}
+    return input_variant_dims - {dim_name}, input_reduced_dims
 
 
 class TestRegisterVarianceForFunction(MultiThreadedTestCase):
@@ -256,7 +259,8 @@ class TestRegisterVarianceForFunction(MultiThreadedTestCase):
         # Create a variant LTensor (simulating sharded data)
         local_tensor = torch.randn(4, 8, device=DEVICE, requires_grad=True)
         ltensor = LTensor(
-            local_tensor, variant_dims={"dp"}, reduced_dims=set(), mesh=mesh
+            local_tensor, variant_dims={"dp"}, reduced_dims=set(), mesh=mesh,
+            custom_function_context=False,
         )
 
         # Apply custom all_reduce - should make output invariant
@@ -280,7 +284,8 @@ class TestRegisterVarianceForFunction(MultiThreadedTestCase):
         # Create LTensor variant on both dims
         local_tensor = torch.randn(4, 8, device=DEVICE)
         ltensor = LTensor(
-            local_tensor, variant_dims={"dp", "tp"}, reduced_dims=set(), mesh=mesh
+            local_tensor, variant_dims={"dp", "tp"}, reduced_dims=set(), mesh=mesh,
+            custom_function_context=False,
         )
 
         # Apply custom all_reduce on "dp" dim - should remove "dp" from variance
@@ -313,7 +318,8 @@ class TestRegisterVarianceForFunction(MultiThreadedTestCase):
         # Create a variant LTensor
         local_tensor = torch.randn(4, 8, device=DEVICE, requires_grad=True)
         ltensor = LTensor(
-            local_tensor, variant_dims={"dp"}, reduced_dims=set(), mesh=mesh
+            local_tensor, variant_dims={"dp"}, reduced_dims=set(), mesh=mesh,
+            custom_function_context=False,
         )
 
         # Apply unregistered function - should preserve variance (default behavior)
@@ -322,6 +328,108 @@ class TestRegisterVarianceForFunction(MultiThreadedTestCase):
         # Result should be LTensor with same variant dims (union = original)
         self.assertIsInstance(result, LTensor)
         self.assertEqual(result.variant_dims, {"dp"})
+
+
+class TestLTensorFunctionCall(MultiThreadedTestCase):
+    """Tests for ltensor_custom_function_call with custom autograd.Function."""
+
+    @property
+    def world_size(self):
+        return 4
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def test_ltensor_custom_function_call_with_strategy(self):
+        """Test ltensor_custom_function_call with a registered variance strategy."""
+        mesh = DeviceMesh(
+            DEVICE,
+            torch.arange(self.world_size),
+            mesh_dim_names=("dp",),
+        )
+
+        # Create variant LTensor
+        local_tensor = torch.randn(4, 8, device=DEVICE)
+        ltensor = LTensor(local_tensor, {"dp"}, set(), mesh, False)
+
+        # Use the existing CustomAllReduceFunction which has a registered strategy
+        group_name = mesh.get_group("dp").group_name
+        result = ltensor_custom_function_call(
+            CustomAllReduceFunction, ltensor, "sum", group_name
+        )
+
+        # Strategy removes 'dp' from variant dims
+        self.assertIsInstance(result, LTensor)
+        self.assertEqual(result.variant_dims, set())
+        # Context should be reset after call
+        self.assertEqual(ltensor.custom_function_context, False)
+        self.assertEqual(result.custom_function_context, False)
+
+    def test_ltensor_custom_function_call_passthrough(self):
+        """Test ltensor_custom_function_call with all_reduce that preserves LTensor."""
+        mesh = DeviceMesh(
+            DEVICE,
+            torch.arange(self.world_size),
+            mesh_dim_names=("dp",),
+        )
+
+        class AllReducePassthrough(torch.autograd.Function):
+            """Custom all_reduce that operates on LTensor and returns LTensor.
+
+            This pattern is used when the autograd.Function internally handles
+            variance tracking by operating on LTensors directly. The variance
+            tracking strategy for all_reduce automatically updates variant dims.
+            """
+
+            @staticmethod
+            def forward(ctx, x, group_name):
+                ctx.group_name = group_name
+                # Perform all_reduce on the LTensor - this goes through
+                # LTensor.__torch_function__ which applies variance tracking
+                # strategy and wraps the result as LTensor with correct dims
+                result = all_reduce(x, "sum", group_name)
+                return torch.ops._c10d_functional.wait_tensor(result)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                # Identity backward - gradient is already reduced
+                return grad_output, None
+
+        local_tensor = torch.randn(4, 8, device=DEVICE)
+        ltensor = LTensor(local_tensor, {"dp"}, set(), mesh, False)
+
+        group_name = mesh.get_group("dp").group_name
+        result = ltensor_custom_function_call(AllReducePassthrough, ltensor, group_name)
+
+        # Result should be LTensor with 'dp' removed from variant dims
+        self.assertIsInstance(result, LTensor)
+        self.assertEqual(result.variant_dims, set())
+        self.assertEqual(result.custom_function_context, False)
+
+    def test_custom_function_context_skips_mark_varying(self):
+        """Test that mark_varying is skipped when in custom_function_context."""
+        mesh = DeviceMesh(
+            DEVICE,
+            torch.arange(self.world_size),
+            mesh_dim_names=("dp",),
+        )
+
+        # Create LTensors with different variant dims
+        tensor1 = torch.randn(4, 4, device=DEVICE)
+        tensor2 = torch.randn(4, 4, device=DEVICE)
+
+        ltensor1 = LTensor(tensor1, {"dp"}, set(), mesh, custom_function_context=True)
+        ltensor2 = LTensor(tensor2, set(), set(), mesh, custom_function_context=True)
+
+        # Normally adding these would insert mark_varying for ltensor2,
+        # but in custom_function_context it should be skipped
+        result = ltensor1 + ltensor2
+
+        self.assertIsInstance(result, LTensor)
+        self.assertEqual(result.variant_dims, {"dp"})
+        # custom_function_context should be preserved
+        self.assertEqual(result.custom_function_context, True)
 
 
 if __name__ == "__main__":
