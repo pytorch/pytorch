@@ -21,7 +21,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -1303,3 +1306,72 @@ def gen_unbind_strategy(op_schema: OpSchema) -> StrategyType:
             )
         )
     return unbind_strategy
+
+
+@register_single_dim_strategy(aten.searchsorted.Tensor)
+def searchsorted_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Searchsorted single-dim sharding strategy.
+
+    Binary search finds insertion indices in sorted_sequence (along innermost dim).
+    Each value search is independent within its batch element.
+
+    Valid patterns:
+    - R, S(d) -> S(d) for any d (values can be sharded, output follows)
+    - S(d), S(d) -> S(d) when d != innermost (batch dims match)
+    - S(innermost), R -> P(sum) (sum of local indices = global index)
+
+    The Partial(sum) strategy ONLY works with Shard (not StridedShard) because
+    it requires contiguous chunks for the sum-reduction invariant to hold.
+    """
+    sorted_seq_meta = args_schema[0]
+    values_meta = args_schema[1]
+    sorter = kwargs_schema.get("sorter", None)
+
+    if not isinstance(sorted_seq_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(sorted_seq_meta)}")
+    if not isinstance(values_meta, TensorMeta):
+        raise AssertionError(f"Expected TensorMeta, got {type(values_meta)}")
+
+    sorted_seq_ndim = len(sorted_seq_meta.shape)
+    values_ndim = len(values_meta.shape)
+    search_dim = sorted_seq_ndim - 1
+
+    single_dim_strategies: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # Strategy 1: R, S(d) -> S(d) for each dim d of values
+    for d in range(values_ndim):
+        single_dim_strategies.append(
+            [
+                _ShardingPlaceholder(d),  # output
+                Replicate(),  # sorted_sequence
+                _ShardingPlaceholder(d),  # values
+            ]
+        )
+
+    # Strategy 2: S(d), S(d) -> S(d) for batch dims (d != innermost)
+    if sorted_seq_ndim > 1:
+        for d in range(sorted_seq_ndim - 1):
+            if d < values_ndim:
+                single_dim_strategies.append(
+                    [
+                        _ShardingPlaceholder(d),  # output
+                        _ShardingPlaceholder(d),  # sorted_sequence
+                        _ShardingPlaceholder(d),  # values
+                    ]
+                )
+
+    # Strategy 3: S(innermost), R -> P(sum)
+    # This ONLY works with Shard (not StridedShard) and requires no sorter
+    if sorter is None:
+        single_dim_strategies.append(
+            [
+                Partial("sum"),  # output
+                Shard(search_dim),  # sorted_sequence - MUST be Shard, not placeholder
+                Replicate(),  # values
+            ]
+        )
+
+    return single_dim_strategies
