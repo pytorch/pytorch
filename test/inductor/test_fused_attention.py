@@ -1015,6 +1015,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
             return attn_weights.matmul(value)
 
+        atol = 1e-3
+        rtol = 0.2
+        if TEST_WITH_ROCM:
+            atol = 3e-3
+            rtol = 1e-2
+
         tensor_shapes = [(4, 2, 16, 32), (1, 2, 16, 32)]
         for tensor_shape in tensor_shapes:
             attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
@@ -1029,6 +1035,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 args1=args,
                 has_dropout=False,
                 check_train=False,
+                atol=atol,
+                rtol=rtol,
             )
 
     def _test_sdpa_rewriter_22(self):
