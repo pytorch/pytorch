@@ -1552,6 +1552,16 @@ class DeviceCachingAllocator {
             " allocated in private pools (e.g., CUDA Graphs), ";
       }
 
+      std::string expandable_segments_suggestion;
+
+      if (!CUDAAllocatorConfig::expandable_segments()) {
+        expandable_segments_suggestion =
+            " If reserved but unallocated memory is large try setting"
+            " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+            " fragmentation.  See documentation for Memory Management "
+            " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)";
+      }
+
       // Make sure we do not have the device lock before calling our
       // observers which might need hold the GIL
       // It is safe to release at this point because will no longer
@@ -1606,10 +1616,7 @@ class DeviceCachingAllocator {
           format_size(
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
-          " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
-          " fragmentation.  See documentation for Memory Management "
-          " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
+          expandable_segments_suggestion);
     }
 
     bool split_remainder = should_split(
