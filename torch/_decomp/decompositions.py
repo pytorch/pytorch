@@ -4347,18 +4347,15 @@ def _linspace_from_neg_one(
     end = torch.tensor(1.0, device=device, dtype=dtype)
     step = (end - start) / (n - 1)
 
-    # Indices for forward and backward computation
-    idx_forward = torch.arange(halfway, device=device, dtype=dtype)
-    idx_backward = torch.arange(n - halfway, device=device, dtype=dtype)
+    # Single index tensor
+    idx = torch.arange(n, device=device, dtype=dtype)
 
-    # Forward direction: start + step * idx for first half
-    forward = start + step * idx_forward
-
-    # Backward direction: end - step * (steps - idx - 1) for second half
-    # When idx goes from halfway to n-1, (steps - idx - 1) goes from (n - halfway - 1) to 0
-    backward = end - step * idx_backward.flip(0)
-
-    result = torch.cat([forward, backward])
+    # Two-sided computation using where instead of flip/cat
+    # Forward: start + step * idx
+    # Backward: end - step * (n - 1 - idx)
+    forward = start + step * idx
+    backward = end - step * (n - 1 - idx)
+    result = torch.where(idx < halfway, forward, backward)
 
     if not align_corners:
         result = result * ((n - 1) / n)

@@ -7829,36 +7829,40 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @parametrize("dtype", (torch.float32, torch.float16))
     @parametrize("align_corners", (True, False))
-    def test_affine_grid_generator(self, dtype, align_corners):
+    def test_affine_grid_generator_4D(self, dtype, align_corners):
         if not self.is_dtype_supported(dtype):
             raise unittest.SkipTest(f"{dtype} not supported on {self.device}")
 
-        def fn_4d(theta):
+        def fn(theta):
             size = [theta.size(0), 1, 8, 8]
             return torch.nn.functional.affine_grid(
                 theta, size, align_corners=align_corners
             )
 
-        def fn_5d(theta):
+        theta = torch.randn([3, 2, 3], dtype=dtype, device=self.device)
+        self.common(
+            fn,
+            (theta,),
+            reference_in_float=False,  # Compare in native dtype
+            check_lowp=False,
+        )
+
+    @parametrize("dtype", (torch.float32, torch.float16))
+    @parametrize("align_corners", (True, False))
+    def test_affine_grid_generator_5D(self, dtype, align_corners):
+        if not self.is_dtype_supported(dtype):
+            raise unittest.SkipTest(f"{dtype} not supported on {self.device}")
+
+        def fn(theta):
             size = [theta.size(0), 1, 8, 8, 8]
             return torch.nn.functional.affine_grid(
                 theta, size, align_corners=align_corners
             )
 
-        # 4D case
-        theta_4d = torch.randn([3, 2, 3], dtype=dtype, device=self.device)
+        theta = torch.randn([3, 3, 4], dtype=dtype, device=self.device)
         self.common(
-            fn_4d,
-            (theta_4d,),
-            reference_in_float=False,  # Compare in native dtype
-            check_lowp=False,
-        )
-
-        # 5D case
-        theta_5d = torch.randn([3, 3, 4], dtype=dtype, device=self.device)
-        self.common(
-            fn_5d,
-            (theta_5d,),
+            fn,
+            (theta,),
             reference_in_float=False,  # Compare in native dtype
             check_lowp=False,
         )
