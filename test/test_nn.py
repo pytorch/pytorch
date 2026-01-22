@@ -9177,6 +9177,22 @@ class TestNNDeviceType(NNTestCase):
             transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6).to(device)
             _test_module_empty_input(self, transformer_encoder, input, check_size=False)
 
+    def test_TransformerEncoder_num_layers_validation(self):
+        """Test that TransformerEncoder raises ValueError for invalid num_layers."""
+        encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
+
+        # Test num_layers = 0
+        with self.assertRaisesRegex(ValueError, "num_layers must be a positive integer"):
+            nn.TransformerEncoder(encoder_layer, num_layers=0)
+
+        # Test num_layers < 0
+        with self.assertRaisesRegex(ValueError, "num_layers must be a positive integer"):
+            nn.TransformerEncoder(encoder_layer, num_layers=-1)
+
+        # Test valid num_layers = 1 (should not raise)
+        transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
+        self.assertEqual(len(transformer_encoder.layers), 1)
+
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
