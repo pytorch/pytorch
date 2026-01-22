@@ -248,7 +248,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
-                if inspect.ismethod(value):
+                if callable(value):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
