@@ -186,8 +186,64 @@ def _get_flattened_mesh_by_layout(
     return None
 
 
-# Track (mesh_hash, mesh_dims) we've already warned about to avoid repeated warnings
-_warned_missing_flattened_meshes: set[tuple[int, tuple[int, ...]]] = set()
+# Track (mesh_hash, mesh_dims, reason) we've already warned about to avoid repeated warnings
+_warned_flatten_issues: set[tuple[int, tuple[int, ...], str]] = set()
+
+
+def _warn_flatten_optimization_not_possible(
+    device_mesh: DeviceMesh,
+    mesh_dims: tuple[int, ...],
+    src_placements: tuple[Placement, ...],
+    dst_placements: tuple[Placement, ...],
+    num_ops: int,
+    comm_type: str,
+    reason: str,
+) -> None:
+    """
+    Warn once per (mesh, dims, reason) about inability to flatten operations.
+
+    Args:
+        device_mesh: The device mesh being used
+        mesh_dims: Tuple of mesh dimensions that could not be flattened
+        src_placements: Source placements for the redistribution
+        dst_placements: Target placements for the redistribution
+        num_ops: Number of sequential operations that will be performed
+        comm_type: Type of collective operation (e.g., "reduce_scatter")
+        reason: Either "no_flattened_mesh" or "uneven_tensor_shape"
+    """
+    cache_key = (hash(device_mesh), mesh_dims, reason)
+    if cache_key in _warned_flatten_issues:
+        return
+    _warned_flatten_issues.add(cache_key)
+
+    mesh_dim_names = device_mesh.mesh_dim_names
+    if mesh_dim_names is not None:
+        dim_names = [mesh_dim_names[d] for d in mesh_dims]
+        dims_str = ", ".join(f'"{name}"' for name in dim_names)
+    else:
+        dims_str = f"dims {', '.join(str(d) for d in mesh_dims)} of {device_mesh}"
+
+    common_warning = (
+        "While redistributing from %s to %s, %d sequential %s "
+        "operations will be performed. This is suboptimal: "
+        "multiple collective operations have higher latency "
+        "(separate kernel launches and synchronization points) "
+        "and may give inconsistent results between ranks due to different reduction orders. %s"
+    )
+
+    if reason == "no_flattened_mesh":
+        reason_msg = f"To optimize, flatten mesh dimensions [{dims_str}] so DTensor can use a single operation instead."
+    elif reason == "uneven_tensor_shape":
+        reason_msg = (
+            " Unfortunately, because the tensor dimension is not evenly divisible by the product of "
+            "the mesh dim sizes that would need to be flattened for the optimization to work, it can not be optimized.",
+        )
+    else:
+        raise AssertionError(f"Unexpected reason: {reason}")
+
+    logger.warning(
+        common_warning, src_placements, dst_placements, num_ops, comm_type, reason_msg
+    )
 
 
 def _optimize_transform_infos(
@@ -231,18 +287,19 @@ def _optimize_transform_infos(
 
     def try_create_flattened(
         infos: list[_TransformInfo],
-    ) -> _FlattenedTransformInfo | None:
+    ) -> tuple[_FlattenedTransformInfo | None, str | None]:
         """
         Try to create a flattened transform from 2+ same-type transforms.
 
-        Returns None if:
-        - Less than 2 transforms provided
-        - Transforms have different src_dst_placements
-        - No flattened mesh exists for the required dimensions
-        - For reduce_scatter: tensor dim is not evenly divisible by flattened mesh size
+        Returns (result, failure_reason) where:
+        - result is the FlattenedTransformInfo if successful, None otherwise
+        - failure_reason is None if successful, or one of:
+          - "too_few_transforms": Less than 2 transforms provided
+          - "no_flattened_mesh": No flattened mesh exists for the required dimensions
+          - "uneven_tensor_shape": For reduce_scatter, tensor dim not evenly divisible
         """
         if len(infos) < 2:
-            return None
+            return None, "too_few_transforms"
 
         # All transforms must have the same src_dst_placements to be merged
         # (e.g., can't merge Partial->Shard(0) with Partial->Shard(1))
@@ -252,7 +309,7 @@ def _optimize_transform_infos(
         mesh_dims = tuple(sorted(info.mesh_dim for info in infos))
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
         if flattened_mesh is None:
-            return None
+            return None, "no_flattened_mesh"
 
         # For nested sharding, each transform has a different logical_shape.
         # We need the outermost transform's logical_shape, which represents the
@@ -277,7 +334,7 @@ def _optimize_transform_infos(
             # (not all dims with matching placement - intervening shards are already
             # accounted for in logical_shape).
             if tensor_dim_size % effective_shard_mesh_size != 0:
-                return None
+                return None, "uneven_tensor_shape"
         elif comm_type == "all_reduce":
             # no shape change, any info works
             outermost_info = infos[0]
@@ -286,12 +343,15 @@ def _optimize_transform_infos(
                 f"Unsupported comm type for try_create_flattened: {comm_type}"
             )
 
-        return _FlattenedTransformInfo(
-            mesh_dim=0,
-            src_dst_placements=first_placements,
-            logical_shape=outermost_info.logical_shape,
-            mesh=flattened_mesh,
-            original_mesh_dims=mesh_dims,
+        return (
+            _FlattenedTransformInfo(
+                mesh_dim=0,
+                src_dst_placements=first_placements,
+                logical_shape=outermost_info.logical_shape,
+                mesh=flattened_mesh,
+                original_mesh_dims=mesh_dims,
+            ),
+            None,
         )
 
     # Merge consecutive same-type operations (without reordering)
@@ -322,41 +382,24 @@ def _optimize_transform_infos(
             j += 1
 
         # Try to flatten the group
-        if flattened := try_create_flattened(group):
+        flattened, failure_reason = try_create_flattened(group)
+        if flattened is not None:
             result.append(flattened)
         else:
             # Can't flatten - add individually and warn once if applicable
             result.extend(group)
-            if len(group) >= 2:
+            # Warn for reasons that indicate a real optimization opportunity was missed
+            if failure_reason in ("no_flattened_mesh", "uneven_tensor_shape"):
                 mesh_dims = tuple(sorted(g.mesh_dim for g in group))
-                # Only warn if the flattened mesh doesn't exist. If it exists but
-                # we can't use it (e.g., due to uneven tensor dimensions for
-                # reduce_scatter), don't emit a misleading warning.
-                flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
-                if flattened_mesh is None:
-                    cache_key = (hash(device_mesh), mesh_dims)
-                    if cache_key not in _warned_missing_flattened_meshes:
-                        _warned_missing_flattened_meshes.add(cache_key)
-                        mesh_dim_names = device_mesh.mesh_dim_names
-                        if mesh_dim_names is not None:
-                            dim_names = [mesh_dim_names[d] for d in mesh_dims]
-                            dims_str = ", ".join(f'"{name}"' for name in dim_names)
-                        else:
-                            dims_str = f"dims {', '.join(str(d) for d in mesh_dims)} of {device_mesh}"
-                        logger.warning(
-                            "While redistributing from %s to %s, %d sequential %s "
-                            "operations will be performed. This is suboptimal: "
-                            "multiple collective operations have higher latency "
-                            "(separate kernel launches and synchronization points) "
-                            "and may give inconsistent results between ranks due to different reduction orders. "
-                            "To optimize, flatten mesh dimensions [%s] so DTensor "
-                            "can use a single operation instead.",
-                            src_placements,
-                            dst_placements,
-                            len(group),
-                            current_key,
-                            dims_str,
-                        )
+                _warn_flatten_optimization_not_possible(
+                    device_mesh,
+                    mesh_dims,
+                    src_placements,
+                    dst_placements,
+                    len(group),
+                    current_key,  # type: ignore[arg-type]
+                    failure_reason,
+                )
 
         i = j
 

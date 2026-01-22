@@ -1400,7 +1400,7 @@ class OptimizeFlattenedReductionsTest(TestCase):
 
         # Use a fresh warning cache to avoid global side effects
         with patch(
-            "torch.distributed.tensor._redistribute._warned_missing_flattened_meshes",
+            "torch.distributed.tensor._redistribute._warned_flatten_issues",
             new=set(),
         ):
             with self.assertLogs(
@@ -1658,6 +1658,62 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], _FlattenedTransformInfo)
         self.assertEqual(result[0].original_mesh_dims, (1, 2))
+
+    def test_uneven_tensor_shape_returns_original_with_warning(self):
+        """When tensor dim is not evenly divisible by flattened mesh, originals returned with warning.
+
+        Scenario:
+        - Tensor shape: (10,) on dim 0
+        - Mesh: (2, 3) with dims A, B - flattened size = 6
+        - src_placements: (Partial, Partial)
+        - dst_placements: (Shard(0), Shard(0))
+
+        This is a reduce_scatter where tensor_dim_size (10) % effective_shard_mesh_size (6) != 0.
+        Flattening would produce incorrect results, so it should be rejected with a warning.
+        """
+        mesh = init_device_mesh("cpu", (2, 3), mesh_dim_names=("A", "B"))
+        mesh["A", "B"]._flatten("A_B")
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[10],  # Not evenly divisible by 6
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[10],
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Partial("sum"))
+        dst_placements = (Shard(0), Shard(0))
+
+        # Use a fresh warning cache to avoid global side effects
+        with patch(
+            "torch.distributed.tensor._redistribute._warned_flatten_issues",
+            new=set(),
+        ):
+            with self.assertLogs(
+                "torch.distributed.tensor._redistribute", level=logging.WARNING
+            ) as log_context:
+                result = _optimize_transform_infos(
+                    transform_infos, mesh, src_placements, dst_placements
+                )
+
+            # Should NOT be flattened: 10 % 6 != 0
+            self.assertEqual(len(result), 2)
+            self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
+            # Verify warning message content - specific to uneven tensor shape
+            self.assertEqual(len(log_context.output), 1)
+            warning_msg = log_context.output[0]
+            self.assertIn("While redistributing from", warning_msg)
+            self.assertIn("reduce_scatter", warning_msg)
+            self.assertIn("not evenly divisible", warning_msg)
+            self.assertIn('"A"', warning_msg)
+            self.assertIn('"B"', warning_msg)
 
     def test_empty_input(self):
         """Empty input returns empty output."""
