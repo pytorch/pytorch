@@ -745,10 +745,14 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
         """
         Test that sharding_spec in RNG state enables reproducible sharded random generation.
         """
-        from torch.distributed.tensor._random import _RNGStateTracker
+        from torch.distributed.tensor._random import (
+            _RNGStateTracker,
+            set_use_thread_based_rng,
+        )
 
         device = self.device_type
         initial_state = torch.cuda.get_rng_state(device)
+        set_use_thread_based_rng(True, device=torch.device(self.device_type))
 
         reference_32 = torch.empty(32, device=device).uniform_(0, 1)
         reference_32_v2 = torch.empty(32, device=device).uniform_(0, 1)
@@ -783,6 +787,7 @@ class DTensorThreadRNGTrackerTest(DTensorTestBase):
             device_handle.set_rng_state(make_state(4, (8,), (off,)))
             chunks.append(torch.empty(8, device=device).uniform_(0, 1))
         self.assertEqual(reference_32_v2, torch.cat(chunks))
+        set_use_thread_based_rng(False, device=torch.device(self.device_type))
 
 
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
