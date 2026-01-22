@@ -3358,6 +3358,39 @@ class TestInvokeSubgraphDTensor(TestCase):
 
         self.assertEqual(ref.to_local(), res.to_local())
 
+    def test_dtensor_with_activation_checkpointing(self):
+        """Test nested HOPs: nested_compile_region with activation checkpointing and DTensor."""
+
+        def inner_fn(x):
+            return torch.sin(x) * torch.cos(x)
+
+        @nested_compile_region
+        def fn_with_ac(x):
+            # This creates a nested HOP: invoke_subgraph wrapping tag_activation_checkpoint
+            return torch.utils.checkpoint.checkpoint(inner_fn, x, use_reentrant=False)
+
+        def fn(x):
+            return fn_with_ac(x) + fn_with_ac(x)
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        local_tensor = torch.randn(4, 4, requires_grad=True)
+        x = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        ref = fn(x)
+
+        local_tensor_clone = local_tensor.clone().detach().requires_grad_(True)
+        x_clone = DTensor.from_local(
+            local_tensor_clone, mesh, [Shard(0)], run_check=False
+        )
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone)
+
+        self.assertEqual(ref.to_local(), res.to_local())
+
+        # Test backward
+        ref.to_local().sum().backward()
+        res.to_local().sum().backward()
+        self.assertEqual(local_tensor.grad, local_tensor_clone.grad)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphTwoTensor(TestCase):

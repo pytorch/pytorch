@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+import operator
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
@@ -154,37 +155,105 @@ def flatten_all_tensor_subclasses(
     return tuple(output_inner_tensors)
 
 
-class TensorSubclassWrapper:
+class TensorSubclassUnflattenModule(torch.nn.Module):
+    """Module wrapper for unflatten_all_tensor_subclasses to use with call_module."""
+
+    def __init__(self, flatten_info_list: list[Any]) -> None:
+        super().__init__()
+        self.flatten_info_list = flatten_info_list
+
+    def forward(self, *inner_operands: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        return unflatten_all_tensor_subclasses(inner_operands, self.flatten_info_list)
+
+
+class TensorSubclassFlattenModule(torch.nn.Module):
+    """Module wrapper for flatten_all_tensor_subclasses to use with call_module."""
+
+    def forward(self, *results: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        return flatten_all_tensor_subclasses(results)
+
+
+def make_subclass_wrapper_graph(
+    subgraph: GraphModule,
+    input_flatten_info: list[Any],
+    num_inner_operands: int,
+) -> GraphModule:
     """
-    A wrapper that handles tensor subclass input reconstruction and output extraction.
+    Create an FX GraphModule that wraps a subgraph to handle tensor subclass inputs/outputs.
 
-    Similar to FunctionalizeCtxWrapper, this wrapper is hashable based on the
-    inner subgraph, enabling fake tensor caching. It wraps a subgraph and
-    uses __tensor_flatten__/__tensor_unflatten__ for generic tensor subclass support.
+    The returned graph:
+    1. Takes flattened inner operands as input
+    2. Calls unflatten_all_tensor_subclasses to reconstruct subclasses
+    3. Calls the original subgraph as a submodule
+    4. Calls flatten_all_tensor_subclasses on the output
+
+    Args:
+        subgraph: The original FX GraphModule
+        input_flatten_info: List of flatten info for each original operand
+        num_inner_operands: Number of flattened inner operands
+
+    Returns:
+        A new GraphModule that handles tensor subclass wrapping/unwrapping
     """
+    # Create a new graph
+    new_graph = torch.fx.Graph()
 
-    def __init__(self, inner_subgraph, input_flatten_info: list[Any]):
-        self.subgraph = inner_subgraph
-        # Each entry is (subclass_type, tensor_attr_names, flatten_spec, outer_size, outer_stride) or None for non-subclass
-        self.input_flatten_info = input_flatten_info
+    # Create placeholders for inner operands
+    inner_operand_nodes = []
+    for i in range(num_inner_operands):
+        placeholder = new_graph.placeholder(f"inner_arg_{i}")
+        inner_operand_nodes.append(placeholder)
 
-    def __hash__(self):
-        return id(self.subgraph)
+    # Use call_module to invoke the unflatten module with variadic args
+    reconstructed_operands = new_graph.call_module(
+        "_unflatten", tuple(inner_operand_nodes)
+    )
 
-    def __repr__(self):
-        return f"TensorSubclassWrapper({self.subgraph})"
-
-    def __call__(self, *inner_operands):
-        # Reconstruct tensor subclasses from inner tensors using captured flatten info
-        reconstructed_operands = unflatten_all_tensor_subclasses(
-            inner_operands, self.input_flatten_info
+    # Unpack reconstructed operands to pass to subgraph
+    num_original_operands = len(input_flatten_info)
+    unpacked_args = []
+    for i in range(num_original_operands):
+        unpacked_arg = new_graph.call_function(
+            operator.getitem, (reconstructed_operands, i)
         )
+        unpacked_args.append(unpacked_arg)
 
-        # Call the original subgraph with reconstructed subclasses
-        result = self.subgraph(*reconstructed_operands)
+    # Call the original subgraph as a submodule
+    subgraph_output = new_graph.call_module("_subgraph", tuple(unpacked_args))
 
-        # Flatten output subclasses to inner tensors
-        return flatten_all_tensor_subclasses(result)
+    # Get the number of outputs from the subgraph's output node
+    output_node = next(n for n in subgraph.graph.nodes if n.op == "output")
+    output_args = output_node.args[0]
+    if isinstance(output_args, (list, tuple)):
+        num_outputs = len(output_args)
+    else:
+        num_outputs = 1
+
+    # Unpack subgraph outputs
+    unpacked_outputs = []
+    for i in range(num_outputs):
+        unpacked_output = new_graph.call_function(
+            operator.getitem, (subgraph_output, i)
+        )
+        unpacked_outputs.append(unpacked_output)
+
+    # Use call_module to invoke the flatten module with variadic args
+    flattened_output = new_graph.call_module("_flatten", tuple(unpacked_outputs))
+
+    # Set output
+    new_graph.output(flattened_output)
+
+    # Create the GraphModule with the unflatten, subgraph, and flatten modules as submodules
+    wrapper_gm = GraphModule(
+        {
+            "_unflatten": TensorSubclassUnflattenModule(input_flatten_info),
+            "_subgraph": subgraph,
+            "_flatten": TensorSubclassFlattenModule(),
+        },
+        new_graph,
+    )
+
+    return wrapper_gm
 
 
 def _extract_nested_region_config(fn):
@@ -225,7 +294,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: Union[GraphModule, FunctionalizeCtxWrapper, TensorSubclassWrapper],
+        subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
         identifier: Optional[str],
         *operands,
     ):
@@ -282,7 +351,7 @@ invoke_subgraph = InvokeSubgraphHOP()
 
 
 def invoke_subgraph_infer(
-    subgraph: Union[GraphModule, FunctionalizeCtxWrapper, TensorSubclassWrapper],
+    subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
     *operands,
 ):
     """Inference-only entrypoint for invoke_subgraph that auto-generates identifier.
@@ -858,7 +927,7 @@ def invoke_subgraph_subclass(subgraph, identifier, *operands):
     """
     Handle invoke_subgraph when some inputs are tensor subclasses.
 
-    This creates a TensorSubclassWrapper that uses __tensor_flatten__/__tensor_unflatten__
+    This creates a wrapper FX GraphModule that uses __tensor_flatten__/__tensor_unflatten__
     for generic tensor subclass support:
     1. Flattens tensor subclasses to inner tensors using __tensor_flatten__
     2. Calls the original subgraph with reconstructed subclasses
@@ -866,6 +935,7 @@ def invoke_subgraph_subclass(subgraph, identifier, *operands):
     4. Reconstructs output subclasses using __tensor_unflatten__
     """
     assert isinstance(operands, tuple), "operands are expected to be a tuple"
+    assert isinstance(subgraph, GraphModule), "subgraph must be a GraphModule"
 
     # Capture flatten info and extract inner tensors for each operand
     input_flatten_info = []
@@ -874,7 +944,13 @@ def invoke_subgraph_subclass(subgraph, identifier, *operands):
         if is_traceable_wrapper_subclass(op):
             tensor_attr_names, flatten_spec = op.__tensor_flatten__()
             input_flatten_info.append(
-                (type(op), tensor_attr_names, flatten_spec, op.shape, op.stride())
+                (
+                    type(op),
+                    tuple(tensor_attr_names),
+                    flatten_spec,
+                    op.shape,
+                    op.stride(),
+                )
             )
             # Extract inner tensors
             for name in tensor_attr_names:
@@ -897,7 +973,10 @@ def invoke_subgraph_subclass(subgraph, identifier, *operands):
         else:
             output_flatten_info.append(None)
 
-    wrapper_subgraph = TensorSubclassWrapper(subgraph, input_flatten_info)
+    # Create the wrapper GraphModule
+    wrapper_subgraph = make_subclass_wrapper_graph(
+        subgraph, input_flatten_info, len(inner_operands)
+    )
 
     # Call invoke_subgraph with the wrapper and inner tensors
     inner_result = invoke_subgraph(wrapper_subgraph, identifier, *inner_operands)
