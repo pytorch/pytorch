@@ -15234,26 +15234,50 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         a, b = [torch.randn(s, device=GPU_TYPE) for s in [(1024, 512), (512, 1024)]]
         self.common(fn, (a, b))
         code = run_and_get_triton_code(torch.compile(fn, mode="max-autotune"), a, b)
-        (
-            FileCheck()
-            # first kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("load")
-            .check_dag("gdc_launch")
-            .check_dag("store")
-            # second kernel, no need to wait before load
-            .check("'launch_pdl': True")
-            .check("load")
-            .check("gdc_wait")
-            .check_dag("gdc_launch")
-            .check_dag("store")
-            # matmul template
-            .check_not("'launch_pdl': True")
-            .check_not("gdc_wait")
-            .check_not("gdc_launch")
-            .check("store")
-        ).run(code)
+        if is_dynamic_shape_enabled():
+            # Dynamic shapes version: store comes before gdc_launch
+            (
+                FileCheck()
+                # first kernel
+                .check("'launch_pdl': True")
+                .check("gdc_wait")
+                .check("load")
+                .check("store")
+                .check("gdc_launch")
+                # second kernel, no need to wait before load
+                .check("'launch_pdl': True")
+                .check("load")
+                .check("gdc_wait")
+                .check("store")
+                .check("gdc_launch")
+                # matmul template
+                .check_not("'launch_pdl': True")
+                .check_not("gdc_wait")
+                .check_not("gdc_launch")
+                .check("store")
+            ).run(code)
+        else:
+            # Static shapes version: gdc_launch comes before store
+            (
+                FileCheck()
+                # first kernel
+                .check("'launch_pdl': True")
+                .check("gdc_wait")
+                .check("load")
+                .check("gdc_launch")
+                .check("store")
+                # second kernel, no need to wait before load
+                .check("'launch_pdl': True")
+                .check("load")
+                .check("gdc_wait")
+                .check("gdc_launch")
+                .check("store")
+                # matmul template
+                .check_not("'launch_pdl': True")
+                .check_not("gdc_wait")
+                .check_not("gdc_launch")
+                .check("store")
+            ).run(code)
 
     def test_use_deterministic_algorithms(self):
         @torch.compile(backend="inductor", fullgraph=True)
