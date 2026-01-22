@@ -89,6 +89,10 @@ def impl_IS_MAPPING(a: Any) -> bool:
     return isinstance(a, Mapping)
 
 
+def impl_MATCH_SEQUENCE(a: Any) -> bool:
+    return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
+
+
 def impl_MATCH_KEYS(obj: Any, keys: tuple[Any, ...]) -> tuple[Any, ...] | None:
     if all(key in obj for key in keys):
         return tuple(obj[key] for key in keys)
