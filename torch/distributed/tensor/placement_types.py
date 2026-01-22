@@ -21,7 +21,7 @@ from torch.distributed.tensor._collective_utils import (
 from torch.distributed.tensor._ops._mask_buffer import MaskBuffer
 
 
-__all__ = ["Placement", "Shard", "Replicate", "Partial"]
+__all__ = ["Placement", "Shard", "Replicate", "Partial", "Reduced"]
 
 
 # Appease TestPublicBindings.test_correct_module_names
@@ -892,6 +892,41 @@ class Replicate(torch._C._distributed.Replicate):
         src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         return Replicate._make_replicate_tensor(tensor, mesh, mesh_dim, src_data_rank)
+
+
+class Reduced(Replicate):
+    """
+    Replicated data where gradient should be Partial (unreduced).
+
+    Subclasses Replicate so existing sharding propagation rules
+    treat it as replicated data (which it is, at runtime).
+
+    Always uses sum for gradient reduction (the only practical case
+    for distributed training).
+
+    The ``Reduced`` placement is the cotangent of ``Partial`` placement:
+    - Forward: data is replicated (same as Replicate)
+    - Backward: gradient becomes Partial (needs reduction)
+
+    This enables efficient FSDP-style gradient computation where
+    all-gather produces Reduced output, and the backward pass
+    automatically uses reduce-scatter.
+    """
+
+    def is_reduced(self) -> bool:
+        return True
+
+    def __repr__(self) -> str:
+        return "Reduced()"
+
+    def __str__(self) -> str:
+        return "Red"
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, Reduced)
+
+    def __hash__(self) -> int:
+        return hash("Reduced")
 
 
 class Partial(torch._C._distributed.Partial):
