@@ -634,6 +634,7 @@ class KernelCallLine(WrapperLine):
     arg_types: list[str]
     triton: bool
     triton_meta: dict[str, Any]
+    inductor_meta: Optional[dict[str, Any]]
     device: torch.device
     graph_name: str
     original_fxnode_name: str
@@ -647,6 +648,7 @@ class KernelCallLine(WrapperLine):
             raw_keys=self.raw_keys,
             raw_args=self.raw_args,
             triton_meta=self.triton_meta,
+            inductor_meta=self.inductor_meta,
             device=self.device,
             graph_name=self.graph_name,
             original_fxnode_name=self.original_fxnode_name,
@@ -2939,6 +2941,7 @@ class PythonWrapperCodegen(CodeGen):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        inductor_meta=None,
         original_fxnode_name=None,
     ):
         """
@@ -2973,6 +2976,7 @@ class PythonWrapperCodegen(CodeGen):
                 triton=triton,
                 # pyrefly: ignore [bad-argument-type]
                 triton_meta=triton_meta,
+                inductor_meta=inductor_meta,
                 device=device,
                 graph_name=V.graph.name,
                 # pyrefly: ignore [bad-argument-type]
@@ -2991,6 +2995,7 @@ class PythonWrapperCodegen(CodeGen):
         raw_keys=None,
         raw_args=None,
         triton_meta=None,
+        inductor_meta=None,
         graph_name="",
         original_fxnode_name=None,
     ):
