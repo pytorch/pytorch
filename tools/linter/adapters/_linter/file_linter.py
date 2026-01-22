@@ -6,7 +6,6 @@ from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing_extensions import Never
 
 from . import ParseError
 from .argument_parser import ArgumentParser
@@ -17,6 +16,7 @@ from .python_file import PythonFile
 if TYPE_CHECKING:
     from argparse import Namespace
     from collections.abc import Iterator, Sequence
+    from typing_extensions import Never
 
 
 class ErrorLines:
