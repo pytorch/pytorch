@@ -316,17 +316,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # user1(wait_ag1)
         stable_topological_sort(gm.graph)
 
-    # Keep these last, since they introduce mutation. Look at
-    # ./fx_passes/README.md for a discussion of mutation invariants.
-    GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
-    )
-    GraphTransformObserver(
-        gm, "decompose_triton_kernel_wrapper_functional"
-    ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
-    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
-        decompose_auto_functionalized
-    )
 
     # Apply overlap scheduling if enabled
     if config.aten_distributed_optimizations.enable_overlap_scheduling:
@@ -354,7 +343,17 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 )
             )
 
-
+    # Keep these last, since they introduce mutation. Look at
+    # ./fx_passes/README.md for a discussion of mutation invariants.
+    GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
+        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
+    )
+    GraphTransformObserver(
+        gm, "decompose_triton_kernel_wrapper_functional"
+    ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
+    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
+        decompose_auto_functionalized
+    )
     if not torch._dynamo.config.skip_fsdp_hooks:
         GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
             comms.reinplace_fsdp_all_gather
@@ -1206,6 +1205,18 @@ def decompose_triton_kernel_wrapper_functional(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+    # First, recursively process any subgraphs (e.g., while_loop body, cond branches)
+    gm = graph.owning_module
+    if gm is not None:
+        subgraph_names: OrderedSet[str] = OrderedSet(
+            x.target for x in graph.find_nodes(op="get_attr")
+        )
+        for child_name, child_mod in gm.named_children():
+            if child_name in subgraph_names and isinstance(
+                child_mod, torch.fx.GraphModule
+            ):
+                decompose_triton_kernel_wrapper_functional(child_mod.graph)
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -1247,6 +1258,18 @@ def decompose_auto_functionalized(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+    # First, recursively process any subgraphs (e.g., while_loop body, cond branches)
+    gm = graph.owning_module
+    if gm is not None:
+        subgraph_names: OrderedSet[str] = OrderedSet(
+            x.target for x in graph.find_nodes(op="get_attr")
+        )
+        for child_name, child_mod in gm.named_children():
+            if child_name in subgraph_names and isinstance(
+                child_mod, torch.fx.GraphModule
+            ):
+                decompose_auto_functionalized(child_mod.graph)
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(

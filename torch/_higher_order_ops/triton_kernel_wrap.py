@@ -1346,14 +1346,14 @@ def triton_kernel_wrapper_functional_dense(
         key: (clone_preserve_strides(val) if key in tensors_to_clone else val)
         for key, val in kwargs.items()
     }
-    return triton_kernel_wrapper_mutation(
+    triton_kernel_wrapper_mutation(
         kernel_idx=kernel_idx,
         constant_args_idx=constant_args_idx,
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
         kwargs=kwargs,
     )
-    # return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
+    return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
 
 @triton_kernel_wrapper_functional.py_impl(FakeTensorMode)
