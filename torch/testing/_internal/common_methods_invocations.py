@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
+    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
@@ -5442,6 +5443,12 @@ def sample_inputs__unsafe_masked_index_put_accumulate(op_info, device, dtype, re
         masks = [torch.logical_and(idx >= 0, idx < self_shape[i]) for i, idx in enumerate(indices) if idx is not None]
         mask = functools.reduce(torch.logical_and, masks)
         values = make_arg(idx_sizes)
+        if device == 'mps:0' and dtype in [torch.float16, torch.bfloat16]:
+            # TestConsistencyMPS.test_output_match compares CPU to MPS results
+            # Order of operations in GPU index_put_accumulate is not guaranteed,
+            # which can result in significant divergence between sequential and parallel execution
+            # Unless inputs are normalized
+            values = torch.nn.functional.normalize(values)
         yield SampleInput(make_arg(self_shape), mask, indices, values)
 
         masks = [torch.logical_and(idx >= 1, idx < self_shape[i] - 1) for i, idx in enumerate(indices) if idx is not None]
@@ -8950,7 +8957,10 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
 
     dmajor, dminor = torch.cuda.get_device_capability()
 
-    if dmajor == 9 and not torch.version.hip:
+    # Blockwise scaling requires cublasLt >= 12.9 (CUDA 12.9+)
+    # See: https://github.com/pytorch/pytorch/issues/172227
+    cuda_version = _get_torch_cuda_version()
+    if dmajor == 9 and not torch.version.hip and cuda_version >= (12, 9):
         # 1x128 x 1x128
         scale1 = make_scale((K // 128, M)).t()
         scale2 = make_scale((K // 128, N)).t()
@@ -13101,8 +13111,7 @@ op_db: list[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               # NotImplementedError: "cdist" not implemented for 'Half'/'BFloat16'
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency', device_type='mps', dtypes=(torch.float16, torch.bfloat16)),
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-2)}), 'TestConsistency', device_type='mps'),
            )),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
@@ -19242,6 +19251,7 @@ op_db: list[OpInfo] = [
            )),
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
+                    dtypesIfMPS=floating_types_and(torch.float16),
                     # this function is undefined if 'abs' values are <0
                     supports_forward_ad=True,
                     lhs_make_tensor_kwargs=dict(low=0),
@@ -19256,6 +19266,11 @@ op_db: list[OpInfo] = [
                         # Analytical:
                         # tensor([[-0.0047]], dtype=torch.float64, grad_fn=<CopySlices>)
                         DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
+                        # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
+                        DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-5, rtol=5e-3)}),
+                                     'TestConsistency', 'test_output_match', device_type='mps'),
+                        DecorateInfo(toleranceOverride({torch.float16: tol(atol=5e-3, rtol=5e-2)}),
+                                     'TestConsistency', 'test_output_grad_match', device_type='mps'),
                     )),
     # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
     # To test reference numerics against multiple values of argument `n`,
