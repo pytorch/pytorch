@@ -708,32 +708,36 @@ namespace c10::detail {
 
 #ifndef FATAL_IF
 #ifdef C10_USE_GLOG
-#define FATAL_IF(condition)                                              \
-  condition ? (void)0                                                    \
-            : ::c10::LoggerVoidify() &                                   \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::google::GLOG_FATAL) \
+#define FATAL_IF(condition)                                           \
+  condition ? (void)0                                                 \
+            : ::c10::LoggerVoidify() &                                \
+          ::c10::MessageLogger(                                       \
+              ::c10::SourceLocation::current(), ::google::GLOG_FATAL) \
               .stream()
 #else
-#define FATAL_IF(condition)            \
-  condition ? (void)0                  \
-            : ::c10::LoggerVoidify() & \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL).stream()
+#define FATAL_IF(condition)                                        \
+  condition ? (void)0                                              \
+            : ::c10::LoggerVoidify() &                             \
+          ::c10::MessageLogger(                                    \
+              ::c10::SourceLocation::current(), ::c10::GLOG_FATAL) \
+              .stream()
 #endif
 #endif
 
 #ifndef NON_FATAL_IF
 #ifdef C10_USE_GLOG
-#define NON_FATAL_IF(condition)                                \
-  condition ? (void)0                                          \
-            : ::c10::LoggerVoidify() &                         \
-          ::c10::MessageLogger(                                \
-              __FILE__, __LINE__, ::google::GLOG_FATAL, false) \
-              .stream()
-#else
 #define NON_FATAL_IF(condition)                                              \
   condition ? (void)0                                                        \
             : ::c10::LoggerVoidify() &                                       \
-          ::c10::MessageLogger(__FILE__, __LINE__, ::c10::GLOG_FATAL, false) \
+          ::c10::MessageLogger(                                              \
+              ::c10::SourceLocation::current(), ::google::GLOG_FATAL, false) \
+              .stream()
+#else
+#define NON_FATAL_IF(condition)                                           \
+  condition ? (void)0                                                     \
+            : ::c10::LoggerVoidify() &                                    \
+          ::c10::MessageLogger(                                           \
+              ::c10::SourceLocation::current(), ::c10::GLOG_FATAL, false) \
               .stream()
 #endif
 #endif
