@@ -224,6 +224,9 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
             >>> ds.__getitems__([0, 2])
             [(tensor([1, 2]), tensor(7)), (tensor([5, 6]), tensor(9))]
         """
+        # Convert to list to ensure proper tensor fancy indexing
+        # (tuples are interpreted as multi-dimensional indices)
+        indices = list(indices)
         return list(zip(*(tensor[indices] for tensor in self.tensors)))
 
     def __len__(self) -> int:
