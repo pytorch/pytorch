@@ -3785,7 +3785,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 11):
             # for versions < 3.11, also push the boolean result
             tos = self.stack[-1]
-            self.push(ConstantVariable.create(istype(tos, ConstantVariable)))
+            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
 
     def LOAD_ASSERTION_ERROR(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval("AssertionError"))
