@@ -29,11 +29,13 @@ class _LazyModule:
 if TYPE_CHECKING:
     import onnx
     import onnx_ir  # type: ignore[import-untyped, import-not-found]
+    import onnx_ir.passes.common as onnx_passes
     import onnxscript
     import onnxscript._framework_apis.torch_2_9 as onnxscript_apis
 
 else:
     onnx = _LazyModule("onnx")
     onnx_ir = _LazyModule("onnx_ir")
+    onnx_passes = _LazyModule("onnx_ir.passes.common")
     onnxscript = _LazyModule("onnxscript")
     onnxscript_apis = _LazyModule("onnxscript._framework_apis.torch_2_9")
