@@ -1,6 +1,7 @@
 import contextlib
 import functools
 from collections.abc import Callable, Generator, Sequence
+from dataclasses import dataclass
 from typing import Any, NamedTuple
 
 import torch
@@ -54,6 +55,33 @@ class LeafModuleState(NamedTuple):
     nn_module_index: int
     named_parameters: dict[str, torch.nn.Parameter]
     named_buffers: dict[str, torch.Tensor]
+
+
+@dataclass
+class GradientInfo:
+    """
+    Lightweight gradient metadata for invoke_leaf_function backward.
+
+    Instead of storing full tensors in the forward state (which can be large),
+    we store just the information needed for backward:
+    - edge: GradientEdge for torch.autograd.grad (points to autograd graph node)
+    - size: torch.Size for creating zero gradients when needed
+    - dtype: torch.dtype for creating zero gradients
+    - device: torch.device for creating zero gradients
+
+    Why we store metadata (size, dtype, device) instead of using weakref:
+    - The zeros fallback needs to create a tensor with the same shape/dtype/device
+      as the original input. With explicit metadata, we always have this info.
+    - Weakref would require a fallback path if the tensor is collected, adding
+      complexity. And if we need the fallback anyway, might as well always use it.
+    - The metadata overhead (a few bytes for size tuple + dtype + device) is
+      negligible compared to actual tensor data we'd otherwise store.
+    """
+
+    edge: torch.autograd.graph.GradientEdge
+    size: torch.Size
+    dtype: torch.dtype
+    device: torch.device
 
 
 def unwrap_fn_spec(fn_spec: pytree.TreeSpec) -> Callable:
@@ -221,63 +249,83 @@ def reconstruct_original_args(
         yield new_args, new_kwargs
 
 
-def autograd_grad_with_mixed_inputs(
-    outputs: Sequence[Any],
-    inputs: Sequence[Any],
+def autograd_grad_with_gradient_info(
+    output_infos: Sequence[GradientInfo | None],
+    input_infos: Sequence[GradientInfo | None],
     grad_outputs: Sequence[Any] | None = None,
     retain_graph: bool | None = None,
     create_graph: bool = False,
     allow_unused: bool = False,
 ) -> tuple[torch.Tensor | None, ...]:
     """
-    Wrapper for torch.autograd.grad that handles mixed tensor/non-tensor inputs.
+    Compute gradients using GradientInfo instead of full tensors.
 
-    Unlike torch.autograd.grad, this function accepts:
-    - outputs: mix of tensors (with or without grad_fn) and non-tensors
-    - inputs: mix of tensors (with or without requires_grad) and non-tensors
+    This is a lighter-weight alternative that avoids storing full tensors in
+    the forward state. Instead, we store GradientInfo containing:
+    - GradientEdge for torch.autograd.grad
+    - Tensor metadata (size, dtype, device) for creating zeros when needed
 
-    Returns a tuple of gradients with None for non-tensor or non-requires_grad inputs.
+    Args:
+        output_infos: GradientInfo for each output (None if no grad_fn)
+        input_infos: GradientInfo for each input (None if not requires_grad)
+        grad_outputs: Gradients w.r.t. outputs
+
+    Returns a tuple of gradients with None for inputs that don't require grad.
     """
-    # Filter outputs to only tensors with grad_fn
-    filtered_outputs = []
+    # Filter outputs to only those with valid GradientInfo
+    filtered_output_edges = []
     filtered_grad_outputs = []
-    for i, out in enumerate(outputs):
-        if isinstance(out, torch.Tensor) and out.grad_fn is not None:
-            filtered_outputs.append(out)
+    for i, info in enumerate(output_infos):
+        if info is not None and info.edge.node is not None:
+            filtered_output_edges.append(info.edge)
             if grad_outputs is not None:
                 filtered_grad_outputs.append(grad_outputs[i])
 
-    # Filter inputs to only tensors with requires_grad, tracking original indices
-    filtered_inputs = []
+    # Filter inputs to only those with GradientInfo, tracking original indices
+    filtered_input_edges = []
+    filtered_input_infos = []
     input_indices = []
-    for i, inp in enumerate(inputs):
-        if isinstance(inp, torch.Tensor) and inp.requires_grad:
-            filtered_inputs.append(inp)
+    for i, info in enumerate(input_infos):
+        if info is not None:
+            filtered_input_edges.append(info.edge)
+            filtered_input_infos.append(info)
             input_indices.append(i)
 
     # Early return if no valid outputs or inputs
-    if not filtered_outputs or not filtered_inputs:
-        return tuple(None for _ in inputs)
+    if not filtered_output_edges or not filtered_input_edges:
+        return tuple(None for _ in input_infos)
 
-    # Compute gradients
+    # Compute gradients using GradientEdges
     grads = torch.autograd.grad(
-        outputs=filtered_outputs,
-        inputs=filtered_inputs,
+        outputs=filtered_output_edges,
+        inputs=filtered_input_edges,
         grad_outputs=filtered_grad_outputs if grad_outputs is not None else None,
         retain_graph=retain_graph,
         create_graph=create_graph,
         allow_unused=allow_unused,
     )
 
-    # Reconstruct full gradient tuple with Nones at proper positions
-    # For unused inputs that require grad, return zeros instead of None
-    # to match what the tracing backward produces
-    result: list[torch.Tensor | None] = [None] * len(inputs)
+    # Reconstruct full gradient tuple with Nones at proper positions.
+    #
+    # NB: For unused inputs that require grad, we return zeros instead of None.
+    # This is necessary because during AOT tracing, we use fake_impl to determine
+    # the backward graph structure. fake_impl may not accurately reflect which
+    # inputs are truly used for gradients in real_impl. For example, users often
+    # write fake_impl by returning torch.empty_like(input) to get the right shape
+    # without actually using the input in a differentiable computation. So we must
+    # be permissive and assume all inputs with requires_grad=True could need
+    # gradients. When multiple invoke_leaf_function calls share an input (e.g.,
+    # a module's forward + hook both receiving the same tensor), the traced
+    # backward graph generates explicit add operations to accumulate their
+    # gradients. At runtime, if one leaf function doesn't actually use the input,
+    # autograd.grad returns None for it, and the traced add(grad1, grad2) fails
+    # because one operand is None. Returning zeros ensures the add always works.
+    result: list[torch.Tensor | None] = [None] * len(input_infos)
     for filtered_idx, original_idx in enumerate(input_indices):
         grad = grads[filtered_idx]
         if grad is None:
-            # Input was unused - return zeros to match traced backward structure
-            grad = torch.zeros_like(inputs[original_idx])
+            info = filtered_input_infos[filtered_idx]
+            grad = torch.zeros(info.size, dtype=info.dtype, device=info.device)
         result[original_idx] = grad
 
     return tuple(result)
@@ -291,20 +339,45 @@ def _make_forward(
     exclude_keys: DispatchKeySet,
 ) -> tuple[Callable, dict[str, Any]]:
     """
-    Create a forward wrapper that captures inputs/outputs for backward.
+    Create a forward wrapper that captures gradient info for backward.
 
     Returns (forward_fn, state_dict) where state_dict is shared with backward.
+    Instead of storing full tensors, we store lightweight GradientInfo to
+    minimize memory usage.
     """
     state: dict[str, Any] = {"inputs": None, "outputs": None}
 
     @functools.wraps(fn)
     def forward(*args):
-        state["inputs"] = tuple(
+        # NB: We mutate requires_grad in-place here, but this is safe because
+        # the args are already detached tensors. In dense/fake dispatch,
+        # _detach_tensors() is called before invoking this function, so we're
+        # not touching the caller's original tensors' requires_grad state.
+        #
+        # We need this because we capture which inputs have requires_grad=True
+        # at tracing time (in requires_grad_indices). The tricky part is that
+        # at runtime with aot_eager, the forward graph runs inside
+        # autograd.Function.forward(), which is a no-grad context. This means
+        # intermediate tensors can lose their requires_grad status by the time
+        # they reach invoke_leaf_function, even though they had it during tracing.
+        #
+        # So we're essentially restoring the requires_grad state to match what
+        # we saw at tracing time. Otherwise the leaf function's internal
+        # autograd wouldn't work correctly.
+        inputs = tuple(
             arg.requires_grad_(True) if idx in requires_grad_indices else arg
             for idx, arg in enumerate(args)
         )
-        # For fake_impl, it can be called at tracing time and runtime (for output validation).
-        # So dynamically remove PythonDispatcher if the forward is called at runtime
+        # NB: fake_impl can be called in two different contexts:
+        # - At tracing time: with fake tensors, where PythonDispatcher is active
+        # - At runtime: for output validation (when leaf_function_validate_outputs=True),
+        #   where PythonDispatcher is NOT active
+        #
+        # We capture the dispatch keys when the wrapper is created (at tracing time),
+        # but the wrapper may be invoked later at runtime for validation. Since
+        # PythonDispatcher should only be active during tracing, we detect runtime
+        # by checking if it's currently in the TLS include set—if not, we remove it
+        # from the captured keys.
         effective_keys = include_keys
         if include_keys.has(DispatchKey.PythonDispatcher):
             current_include = torch._C._dispatch_tls_local_include_set()
@@ -316,14 +389,44 @@ def _make_forward(
                     new_args,
                     new_kwargs,
                 ):
-                    state["outputs"] = fn(*new_args, **new_kwargs)
+                    outputs = fn(*new_args, **new_kwargs)
 
                 # Check for escaped gradients (must be inside enable_grad for get_gradient_edge)
-                check_escaped_gradients(
-                    state["outputs"], state["inputs"], requires_grad_indices
+                check_escaped_gradients(outputs, inputs, requires_grad_indices)
+
+                # Capture lightweight gradient info instead of storing full tensors.
+                # This significantly reduces memory usage for large tensors.
+                state["inputs"] = tuple(
+                    GradientInfo(
+                        edge=get_gradient_edge(inp),
+                        size=inp.size(),
+                        dtype=inp.dtype,
+                        device=inp.device,
+                    )
+                    if isinstance(inp, torch.Tensor) and inp.requires_grad
+                    else None
+                    for inp in inputs
                 )
 
-        return state["outputs"]
+                # Capture output GradientInfo for tensors with grad_fn
+                flat_outputs = (
+                    outputs if isinstance(outputs, tuple) else (outputs,)
+                )
+                state["outputs"] = tuple(
+                    GradientInfo(
+                        edge=get_gradient_edge(out),
+                        size=out.size(),
+                        dtype=out.dtype,
+                        device=out.device,
+                    )
+                    if isinstance(out, torch.Tensor)
+                    and out.requires_grad
+                    and out.grad_fn is not None
+                    else None
+                    for out in flat_outputs
+                )
+
+        return outputs
 
     return forward, state
 
@@ -347,9 +450,9 @@ def make_runtime_wrappers(
             raise RuntimeError(
                 "invoke_leaf_function backward expects inputs/outputs to be set in forward."
             )
-        return autograd_grad_with_mixed_inputs(
-            outputs=state["outputs"],
-            inputs=state["inputs"],
+        return autograd_grad_with_gradient_info(
+            output_infos=state["outputs"],
+            input_infos=state["inputs"],
             grad_outputs=grads,
             allow_unused=True,
         )
@@ -378,8 +481,10 @@ def make_tracing_wrappers(
             )
         # Return fake gradients for tracing (shapes match inputs)
         return tuple(
-            torch.empty_like(state["inputs"][i]) if i in requires_grad_indices else None
-            for i in range(len(state["inputs"]))
+            torch.empty(info.size, dtype=info.dtype, device=info.device)
+            if info is not None
+            else None
+            for info in state["inputs"]
         )
 
     return forward, backward
