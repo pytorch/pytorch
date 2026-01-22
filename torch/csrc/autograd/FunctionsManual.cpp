@@ -4905,7 +4905,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask) {
   const auto normalized_ndim = normalized_shape.size();
-  git const auto input_shape = input_t.sym_sizes();
+  const auto input_shape = input_t.sym_sizes();
   const auto input_ndim = input_t.dim();
   const auto axis = input_ndim - normalized_ndim;
   const c10::SymInt M =
