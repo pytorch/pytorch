@@ -146,7 +146,6 @@ def impl(
         func = pytree._retrieve_constant(func)
         assert isinstance(func, _ConstantFunction)
 
-    # Lazy import to avoid circular dependency with invoke_leaf_function
     from torch._higher_order_ops.invoke_leaf_function import reconstruct_original_args
 
     # Reconstruct args/kwargs from flat_args and process any LeafModuleState objects
