@@ -281,6 +281,35 @@ class CallFunctionNoArgsSource(WeakRefCallSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class MethodCallSource(ChainedSource):
+    """
+    Source for method call results like obj.method(arg1, arg2).
+    Used when the method is called with constant arguments and the result
+    needs to be tracked as a source for guard generation.
+    """
+
+    method_name: str
+    args: tuple[Any, ...] = ()
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # The add_push_null wrapper handles the null push for function calls.
+        # We need to load obj.method as the callable, then push args and call.
+        def load_method() -> None:
+            codegen(self.base)
+            codegen.extend_output(codegen.create_load_attrs(self.method_name))
+
+        codegen.add_push_null(load_method)
+        for arg in self.args:
+            codegen.append_output(codegen.create_load_const(arg))
+        codegen.extend_output(create_call_function(len(self.args), False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        args_str = ", ".join(_esc_str(arg, apply_repr=True) for arg in self.args)
+        return f"{{0}}.{_esc_str(self.method_name)}({args_str})"
+
+
+@dataclass_with_cached_hash(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 

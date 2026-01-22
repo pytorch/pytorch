@@ -1196,8 +1196,27 @@ class VariableBuilder:
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
+            # ProcessGroup objects are lifted as graph inputs (placeholders) rather
+            # than being embedded as constants. This is necessary because repr()
+            # of ProcessGroup produces invalid Python syntax (e.g.,
+            # "<ProcessGroup object at 0x...>"), which would cause syntax errors
+            # when FX generates Python code.
             self.install_guards(GuardBuilder.ID_MATCH)
-            return ProcessGroupVariable(value, source=self.source)
+            proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(value),
+                value,
+                source=self.source,
+            )
+            proxy.node.meta["grapharg"] = GraphArg(
+                self.source,
+                value,
+                False,
+                None,
+                False,
+                value,
+            )
+            return ProcessGroupVariable(value, proxy=proxy, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
             self.install_guards(GuardBuilder.EQUALS_MATCH)

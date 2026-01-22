@@ -3000,7 +3000,28 @@ if hasattr(torch._C, "_c10d_init"):
     import torch.distributed
 
     if torch.distributed.is_available():
-        from torch._library.opaque_object import register_opaque_type
+        from torch._library.opaque_object import MemberType, register_opaque_type
 
         register_opaque_type(torch.distributed.ProcessGroup, typ="reference")
-        register_opaque_type(torch.distributed.DeviceMesh, typ="reference")
+        register_opaque_type(
+            torch.distributed.DeviceMesh,
+            typ="reference",
+            members={
+                # Attributes accessed via var_getattr in DeviceMeshVariable
+                "ndim": MemberType.USE_REAL,
+                "device_type": MemberType.USE_REAL,
+                "mesh_dim_names": MemberType.USE_REAL,
+                # Methods accessed via call_method in DeviceMeshVariable
+                "size": MemberType.USE_REAL,
+                "get_coordinate": MemberType.USE_REAL,
+                "get_rank": MemberType.USE_REAL,
+                "get_local_rank": MemberType.USE_REAL,
+                "get_group": MemberType.USE_REAL,
+                "_is_current_rank_part_of_mesh": MemberType.USE_REAL,
+                "_flatten": MemberType.USE_REAL,
+                "_sym_get_coordinate": MemberType.USE_REAL,
+                # Dunder methods for equality comparison
+                "__eq__": MemberType.USE_REAL,
+                "__hash__": MemberType.USE_REAL,
+            },
+        )
