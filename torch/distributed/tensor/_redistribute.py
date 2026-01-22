@@ -1164,10 +1164,6 @@ def redistribute_local_tensor(
         # which should be an empty tensor
         return local_tensor
 
-    # Short-circuit if placements are already equal (no-op redistribution)
-    if current_spec.placements == target_spec.placements:
-        return local_tensor
-
     if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(
             current_spec, target_spec, use_graph_based_transform

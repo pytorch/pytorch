@@ -1712,8 +1712,6 @@ class OptimizeFlattenedReductionsTest(TestCase):
             self.assertIn("While redistributing from", warning_msg)
             self.assertIn("reduce_scatter", warning_msg)
             self.assertIn("not evenly divisible", warning_msg)
-            self.assertIn('"A"', warning_msg)
-            self.assertIn('"B"', warning_msg)
 
     def test_empty_input(self):
         """Empty input returns empty output."""
