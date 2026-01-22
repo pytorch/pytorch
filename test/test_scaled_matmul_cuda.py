@@ -1704,7 +1704,7 @@ class TestFP8Matmul(TestCase):
         else:
             rhs_recipe = ScalingType.BlockWise128x128
 
-        # Verify that actual F8 mm doesn't error
+        # Verify that actual F8 mm raises expected error on non-SM90
         with self.assertRaisesRegex(
             NotImplementedError,
             ".*DeepSeek.*scaling.*only supported in CUDA for SM90.*"
