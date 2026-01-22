@@ -55,8 +55,6 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 Expr = sympy.Expr
 
-INT32_MAX = 2**31 - 1
-
 
 def _sanitize_kernel_options_for_triton(
     kernel_options: dict[str, Any],
@@ -401,13 +399,10 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        USE_TMA_DEFAULT = bool(torch.xpu.is_available())
-        # The shape dtype of tensor desc is i32
-        if V.graph.sizevars.statically_known_true(
-            seq_len_q > INT32_MAX
-        ) or V.graph.sizevars.statically_known_true(seq_len_kv > INT32_MAX):
-            USE_TMA_DEFAULT = False
-        cur_kernel_options.setdefault("USE_TMA", USE_TMA_DEFAULT)
+        # Intel GPU enables TMA by default
+        cur_kernel_options.setdefault(
+            "USE_TMA", True if torch.xpu.is_available() else False
+        )
 
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
