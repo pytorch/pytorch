@@ -11,8 +11,8 @@ from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Optional, TypeVar, Union
 
 import onnx
-
 import onnxscript
+
 from torch.onnx._internal._lazy_import import onnx_ir as ir
 
 

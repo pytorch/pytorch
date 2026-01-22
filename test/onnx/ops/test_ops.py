@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
+import onnx_ir as ir
 import onnx_ir.passes.common as common_passes
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing

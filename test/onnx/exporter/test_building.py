@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
+import onnx_ir as ir
 import numpy as np
 import onnxscript
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter import _building, _tensors

@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import logging
 
+import onnx_ir as ir
 import pytest
 import transformers
-from torch.onnx._internal._lazy_import import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
