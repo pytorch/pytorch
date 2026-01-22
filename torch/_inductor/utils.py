@@ -1842,6 +1842,9 @@ def can_use_tma(
         if m.get_name() in V.graph.unaligned_buffers:
             return False
 
+        if (m_device := m.get_device()) is not None and m_device.type == "xpu":
+            return _is_tma_compatible_xpu(sizes, strides, dtype)
+
         return _is_tma_compatible(sizes, strides, dtype, allow_float32=False)
 
     def _is_tma_compatible(
@@ -1901,6 +1904,26 @@ def can_use_tma(
             inner_dim, 32
         ):
             return False
+
+        return True
+
+    def _is_tma_compatible_xpu(
+        sizes: Sequence[sympy.Expr],
+        strides: Sequence[_IntLike],
+        dtype: torch.dtype,
+    ) -> bool:
+        # Make sure the last dimension is contiguous
+        last_stride = strides[-1]
+        last_stride_hint = V.graph.sizevars.symbolic_hint(last_stride)
+        if not V.graph.sizevars.statically_known_equals(last_stride_hint, 1):
+            return False
+
+        # Triton's type of index is uint32, so all dimensions must fit in uint32
+        MAX_UINT32 = 2**32 - 1
+        for size in sizes:
+            size_hint = V.graph.sizevars.symbolic_hint(size)
+            if V.graph.sizevars.statically_known_gt(size_hint, MAX_UINT32):
+                return False
 
         return True
 
