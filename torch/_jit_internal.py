@@ -717,11 +717,6 @@ def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
-    warnings.warn(
-        "`torch.jit.export` is deprecated since 2.5. Please use `torch.compile` instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
     fn._torchscript_modifier = FunctionModifiers.EXPORT  # type:ignore[attr-defined]
     return fn
 
@@ -766,10 +761,6 @@ def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # exception raised
             m(torch.rand(100))
     """
-    warnings.warn(
-        "`torch.jit.unused` is deprecated. Please use `torch.compile` instead.",
-        DeprecationWarning,
-    )
     if isinstance(fn, property):
         prop = fn
         setattr(  # noqa: B010
@@ -863,12 +854,6 @@ def ignore(drop=False, **kwargs):
         import os
         os.remove('m.pt')
     """
-
-    warnings.warn(
-        "`torch.jit.ignore` is deprecated since 2.5. Please use `torch.compile` instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
 
     if callable(drop):
         # used without any args, so drop is actually a function
