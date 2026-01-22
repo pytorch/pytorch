@@ -6369,100 +6369,182 @@ def forward(self, primals_1, tangents_1):
                     f"Quantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
-    def test_force_save_collectives_torchcomms(self):
-        """Test that force_save_collectives marks torchcomms with_effects outputs as MUST_SAVE.
+    def test_force_save_effectful_ops(self):
+        """Test that effectful op outputs are saved, not recomputed.
 
-        This tests the fix where backward ops that depend on forward with_effects outputs
-        would have invalid dependencies because with_effects is marked must_be_in_forward.
-        The fix ensures tensor output getitems from torchcomms with_effects nodes are
-        marked as MUST_SAVE.
+        This test traces a function with a with_effects node and verifies
+        that the getitem outputs are marked MUST_SAVE.
         """
-        from torch._functorch.partitioners import force_save_collectives
-        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
-        from torch.utils.checkpoint import CheckpointPolicy
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
 
-        mock_lib = torch.library.Library("torchcomms", "FRAGMENT")
+        @torch.library.custom_op("test::effectful_op", mutates_args=())
+        def effectful_op(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @effectful_op.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_op, EffectType.ORDERED)
+
         try:
-            mock_lib.define("mock_collective(Tensor x) -> (Tensor, Tensor)")
+            gm = None
 
-            @torch.library.impl(mock_lib, "mock_collective", "Meta")
-            def mock_collective_meta(x):
-                return x.clone(), x.clone()
+            def graph_capture_backend(graph_module, example_inputs):
+                """Custom backend that captures the graph before passing to inductor."""
+                nonlocal gm
 
-            @torch.library.impl(mock_lib, "mock_collective", "CPU")
-            def mock_collective_cpu(x):
-                return x.clone(), x.clone()
+                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 
-            _register_effectful_op(
-                torch.ops.torchcomms.mock_collective.default,
-                _EffectType.ORDERED,
-            )
+                def log_and_compile(graph_module, example_inputs, **kwargs):
+                    nonlocal gm
+                    gm = graph_module
+                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
 
-            class M(torch.nn.Module):
-                def forward(self, x):
-                    out1, out2 = torch.ops.torchcomms.mock_collective(x)
-                    return (out1 + out2,)
+                return compile_fx(
+                    graph_module, example_inputs, inner_compile=log_and_compile
+                )
+
+            @torch.compile(backend=graph_capture_backend)
+            def fn(x, weight):
+                a = torch.ops.test.effectful_op(x)
+                return a.sum() * weight
 
             x = torch.randn(4, 4)
-            gm, _ = aot_export_module(M(), (x,), trace_joint=False)
+            weight = torch.randn(4, 4)
+            fn(x, weight)
+
+            force_save_effectful_ops(gm)
 
             with_effects_nodes = [
                 n
                 for n in gm.graph.nodes
-                if n.op == "call_function"
-                and n.target == torch.ops.higher_order.with_effects
+                if n.op == "call_function" and n.target == with_effects
             ]
-            self.assertGreater(
-                len(with_effects_nodes),
-                0,
-                "Should have with_effects node wrapping torchcomms op",
+            self.assertEqual(
+                len(with_effects_nodes), 1, "dishould have one with_effects node"
             )
 
-            force_save_collectives(gm)
+            getitem_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == operator.getitem
+                and n.args[0] == with_effects_nodes[0]
+            ]
 
-            def get_tensor_getitems_from_with_effects(we_node):
-                """Find all tensor-producing getitems in the chain from a with_effects node."""
-                result = []
-                visited = set()
+            def is_must_save(node):
+                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
 
-                def visit(node):
-                    if node in visited:
-                        return
-                    visited.add(node)
-
-                    for user in node.users:
-                        if user.target == operator.getitem:
-                            val = user.meta.get("val")
-                            if isinstance(
-                                val, (torch.Tensor, torch._subclasses.FakeTensor)
-                            ):
-                                result.append(user)
-                            else:
-                                visit(user)
-
-                visit(we_node)
-                return result
-
-            tensor_getitems = []
-            for we_node in with_effects_nodes:
-                tensor_getitems.extend(get_tensor_getitems_from_with_effects(we_node))
-
-            self.assertGreater(
-                len(tensor_getitems),
-                0,
-                "Should have tensor getitem nodes from with_effects",
+            must_save_count = sum(1 for n in getitem_nodes if is_must_save(n))
+            self.assertEqual(
+                must_save_count,
+                2,
+                f"2 items should be MUST_SAVE, got {must_save_count}",
             )
+            self.assertEqual(
+                len(getitem_nodes),
+                must_save_count,
+                "all getitem nodes should be MUST_SAVE",
+            )
+        finally:
+            handle.destroy()
 
-            for node in tensor_getitems:
-                self.assertEqual(
-                    node.meta.get("recompute"),
-                    CheckpointPolicy.MUST_SAVE,
-                    f"Tensor getitem '{node.name}' from torchcomms with_effects "
-                    "should be marked MUST_SAVE",
+    def test_force_save_effectful_ops_nested_tuple(self):
+        """Test that effectful ops returning tuples have all tensor outputs marked MUST_SAVE.
+
+        This test creates a custom op that returns a tuple, registers it as effectful,
+        and verifies that all tensor getitems are marked MUST_SAVE after tracing.
+        """
+        from torch._functorch.partitioners import (
+            CheckpointPolicy,
+            force_save_effectful_ops,
+        )
+        from torch._higher_order_ops.effects import _register_effectful_op, with_effects
+        from torch._library.effects import EffectType
+
+        @torch.library.custom_op("test::effectful_tuple_op", mutates_args=())
+        def effectful_tuple_op(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return x * 2, x + 1
+
+        @effectful_tuple_op.register_fake
+        def _(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return torch.empty_like(x), torch.empty_like(x)
+
+        handle = _register_effectful_op(effectful_tuple_op, EffectType.ORDERED)
+
+        try:
+            gm = None
+
+            def graph_capture_backend(graph_module, example_inputs):
+                """Custom backend that captures the graph before passing to inductor."""
+                nonlocal gm
+
+                from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+
+                def log_and_compile(graph_module, example_inputs, **kwargs):
+                    nonlocal gm
+                    gm = graph_module
+                    return compile_fx_inner(graph_module, example_inputs, **kwargs)
+
+                return compile_fx(
+                    graph_module, example_inputs, inner_compile=log_and_compile
                 )
 
+            @torch.compile(backend=graph_capture_backend)
+            def fn(x):
+                a, b = torch.ops.test.effectful_tuple_op(x)
+                return a.sum() + b.sum()
+
+            x = torch.randn(4, 4)
+            fn(x)
+
+            with_effects_node = None
+            for node in gm.graph.nodes:
+                if node.op == "call_function" and node.target == with_effects:
+                    with_effects_node = node
+                    break
+            self.assertIsNotNone(with_effects_node, "should have a with_effects node")
+
+            getitem_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "call_function"
+                and n.target == operator.getitem
+                and n.args[0] == with_effects_node
+            ]
+
+            force_save_effectful_ops(gm)
+
+            def is_must_save(node):
+                return node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+
+            tensor_getitem_count = 0
+            must_save_count = 0
+            for node in getitem_nodes:
+                val = node.meta.get("val")
+                if isinstance(val, torch.Tensor):
+                    tensor_getitem_count += 1
+                    if is_must_save(node):
+                        must_save_count += 1
+
+            self.assertEqual(
+                tensor_getitem_count,
+                3,
+                f"expected 3 getitems, got {tensor_getitem_count}",
+            )
+            self.assertEqual(
+                must_save_count,
+                tensor_getitem_count,
+                f"all {tensor_getitem_count} tensor getitems should be MUST_SAVE, got {must_save_count}",
+            )
         finally:
-            del mock_lib
+            handle.destroy()
 
 
 class TestAOTDispatch(AOTTestCase):
