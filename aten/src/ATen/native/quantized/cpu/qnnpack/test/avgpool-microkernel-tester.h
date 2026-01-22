@@ -301,12 +301,12 @@ class AvgPoolMicrokernelTester {
           ASSERT_NEAR(
               float(int32_t(y[i * yStride() + k])), yFP[i * kc() + k], 0.5001f)
               << "at pixel " << i << ", channel " << k << ", n = " << n()
-              << ", ks = " << kh() << "x" << kw() << " (" << ks()
+              << ", ks = " << kh() << 'x' << kw() << " (" << ks()
               << "), kc = " << kc() << ", acc = " << yAcc[i * kc() + k];
           ASSERT_EQ(
               uint32_t(yRef[i * kc() + k]), uint32_t(y[i * yStride() + k]))
               << "at pixel " << i << ", channel " << k << ", n = " << n()
-              << ", ks = " << kh() << "x" << kw() << " (" << ks()
+              << ", ks = " << kh() << 'x' << kw() << " (" << ks()
               << "), kc = " << kc() << ", acc = " << yAcc[i * kc() + k];
         }
       }
@@ -396,12 +396,12 @@ class AvgPoolMicrokernelTester {
           ASSERT_NEAR(
               float(int32_t(y[i * yStride() + k])), yFP[i * kc() + k], 0.5001f)
               << "at pixel " << i << ", channel " << k << ", n = " << n()
-              << ", ks = " << kh() << "x" << kw() << " (" << ks()
+              << ", ks = " << kh() << 'x' << kw() << " (" << ks()
               << "), kc = " << kc() << ", acc = " << yAcc[i * kc() + k];
           ASSERT_EQ(
               uint32_t(yRef[i * kc() + k]), uint32_t(y[i * yStride() + k]))
               << "at pixel " << i << ", channel " << k << ", n = " << n()
-              << ", ks = " << kh() << "x" << kw() << " (" << ks()
+              << ", ks = " << kh() << 'x' << kw() << " (" << ks()
               << "), kc = " << kc() << ", acc = " << yAcc[i * kc() + k];
         }
       }

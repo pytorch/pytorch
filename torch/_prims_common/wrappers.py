@@ -28,19 +28,19 @@ _P = ParamSpec("_P")
 
 
 @overload
-# pyrefly: ignore  # bad-return
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     pass
 
 
 @overload
-# pyrefly: ignore  # bad-return
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: NumberType, dtype: torch.dtype) -> NumberType:
     pass
 
 
 @overload
-# pyrefly: ignore  # bad-return
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: Sequence, dtype: torch.dtype) -> Sequence:
     pass
 
@@ -133,7 +133,7 @@ class elementwise_type_promotion_wrapper:
             type_promoting_args = tuple(
                 bound.arguments[x]
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             )
 
             flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
@@ -145,7 +145,7 @@ class elementwise_type_promotion_wrapper:
             promoted_args = {
                 x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             }
             bound.arguments.update(promoted_args)
 
@@ -280,7 +280,7 @@ def out_wrapper(
             if is_tensor
             else NamedTuple(
                 f"return_types_{fn.__name__}",
-                # pyrefly: ignore  # bad-argument-count
+                # pyrefly: ignore [bad-argument-count]
                 [(o, TensorLikeType) for o in out_names],
             )
         )
@@ -299,7 +299,6 @@ def out_wrapper(
                         kwargs[k] = out_attr
 
             def maybe_check_copy_devices(out):
-                # pyrefly: ignore  # unsupported-operation
                 if isinstance(out, TensorLike) and isinstance(args[0], TensorLike):
                     check_copy_devices(copy_from=args[0], copy_to=out)
 
@@ -315,7 +314,7 @@ def out_wrapper(
                 result = fn(*args, **kwargs)
             if result is NotImplemented:
                 return NotImplemented
-            assert (
+            if not (
                 (isinstance(result, TensorLike) and is_tensor)
                 or (
                     isinstance(result, tuple)  # type: ignore[arg-type]
@@ -324,7 +323,11 @@ def out_wrapper(
                 or (
                     fn.__name__ == "unbind" and isinstance(result, (list, tuple))  # type: ignore[arg-type]
                 )
-            )
+            ):
+                raise AssertionError(
+                    f"Unexpected result type: {type(result)}, is_tensor={is_tensor}, "
+                    f"out_names={out_names}"
+                )
             # unbind_copy is a special case: see https://github.com/pytorch/pytorch/issues/130829
             if out is not None:
                 # Naively you might expect this assert to be true, but
@@ -344,7 +347,10 @@ def out_wrapper(
                 # be a normal meta tensor, but this is perfectly
                 # harmless.
                 if is_tensor and fn.__name__ != "unbind":
-                    assert isinstance(out, TensorLike)
+                    if not isinstance(out, TensorLike):
+                        raise AssertionError(
+                            f"out must be TensorLike, got {type(out)}"
+                        )  # mypy
                     # These two operations are done in-place
                     _maybe_resize_out(
                         out,
@@ -358,9 +364,13 @@ def out_wrapper(
                     )
                 else:
                     if fn.__name__ != "unbind":
-                        assert isinstance(out, tuple)  # type: ignore[arg-type]
+                        if not isinstance(out, tuple):
+                            raise AssertionError(f"out must be tuple, got {type(out)}")  # type: ignore[arg-type]  # mypy
                     else:
-                        assert isinstance(out, (list, tuple))  # type: ignore[arg-type]
+                        if not isinstance(out, (list, tuple)):
+                            raise AssertionError(
+                                f"out must be list or tuple, got {type(out)}"
+                            )  # type: ignore[arg-type]  # mypy
                     torch._check_type(
                         len(out) == len(result),  # type: ignore[arg-type]
                         lambda: f"expected tuple of {len(result)} elements but got {len(out)}",  # type: ignore[arg-type]
@@ -381,13 +391,14 @@ def out_wrapper(
             annotation=out_type,
         )
         # Mark that the function now returns a tuple
-        assert isinstance(
-            sig.return_annotation, (str, TypeVar)
-        ) or sig.return_annotation in (
-            sig.empty,
-            out_type,
-            bc_out_type,
-        )
+        if not (
+            isinstance(sig.return_annotation, (str, TypeVar))
+            or sig.return_annotation in (sig.empty, out_type, bc_out_type)
+        ):
+            raise AssertionError(
+                f"Unexpected return annotation: {sig.return_annotation}, "
+                f"expected str, TypeVar, empty, {out_type}, or {bc_out_type}"
+            )
         params = *sig.parameters.values(), out_param
 
         # If there's a Parameter.VAR_KEYWORD parameter (like **kwds), it must appear
@@ -435,7 +446,7 @@ def backwards_not_supported(prim):
 
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         def forward(ctx, args_spec, *flat_args):
             args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
             return redispatch_prim(args, kwargs)
@@ -484,14 +495,15 @@ def elementwise_unary_scalar_wrapper(
             dtype = utils.type_to_dtype(type(args[0]))
             args_ = list(args)
             args_[0] = torch.tensor(args[0], dtype=dtype)
-            # pyrefly: ignore  # invalid-param-spec
+            # pyrefly: ignore [invalid-param-spec]
             result = fn(*args_, **kwargs)
-            assert isinstance(result, torch.Tensor)
+            if not isinstance(result, torch.Tensor):
+                raise AssertionError(f"Expected torch.Tensor, got {type(result)}")
             return result.item()
 
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         return fn(*args, **kwargs)
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return _fn

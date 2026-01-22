@@ -10,7 +10,7 @@ visualize_schedule(ops, "test.png")
 """
 
 import collections
-from typing import NamedTuple, Optional, Union
+from typing import NamedTuple
 from unittest import mock
 
 from torch.distributed.pipelining.schedules import (
@@ -32,13 +32,13 @@ class OpKey(NamedTuple):
 
 
 def get_schedule_ops(
-    schedule: Union[str, type[_PipelineSchedule]],
+    schedule: str | type[_PipelineSchedule],
     pp_degree: int,
     num_microbatches: int,
-    num_stages_per_rank: Optional[int] = None,
+    num_stages_per_rank: int | None = None,
     add_spacing: bool = False,
     with_comms: bool = False,
-) -> list[list[Optional[_Action]]]:
+) -> list[list[_Action | None]]:
     """
     Get all actions for a given schedule, pp_degree, and num_microbatches. The actions are returned in a list of lists
     where each inner list represents a rank and each element in the inner list represents an action.
@@ -66,13 +66,19 @@ def get_schedule_ops(
     if issubclass(schedule_class, PipelineScheduleSingle):
         if num_stages_per_rank is None:
             num_stages_per_rank = 1
-        assert num_stages_per_rank == 1
+        if not num_stages_per_rank == 1:
+            raise AssertionError(
+                f"Expected num_stages_per_rank to be 1, got {num_stages_per_rank}"
+            )
         stages = mock_pipeline_stage
         stages.num_stages = num_stages_per_rank * pp_degree
     elif issubclass(schedule_class, PipelineScheduleMulti):
         if num_stages_per_rank is None:
             num_stages_per_rank = 2
-        assert num_stages_per_rank >= 2
+        if not num_stages_per_rank >= 2:
+            raise AssertionError(
+                f"Expected num_stages_per_rank >= 2, got {num_stages_per_rank}"
+            )
         stages = [mock_pipeline_stage for _ in range(num_stages_per_rank)]
         for stage in stages:
             stage.num_stages = num_stages_per_rank * pp_degree
@@ -83,10 +89,11 @@ def get_schedule_ops(
     # Instantiate the schedule class
     # pyrefly: ignore [bad-instantiation, bad-argument-type]
     schedule_instance = schedule_class(stages, num_microbatches)
-    assert schedule_instance.pipeline_order is not None
+    if schedule_instance.pipeline_order is None:
+        raise AssertionError("Expected pipeline_order to not be None")
 
     # Convert to List[List[_Action]]
-    all_actions: list[list[Optional[_Action]]] = []
+    all_actions: list[list[_Action | None]] = []
     if with_comms:
         runtime = _PipelineScheduleRuntime(stages, num_microbatches)
         runtime._prepare_schedule_with_comms(schedule_instance.pipeline_order)
@@ -136,8 +143,8 @@ action_type_to_color_mapping = {
 
 
 def add_schedule_op_spacing(
-    schedule: list[list[Optional[_Action]]],
-) -> list[list[Optional[_Action]]]:
+    schedule: list[list[_Action | None]],
+) -> list[list[_Action | None]]:
     """
     Add spacing to the schedule based on dependencies between ranks.
 
@@ -169,7 +176,7 @@ def add_schedule_op_spacing(
     )
 
     num_ranks = len(schedule)
-    spaced_schedule: list[list[Optional[_Action]]] = [[] for _ in range(num_ranks)]
+    spaced_schedule: list[list[_Action | None]] = [[] for _ in range(num_ranks)]
     rank_ops = [collections.deque(ops) for ops in schedule]
 
     # Track completion times: (stage_index, action_type, microbatch_index) -> completion_time
@@ -189,7 +196,8 @@ def add_schedule_op_spacing(
         mb_idx = action.microbatch_index
 
         # Ensure mb_idx is not None for dependency tracking
-        assert mb_idx is not None, f"Action {action} has None microbatch_index"
+        if mb_idx is None:
+            raise AssertionError(f"Action {action} has None microbatch_index")
 
         # First stage forward has no dependencies
         if stage_idx == 0 and comp_type == _ComputationType.FORWARD:
@@ -237,9 +245,10 @@ def add_schedule_op_spacing(
             dependencies = get_dependencies(action)
             return all(is_dependency_ready(dep, timestep) for dep in dependencies)
         elif action.computation_type == _ComputationType.OVERLAP_F_B:
-            assert action.sub_actions is not None, (
-                f"OVERLAP_F_B action {action} has None sub_actions"
-            )
+            if action.sub_actions is None:
+                raise AssertionError(
+                    f"OVERLAP_F_B action {action} has None sub_actions"
+                )
             dep_list: list[bool] = []
             for sub_action in action.sub_actions:
                 dep_list.append(is_action_ready(sub_action, timestep))
@@ -256,14 +265,16 @@ def add_schedule_op_spacing(
 
         if comp_type == _ComputationType.OVERLAP_F_B:
             # For overlap actions, schedule each sub-action with cumulative timing
-            assert action.sub_actions is not None, (
-                f"OVERLAP_F_B action {action} has None sub_actions"
-            )
+            if action.sub_actions is None:
+                raise AssertionError(
+                    f"OVERLAP_F_B action {action} has None sub_actions"
+                )
             cumulative_time = 0
             for sub_action in action.sub_actions:
-                assert sub_action.microbatch_index is not None, (
-                    f"Sub-action {sub_action} has None microbatch_index"
-                )
+                if sub_action.microbatch_index is None:
+                    raise AssertionError(
+                        f"Sub-action {sub_action} has None microbatch_index"
+                    )
                 sub_comp_time = action_type_to_color_mapping[
                     sub_action.computation_type
                 ].width
@@ -276,9 +287,8 @@ def add_schedule_op_spacing(
                     )
                 ] = timestep + cumulative_time
         else:
-            assert action.microbatch_index is not None, (
-                f"Action {action} has None microbatch_index"
-            )
+            if action.microbatch_index is None:
+                raise AssertionError(f"Action {action} has None microbatch_index")
             scheduled_ops[
                 OpKey(action.stage_index, comp_type, action.microbatch_index)
             ] = completion_time
@@ -331,8 +341,8 @@ def add_schedule_op_spacing(
 
 
 def visualize_schedule(
-    schedule: list[list[Optional[_Action]]],
-    filename: Optional[str] = None,
+    schedule: list[list[_Action | None]],
+    filename: str | None = None,
 ) -> None:
     """
     Visualize the schedule using matplotlib.

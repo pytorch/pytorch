@@ -7,11 +7,12 @@ import logging
 import os
 import queue
 import sys
+import tempfile
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
-from typing_extensions import final, override, Self, TypeGuard
+from typing import Any, Optional, TYPE_CHECKING, TypeGuard, Union
+from typing_extensions import final, override, Self
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
@@ -41,6 +42,29 @@ if TYPE_CHECKING:
 
     from torch._inductor.utils import InputType
     from torch.fx import GraphModule
+
+
+def _graph_contains_triton_kernel_wrappers(gm: GraphModule) -> bool:
+    """
+    Check if the graph contains triton kernel wrapper nodes. These nodes contain
+    references to the kernel_side_table which is process-local and can't be
+    serialized across processes.
+    """
+    from torch._higher_order_ops.triton_kernel_wrap import (
+        triton_kernel_wrapper_functional,
+        triton_kernel_wrapper_mutation,
+    )
+
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        for node in module.graph.nodes:
+            if node.target in (
+                triton_kernel_wrapper_functional,
+                triton_kernel_wrapper_mutation,
+            ):
+                return True
+    return False
 
 
 @dataclass
@@ -448,6 +472,14 @@ class _SerializedFxCompile(FxCompile):
             log.debug("Skipping %s compile: %s", type(self), e)  # noqa: G200
             return None
 
+        # Triton kernel wrapper nodes contain references to the kernel_side_table
+        # which is process-local and can't be serialized across processes.
+        if _graph_contains_triton_kernel_wrappers(gm):
+            log.debug(
+                "Skipping %s compile: graph contains triton kernel wrappers", type(self)
+            )
+            return None
+
         context = torch._guards.TracingContext.try_get()
         constants = CompiledFxGraphConstantsWithGm(gm)
         logger_state = _LoggerState()
@@ -468,6 +500,8 @@ class _SerializedFxCompile(FxCompile):
         fake_mode = _current_fake_mode()
         fake_tensor_mode = _FakeTensorModeSerializer(fake_mode)
 
+        from pickle import PicklingError
+
         try:
             input = _WireProtocolInput(
                 gm,
@@ -483,7 +517,7 @@ class _SerializedFxCompile(FxCompile):
                 fake_tensor_mode,
             ).serialize()
             return (input, constants)
-        except (AttributeError, BypassFxGraphCache):
+        except (AttributeError, BypassFxGraphCache, PicklingError):
             # For example: AttributeError: Can't pickle local object
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
 
@@ -660,19 +694,25 @@ class _DebugFileFxCompile(_SerializedFxCompile):
         idx = _DebugFileFxCompile.file_index
         _DebugFileFxCompile.file_index += 1
 
-        name = f"/tmp/aorenste/pytorch_compile_fx_tmp_input_{idx}.bin"
+        name = os.path.join(
+            tempfile.gettempdir(), f"pytorch_compile_fx_tmp_input_{idx}.bin"
+        )
         with open(name, "wb") as f:
             f.write(pickled_input.value)
         print(f"Wrote to {name}")
 
         if False:
-            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_actual_{idx}.bin"
+            name = os.path.join(
+                tempfile.gettempdir(), f"pytorch_compile_fx_tmp_actual_{idx}.bin"
+            )
             actual = self._run_in_child(pickled_input)
             with open(name, "wb") as f:
                 f.write(actual.value)
             return actual
         elif False:
-            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_output_{idx}.bin"
+            name = os.path.join(
+                tempfile.gettempdir(), f"pytorch_compile_fx_tmp_output_{idx}.bin"
+            )
             with open(name, "rb") as f:
                 result = _WireProtocolPickledOutput(f.read())
                 print(f"Read from {name}")

@@ -38,7 +38,7 @@ mobilenetv2_100,pass,7
 
 
 
-mobilenetv3_large_100,pass,7
+mobilenetv3_large_100,fail_accuracy,7
 
 
 

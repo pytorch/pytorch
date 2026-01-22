@@ -47,6 +47,12 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
+def last_power_of_2(n: int) -> int:
+    """Return the largest power of 2 less than or equal to n"""
+    next_pow2 = next_power_of_2(n)
+    return next_pow2 // 2 if next_pow2 > n else next_pow2
+
+
 def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     """
     Return the total number of bytes the arguments of tensor type takes.
@@ -106,7 +112,6 @@ def get_max_y_grid() -> int:
 
 
 try:
-    # pyrefly: ignore [import-error]
     import colorama
 
     HAS_COLORAMA = True
@@ -187,3 +192,98 @@ def compile_mps_shader(source: str) -> Any:
         return torch.mps.compile_shader(source)
     except SyntaxError as err:
         raise SyntaxError(f"failed to compile {source} with {err.msg}") from err
+
+
+def torch_dtype_to_jax_runtime(dtype: torch.dtype) -> Any:
+    """
+    Map PyTorch dtype to actual JAX dtype object at runtime.
+
+    This helper is used in generated Pallas kernels at runtime to convert
+    PyTorch dtypes to JAX dtype objects (not string representations).
+
+    Args:
+        dtype: PyTorch dtype to convert
+
+    Returns:
+        JAX dtype object (e.g., jnp.float32 object itself)
+    """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
+    dtype_map = {
+        torch.float32: jnp.float32,
+        torch.float64: jnp.float64,
+        torch.float16: jnp.float16,
+        torch.bfloat16: jnp.bfloat16,
+        torch.int32: jnp.int32,
+        torch.int64: jnp.int64,
+        torch.int16: jnp.int16,
+        torch.int8: jnp.int8,
+        torch.uint8: jnp.uint8,
+        torch.bool: jnp.bool_,
+        torch.complex64: jnp.complex64,
+        torch.complex128: jnp.complex128,
+    }
+    if dtype not in dtype_map:
+        raise ValueError(f"Unsupported dtype for JAX conversion: {dtype}")
+    return dtype_map[dtype]
+
+
+def torch_dtype_to_jax(dtype: torch.dtype) -> str:
+    """
+    Map PyTorch dtype to JAX dtype expression string.
+
+    This helper is used at compile time in codegen to generate
+    JAX dtype expressions for Pallas kernels.
+
+    Args:
+        dtype: PyTorch dtype to convert
+
+    Returns:
+        JAX dtype expression as string (e.g., "jnp.float32")
+    """
+    jax_dtype = torch_dtype_to_jax_runtime(dtype)
+    dtype_name = jax_dtype.__name__
+    if dtype_name == "bool":
+        dtype_name = "bool_"
+    return f"jnp.{dtype_name}"
+
+
+def pallas_partial_reduce(reduce_fn: Any, v: Any, pw_numel: int, red_numel: int) -> Any:
+    """
+    Helper for partial reductions in Pallas kernels.
+
+    Reorders axes and reduces, returning result with keepdims-style shape
+    for proper in-kernel broadcasting.
+
+    Args:
+        reduce_fn: The reduction function to apply (e.g., jnp.sum, jnp.max)
+        v: The input array to reduce
+        pw_numel: The number of pointwise elements
+        red_numel: The number of reduction elements
+
+    Returns:
+        Reduced array with keepdims-style shape
+    """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
+    shape = tuple(v.shape)
+    # Find contiguous axes whose product = red_numel (search from right)
+    red_axes = None
+    for i in range(len(shape) - 1, -1, -1):
+        prod = 1
+        for j in range(i, -1, -1):
+            prod *= shape[j]
+            if prod == red_numel:
+                red_axes = list(range(j, i + 1))
+                break
+        if red_axes is not None:
+            break
+    if red_axes is None:
+        red_axes = [len(shape) - 1]
+    # Build output shape with 1s for reduced dimensions (keepdims style)
+    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
+    # Move pointwise axes to front, reduction axes to back
+    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
+    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
+    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
+    return result.reshape(out_shape)

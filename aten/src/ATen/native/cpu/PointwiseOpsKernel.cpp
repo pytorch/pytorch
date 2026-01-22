@@ -92,7 +92,8 @@ void addcdiv_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
 
 void smooth_l1_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm, double beta) {
   ScalarType dtype = iter.dtype(0);
-  if (dtype == kBFloat16) {
+  if (at::isReducedFloatingType(dtype)) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "smooth_l1_backward_cpu_out", [&]() {
     auto norm_val = norm.to<float>();
     float beta_val(beta);
     auto norm_val_vec = Vectorized<float>(norm_val);
@@ -101,9 +102,9 @@ void smooth_l1_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm, dou
     const auto zero_vec = Vectorized<float>(0);
     const auto pos_1_vec = Vectorized<float>(1);
     cpu_kernel_vec(iter,
-      [=](BFloat16 input, BFloat16 target, BFloat16 grad_output) -> BFloat16 {
+      [=](scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
         const auto x = float(input) - float(target);
-        if (x <= -beta){
+        if (x <= -beta) {
           return -norm_val * float(grad_output);
         }else if (x >= beta){
           return norm_val * float(grad_output);
@@ -112,14 +113,14 @@ void smooth_l1_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm, dou
         }
       },
       [norm_val_vec, beta_val_vec, neg_1_vec, zero_vec, pos_1_vec](
-         Vectorized<BFloat16> input, Vectorized<BFloat16> target, Vectorized<BFloat16> grad_output) -> Vectorized<BFloat16> {
+         Vectorized<scalar_t> input, Vectorized<scalar_t> target, Vectorized<scalar_t> grad_output) -> Vectorized<scalar_t> {
         // using two blendv calls to simulate the 3 cases
         // 1        if  x >= beta
         // -1       if x <= -beta
         // x / beta if |x| < beta
-        auto [input0, input1] = convert_bfloat16_float(input);
-        auto [target0, target1] = convert_bfloat16_float(target);
-        auto [grad_output0, grad_output1] = convert_bfloat16_float(grad_output);
+        auto [input0, input1] = convert_to_float(input);
+        auto [target0, target1] = convert_to_float(target);
+        auto [grad_output0, grad_output1] = convert_to_float(grad_output);
         auto x = input0 - target0;
         auto pos_or_neg_1_vec = Vectorized<float>::blendv(
             neg_1_vec, pos_1_vec, x > zero_vec);
@@ -135,9 +136,10 @@ void smooth_l1_backward_cpu_kernel(TensorIterator& iter, const Scalar& norm, dou
         output = Vectorized<float>::blendv(
             x / beta_val_vec, pos_or_neg_1_vec, x_abs >= beta_val_vec);
         input1 = norm_val_vec * output * grad_output1;
-        return convert_float_bfloat16(input0, input1);
+        return convert_from_float<scalar_t>(input0, input1);
       }
     );
+  });
   } else {
     AT_DISPATCH_ALL_TYPES(dtype, "smooth_l1_backward_cpu_out", [&] {
     auto norm_val = norm.to<scalar_t>();

@@ -39,6 +39,7 @@ from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
@@ -46,6 +47,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_MULTIACCELERATOR,
 )
 
 
@@ -56,7 +58,6 @@ batch_size = 64
 torch.manual_seed(0)
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)
-TEST_MULTIACCELERATOR = torch.accelerator.device_count() >= 2
 
 
 @dataclass
@@ -231,6 +232,7 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [_ScheduleForwardOnly])
+    @skip_if_lt_x_gpu(4)
     def test_forward_only(self, ScheduleClass):
         mod, mod_ref, x, _, _ = setup_models_and_data(self.config)
         x_clone = x.clone()
@@ -274,6 +276,7 @@ class ScheduleTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
+    @skip_if_lt_x_gpu(4)
     def test_eval_inference_mode(self, ScheduleClass):
         num_microbatches = 4
         if ScheduleClass in [
@@ -351,6 +354,7 @@ class ScheduleTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
+    @skip_if_lt_x_gpu(4)
     def test_return_output(self, ScheduleClass):
         num_microbatches = 4
         if ScheduleClass in [
@@ -406,6 +410,7 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @skip_if_lt_x_gpu(4)
     def test_multi_iter(self, ScheduleClass):
         mod, _, x, target, loss_fn = setup_models_and_data(self.config)
         chunks = 4
@@ -429,6 +434,7 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @skip_if_lt_x_gpu(4)
     def test_kwargs_with_tracer(self, ScheduleClass):
         mod = ModelWithKwargs(d_hid, splits=self.world_size)
         mod.to(self.device)
@@ -481,6 +487,7 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @skip_if_lt_x_gpu(4)
     def test_grad_with_tracer(self, ScheduleClass):
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
@@ -523,6 +530,7 @@ class ScheduleTest(MultiProcContinuousTest):
     )
     @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
     @parametrize("shape_inference", [True, False])
+    @skip_if_lt_x_gpu(4)
     def test_grad_with_manual(self, ScheduleClass, shape_inference):
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(self.config)
 
@@ -586,6 +594,7 @@ class ScheduleTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
+    @skip_if_lt_x_gpu(4)
     def test_grad_with_manual_interleaved(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
@@ -650,6 +659,7 @@ class ScheduleTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleInterleavedZeroBubble])
+    @skip_if_lt_x_gpu(4)
     def test_schedule_with_weight_update_mlp_e2e(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
@@ -736,6 +746,7 @@ class ScheduleTest(MultiProcContinuousTest):
         "schedule_class",
         [ScheduleZBVZeroBubble, ScheduleDualPipeV],
     )
+    @skip_if_lt_x_gpu(4)
     def test_v_shape_schedules(self, schedule_class):
         n_stages = 8
         rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
@@ -780,6 +791,7 @@ class ScheduleTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
+    @skip_if_lt_x_gpu(4)
     def test_custom_function_callback(self):
         """Test the custom function callback functionality with _PipelineScheduleRuntime."""
         n_stages = 8
@@ -979,6 +991,7 @@ class ScheduleTest(MultiProcContinuousTest):
         "ScheduleClass",
         [ScheduleInterleavedZeroBubble, ScheduleInterleaved1F1B],
     )
+    @skip_if_lt_x_gpu(4)
     def test_zero_bubble_with_model_kwargs(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
@@ -1072,6 +1085,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         "schedule_class",
         [ScheduleVShaped, ScheduleUnbalanced],
     )
+    @skip_if_lt_x_gpu(4)
     def test_non_symmetric_stage_ids(self, schedule_class):
         n_stages = schedule_class.n_stages
         rank_stages = schedule_class.rank_stages
@@ -1121,6 +1135,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleWithReorderedB])
+    @skip_if_lt_x_gpu(4)
     def test_pipeline_schedule_runtime_custom_sched(self, ScheduleClass):
         n_stages = 2
         stages_per_rank = 1
@@ -1181,6 +1196,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
     )
     @parametrize("ScheduleClass", [ScheduleWithW])
+    @skip_if_lt_x_gpu(4)
     def test_schedule_with_native_zero_bubble(self, ScheduleClass):
         n_stages = ScheduleClass.n_stages
         num_microbatches = ScheduleClass.num_microbatches

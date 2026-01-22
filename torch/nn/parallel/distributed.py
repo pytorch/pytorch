@@ -87,9 +87,9 @@ class _MixedPrecision:
         would result in communication occurring in fp16.
     """
 
-    param_dtype: Optional[torch.dtype] = None
-    reduce_dtype: Optional[torch.dtype] = None
-    buffer_dtype: Optional[torch.dtype] = None
+    param_dtype: torch.dtype | None = None
+    reduce_dtype: torch.dtype | None = None
+    buffer_dtype: torch.dtype | None = None
     # TODO (rohan-varma): keep_low_precision_grads: bool = False
     # TODO (rohan-varma): APIs to allow users to run batchnorm and layernorm
     # in full precision. For DDP, this can be implemented by not performing the
@@ -276,11 +276,13 @@ class _DDPSink(Function):
 class _DDPJoinHook(JoinHook):
     def __init__(self, ddp, divide_by_initial_world_size):
         """Set config variables for internal usage."""
-        assert isinstance(ddp, DistributedDataParallel), (
-            "DDP join hook requires passing in a DistributedDataParallel "
-            "instance as the state"
-        )
-        assert ddp.logger is not None
+        if not isinstance(ddp, DistributedDataParallel):
+            raise AssertionError(
+                "DDP join hook requires passing in a DistributedDataParallel "
+                f"instance as the state, got {type(ddp).__name__}"
+            )
+        if ddp.logger is None:
+            raise AssertionError("ddp.logger must not be None")
         ddp.logger._set_uneven_input_join()
         self.ddp = ddp
         self.ddp._divide_by_initial_world_size = divide_by_initial_world_size
@@ -666,7 +668,7 @@ class DistributedDataParallel(Module, Joinable):
         static_graph=False,
         delay_all_reduce_named_params=None,
         param_to_hook_all_reduce=None,
-        mixed_precision: Optional[_MixedPrecision] = None,
+        mixed_precision: _MixedPrecision | None = None,
         device_mesh=None,
         skip_all_reduce_unused_params=False,
     ):
@@ -675,7 +677,7 @@ class DistributedDataParallel(Module, Joinable):
         self._use_python_reducer = (
             torch._dynamo.utils.get_optimize_ddp_mode() == "python_reducer"
         )
-        self.logger: Optional[dist.Logger] = None
+        self.logger: dist.Logger | None = None
         if bool(delay_all_reduce_named_params is not None) != bool(
             param_to_hook_all_reduce is not None
         ):
@@ -839,7 +841,7 @@ class DistributedDataParallel(Module, Joinable):
         )
 
         # Initialize gradient buffers and register all reduce hook
-        self._delay_grad_buffer: Optional[torch.Tensor] = None
+        self._delay_grad_buffer: torch.Tensor | None = None
         self._delay_grad_views: list[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
@@ -1300,7 +1302,10 @@ class DistributedDataParallel(Module, Joinable):
         )
         if self.static_graph:
             self.reducer._set_static_graph()
-            assert self.logger is not None
+            if self.logger is None:
+                raise AssertionError(
+                    "self.logger must not be None when static_graph is True"
+                )
             self.logger._set_static_graph()
 
     def _build_params_for_reducer(self):
@@ -1529,7 +1534,8 @@ class DistributedDataParallel(Module, Joinable):
             return inputs, kwargs
 
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
-            assert self.logger is not None
+            if self.logger is None:
+                raise AssertionError("self.logger must not be None")
             self.logger.set_runtime_stats_and_log()
             self.reducer.prepare_for_forward()
 
@@ -1626,7 +1632,7 @@ class DistributedDataParallel(Module, Joinable):
                 treespec,
                 output_is_rref,
             ) = _tree_flatten_with_rref(output)
-            output_placeholders: list[Optional[torch.Tensor]] = [
+            output_placeholders: list[torch.Tensor | None] = [
                 None for _ in range(len(output_tensor_list))
             ]
             # Do not touch tensors that have no grad_fn, which can cause issues
@@ -1943,14 +1949,15 @@ class DistributedDataParallel(Module, Joinable):
                 ensure appropriate synchronization when manipulating GPU
                 buffers in the forward pass.
         """
-        assert callable(hook)
+        if not callable(hook):
+            raise AssertionError(f"hook must be callable, got {type(hook).__name__}")
         self.buffer_hook = _BufferCommHook(
             buffer_comm_hook=hook,
             buffer_comm_hook_state=state,
             buffer_comm_hook_location=comm_hook_location,
         )
 
-    def register_comm_hook(self, state: object, hook: Callable):
+    def register_comm_hook(self, state: object, hook: Callable) -> None:
         r"""
         Register communication hook for user-defined DDP aggregation of gradients across multiple workers.
 
@@ -2026,7 +2033,8 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
-        assert self.logger is not None
+        if self.logger is None:
+            raise AssertionError("self.logger must not be None")
         self.logger._set_comm_hook_name(hook.__qualname__)
         self._comm_hooks.append((hook, state))
         dist._register_comm_hook(self.reducer, state, hook)
@@ -2054,7 +2062,8 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
 
         """
-        assert self.logger is not None
+        if self.logger is None:
+            raise AssertionError("self.logger must not be None")
         self.logger._set_comm_hook_name(str(comm_hook_type))
         dist._register_builtin_comm_hook(self.reducer, comm_hook_type)
 
@@ -2331,7 +2340,8 @@ class DistributedDataParallel(Module, Joinable):
         these metrics are.
         This is a prototype interface and subject to change in the future.
         """
-        assert self.logger is not None
+        if self.logger is None:
+            raise AssertionError("self.logger must not be None")
         ddp_logging_data = self.logger._get_ddp_logging_data()
         return {**ddp_logging_data.strs_map, **ddp_logging_data.ints_map}
 
@@ -2372,7 +2382,8 @@ class DistributedDataParallel(Module, Joinable):
         self.static_graph = True
         self._static_graph_delay_allreduce_enqueued = False
         self.reducer._set_static_graph()
-        assert self.logger is not None
+        if self.logger is None:
+            raise AssertionError("self.logger must not be None")
         self.logger._set_static_graph()
         if self.find_unused_parameters:
             warnings.warn(

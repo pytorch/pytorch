@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from functools import partial
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -42,7 +41,7 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
         input, running_mean, running_var = ctx.input, ctx.running_mean, ctx.running_var
         weight, bias, eps = ctx.weight, ctx.bias, ctx.eps
 
-        results: list[Optional[torch.Tensor]] = []
+        results: list[torch.Tensor | None] = []
         results.append(None)  # for kwarg names
         results.append(None)  # for op reference
         if input.requires_grad:

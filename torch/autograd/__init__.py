@@ -94,6 +94,7 @@ def _make_grads(
     new_grads: list[_OptionalTensor] = []
 
     for out, grad in zip(outputs, grads):
+        # pyrefly: ignore [redundant-cast]
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         out_size = None
         out_device = None
@@ -350,8 +351,24 @@ def backward(
             Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (tensors,)
         )
     else:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         tensors = tuple(tensors)
+
+    # Check for __torch_function__ on tensors (similar to torch.autograd.grad)
+    # This allows tensor subclasses to customize backward behavior
+    t_tensors = tuple(t for t in tensors if is_tensor_like(t))
+    t_inputs = tuple(t for t in inputs_tuple if is_tensor_like(t))
+    overridable_args = t_tensors + t_inputs
+    if has_torch_function(overridable_args):
+        return handle_torch_function(
+            backward,
+            overridable_args,
+            tensors,
+            grad_tensors=grad_tensors,
+            retain_graph=retain_graph,
+            create_graph=create_graph,
+            inputs=inputs,
+        )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
     grad_tensors_ = _make_grads(tensors, grad_tensors_, is_grads_batched=False)
@@ -450,12 +467,12 @@ def grad(
             Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]], (outputs,)
         )
     else:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         outputs = tuple(outputs)
     if is_tensor_like(inputs) or isinstance(inputs, graph.GradientEdge):
         inputs = cast(_TensorOrTensorsOrGradEdge, (inputs,))
     else:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         inputs = tuple(inputs)
     t_outputs = tuple(i for i in outputs if is_tensor_like(i))
     t_inputs = tuple(i for i in inputs if is_tensor_like(i))
@@ -532,7 +549,7 @@ def grad(
         result = tuple(
             output
             if output is not None
-            else torch.zeros_like(input, requires_grad=True)
+            else torch.zeros_like(input, requires_grad=create_graph)
             for (output, input) in zip(result, inputs)
         )
     return result

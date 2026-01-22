@@ -705,7 +705,7 @@ class TestTensorExprFuser(BaseTestClass):
                 #    d = to_bf16(to_fp32(a) + to_fp32(b) + to_fp32(c))
                 # Hence, we simulate NNC computation by feeding fp32 tensors and converting
                 # the result tensor back to bf16. The simulation could avoid the numeric
-                # deviation to simplify the result comprasion
+                # deviation to simplify the result comparison
                 y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
                 if torch_fn not in cmp_fns:
                     y = y.bfloat16()
@@ -891,7 +891,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         torch.manual_seed(0)
         for torch_fn, dev, data_type in fn_dev_dtype:
-            if torch_fn == test_lgamma and dev == "cuda":
+            if torch_fn is test_lgamma and dev == "cuda":
                 # lgamma_cuda does not support BF16
                 continue
             rand_a = torch.rand(1024, dtype=data_type, device=dev)
@@ -1216,7 +1216,7 @@ class TestTensorExprFuser(BaseTestClass):
         @torch.jit.script
         def test(x: torch.Tensor, y: torch.Tensor, z: int) -> torch.Tensor:
             b = y
-            for i in range(z):
+            for _ in range(z):
                 a = x + y
                 b = b + y
             return b

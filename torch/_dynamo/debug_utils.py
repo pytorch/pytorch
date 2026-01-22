@@ -47,7 +47,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
-from .utils import clone_inputs, get_debug_dir
+from .utils import clone_inputs, get_debug_dir, warn_once
 
 
 if TYPE_CHECKING:
@@ -262,10 +262,13 @@ def _cuda_system_info_comment() -> str:
 
     model_str = "# CUDA Info: \n"
     try:
-        cuda_version_out = subprocess.check_output(["nvcc", "--version"])
-        cuda_version_lines = cuda_version_out.decode().split("\n")
-        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
-        model_str += f"{comment}\n"
+        if torch.version.hip is None:
+            cuda_version_out = subprocess.check_output(["nvcc", "--version"])
+            cuda_version_lines = cuda_version_out.decode().split("\n")
+            comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
+            model_str += f"{comment}\n"
+        else:
+            model_str += "# Not searching for nvcc on ROCM setup\n"
     except (FileNotFoundError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
 
@@ -455,7 +458,7 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
-            and node.target == torch.ops.prims.convert_element_type.default
+            and node.target is torch.ops.prims.convert_element_type.default
         ):
             assert len(node.args) == 2
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
@@ -582,7 +585,9 @@ class NopInputReader:
 # TODO: Support bundling the entire repro into a zip file for ease of
 # transferring around
 class InputReader:
-    def __init__(self, save_dir: Optional[str] = None, *, pbar: Optional[tqdm] = None):
+    def __init__(
+        self, save_dir: str | None = None, *, pbar: tqdm | None = None
+    ) -> None:
         # If None, we will generate random data instead.  It's important
         # to natively support this use case as it will allow people to
         # share repros without including the real data, if the problem
@@ -617,7 +622,7 @@ class InputReader:
                     # way would be very mysterious!  Would have been better
                     # not to store device in the serialized format...
                 return storage
-        log.warning("could not load %s, generating random data instead", storage_hash)
+        warn_once(f"could not load {storage_hash}, generating random data instead")
         shape = (nbytes // dtype_hint.itemsize,)
         stride = _stride_or_default(None, shape=shape)
         return rand_strided(shape, stride, dtype_hint, device).untyped_storage()

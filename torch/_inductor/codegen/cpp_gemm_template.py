@@ -2,8 +2,9 @@
 import contextlib
 import logging
 import math
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -601,7 +602,13 @@ class CppGemmTemplate(CppTemplate):
         should_block_weights: bool = True,
         name="packed_gemm",
     ) -> None:
-        assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
+        assert layout.dtype in [
+            torch.float,
+            torch.bfloat16,
+            torch.half,
+            torch.uint8,
+            torch.int8,
+        ]
         super().__init__(
             name,
             input_nodes,
@@ -1534,7 +1541,6 @@ class CppGemmTemplate(CppTemplate):
             self.n,
             self.k,
             input_dtype=X.get_dtype(),
-            # pyrefly: ignore [missing-attribute]
             input2_dtype=W.get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,

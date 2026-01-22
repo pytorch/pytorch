@@ -3,7 +3,6 @@ import io
 import pickle
 import warnings
 from collections.abc import Collection
-from typing import Optional, Union
 
 from torch.utils._import_utils import dill_available
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
@@ -11,11 +10,11 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 
 __all__ = ["traverse", "traverse_dps"]
 
-DataPipe = Union[IterDataPipe, MapDataPipe]
+DataPipe = IterDataPipe | MapDataPipe
 DataPipeGraph = dict[int, tuple[DataPipe, "DataPipeGraph"]]
 
 
-def _stub_unpickler():
+def _stub_unpickler() -> str:
     return "STUB"
 
 
@@ -106,7 +105,7 @@ def traverse_dps(datapipe: DataPipe) -> DataPipeGraph:
     return _traverse_helper(datapipe, only_datapipe=True, cache=cache)
 
 
-def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPipeGraph:
+def traverse(datapipe: DataPipe, only_datapipe: bool | None = None) -> DataPipeGraph:
     r"""
     Traverse the DataPipes and their attributes to extract the DataPipe graph.
 

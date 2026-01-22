@@ -7,7 +7,7 @@ import warnings
 class FileBaton:
     """A primitive, file-based synchronization utility."""
 
-    def __init__(self, lock_file_path, wait_seconds=0.1, warn_after_seconds=None):
+    def __init__(self, lock_file_path, wait_seconds=0.1, warn_after_seconds=None) -> None:
         """
         Create a new :class:`FileBaton`.
 
@@ -23,7 +23,7 @@ class FileBaton:
         self.fd = None
         self.warn_after_seconds = warn_after_seconds
 
-    def try_acquire(self):
+    def try_acquire(self) -> bool | None:
         """
         Try to atomically create a file under exclusive access.
 
@@ -37,7 +37,7 @@ class FileBaton:
         except FileExistsError:
             return False
 
-    def wait(self):
+    def wait(self) -> None:
         """
         Periodically sleeps for a certain amount until the baton is released.
 
@@ -56,7 +56,7 @@ class FileBaton:
                                   f'{self.warn_after_seconds} seconds.', stacklevel=2)
                     has_warned = True
 
-    def release(self):
+    def release(self) -> None:
         """Release the baton and removes its file."""
         if self.fd is not None:
             os.close(self.fd)

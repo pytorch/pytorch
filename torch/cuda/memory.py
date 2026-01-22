@@ -8,12 +8,12 @@ import pickle
 import sys
 import warnings
 from inspect import signature
-from typing import Any, Literal, Optional, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
 from torch import _C
-from torch._utils import _dummy_type
+from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type
 
 from . import (
     _get_amdsmi_device_index,
@@ -377,55 +377,41 @@ def reset_peak_memory_stats(device: "Device" = None) -> None:
 
 
 def host_memory_stats() -> dict[str, Any]:
-    r"""Return a dictionary of CUDA memory allocator statistics for a given device.
+    r"""Return a dictionary of pinned (host) allocator statistics.
 
-     The return value of this function is a dictionary of statistics, each of
-     which is a non-negative integer.
+    Core statistics (host pinned allocator):
 
-     Core statistics:
+    - ``"allocations.{current,peak,allocated,freed}"``:
+      pinned blocks owned by the allocator (active + cached). Grows when a new
+      block is created via CUDA and shrinks when cached blocks are returned.
+    - ``"allocated_bytes.{current,peak,allocated,freed}"``:
+      bytes of pinned blocks owned by the allocator (active + cached), using
+      the rounded block size requested from CUDA.
+    - ``"active_requests.{current,peak,allocated,freed}"``:
+      blocks currently checked out to callers (increments on handout, decrements
+      when the block becomes reusable after stream deps finish).
+    - ``"active_bytes.{current,peak,allocated,freed}"``:
+      bytes corresponding to active blocks.
 
-     - ``"allocated.{current,peak,allocated,freed}"``:
-       number of allocation requests received by the memory allocator.
-     - ``"allocated_bytes.{current,peak,allocated,freed}"``:
-       amount of allocated memory.
-     - ``"segment.{current,peak,allocated,freed}"``:
-       number of reserved segments from ``cudaMalloc()``.
-     - ``"reserved_bytes.{current,peak,allocated,freed}"``:
-       amount of reserved memory.
+    Metric type:
 
-     For these core statistics, values are broken down as follows.
+    - ``current``: current value.
+    - ``peak``: maximum value.
+    - ``allocated``: historical total increase.
+    - ``freed``: historical total decrease.
 
-     Metric type:
+    Event/timing counters:
 
-     - ``current``: current value of this metric.
-     - ``peak``: maximum value of this metric.
-     - ``allocated``: historical total increase in this metric.
-     - ``freed``: historical total decrease in this metric.
+    - ``"num_host_alloc"`` / ``"num_host_free"``: blocks created to grow the
+      pool / cached blocks returned to CUDA (matches allocations allocated/freed).
+    - ``"host_alloc_time.{total,max,min,count,avg}"``: time in CUDA alloc calls
+      when growing the pool (microseconds).
+    - ``"host_free_time.{total,max,min,count,avg}"``: time in CUDA free calls
+      when cached blocks are returned (microseconds).
 
-     In addition to the core statistics, we also provide some simple event
-     counters:
-
-     - ``"num_host_alloc"``: number of CUDA allocation calls. This includes both
-       cudaHostAlloc and cudaHostRegister.
-     - ``"num_host_free"``: number of CUDA free calls. This includes both cudaHostFree
-       and cudaHostUnregister.
-
-     Finally, we also provide some simple timing counters:
-
-     - ``"host_alloc_time.{total,max,min,count,avg}"``:
-       timing of allocation requests going through CUDA calls.
-     - ``"host_free_time.{total,max,min,count,avg}"``:
-       timing of free requests going through CUDA calls.
-
-    For these timing statistics, values are broken down as follows.
-
-     Metric type:
-
-     - ``total``: total time spent.
-     - ``max``: maximum value per call.
-     - ``min``: minimum value per call.
-     - ``count``: number of times it was called.
-     - ``avg``: average time per call.
+    Block sizes are rounded up to the next power of two before calling CUDA, so
+    byte stats reflect the rounded size. Peak values are aggregated per bucket
+    and are a best-effort approximation of the true peak.
     """
     result = []
 
@@ -772,7 +758,7 @@ def list_gpu_processes(device: "Device" = None) -> str:
             import pynvml  # type: ignore[import]
         except ModuleNotFoundError:
             return "pynvml module not found, please install nvidia-ml-py"
-        # pyrefly: ignore  # import-error
+        # pyrefly: ignore [import-error, missing-import, missing-module-attribute]
         from pynvml import NVMLError_DriverNotLoaded
 
         try:
@@ -851,22 +837,25 @@ def _record_memory_history_legacy(
     clear_history=False,
     compile_context=False,
     global_record_annotations=False,
+    skip_actions=None,
 ):
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
         record_context,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         trace_alloc_max_entries,
         trace_alloc_record_context,
         record_context_cpp,
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
+        skip_actions if skip_actions is not None else [],
     )
 
 
 def _record_memory_history(
-    enabled: Optional[Literal["state", "all"]] = "all", *args, **kwargs
+    enabled: Literal["state", "all"] | None = "all", *args, **kwargs
 ) -> None:
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
@@ -933,6 +922,24 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
+        clear_history (bool, optional): Clear history when enabling, defaults to False.
+        skip_actions (list[str], optional): List of action types to skip when recording
+            memory history. This can be used to reduce memory overhead by excluding
+            certain types of events from being recorded. Valid action types are:
+
+            - `"alloc"`: Memory allocation events
+            - `"free_requested"`: Free requests (memory marked for freeing)
+            - `"free_completed"`: Completed free operations (memory actually freed)
+            - `"segment_alloc"`: Segment allocation from cudaMalloc
+            - `"segment_free"`: Segment freed back to CUDA via cudaFree
+            - `"oom"`: Out-of-memory exceptions
+            - `"snapshot"`: Memory snapshot generation events
+
+            For example, to skip recording free_requested events:
+            `skip_actions=["free_requested"]`
+
+            Defaults to None (record all actions).
+
     """
     if isinstance(enabled, bool):
         return _record_memory_history_legacy(enabled, *args, **kwargs)
@@ -941,14 +948,15 @@ def _record_memory_history(
 
 
 def _record_memory_history_impl(
-    enabled: Optional[str] = "all",
-    context: Optional[str] = "all",
+    enabled: str | None = "all",
+    context: str | None = "all",
     stacks: str = "all",
     max_entries: int = sys.maxsize,
     device: "Device" = None,
     clear_history: bool = False,
     compile_context: bool = False,
     global_record_annotations: bool = False,
+    skip_actions: list[str] | None = None,
 ):
     _C._cuda_record_memory_history(  # type: ignore[call-arg]
         enabled,
@@ -958,13 +966,15 @@ def _record_memory_history_impl(
         clear_history,
         compile_context,
         global_record_annotations,
+        # pyrefly: ignore [bad-argument-count]
+        skip_actions if skip_actions is not None else [],
     )
 
 
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _snapshot(device: "Device" = None):
+def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """Save a snapshot of CUDA memory state at the time it was called.
 
     The state is represented as a dictionary with the following structure.
@@ -1012,6 +1022,11 @@ def _snapshot(device: "Device" = None):
             filename: str
             line: int
             name: str
+            # Optional FX debug fields (present when augment_with_fx_traces=True
+            # and the frame corresponds to FX-generated code)
+            fx_node_op: str  # FX node operation type (e.g., 'call_function', 'output')
+            fx_node_name: str  # FX node name (e.g., 'linear', 'relu_1')
+            fx_original_trace: str  # Original model source code stack trace
 
 
         class TraceEntry(TypedDict):
@@ -1041,13 +1056,23 @@ def _snapshot(device: "Device" = None):
             device_free: int  # only present for OOM, the amount of
             # memory cuda still reports to be free
 
+    Args:
+        device: Device to capture snapshot for. If None, captures for current device.
+        augment_with_fx_traces: If True, augment stack trace frames with FX debug information
+                                that maps generated FX code back to original model source code.
+                                This adds fx_node_op, fx_node_name, fx_original_trace, and
+                                fx_node_info fields to Frame objects. Default: False.
+
     Returns:
         The Snapshot dictionary object
     """
-    return _C._cuda_memorySnapshot(None)
+    s = _C._cuda_memorySnapshot(None)
+    if augment_with_fx_traces:
+        s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
+    return s
 
 
-def _dump_snapshot(filename="dump_snapshot.pickle"):
+def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False):
     """
     Save a pickled version of the `torch.memory._snapshot()` dictionary to a file.
 
@@ -1059,8 +1084,12 @@ def _dump_snapshot(filename="dump_snapshot.pickle"):
 
     Args:
         filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
+        augment_with_fx_traces (bool, optional): If True, augment the snapshot with FX debug information
+                                                  before dumping. This maps generated FX code stack traces
+                                                  back to original model source code. Defaults to False.
     """
-    s = _snapshot()
+    s = _snapshot(augment_with_fx_traces=augment_with_fx_traces)
+
     with open(filename, "wb") as f:
         pickle.dump(s, f)
 
@@ -1076,7 +1105,7 @@ def _set_memory_metadata(metadata: str):
         metadata (str): Custom metadata string to attach to allocations.
                        Pass an empty string to clear the metadata.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     torch._C._cuda_setMemoryMetadata(metadata)
 
 
@@ -1087,7 +1116,7 @@ def _get_memory_metadata() -> str:
     Returns:
         str: The current metadata string, or empty string if no metadata is set.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return torch._C._cuda_getMemoryMetadata()
 
 
@@ -1110,13 +1139,13 @@ def _save_memory_usage(filename="output.svg", snapshot=None):
     category=FutureWarning,
 )
 def _set_allocator_settings(env: str):
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_setAllocatorSettings(env)
 
 
 def get_allocator_backend() -> str:
     r"""Return a string describing the active allocator backend as set by
-    ``PYTORCH_CUDA_ALLOC_CONF``. Currently available backends are
+    ``PYTORCH_ALLOC_CONF``. Currently available backends are
     ``native`` (PyTorch's native caching allocator) and `cudaMallocAsync``
     (CUDA's built-in asynchronous allocator).
 
@@ -1163,8 +1192,10 @@ class CUDAPluggableAllocator(_CUDAAllocator):
         allocator = ctypes.CDLL(path_to_so_file)
         alloc_fn = ctypes.cast(getattr(allocator, alloc_fn_name), ctypes.c_void_p).value
         free_fn = ctypes.cast(getattr(allocator, free_fn_name), ctypes.c_void_p).value
-        assert alloc_fn is not None
-        assert free_fn is not None
+        if alloc_fn is None:
+            raise AssertionError(f"alloc_fn '{alloc_fn_name}' is None")
+        if free_fn is None:
+            raise AssertionError(f"free_fn '{free_fn_name}' is None")
         self._allocator = torch._C._cuda_customAllocator(alloc_fn, free_fn)
 
 
@@ -1204,15 +1235,18 @@ class MemPool(_MemPool):
         use_on_oom(bool): a bool that indicates if this pool can be used
             as a last resort if a memory allocation outside of the pool fails due
             to Out Of Memory. This is False by default.
-
+        no_split(bool): a bool that indicates if this pool should not split a segment.
+            This is False by default.
     """
 
     def __init__(
         self,
-        allocator: Optional[_cuda_CUDAAllocator] = None,
+        allocator: _cuda_CUDAAllocator | None = None,
         use_on_oom: bool = False,
+        no_split: bool = False,
     ):
-        super().__init__(allocator, True, use_on_oom)
+        # pyrefly: ignore [bad-argument-count]
+        super().__init__(allocator, True, use_on_oom, no_split)
 
     @property
     def id(self) -> tuple[int, int]:
@@ -1220,11 +1254,11 @@ class MemPool(_MemPool):
         return super().id
 
     @property
-    def allocator(self) -> Optional[_cuda_CUDAAllocator]:
+    def allocator(self) -> _cuda_CUDAAllocator | None:
         r"""Returns the allocator this MemPool routes allocations to."""
         return super().allocator
 
-    def use_count(self) -> int:
+    def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
         r"""Returns the reference count of this pool."""
         return super().use_count()
 

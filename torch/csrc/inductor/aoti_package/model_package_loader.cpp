@@ -4,12 +4,10 @@
 #include <c10/util/string_view.h>
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
-#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -33,7 +31,6 @@ namespace fs = std::filesystem;
 #define access _access
 #define F_OK 0
 #else
-#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -696,7 +693,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   } else {
     LOG(WARNING)
         << "You are using an outdated version of the pt2 archive which do not have a prefix in front of each filename. Example: \n"
-        << found_filenames[0] << "\n"
+        << found_filenames[0] << '\n'
         << found_filenames[1];
   }
 
@@ -824,7 +821,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   runner_ = registered_aoti_runner[device_key](
       so_path, num_runners, device.str(), cubin_dir, run_single_threaded);
 
-  if (weight_blob_filename != "") {
+  if (!weight_blob_filename.empty()) {
     runner_->update_constant_buffer_from_blob(weight_blob_filename);
   }
 }

@@ -85,6 +85,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          Tensor& output,
                                                          Tensor& save_mean,
                                                          Tensor& save_var) {
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "Long batch norm is not supported with MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "Batch norm for complex is not supported for MPS");
 #ifdef __MAC_15_0
   if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
     // macOS 15+ path: simplified implementation using strided tensor support
@@ -1447,8 +1450,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
   MPSStream* stream = getCurrentMPSStream();
+  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "Not implemented for long on MPS");
   @autoreleasepool {
-    mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
       // which kernel variant to use based on the normalized axis N size
       const int N_READS = 4;
       auto metalType = mps::scalarToMetalTypeString(input);

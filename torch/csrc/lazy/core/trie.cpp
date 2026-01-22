@@ -1,8 +1,5 @@
 #include <torch/csrc/lazy/core/trie.h>
 
-#include <torch/csrc/lazy/core/hash.h>
-#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
-#include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <fstream>
 #include <sstream>
@@ -19,7 +16,7 @@ void TraverseTrie(TrieNode* node, std::stringstream& ss) {
        << ", " << node->hit_counter << " hits\"]\n";
   }
   for (auto& successor : node->successors) {
-    ss << node->unique_id << " -> " << successor->unique_id << "\n";
+    ss << node->unique_id << " -> " << successor->unique_id << '\n';
     TraverseTrie(successor.get(), ss);
   }
 }

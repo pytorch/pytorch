@@ -6,9 +6,12 @@ import enum
 import functools
 import inspect
 import keyword
+import logging
 import math
 import os
+import pprint
 import re
+import types
 import typing
 import warnings
 from collections import defaultdict
@@ -20,6 +23,7 @@ from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
 from . import _pytree as fx_pytree
@@ -27,6 +31,8 @@ from ._compatibility import compatibility
 from .immutable_collections import immutable_dict
 from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
+
+log = logging.getLogger(__name__)
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -225,8 +231,10 @@ class PythonCode:
     # Values in global scope during execution of `src_def`.
     globals: dict[str, Any]
     # Optional mapping from the forward function's line number to
-    # node index.
+    # node index. Line number starts at the prologue (i.e. forward()).
     _lineno_map: Optional[dict[int, Optional[int]]]
+    # The line number of prologue in fn_code
+    _prologue_start: int = 0
 
 
 def _format_target(base: str, target: str) -> str:
@@ -294,7 +302,9 @@ class _ParsedStackTrace:
 
 
 # get File:lineno code from stack_trace
-def _parse_stack_trace(stack_trace: str):
+def _parse_stack_trace(
+    stack_trace: str, filter_fn: Optional[Callable[[str, str, str], bool]] = None
+):
     if stack_trace is None:
         return None
     pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
@@ -311,6 +321,8 @@ def _parse_stack_trace(stack_trace: str):
             name = matches.group(3)
             # next line should be the code
             code = lines[idx + 1].strip()
+            if filter_fn and not filter_fn(file, name, code):
+                continue
             return _ParsedStackTrace(file, lineno, name, code)
     return None
 
@@ -440,6 +452,7 @@ class CodeGen:
         colored: bool = False,
         # Render each argument on its own line
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         free_vars: list[str] = []
         body: list[str] = []
@@ -454,6 +467,7 @@ class CodeGen:
         include_device = include_device or (
             os.environ.get("FX_GRAPH_SHOW_DEVICE", "0") == "1"
         )
+        include_meta = os.environ.get("FX_GRAPH_SHOW_META", "0") == "1"
 
         def add_global(name_hint: str, obj: Any):
             """Add an obj to be tracked as a global.
@@ -490,6 +504,10 @@ class CodeGen:
                 return "()"
 
             typename = _type_repr(o)
+            if isinstance(o, types.UnionType) and "|" in typename:
+                # str | int
+                args = [type_repr(arg) for arg in o.__args__]
+                return "|".join(args)
 
             if origin_type := getattr(o, "__origin__", None):
                 # list[...], typing.List[...], TensorType[...]
@@ -553,6 +571,11 @@ class CodeGen:
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
+            elif is_opaque_value_type(type(arg)):
+                obj_repr, opaque_types = get_opaque_obj_repr(arg)
+                for n, t in opaque_types.items():
+                    add_global(n, t)
+                return obj_repr
             else:
                 return blue(repr(arg))
 
@@ -606,29 +629,46 @@ class CodeGen:
             else:
                 body.append("\n")
 
-        prev_stacktrace = None
+        prev_summary_str = None
 
         def append_stacktrace_summary(node: Node):
             """
             Append a summary of the stacktrace to the generated code. This is
             useful for debugging.
             """
-            nonlocal prev_stacktrace
+            nonlocal prev_summary_str
 
             if node.op not in {"placeholder", "output"}:
-                stack_trace = node.stack_trace
-                if stack_trace:
-                    if stack_trace != prev_stacktrace:
-                        prev_stacktrace = stack_trace
-                        if parsed_stack_trace := _parse_stack_trace(stack_trace):
-                            summary_str = parsed_stack_trace.get_summary_str()
-                        else:
-                            summary_str = ""
-                        body.append(f"\n {dim(f'# {summary_str}')}\n")
-                elif prev_stacktrace != "":
-                    prev_stacktrace = ""
-                    no_stacktrace_msg = "# No stacktrace found for following nodes"
-                    body.append(f"\n{dim(no_stacktrace_msg)}\n")
+                annotation_str = ""
+                annotation = node.meta.get("custom", {})
+                if annotation:
+                    annotation_str = f" Annotation: {annotation}"
+
+                stack_trace_str = "No stacktrace found for following nodes"
+                if stack_trace := node.stack_trace:
+                    if parsed_stack_trace := _parse_stack_trace(stack_trace):
+                        stack_trace_str = parsed_stack_trace.get_summary_str()
+
+                maybe_recompute_info = ""
+                if hasattr(node, "meta") and node.meta:
+                    # recompute tags are generated by torch.compile and put in the joint graph.
+                    # These tags are load bearing enough that we want them to show up by default
+                    # in tlparse, when you run torch.compile.
+                    recompute = node.meta.get("recompute", None)
+                    ac_graph_id = node.meta.get("ac_graph_id", None)
+
+                    if recompute is not None and ac_graph_id is not None:
+                        maybe_recompute_info = f" # ac_graph_id: {str(ac_graph_id)} - {str(recompute.name)}"
+                    elif recompute is not None:
+                        maybe_recompute_info = f" # recompute: {str(recompute.name)}"
+                    elif ac_graph_id is not None:
+                        maybe_recompute_info = f" # ac_graph_id: {str(ac_graph_id)}"
+
+                summary_str = f"\n{dim(f'#{annotation_str}{maybe_recompute_info} {stack_trace_str}')}\n"
+
+                if summary_str != prev_summary_str:
+                    prev_summary_str = summary_str
+                    body.append(summary_str)
 
         def stringify_shape(shape: Iterable) -> str:
             return f"[{', '.join([str(x) for x in shape])}]"
@@ -641,6 +681,15 @@ class CodeGen:
 
             if verbose:
                 # override annotation with more detailed information
+                try:
+                    from torch.distributed.tensor._api import DTensor, DTensorSpec
+
+                    dtensorspec_format_shard_order_str = (
+                        DTensorSpec.format_shard_order_str
+                    )
+                except ModuleNotFoundError:
+                    DTensor = None  # type: ignore[assignment,misc]
+                    dtensorspec_format_shard_order_str = None
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
@@ -671,6 +720,16 @@ class CodeGen:
                     core = _tensor_annotation(meta_val)
                     if is_plain:
                         maybe_type_annotation = f': "{core}"'
+                    elif type(meta_val) is DTensor:
+                        assert dtensorspec_format_shard_order_str is not None
+                        dtensor_meta = dtensorspec_format_shard_order_str(
+                            meta_val._spec.placements,  # type: ignore[attr-defined]
+                            meta_val._spec.shard_order,  # type: ignore[attr-defined]
+                        )
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = (
+                            f': "{cls}({core}, {dim_green(dtensor_meta)})"'
+                        )
                     else:
                         cls = meta_val.__class__.__name__
                         maybe_type_annotation = f': "{cls}({core})"'
@@ -688,6 +747,17 @@ class CodeGen:
                 if desc is not None and node.op == "placeholder":
                     maybe_comment += f"  # {desc}"
                 # output is handled specially
+
+            if include_meta and hasattr(node, "meta") and node.meta:
+                body.append('"""\n')
+                for k, v in node.meta.items():
+                    # use str over repr since repr is susceptible to sympy
+                    # errors such as "cannot determine truth value of Relational"
+                    # Pretty print the high-level dict with str() for values
+                    body.append(
+                        f"{k}: {pprint.pformat(str(v), width=80, compact=True)}\n"
+                    )
+                body.append('"""\n')
 
             if node.op == "placeholder":
                 assert isinstance(node.target, str)
@@ -781,6 +851,10 @@ class CodeGen:
                 return
             raise NotImplementedError(f"node: {node.op} {node.target}")
 
+        if record_func:
+            body.append(
+                "_rf = torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##'); _rf.__enter__()\n"
+            )
         for i, node in enumerate(nodes):
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
@@ -790,8 +864,22 @@ class CodeGen:
             # node index, which will be deleted later
             # after going through _body_transformer
             body.append(f"# COUNTER: {i}\n")
+            do_record = record_func and node.op in (
+                "call_function",
+                "call_method",
+                "call_module",
+            )
+            if do_record:
+                # The double hash ## convention is used by post-processing to find the fx markers
+                body.append(
+                    f"_rf_{node.name} = torch._C._profiler._RecordFunctionFast('## {i} ##'); _rf_{node.name}.__enter__()\n"
+                )
             emit_node(node)
             delete_unused_values(node)
+            if do_record:
+                body.append(f"_rf_{node.name}.__exit__(None, None, None)\n")
+        if record_func:
+            body.append("_rf.__exit__(None, None, None)\n")
 
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
@@ -839,7 +927,14 @@ class CodeGen:
 
 {prologue}
 {code}"""
-        return PythonCode(fn_code, globals_, _lineno_map=lineno_map)
+        # The +4 accounts for the empty lines before prologue in fn_code
+        prologue_start = wrap_stmts.count("\n") + 4
+        return PythonCode(
+            fn_code,
+            globals_,
+            _lineno_map=lineno_map,
+            _prologue_start=prologue_start,
+        )
 
 
 # Ideally, we'd like to refactor all of the pytree logic into this codegen
@@ -917,6 +1012,43 @@ class _PyTreeCodeGen(CodeGen):
         else:
             return "\n    " + "".join(x + "; " for x in has_annotation) + "\n"
 
+    def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+        in_spec = self.pytree_info.in_spec
+        # when kwargs is present, in_spec is tuple(args, kwargs)
+        has_args_kwargs_tuple = (
+            in_spec.type is tuple
+            and in_spec.num_children == 2
+            and in_spec.child(0).type is tuple
+            and in_spec.child(1).type is dict
+        )
+        fn_kwargs = "{}"
+        fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
+        if has_args_kwargs_tuple:
+            count_args = in_spec.child(0).num_children
+            fn_args = self.pytree_info.orig_args[:count_args]
+            fn_kwargs = (
+                "{"
+                + ", ".join(
+                    f"'{k}':{v}"
+                    for k, v in zip(
+                        in_spec.child(1).context,
+                        self.pytree_info.orig_args[count_args:],
+                    )
+                )
+                + "}"
+            )
+            fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
+
+        # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
+        # we need to split it to two lines:
+        # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
+        # one for code: `var1, var2, = function_call()`
+        without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
+        bindings = self._format_annotations(free_vars, expanded_def)
+        bindings += f"""
+    {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+        return bindings
+
     def gen_fn_def(
         self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
     ):
@@ -949,39 +1081,7 @@ class _PyTreeCodeGen(CodeGen):
         )
 
         if len(free_vars) > 0:  # pytree has placeholders in it
-            # when kwargs is present, in_spec is tuple(args, kwargs)
-            has_args_kwargs_tuple = (
-                self.pytree_info.in_spec.type is tuple
-                and self.pytree_info.in_spec.num_children == 2
-                and self.pytree_info.in_spec.children_specs[0].type is tuple
-                and self.pytree_info.in_spec.children_specs[1].type is dict
-            )
-            fn_kwargs = "{}"
-            fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
-            if has_args_kwargs_tuple:
-                count_args = self.pytree_info.in_spec.children_specs[0].num_children
-                fn_args = self.pytree_info.orig_args[:count_args]
-                fn_kwargs = (
-                    "{"
-                    + ", ".join(
-                        f"'{k}':{v}"
-                        for k, v in zip(
-                            self.pytree_info.in_spec.children_specs[1].context,
-                            self.pytree_info.orig_args[count_args:],
-                        )
-                    )
-                    + "}"
-                )
-                fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
-
-            # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
-            # we need to split it to two lines:
-            # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
-            # one for code: `var1, var2, = function_call()`
-            without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
-            fn_definition += self._format_annotations(free_vars, expanded_def)
-            fn_definition += f"""
-    {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+            fn_definition += self.gen_var_bindings(fn_args, free_vars, expanded_def)
         return fn_definition
 
     def generate_output(self, output_args, *, descs: Optional[Any] = None):
@@ -999,6 +1099,52 @@ class _PyTreeCodeGen(CodeGen):
                 )
         else:
             return super().generate_output(output_args, descs=descs)
+
+
+class _ExportCodeGen(_PyTreeCodeGen):
+    def __init__(
+        self,
+        pytree_info: _PyTreeInfo,
+        in_shuffle_graph: "GraphModule",
+        out_shuffle_graph: "GraphModule",
+        tree_leaf_names: list[str],
+        root: Optional[torch.nn.Module],
+    ):
+        super().__init__(pytree_info)
+        self.in_shuffle_graph = in_shuffle_graph
+        self.out_shuffle_graph = out_shuffle_graph
+        self.tree_leaf_names = tree_leaf_names
+        self.root = root
+
+    def process_inputs(self, *inputs: Any) -> Any:
+        flat_args = super().process_inputs(*inputs)
+        if self.root is not None:
+            flat_args = (self.root, *flat_args)
+        self.flat_args = flat_args
+        return self.in_shuffle_graph(*flat_args)
+
+    def process_outputs(self, out: Any) -> Any:
+        flat_outs = self.out_shuffle_graph(*self.flat_args, *out)
+        del self.flat_args
+        ret = super().process_outputs(flat_outs)
+        return ret
+
+    def gen_fn_def(self, *args, **kwargs) -> str:
+        fn_def = super().gen_fn_def(*args, **kwargs)
+        return fn_def
+
+    def gen_var_bindings(self, fn_args, free_vars, expanded_def) -> str:
+        without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
+        fn_signature: str = f"{', '.join(fn_args)}"
+        if self.root is not None:
+            fn_signature = f"self, {fn_signature}"
+        return f"""
+    {", ".join(self.tree_leaf_names)}, = pytree.tree_leaves(({fn_signature},))
+    {", ".join(without_annotation)}, = self._in_shuffle_graph({", ".join(self.tree_leaf_names)})"""
+
+    def generate_output(self, output_args, *args, **kwargs) -> str:
+        output = f"self._out_shuffle_graph({', '.join(self.tree_leaf_names)}, {', '.join([str(a) for a in output_args])})"
+        return f"return pytree.tree_unflatten({output}, self._out_spec)"
 
 
 class _FindNodesLookupTable:
@@ -1032,7 +1178,7 @@ class _FindNodesLookupTable:
             return [*self.table[(op, None)].keys()]
 
         # op is call_method, get_attr, call_module
-        return [node for node in self.table[(op, None)].keys() if node.target == target]
+        return [node for node in self.table[(op, None)] if node.target == target]
 
 
 @compatibility(is_backward_compatible=True)
@@ -1206,8 +1352,11 @@ class Graph:
             assert isinstance(output_vals, tuple)
             output_val, old_output_node = output_vals
             new_output_node = g.output(
-                output_val, type_expr=getattr(old_output_node, "type", None)
+                # pyrefly: ignore [bad-argument-type]
+                output_val,
+                type_expr=getattr(old_output_node, "type", None),
             )
+            # pyrefly: ignore [missing-attribute]
             new_output_node.meta = copy.copy(old_output_node.meta)
         return g
 
@@ -1314,7 +1463,7 @@ class Graph:
                 f(to_erase)
 
         self._find_nodes_lookup_table.remove(to_erase)
-        # pyrefly: ignore  # missing-attribute
+
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes
         self._len -= 1
@@ -1685,6 +1834,7 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1752,6 +1902,7 @@ class Graph:
                 include_device=include_device,
                 colored=colored,
                 expanded_def=expanded_def,
+                record_func=record_func,
             )
 
     def _python_code(
@@ -1764,6 +1915,7 @@ class Graph:
         include_device: bool = False,
         colored: bool = False,
         expanded_def: bool = False,
+        record_func: bool = False,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes,
@@ -1774,6 +1926,7 @@ class Graph:
             include_device=include_device,
             colored=colored,
             expanded_def=expanded_def,
+            record_func=record_func,
         )
 
     def __str__(self) -> str:
@@ -1875,7 +2028,7 @@ class Graph:
                             "a str is expected"
                         )
                 if node.op in ["get_attr", "call_module"]:
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     target_atoms = node.target.split(".")
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
@@ -1959,11 +2112,15 @@ class Graph:
         # Reverse iterate so that when we remove a node, any nodes used as an
         # input to that node have an updated user count that no longer reflects
         # the removed node.
-        changed = False
+        removed_nodes = set()
         for node in reversed(self.nodes):
             if not has_side_effect(node) and len(node.users) == 0:
                 self.erase_node(node)
-                changed = True
+                removed_nodes.add(node.name)
+
+        changed = len(removed_nodes) > 0
+        if changed:
+            log.info("The following nodes were dead code eliminated: %s", removed_nodes)
 
         # Call DCE on the subgraphs
         if self.owning_module is not None:
@@ -2069,6 +2226,11 @@ class Graph:
                 self._codegen._body_transformer = on_gen_code_old
 
         return on_generate_code_context_manager()
+
+    def _clear_nodes(self) -> None:
+        for node in reversed(self.nodes):
+            node.meta.clear()
+            self.erase_node(node)
 
 
 @contextmanager

@@ -465,7 +465,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                     )
 
         # Destroy process groups
-        for idx, trainer_rref in enumerate(trainer_rrefs):
+        for trainer_rref in trainer_rrefs:
             _remote_method_async(Trainer.destroy_pg, trainer_rref).wait()
 
         # Send shutdown signals.

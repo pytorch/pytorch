@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 from numbers import Number
 import torch
 from torch.utils.benchmark import FuzzedTensor
@@ -9,17 +8,17 @@ class FuzzedSparseTensor(FuzzedTensor):
     def __init__(
         self,
         name: str,
-        size: tuple[Union[str, int], ...],
-        min_elements: Optional[int] = None,
-        max_elements: Optional[int] = None,
-        dim_parameter: Optional[str] = None,
-        sparse_dim: Optional[str] = None,
-        nnz: Optional[str] = None,
-        density: Optional[str] = None,
-        coalesced: Optional[str] = None,
+        size: tuple[str | int, ...],
+        min_elements: int | None = None,
+        max_elements: int | None = None,
+        dim_parameter: str | None = None,
+        sparse_dim: str | None = None,
+        nnz: str | None = None,
+        density: str | None = None,
+        coalesced: str | None = None,
         dtype=torch.float32,
         cuda=False
-    ):
+    ) -> None:
         """
         Args:
             name:

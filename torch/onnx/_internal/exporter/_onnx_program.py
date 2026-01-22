@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx, onnx_ir as ir, onnxscript_apis
 from torch.onnx._internal.exporter import _dynamic_shapes, _ir_passes
 from torch.utils import _pytree
 
@@ -158,7 +158,7 @@ def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValu
             float: np.float32,
         }
         # pyrefly: ignore [no-matching-overload]
-        dtype = dtype_mapping.get(type(input), None)
+        dtype = dtype_mapping.get(type(input))
         return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
 
     if input.dtype == torch.bfloat16 or input.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
@@ -211,7 +211,7 @@ class ONNXProgram:
 
     def __init__(
         self, model: ir.Model, exported_program: torch.export.ExportedProgram | None
-    ):
+    ) -> None:
         """Initialize the ONNX program with the specified model and exported program.
         Args:
             model: The ONNX model.
@@ -327,7 +327,7 @@ ONNXProgram(
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
         external_data: bool | None = None,
-    ):
+    ) -> None:
         """Save the ONNX model to the specified destination.
 
         When ``external_data`` is ``True`` or the model is larger than 2GB,

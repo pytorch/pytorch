@@ -65,7 +65,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.Conv1d.__init__(
             self,
@@ -129,7 +129,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.Conv2d.__init__(
             self,
@@ -194,7 +194,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.Conv3d.__init__(
             self,
@@ -290,7 +290,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.ConvTranspose1d.__init__(
             self,
@@ -310,7 +310,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[list[int]] = None
+        self, x: torch.Tensor, output_size: list[int] | None = None
     ) -> torch.Tensor:
         """
         we have:
@@ -322,7 +322,10 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         and the backend should be able to fuse the ops with `*` into a quantized conv1d
         """
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError(
+                f"Expected self.padding to be a tuple, got {type(self.padding)}"
+            )
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
@@ -370,7 +373,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.ConvTranspose2d.__init__(
             self,
@@ -391,7 +394,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[list[int]] = None
+        self, x: torch.Tensor, output_size: list[int] | None = None
     ) -> torch.Tensor:
         """
         we have:
@@ -402,7 +405,10 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         x -- quant --- *dequant --  *F.convTranspose2d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv2d
         """
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError(
+                f"Expected self.padding to be a tuple, got {type(self.padding)}"
+            )
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
 
@@ -452,7 +458,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.ConvTranspose3d.__init__(
             self,
@@ -473,7 +479,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[list[int]] = None
+        self, x: torch.Tensor, output_size: list[int] | None = None
     ) -> torch.Tensor:
         """
         we have:
@@ -485,7 +491,10 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         and the backend should be able to fuse the ops with `*` into a quantized conv3d
         """
 
-        assert isinstance(self.padding, tuple)
+        if not isinstance(self.padding, tuple):
+            raise AssertionError(
+                f"Expected self.padding to be a tuple, got {type(self.padding)}"
+            )
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(

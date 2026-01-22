@@ -4,6 +4,7 @@ from typing import Any
 from typing_extensions import Unpack
 
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
+from .triton_helpers import get_constexprs
 
 
 class StaticallyLaunchedCudaKernel:
@@ -48,7 +49,7 @@ class StaticallyLaunchedCudaKernel:
         # Const exprs that are declared by the triton kernel directly
         # Used to generate the kernel launcher's def args
         # pyrefly: ignore [missing-attribute]
-        self.declared_constexprs = kernel.src.fn.constexprs
+        self.declared_constexprs = get_constexprs(kernel.src.fn)
 
         # pyrefly: ignore [missing-attribute]
         self.hash = kernel.hash
@@ -250,7 +251,7 @@ class StaticallyLaunchedCudaKernel:
             if has_scratch:
                 arg_tys = arg_tys + "O"
                 args = (*args, None)
-        # pyrefly: ignore [bad-argument-type]
+
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
@@ -263,7 +264,6 @@ class StaticallyLaunchedCudaKernel:
             self.num_warps,
             self.shared,
             arg_tys,
-            # pyrefly: ignore [bad-argument-type]
             args,
             stream,
         )

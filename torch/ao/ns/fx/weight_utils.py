@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from typing import Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -244,10 +243,9 @@ def get_op_to_type_to_weight_extraction_fn() -> dict[str, dict[Callable, Callabl
 def extract_weight_from_node(
     node: Node,
     gm: GraphModule,
-    op_to_type_to_weight_extraction_fn: Optional[
-        dict[str, dict[Callable, Callable]]
-    ] = None,
-) -> Optional[NSSingleResultType]:
+    op_to_type_to_weight_extraction_fn: dict[str, dict[Callable, Callable]]
+    | None = None,
+) -> NSSingleResultType | None:
     res_type = NSSingleResultValuesType.WEIGHT.value
 
     # Not all graphmodules have _node_name_to_scope, so only fill it

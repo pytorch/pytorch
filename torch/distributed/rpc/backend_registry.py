@@ -58,7 +58,7 @@ def backend_registered(backend_name):
         True if the backend has been registered with ``register_backend``, else
         False.
     """
-    return backend_name in BackendType.__members__.keys()
+    return backend_name in BackendType.__members__
 
 
 def register_backend(
@@ -95,7 +95,7 @@ def register_backend(
     BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     if BackendType.__doc__:
         BackendType.__doc__ = _backend_type_doc
-    # pyrefly: ignore [unsupported-operation]
+
     return BackendType[backend_name]
 
 

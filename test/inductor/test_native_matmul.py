@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -10,6 +10,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_triton_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -19,14 +20,12 @@ aten = torch.ops.aten
 @inductor_config.patch({"triton.native_matmul": True})
 class TestTritonDotReduction(TestCase):
     def _check_equal(
-        self,
-        f: Callable,
-        example_inputs: tuple[torch.Tensor],
+        self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
     ):
         compiled = torch.compile(f)
         actual = compiled(*example_inputs)
         expect = f(*example_inputs)
-        self.assertTrue(same(expect, actual))
+        self.assertTrue(same(expect, actual, tol=tol))
 
     def _check_code(
         self,
@@ -92,7 +91,11 @@ class TestTritonDotReduction(TestCase):
         x = rand_strided((M, K), (K, 1), dtype=torch.float16, device=GPU_TYPE)
         y = rand_strided((K, N), (N, 1), dtype=torch.float32, device=GPU_TYPE)
 
-        self._check_equal(f, (x, y))
+        # _check_equal calls torch._dynamo.utils.same with kwarg tol=1e-4.
+        # For fp16 dtype, torch.allclose() defaults to atol=1e-3 rtol=1e-5,
+        # but same() uses the single value to assign both, resulting in
+        # Accuracy failed: allclose not within tol=0.0001.
+        self._check_equal(f, (x, y), tol=1e-3)
         self._check_code(f, (x, y), 1, 1)
 
     def test_reduction_mask_zeroout(self):
@@ -106,6 +109,9 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
+    @skipIfXpu(
+        msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5394"
+    )
     def test_3mm_add(self):
         def f(x, y, z, w, r, t):
             return x @ y + z @ w + r @ t
@@ -152,6 +158,5 @@ if HAS_GPU:
     torch.set_default_device(GPU_TYPE)
 
 if __name__ == "__main__":
-    # TODO: support native matmul on xpu
-    if HAS_GPU and GPU_TYPE != "xpu":
+    if HAS_GPU:
         run_tests()

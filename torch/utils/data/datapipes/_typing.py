@@ -184,7 +184,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                         and len(v_args) == len(c_args)
                         and all(
                             issubtype(v_arg, c_arg)
-                            for v_arg, c_arg in zip(v_args, c_args)
+                            for v_arg, c_arg in zip(v_args, c_args, strict=True)
                         )
                     ):
                         return True
@@ -207,7 +207,7 @@ def issubinstance(data, data_type):
             return True
         if len(dt_args) != len(data):
             return False
-        return all(issubinstance(d, t) for d, t in zip(data, dt_args))
+        return all(issubinstance(d, t) for d, t in zip(data, dt_args, strict=True))
     elif isinstance(data, (list, set)):
         if dt_args is None or len(dt_args) == 0:
             return True
@@ -235,10 +235,10 @@ def issubinstance(data, data_type):
 class _DataPipeType:
     r"""Save type annotation in `param`."""
 
-    def __init__(self, param):
+    def __init__(self, param) -> None:
         self.param = param
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return _type_repr(self.param)
 
     def __eq__(self, other):
@@ -300,7 +300,7 @@ class _DataPipeMeta(GenericMeta):
         )
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
-    def __init__(self, name, bases, namespace, **kwargs):
+    def __init__(self, name, bases, namespace, **kwargs) -> None:
         super().__init__(name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
     # TODO: Fix isinstance bug
@@ -388,7 +388,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
             reset_func = namespace["reset"]
 
             @functools.wraps(reset_func)
-            def conditional_reset(*args, **kwargs):
+            def conditional_reset(*args, **kwargs) -> None:
                 r"""
                 Only execute DataPipe's `reset()` method if `_SnapshotState` is `Iterating` or `NotStarted`.
 
@@ -413,7 +413,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
 
-def _dp_init_subclass(sub_cls, *args, **kwargs):
+def _dp_init_subclass(sub_cls, *args, **kwargs) -> None:
     # Add function for datapipe instance to reinforce the type
     sub_cls.reinforce_type = reinforce_type
 

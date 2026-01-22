@@ -2,7 +2,6 @@
 import operator
 from collections.abc import Callable
 from functools import reduce
-from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -61,8 +60,8 @@ class WeightNormSparsifier(BaseSparsifier):
         self,
         sparsity_level: float = 0.5,
         sparse_block_shape: tuple[int, int] = (1, 4),
-        zeros_per_block: Optional[int] = None,
-        norm: Optional[Union[Callable, int]] = None,
+        zeros_per_block: int | None = None,
+        norm: Callable | int | None = None,
     ):
         if zeros_per_block is None:
             zeros_per_block = reduce(operator.mul, sparse_block_shape)
@@ -95,7 +94,8 @@ class WeightNormSparsifier(BaseSparsifier):
     ):
         r"""Creates patches of size `block_shape` after scattering the indices."""
         if mask is None:
-            assert input_shape is not None
+            if input_shape is None:
+                raise AssertionError("input_shape must be provided when mask is None")
             mask = torch.ones(input_shape, device=device)
         mask.scatter_(dim=dim, index=indices, value=0)
         mask.data = F.fold(

@@ -518,7 +518,7 @@ class TestMisc(JitTestCase):
         ref = fn(x)
 
         script_fn = torch.jit.script(fn)
-        for i in range(4):
+        for _ in range(4):
             res = script_fn(x)
 
         self.assertEqual(ref, res)

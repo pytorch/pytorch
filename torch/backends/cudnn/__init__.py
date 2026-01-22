@@ -15,6 +15,8 @@ from torch.backends import (
     PropModule,
 )
 
+from . import rnn
+
 
 try:
     from torch._C import _cudnn
@@ -34,11 +36,11 @@ if _cudnn is not None:
     def _init():
         global __cudnn_version
         if __cudnn_version is None:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             __cudnn_version = _cudnn.getVersionInt()
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             runtime_version = _cudnn.getRuntimeVersion()
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             compile_version = _cudnn.getCompileVersion()
             runtime_major, runtime_minor, _ = runtime_version
             compile_major, compile_minor, _ = compile_version
@@ -47,7 +49,7 @@ if _cudnn is not None:
             # Not sure about MIOpen (ROCm), so always do a strict check
             if runtime_major != compile_major:
                 cudnn_compatible = False
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             elif runtime_major < 7 or not _cudnn.is_cuda:
                 cudnn_compatible = runtime_minor == compile_minor
             else:
@@ -82,6 +84,20 @@ if _cudnn is not None:
                         )
                 else:
                     raise RuntimeError(base_error_msg)
+            # Check if cuDNN version is compatible with available CUDA devices
+            if torch.cuda.is_available() and not torch.version.hip:
+                min_cc = min(
+                    [
+                        torch.cuda.get_device_capability(i)
+                        for i in range(torch.cuda.device_count())
+                    ]
+                )
+                if __cudnn_version >= 91100 and min_cc < (7, 5):
+                    raise RuntimeError(
+                        f"cuDNN version {__cudnn_version} is not compatible with devices with SM < 7.5. "
+                        f"Please install a version of PyTorch with a compatible cuDNN version. "
+                        f"https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix"
+                    )
 
         return True
 
@@ -198,9 +214,6 @@ def flags(
 
 
 class CudnnModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(
         torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic
@@ -218,7 +231,6 @@ class CudnnModule(PropModule):
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
     )
     conv = _FP32Precision("cuda", "conv")
-    rnn = _FP32Precision("cuda", "rnn")
     fp32_precision = ContextProp(
         _get_fp32_precision_getter("cuda", "all"),
         _set_fp32_precision_setter("cuda", "all"),

@@ -39,11 +39,22 @@ def _ops_filter_safe(name: str) -> bool:
     )
 
 
+def _node_metadata_key_filter_safe(key: str) -> bool:
+    """
+    A metadata filter which allows pickle-safe node metadata. These often times contain
+    stacks with pointers to unserializable objects, so we clear them out.
+    """
+    return key not in ["source_fn_stack", "nn_module_stack", "fwd_source_fn_stack"]
+
+
 @dataclasses.dataclass
 class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
     ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
+    node_metadata_key_filter: Optional[Callable[[str], bool]] = (
+        _node_metadata_key_filter_safe
+    )
 
 
 class GraphPickler(pickle.Pickler):
@@ -67,7 +78,7 @@ class GraphPickler(pickle.Pickler):
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
     @override
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: object
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
@@ -204,7 +215,7 @@ class _SymNodePickleData:
     ]:
         args = (cls(obj.node), pickler._unpickle_state)
         if isinstance(obj, torch.SymInt):
-            # pyrefly: ignore  # bad-return
+            # pyrefly: ignore [bad-return]
             return _SymNodePickleData.unpickle_sym_int, args
         else:
             raise NotImplementedError(f"Unhandled SymNode type {type(obj)}")
@@ -281,7 +292,7 @@ class _TensorPickleData:
                 return FakeTensor(
                     unpickle_state.fake_mode,
                     make_meta_t(),
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     device,
                 )
 
@@ -334,9 +345,9 @@ class _TorchNumpyPickleData:
         if not (name := getattr(np, "__name__", None)):
             return None
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         assert np == getattr(importlib.import_module(mod), name)
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         return cls(mod, name)
 
 
@@ -391,7 +402,14 @@ class _NodePickleData:
         # self.sort_key = node._sort_key
         # self.repr_fn = node._repr_fn
         # self.meta = node.meta
-        self.meta = node.meta
+        self.meta = {
+            k: v
+            for k, v in node.meta.items()
+            if (
+                not options.node_metadata_key_filter
+                or options.node_metadata_key_filter(k)
+            )
+        }
 
     def unpickle(
         self,
@@ -570,6 +588,7 @@ class _GraphPickleData:
         for node in graph.nodes:
             nodes[node] = _NodePickleData(node, nodes, options)
         self.nodes = tuple(nodes.values())
+        self._codegen = graph._codegen
 
         # Unpickled variables:
         # self._used_names = graph._used_names
@@ -577,7 +596,6 @@ class _GraphPickleData:
         # self._len = graph._len
         # self._graph_namespace = graph._graph_namespace
         # self._owning_module = graph._owning_module
-        # self._codegen = graph._codegen
         # self._co_fields: Dict[str, Any] = graph._co_fields
         # -- self._find_nodes_lookup_table = _FindNodesLookupTable()
 
@@ -589,6 +607,8 @@ class _GraphPickleData:
         nodes: dict[_NodePickleData, torch.fx.Node] = {}
         for nd in self.nodes:
             nodes[nd] = nd.unpickle(graph, nodes, unpickle_state)
+        if hasattr(self, "_codegen"):
+            graph._codegen = self._codegen
 
         return graph
 

@@ -25,8 +25,8 @@ from torch._higher_order_ops.utils import (
     filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
     unique_graph_id,
     validate_subgraph_args_types,
 )
@@ -50,9 +50,10 @@ class CondOp(HigherOrderOperator):
 
     def __call__(self, pred, true_fn, false_fn, operands):
         validate_subgraph_args_types(operands)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(pred, true_fn, false_fn, operands)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, pred, true_fn, false_fn, operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -102,8 +103,8 @@ def cond(
     Conditionally applies `true_fn` or `false_fn`.
 
     .. warning::
-        `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
-        doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
+        `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types.
+        Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     `cond` is structured control flow operator. That is, it is like a Python if-statement,
@@ -286,7 +287,7 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
 
 class CondAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         pred,
@@ -307,14 +308,14 @@ class CondAutogradOp(torch.autograd.Function):
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
-        save_tensors_and_symints_for_backward(ctx, operands)
+        save_values_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             return cond_op(pred, true_fn, false_fn, operands)
 
     @staticmethod
     def backward(ctx, *flat_grads):
-        operands = saved_tensors_and_symints(ctx)
+        operands = saved_values(ctx)
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.

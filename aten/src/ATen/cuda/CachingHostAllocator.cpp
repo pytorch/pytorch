@@ -1,9 +1,6 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 
-#include <ATen/DeviceGuard.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/detail/CUDAHooks.h>
-#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 
@@ -107,6 +104,7 @@ struct CUDACachingHostAllocatorImpl
       allocWithCudaHostRegister(ptr, size);
     } else {
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
 
@@ -137,7 +135,7 @@ struct CUDACachingHostAllocatorImpl
   void free_block_slowpath(Block* block) {
     auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
-    // However, allocations using cudaHostRegister should use corresonding
+    // However, allocations using cudaHostRegister should use corresponding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
     void* ptr = block->ptr_;
     bool use_register = false;
@@ -225,7 +223,7 @@ struct CUDACachingHostAllocatorImpl
     // pre-fault/map the pages by setting the first byte of the page
     uintptr_t alignedStart =
         ((start + pageSize - 1) & ~(pageSize - 1));
-    for (uintptr_t p = alignedStart; p < (end); p += pageSize) {
+    for (uintptr_t p = alignedStart; p < end; p += pageSize) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }
@@ -280,8 +278,29 @@ struct CUDACachingHostAllocatorImpl
     }
 
     // Register the mapped pages using cudaHostRegister
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     AT_CUDA_CHECK(
         cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+  }
+
+  CUDAStream get_current_stream() const override {
+    // get_current_stream() is called in contexts (such as allocation)
+    // where a device may not already be set. Set it before
+    // continuing.
+    at::OptionalDeviceGuard device_guard;
+    auto primary_ctx_device_index =
+        c10::cuda::getDeviceIndexWithPrimaryContext();
+    if (primary_ctx_device_index.has_value()) {
+      device_guard.reset_device(
+          at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+    }
+    return at::cuda::getCurrentCUDAStream();
+  }
+
+  bool stream_is_capturing(CUDAStream s) const override {
+    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+    C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
+    return status != cudaStreamCaptureStatusNone;
   }
 };
 

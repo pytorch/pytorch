@@ -10,12 +10,6 @@ import tempfile
 import time
 import warnings
 from concurrent.futures import as_completed, ThreadPoolExecutor
-from typing import Optional
-
-from torch.numa.binding import (
-    maybe_temporarily_apply_numa_binding_to_current_thread,
-    NumaOptions,
-)
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
@@ -38,26 +32,18 @@ __all__ = [
 class ProcessException(Exception):
     __slots__ = ["error_index", "error_pid"]
 
-    def __init__(self, msg: str, error_index: int, pid: int):
+    def __init__(self, msg: str, error_index: int, error_pid: int):
         super().__init__(msg)
         self.msg = msg
         self.error_index = error_index
-        self.pid = pid
+        self.error_pid = error_pid
 
     def __reduce__(self):
-        return type(self), (self.msg, self.error_index, self.pid)
+        return type(self), (self.msg, self.error_index, self.error_pid)
 
 
 class ProcessRaisedException(ProcessException):
     """Exception raised when a process failed due to an exception raised by the code."""
-
-    def __init__(
-        self,
-        msg: str,
-        error_index: int,
-        error_pid: int,
-    ):
-        super().__init__(msg, error_index, error_pid)
 
 
 class ProcessExitedException(ProcessException):
@@ -71,7 +57,7 @@ class ProcessExitedException(ProcessException):
         error_index: int,
         error_pid: int,
         exit_code: int,
-        signal_name: Optional[str] = None,
+        signal_name: str | None = None,
     ):
         super().__init__(msg, error_index, error_pid)
         self.exit_code = exit_code
@@ -80,7 +66,13 @@ class ProcessExitedException(ProcessException):
     def __reduce__(self):
         return (
             type(self),
-            (self.msg, self.error_index, self.pid, self.exit_code, self.signal_name),
+            (
+                self.msg,
+                self.error_index,
+                self.error_pid,
+                self.exit_code,
+                self.signal_name,
+            ),
         )
 
 
@@ -119,13 +111,11 @@ class ProcessContext:
         """Attempt to join all processes with a shared timeout."""
         end = time.monotonic() + timeout
         for process in self.processes:
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             time_to_wait = max(0, end - time.monotonic())
             process.join(time_to_wait)
 
-    def join(
-        self, timeout: Optional[float] = None, grace_period: Optional[float] = None
-    ):
+    def join(self, timeout: float | None = None, grace_period: float | None = None):
         r"""Join one or more processes within spawn context.
 
         Attempt to join one or more processes in this spawn context.
@@ -244,7 +234,6 @@ def start_processes(
     join=True,
     daemon=False,
     start_method="spawn",
-    numa_options: Optional[NumaOptions] = None,
 ):
     # To speed up performance in certain cases (see https://github.com/pytorch/pytorch/issues/133010),
     # this func will start processes in parallel if start_method is 'forkserver'.
@@ -271,7 +260,7 @@ def start_processes(
         # used a multiprocessing.Queue but that can be prone to
         # deadlocks, so we went with a simpler solution for a one-shot
         # message between processes.
-        tf = tempfile.NamedTemporaryFile(
+        tf = tempfile.NamedTemporaryFile(  # noqa: SIM115
             prefix="pytorch-errorfile-", suffix=".pickle", delete=False
         )
         tf.close()
@@ -283,23 +272,7 @@ def start_processes(
             daemon=daemon,
         )
 
-        # HACK [NUMA inheritance]: Subprocesses inherit the parent thread's CPU
-        # affinity. So, we temporarily apply the bindings to the current thread,
-        # and then immediately undo them.
-        # This is necessary because the alternatives would be to
-        # either
-        # 1. Use numactl CLI. However, Python's multiprocessing library
-        # does not provide an API which would allow us to prepend
-        # the command it runs with numactl options.
-        # 2. Wrap the provided function such that it first applies
-        # NUMA bindings, and then executes as expected. However, this
-        # can result in worse memory locality, because torch and CUDA
-        # initialization would occur before applying the bindings, thus
-        # allowing some memory to be allocated on the wrong NUMA nodes.
-        with maybe_temporarily_apply_numa_binding_to_current_thread(
-            gpu_index=i, numa_options=numa_options
-        ):
-            process.start()
+        process.start()
         return i, process, tf.name
 
     if not start_parallel:

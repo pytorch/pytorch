@@ -49,7 +49,7 @@ def tree_flatten_spec(
         flatten_fn_spec = SUPPORTED_NODES[spec.type]
         child_pytrees = flatten_fn_spec(pytree, spec)
         result = []
-        for child, child_spec in zip(child_pytrees, spec.children_specs):
+        for child, child_spec in zip(child_pytrees, spec.children()):
             flat = tree_flatten_spec(child, child_spec)
             result += flat
         return result

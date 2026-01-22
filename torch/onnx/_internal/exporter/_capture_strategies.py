@@ -27,7 +27,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     """Prints messages based on `verbose`."""
     if verbose is False:
         return lambda *_, **__: None
-    # pyrefly: ignore [not-iterable]
+
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
@@ -92,7 +92,7 @@ class CaptureStrategy(abc.ABC):
         dump: bool = False,
         artifacts_dir: str | os.PathLike = ".",
         timestamp: str | None = None,
-    ):
+    ) -> None:
         """Initialize the strategy.
 
         Args:

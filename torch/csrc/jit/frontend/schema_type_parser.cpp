@@ -57,6 +57,11 @@ void registerOpaqueType(const std::string& type_name) {
   }
 }
 
+void unregisterOpaqueType(const std::string& type_name) {
+  auto& global_opaque_types = getOpaqueTypes();
+  global_opaque_types.erase(type_name);
+}
+
 bool isRegisteredOpaqueType(const std::string& type_name) {
   auto& global_opaque_types = getOpaqueTypes();
   return global_opaque_types.find(type_name) != global_opaque_types.end();
@@ -100,6 +105,14 @@ TypePtr SchemaTypeParser::parseBaseType() {
     L.expect(TK_IDENT);
   }
   std::string text = tok.text();
+
+  // Check if this might be a dotted identifier (for opaque types)
+  // Keep consuming '.' + IDENT sequences to build fully qualified names
+  while (L.cur().kind == '.' && L.lookahead().kind == TK_IDENT) {
+    L.next(); // consume '.'
+    auto ident_tok = L.expect(TK_IDENT);
+    text += "." + ident_tok.text();
+  }
 
   // Check if this type is registered as an opaque type first
   if (isRegisteredOpaqueType(text)) {

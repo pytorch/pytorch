@@ -4,8 +4,8 @@ import logging
 import operator
 import textwrap
 from collections import Counter
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -14,7 +14,6 @@ from torch._export.passes._node_metadata_hook import (
     _node_metadata_hook,
     _set_node_metadata_hook,
 )
-from torch._export.utils import _detect_fake_mode_from_gm
 from torch._higher_order_ops.triton_kernel_wrap import (
     TraceableTritonKernelWrapper,
     tracing_triton_hopifier_singleton,
@@ -23,7 +22,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
-from torch._inductor.utils import convert_shape_to_symint, convert_to_symint
+from torch._inductor.utils import convert_to_symint
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
@@ -51,8 +50,6 @@ from .common import (
 from .wrapper import (
     AllocateLine,
     BufferLike,
-    CommBufferAllocateLine,
-    CommBufferFreeLine,
     CommentLine,
     ConditionalLine,
     DynamicScalarLine,
@@ -188,7 +185,7 @@ class WrapperFxCodegen(PythonWrapperCodegen):
         """
         Get the input nodes corresponding to FX graph placeholders.
         """
-        # pyrefly: ignore [missing-argument]
+
         if V.aot_compilation and not self.is_subgraph:
             # AOT graphs must match the signature of the input module.
             return {
@@ -213,7 +210,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             graph_inputs=self.get_fx_graph_inputs(),
             graph_outputs=self.get_graph_outputs(),
             subgms=self.subgms,
-            # pyrefly: ignore [missing-argument]
             is_subgraph=self.is_subgraph,
         ).generate()
 
@@ -314,21 +310,6 @@ class FxConverter:
             )
 
         return kernel
-
-    def _fake_tensor(
-        self,
-        size: tuple[Any, ...],
-        stride: tuple[Any, ...],
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-    ) -> torch.Tensor:
-        with V.fake_mode:
-            return torch.empty_strided(
-                convert_shape_to_symint(size),
-                convert_shape_to_symint(stride),
-                dtype=dtype,
-                device=device,
-            )
 
     def _create_as_strided(
         self,
@@ -606,11 +587,9 @@ class FxConverter:
         self._generate_graph_constants()
         self._generate_subgm_getattrs()
 
-        fake_mode = _detect_fake_mode_from_gm(self.gm)
-
         with _set_node_metadata_hook(
             self.gm,
-            functools.partial(_node_metadata_hook, fake_mode=fake_mode),
+            functools.partial(_node_metadata_hook, fake_mode=V.fake_mode),
         ):
             self._generate_graph_input_shapes()
 
@@ -696,6 +675,7 @@ class FxConverter:
         assert name not in V.graph.removed_buffers
 
         device = buffer.get_device()
+        assert device
         dtype = buffer.get_dtype()
         shape = self._generate_sym_nodes(buffer.get_size())
         stride = self._generate_sym_nodes(buffer.get_stride())
@@ -703,7 +683,7 @@ class FxConverter:
         node = self.gm.graph.call_function(
             torch.empty_strided,
             args=(shape, stride),
-            kwargs={"dtype": dtype, "device": device},
+            kwargs={"dtype": dtype, "device": device.type},
         )
         assert name
         node.name = name
@@ -945,11 +925,11 @@ class FxConverter:
         # Does nothing.
 
     def _generate_comm_buffer_allocate(self, line: WrapperLine) -> None:
-        assert isinstance(line, CommBufferAllocateLine)
+        assert isinstance(line, AllocateLine) and line.comm_buffer
         raise NotImplementedError("Comm buffer allocation is not yet supported")
 
     def _generate_comm_buffer_free(self, line: WrapperLine) -> None:
-        assert isinstance(line, CommBufferFreeLine)
+        assert isinstance(line, FreeIfNotReusedLine) and line.comm_buffer
         self._free(line.node)
 
     def _generate_triton_call(self, line: WrapperLine) -> None:
@@ -967,7 +947,9 @@ class FxConverter:
             from triton.runtime import driver
 
             log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
+
             device = driver.active.get_current_device()
+
             stream = driver.active.get_current_stream(device)
 
             def node_to_tuning_arg(arg: Any) -> Any:
@@ -976,23 +958,30 @@ class FxConverter:
                 for dynamic shapes.
                 """
 
-                def to_size_hint(arg: Any) -> Any:
+                def to_size_hint_sympy_int(arg: Union[sympy.Expr, int]) -> int:
                     if len(free_unbacked_symbols(arg)) > 0:
                         # NYI: tuning args require backed symints.
                         raise UnbackedSymintsError
-                    return pytree.tree_map(V.graph.sizevars.size_hint, arg)
+                    return V.graph.sizevars.size_hint(arg)
+
+                def to_size_hint_list(arg: list[Union[torch.SymInt, int]]) -> list[int]:
+                    args_sympy = [
+                        x.node.expr if isinstance(x, torch.SymInt) else x for x in arg
+                    ]
+                    return pytree.tree_map(to_size_hint_sympy_int, args_sympy)
 
                 if not isinstance(arg, torch.fx.Node):
-                    return to_size_hint(arg)
+                    return to_size_hint_sympy_int(arg)
 
                 fake = arg.meta["val"]
                 return torch.empty_strided(
-                    to_size_hint(fake.shape),
-                    to_size_hint(fake.stride()),
+                    to_size_hint_list(fake.shape),
+                    to_size_hint_list(fake.stride()),
                     dtype=fake.dtype,
                     device=device,
                 ).zero_()
 
+            # call args can be fx nodes or sympy expressions or integers!
             arg_values = [node_to_tuning_arg(arg) for arg in call_args]
             tuner.run(*arg_values, stream=stream)
 
@@ -1112,11 +1101,15 @@ class FxConverter:
         # Get FX nodes corresponding to the call args.
         assert ir.is_node_sequence(kernel.inputs)
         tensor_nodes = tuple(self._generate_buffer(arg) for arg in kernel.inputs)
-        args = tensor_nodes + tuple(kernel.constant_args)
+        if hasattr(kernel, "unflatten_args"):
+            args, _ = kernel.unflatten_args(tensor_nodes, kernel.constant_args)
+        else:
+            args = tensor_nodes + tuple(kernel.constant_args)
 
         # Get the result buffer.
         # Some kernels write to a pre-existing output tensor via the "out" kwarg.
         kwargs = kernel.kwargs.copy()
+
         result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):
             kwargs["out"] = self.buffer_to_node[out_ir_node.codegen_reference()]

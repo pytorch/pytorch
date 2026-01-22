@@ -49,7 +49,7 @@ def compare_dict_tensors(dict_base, dict_control, precision):
         logger.debug("keys after pre/post grad fx passes %s", dict_control.keys())
         return False
     is_allclose = True
-    for key in dict_base.keys():
+    for key in dict_base:
         if key not in dict_control:
             logger.warning(
                 "Mismatch parameter name %s does not exist after pre/post grad fx passes",

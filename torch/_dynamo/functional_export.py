@@ -1,11 +1,11 @@
-import copy
 import inspect
 import logging
+import sys
 import traceback
 import types
 from collections import namedtuple
-from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -13,10 +13,13 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
+from torch._dynamo.decorators import disable as dynamo_disable
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
 from torch._dynamo.utils import dynamo_timed, get_metrics_context
 from torch._export.utils import _compiling_state_context
+from torch._guards import TracingContext
+from torch.export import _restore_state_dict
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.symbolic_shapes import (
@@ -25,13 +28,13 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.node import Argument, Target
 
 
 if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.utils._pytree import TreeSpec
 
-
+T = TypeVar("T")
 log = logging.getLogger(__name__)
 
 
@@ -40,7 +43,7 @@ def post_process_error_msg(
     func: Callable[..., Any],
     args: Any,
     kwargs: Any,
-):
+) -> ConstraintViolationError:
     """
     Because we trace a different callable, the sources are all messed up.
     Manually patch them so the error message looks correct.
@@ -49,9 +52,10 @@ def post_process_error_msg(
 
     orig_sig = inspect.signature(func)
     flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
-    constraint_violation_error.args = (
-        _replace_sources(constraint_violation_error.args[0], flat_input_paths),
-    )
+    if constraint_violation_error.args:
+        constraint_violation_error.args = (
+            _replace_sources(constraint_violation_error.args[0], flat_input_paths),
+        )
     return constraint_violation_error
 
 
@@ -71,7 +75,7 @@ def clean_export_root_string(text: str) -> str:
 
 
 def clean_nn_module_stack_and_source_fn(
-    graph_module: torch.fx.GraphModule, is_inline_builtin=False
+    graph_module: torch.fx.GraphModule, is_inline_builtin: bool = False
 ) -> torch.fx.GraphModule:
     """
     Clean up nn_module_stack metadata by removing export_root references.
@@ -98,7 +102,9 @@ def clean_nn_module_stack_and_source_fn(
         The cleaned GraphModule (modified in-place)
     """
 
-    def _process_nn_module_stack(nn_module_stack):
+    def _process_nn_module_stack(
+        nn_module_stack: dict[str, tuple[str, T]],
+    ) -> dict[str, tuple[str, T]]:
         if "L__self____export_root" in nn_module_stack:
             del nn_module_stack["L__self____export_root"]
 
@@ -118,15 +124,17 @@ def clean_nn_module_stack_and_source_fn(
             cleaned_stack[clean_key] = (clean_name, child_class)
         return cleaned_stack
 
-    def _process_source_fn(source_fn_stack):
+    def _process_source_fn(source_fn_stack: Iterable[T]) -> Iterable[T]:
         cleaned_stack = []
         for item in source_fn_stack:
             if isinstance(item, tuple) and len(item) == 2:
                 name, cls = item
                 if isinstance(name, str):
                     clean_name = clean_export_root_string(name)
+                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append((clean_name, cls))
                 else:
+                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append(item)
             else:
                 cleaned_stack.append(item)
@@ -137,10 +145,10 @@ def clean_nn_module_stack_and_source_fn(
             node.meta["nn_module_stack"] = _process_nn_module_stack(
                 node.meta["nn_module_stack"].copy()
             )
-        if "source_fn_stack" in node.meta:
-            node.meta["source_fn_stack"] = _process_source_fn(
-                node.meta["source_fn_stack"].copy()
-            )
+
+        source_fn_stack = node.meta.get("source_fn_stack", None)
+        if source_fn_stack:
+            node.meta["source_fn_stack"] = _process_source_fn(source_fn_stack.copy())
 
     if "dynamo_flat_name_to_original_fqn" in graph_module.meta:
         # Clean up flat name to original fqn mapping
@@ -303,7 +311,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                 new_placeholder = self.new_input_nodes[user_input_idx]
                 self.old_to_new_mapping[old_placeholder] = new_placeholder
 
-    def placeholder(self, target, args, kwargs) -> Any:
+    def placeholder(
+        self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
+    ) -> Any:
         """Replace old placeholders with new flattened ones."""
         # Return the corresponding new placeholder
         if self.current_node in self.old_to_new_mapping:
@@ -323,7 +333,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             # Shouldn't happen if mapping is correct, but fallback
             return super().placeholder(target, args, kwargs)
 
-    def output(self, target, args, kwargs) -> Any:
+    def output(
+        self, target: Target, args: Sequence[Any], kwargs: dict[str, Any]
+    ) -> Any:
         """Transform output according to graph_output_map."""
         original_outputs = args[0]
 
@@ -342,20 +354,20 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         return super().output(target, (tuple(new_outputs),), {})
 
-    def run_node(self, node: Node) -> Any:
+    def run_node(self, n: Node) -> Any:
         """Run node transformation and preserve metadata."""
-        self.current_node = node
-        result = super().run_node(node)
+        self.current_node = n
+        result = super().run_node(n)
 
         # Copy important metadata
-        if hasattr(result, "node") and result.node is not node:
+        if hasattr(result, "node") and result.node is not n:
             for key in ["val", "example_value", "unbacked_bindings"]:
-                if key in node.meta:
-                    result.node.meta[key] = node.meta[key]
+                if key in n.meta:
+                    result.node.meta[key] = n.meta[key]
 
             # Preserve node names (except output)
-            if node.op != "output" and hasattr(node, "name"):
-                result.node._rename(node.name)
+            if n.op != "output" and hasattr(n, "name"):
+                result.node._rename(n.name)
 
         return result
 
@@ -367,16 +379,18 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         if hasattr(self.module, "meta"):
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     "dynamo_flat_name_to_original_fqn"
                 ]
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     "dynamo_compile_id"
                 ]
 
@@ -385,13 +399,13 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
 def _suggest_or_raise_constraint_violation(
     module_to_trace: torch.nn.Module,
-    orig_callable: Callable,  # type: ignore[type-arg]
+    orig_callable: Callable[..., Any],
     fake_mode: Optional["FakeTensorMode"],
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
-):
+) -> None:
     constraint_violation_error = None
     try:
         # Check if we have any constraint violations
@@ -419,9 +433,12 @@ def _suggest_or_raise_constraint_violation(
             forced_specializations,
         )
         if constraint_violation_error:
-            constraint_violation_error.args = (
-                constraint_violation_error.args[0] + msg,
-            )
+            if constraint_violation_error.args:
+                constraint_violation_error.args = (
+                    constraint_violation_error.args[0] + msg,
+                )
+            else:
+                constraint_violation_error.args = (msg,)
         else:
             if forced_specializations:
                 constraint_violation_error = ConstraintViolationError(msg)
@@ -433,7 +450,7 @@ def _suggest_or_raise_constraint_violation(
 
         # Error if we have any constraints on static values
 
-        for k in shape_env.var_to_range.keys():
+        for k in shape_env.var_to_range:
             if isinstance(k, sympy.Integer):
                 constraint_violation_error = ConstraintViolationError(
                     f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
@@ -448,136 +465,308 @@ def _suggest_or_raise_constraint_violation(
         raise constraint_violation_error
 
 
-def pytreeify(
-    out: CaptureOutput, mod: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
-) -> Any:
-    """
-    Given a dynamo capture output, return a callable graph module that
-    contain the following information:
-    1. input/output pytree spec
-    2. input/output shuffle functions
-    Input shuffle functions are the converters taking pytree falttened inputs
-    and reorder them to the calling convention of dynamo raw graph module.
-    Output shuffle functions are the converters taking the outputs of the
-    dynamo raw graph module and convert them to the pytree format.
+def _normalize_shuffle_graph(shuffle_gm: torch.fx.GraphModule) -> None:
+    shuffle_gm.graph.eliminate_dead_code()
+    shuffle_gm.recompile()
+    for name, buffer in list(shuffle_gm.named_buffers()):
+        delattr(shuffle_gm, name)
+        setattr(shuffle_gm, name, buffer)
 
-    This function will replay any side effects that happened during the bytecode,
-    so it is important to check against side effects before calling this function.
-    """
+
+def normalize_graph_module(gm: torch.fx.GraphModule) -> None:
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            node.meta["val"] = node.meta["example_value"]
+
+
+class InputProcessor:
+    def __init__(
+        self,
+        root: object,
+        num_args: int,
+        kwarg_names: list[str],
+    ) -> None:
+        self.root = root
+        self.num_args = num_args
+        self.kwarg_names = kwarg_names
+
+    def __call__(
+        self, inputs: tuple[object, ...]
+    ) -> tuple[tuple[object, ...], dict[str, object]]:
+        args = inputs
+        kwargs = {}
+        if len(args) > self.num_args:
+            kwargs = dict(zip(self.kwarg_names, args[self.num_args :]))
+            args = args[: self.num_args]
+        if self.root is not None:
+            if isinstance(self.root, torch.fx.GraphModule):
+                assert isinstance(self.root.graph._codegen, _DynamoBytecodeCodeGen)
+                assert hasattr(
+                    self.root.graph._codegen.dynamo_bytecode_flatten, "input_processor"
+                )
+                assert (
+                    self.root.graph._codegen.dynamo_bytecode_flatten.input_processor
+                    is self
+                )
+            args = (self.root, *args)
+        return args, kwargs
+
+
+class Yield(Exception):
+    pass
+
+
+class DynamoBytecodeFlatten:
+    def __init__(
+        self,
+        input_processor: InputProcessor,
+        out: CaptureOutput,
+        f_globals: dict[str, object],
+    ) -> None:
+        self.input_processor = input_processor
+        self.out = out
+        self.f_globals = f_globals
+        self.gm_inputs: tuple[Any, ...] | None = None
+
+    @dynamo_disable(reason="do not trace internal dynamo graph capture")  # type: ignore[misc]
+    def __call__(self, *inputs: object) -> object:
+        def backend_dummy(*example_inputs: object) -> None:
+            self.gm_inputs = example_inputs
+            raise Yield
+
+        args, kwargs = self.input_processor(inputs)
+        try:
+            self.out.forward_callable(
+                compiled_fn=backend_dummy, extra_globals=self.f_globals
+            )(*args, **kwargs)
+        except Yield:
+            assert self.gm_inputs is not None
+            return self.gm_inputs
+        raise RuntimeError
+
+
+class DynamoBytecodeUnflatten:
+    def __init__(
+        self,
+        input_processor: InputProcessor,
+        out: CaptureOutput,
+        f_globals: dict[str, object],
+    ) -> None:
+        self.input_processor = input_processor
+        self.out = out
+        self.f_globals = f_globals
+
+    @dynamo_disable(reason="do not trace internal dynamo graph capture")  # type: ignore[misc]
+    def __call__(
+        self, flat_outs: Sequence[object], inputs: tuple[object, ...]
+    ) -> object:
+        def backend_dummy(*example_inputs: object) -> Sequence[object]:
+            return flat_outs
+
+        args, kwargs = self.input_processor(inputs)
+        with torch._C._DisableTorchDispatch():
+            results = self.out.forward_callable(
+                compiled_fn=backend_dummy, extra_globals=self.f_globals
+            )(*args, **kwargs)
+        return results
+
+
+def create_fx_graph_from_captured_output(
+    out: CaptureOutput, mod: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> torch.fx.GraphModule:
     assert out.backend_input is not None
     backend_input = out.backend_input
-    backend = out.backend_input.graph_module
 
-    if isinstance(mod, torch.nn.Module):
-        args = (mod,) + args
-    elif inspect.ismethod(mod):
-        args = (mod.__self__,) + args
+    _, root = torch._dynamo.convert_frame.get_traced_fn(mod)
 
-    flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
+    flat_real_args = pytree.tree_leaves((args, kwargs))
+    torch._dynamo.eval_frame.check_user_input_output(
+        flat_real_args, UserErrorType.INVALID_INPUT
+    )
+    f_globals = out.graph_capture_output.f_globals
 
-    class Yield(Exception):
-        pass
+    graph_module = backend_input.graph_module
+    if isinstance(root, torch.nn.Module):
+        graph_module._parameters = root._parameters.copy()
+        graph_module._buffers = root._buffers.copy()
+        assert all(not hasattr(graph_module, m) for m in root._modules)
+        graph_module._modules.update(root._modules)
+        graph_module._non_persistent_buffers_set = (
+            root._non_persistent_buffers_set.copy()
+        )
+        if sys.version_info >= (3, 14):
+            import annotationlib  # added in 3.14
 
-    class InShuffle(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.mod = mod
-            self.num_inputs = len(flat_real_args)
-            self.gm_inputs = None
-
-        def forward(self, *flat_proxy_args):
-            args, kwargs = pytree.tree_unflatten(
-                [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
+            annotations = annotationlib.get_annotations(torch.nn.Module)
+        else:
+            annotations = getattr(torch.nn.Module, "__annotations__", None)
+        for name, value in root.__dict__.items():
+            if annotations and name not in annotations:
+                graph_module.__dict__[name] = value
+        graph_module._forward_hooks = root._forward_hooks.copy()
+        graph_module._forward_pre_hooks = root._forward_pre_hooks.copy()
+        graph_module._backward_hooks = root._backward_hooks.copy()
+        graph_module._backward_pre_hooks = root._backward_pre_hooks.copy()
+        if graph_module._forward_hooks or graph_module._forward_pre_hooks:
+            # Even forward hooks are traced through, they still capture a bunch
+            # of state through closure. We need to make sure these data are
+            # accessible through the captured module (but the hooks should be
+            # disabled).
+            assert getattr(graph_module, "_wrapped_call", None) is not None
+            assert isinstance(
+                graph_module._wrapped_call, torch.fx.graph_module._WrappedCall
             )
+            assert graph_module._wrapped_call.cls_call is None
 
-            def backend_dummy(*example_inputs):
-                self.gm_inputs = example_inputs
-                raise Yield
+            def dynamo_wrapped_call(self, *args: object, **kwargs: object) -> object:
+                assert "forward" not in self.__dict__
 
-            backend_input.graph_module = backend_dummy  # type: ignore[assignment]
-            try:
-                out.forward_callable()(*args, **kwargs)
-            except Yield:
-                assert self.gm_inputs is not None
-                return self.gm_inputs
-            finally:
-                backend_input.graph_module = backend
-            raise RuntimeError
+                fwd_hooks = self._forward_hooks
+                fwd_pre_hooks = self._forward_pre_hooks
+                original_forward = type(self).forward
 
-    in_shuffle_graph = torch.fx.symbolic_trace(InShuffle())
+                def patched_forward(self, *args: object, **kwargs: object) -> object:
+                    self._forward_hooks = fwd_hooks
+                    self._forward_pre_hooks = fwd_pre_hooks
+                    return original_forward(self, *args, **kwargs)
 
-    class OutShuffle(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.num_inputs = len(flat_real_args)
-            self.num_outputs = len(
-                next(iter(reversed(backend_input.graph_module.graph.nodes))).args[0]
-            )
-            self.out_spec: Optional[TreeSpec] = None
+                try:
+                    self.forward = types.MethodType(patched_forward, self)
+                    self._forward_hooks = {}
+                    self._forward_pre_hooks = {}
+                    # pyrefly: ignore [invalid-argument]
+                    return super(type(self), self).__call__(*args, **kwargs)
+                finally:
+                    self.__dict__.pop("forward")
+                    self._forward_hooks = fwd_hooks
+                    self._forward_pre_hooks = fwd_pre_hooks
 
-        def forward(self, *flat_proxy_args):
-            args, kwargs = pytree.tree_unflatten(
-                [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
-            )
+            graph_module._wrapped_call.cls_call = dynamo_wrapped_call
 
-            def backend_dummy(*example_inputs):
-                return [
-                    flat_proxy_args[self.num_inputs + i]
-                    for i in range(self.num_outputs)
-                ]
+    root = graph_module if isinstance(root, torch.nn.Module) else root
+    input_processor = InputProcessor(root, len(args), list(kwargs.keys()))
+    dynamo_bytecode_flatten = DynamoBytecodeFlatten(input_processor, out, f_globals)
+    dynamo_bytecode_unflatten = DynamoBytecodeUnflatten(input_processor, out, f_globals)
 
-            backend_input.graph_module = backend_dummy  # type: ignore[assignment]
-            try:
-                results = out.forward_callable()(*args, **kwargs)
-            finally:
-                backend_input.graph_module = backend
-            ret, self.out_spec = pytree.tree_flatten(results)
-            return ret
+    graph_module.graph._codegen = _DynamoBytecodeCodeGen(
+        argument_names(inspect.signature(mod), args, kwargs),
+        dynamo_bytecode_flatten,
+        dynamo_bytecode_unflatten,
+    )  # type: ignore[attr-defined]
+    normalize_graph_module(graph_module)
+    assert not hasattr(graph_module, "_dynamo_bytecode_flatten")
+    assert not hasattr(graph_module, "_dynamo_bytecode_unflatten")
+    # pyrefly: ignore [bad-argument-type]
+    graph_module._dynamo_bytecode_flatten = dynamo_bytecode_flatten
+    # pyrefly: ignore [bad-argument-type]
+    graph_module._dynamo_bytecode_unflatten = dynamo_bytecode_unflatten
+    delattr(graph_module, "_param_name_to_source")
+    graph_module.recompile()
+    graph_module.meta["module_call_specs"] = (
+        out.graph_capture_output.output_graph.export_metadata.module_call_spec
+    )
+    assert out.backend_input is not None
+    graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
+    graph_module.meta["fake_mode"].allow_non_fake_inputs = True
+    tracing_context = TracingContext(graph_module.meta["fake_mode"])
+    tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
+    graph_module.meta["tracing_context"] = tracing_context
+    return graph_module
 
-    out_shuffle = OutShuffle()
-    out_shuffle_graph = torch.fx.symbolic_trace(out_shuffle)
 
-    def pytree_call(*args, **kwargs):
-        import torch.export._unlift
+class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
+    def __init__(
+        self,
+        orig_arg_names: list[str],
+        dynamo_bytecode_flatten: Callable,
+        dynamo_bytecode_unflatten: Callable,
+    ) -> None:
+        super().__init__()
+        self.orig_arg_names = orig_arg_names
+        self.dynamo_bytecode_flatten = dynamo_bytecode_flatten
+        self.dynamo_bytecode_unflatten = dynamo_bytecode_unflatten
+        self.wrap_tuple = False
+        self._inputs: tuple[Any, ...] | None = None
 
-        flat_args, in_spec_runtime = pytree.tree_flatten((args, kwargs))
-        if not torch.export._unlift.eq_spec(in_spec_runtime, in_spec):
-            raise RuntimeError(
-                f"Model input mismatch. Expected input spec: {in_spec}. Actual input spec: {in_spec_runtime}"
-            )
-        flat_outs = backend_input.graph_module(*in_shuffle_graph(*flat_args))
-        assert out_shuffle.out_spec is not None
-        return pytree.tree_unflatten(
-            out_shuffle_graph(*flat_args, *flat_outs), out_shuffle.out_spec
+    def process_inputs(self, *inputs: Any) -> Any:
+        self._inputs = inputs
+        results = self.dynamo_bytecode_flatten(*inputs)
+        return results
+
+    def process_outputs(self, outputs: Any) -> Any:
+        results = self.dynamo_bytecode_unflatten(outputs, self._inputs)
+        if self.wrap_tuple:
+            results = (results,)
+        self._inputs = None
+        return results
+
+    def gen_fn_def(
+        self,
+        free_vars: list[str],
+        maybe_return_annotation: str,
+        *,
+        expanded_def: bool = False,
+    ) -> str:
+        fn_args = self.orig_arg_names
+        has_orig_self = (fn_args[0] == "self") if len(fn_args) > 0 else False
+        if has_orig_self:
+            free_vars.insert(0, "self")
+        fn_definition = super().gen_fn_def(
+            fn_args[:], maybe_return_annotation, expanded_def=expanded_def
         )
 
-    if isinstance(mod, torch.nn.Module):
-        compiled_mod = copy.copy(mod)
-        compiled_mod.forward = types.MethodType(pytree_call, compiled_mod)
-        if not hasattr(compiled_mod, "meta"):
-            compiled_mod.meta = {}  # type: ignore[attr-defined]
-        if isinstance(compiled_mod.meta, dict) and "fake_mode" not in compiled_mod.meta:
-            compiled_mod.meta["fake_mode"] = out.backend_input.fake_mode
-        return compiled_mod
-    elif inspect.ismethod(mod):
-        return types.MethodType(pytree_call, mod.__self__)
-    else:
-        return pytree_call
+        if len(free_vars) > 0:  # pytree has placeholders in it
+            fn_definition += self.gen_var_bindings(fn_args, free_vars, expanded_def)
+        return fn_definition
+
+    def gen_var_bindings(
+        self, fn_args: list[str], free_vars: list[str], expanded_def: bool
+    ) -> str:
+        without_annotation = [x.split(":")[0].split("#")[0] for x in free_vars]
+        if len(fn_args) == 0:
+            fn_signature = ""
+        elif len(fn_args) == 1:
+            fn_signature = f"{fn_args[0]}, "
+        else:
+            fn_signature = f"{', '.join(fn_args)}"
+        return f"""
+    _fn_args = ({fn_signature})
+    {", ".join(without_annotation)}, = self._dynamo_bytecode_flatten(*_fn_args)"""
+
+    def generate_output(
+        self, output_args: torch.fx.node.Argument, *, descs: object | None = None
+    ) -> str:
+        # pyrefly: ignore [not-iterable]
+        returned = f"self._dynamo_bytecode_unflatten(({', '.join([str(a) for a in output_args])},), _fn_args)"
+        if self.wrap_tuple:
+            returned = f"({returned},)"
+        return f"return {returned}"
 
 
 def dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
+    constraints: Optional[list[Constraint]] = None,
+    restore_state_dict: bool = False,
 ) -> Callable[..., Any]:
     def inner(*args: Any, **kwargs: Any) -> Any:
+        assert not torch._dynamo.config.install_free_tensors
         with (
+            torch._dynamo.config.patch(
+                replay_side_effects=False, side_effect_replay_policy="warn"
+            ),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
         ):
-            out = fullgraph_capture(mod, args, kwargs)
-
-        # TODO filter out side effects.
-
-        return pytreeify(out, mod, args, kwargs)
+            out = fullgraph_capture(
+                mod,
+                args,
+                kwargs,
+                constraints=constraints,
+            )
+        graph_module = create_fx_graph_from_captured_output(out, mod, args, kwargs)
+        if restore_state_dict:
+            _restore_state_dict(mod, graph_module)
+        return graph_module
 
     return inner
 
@@ -706,7 +895,7 @@ def _dynamo_graph_capture_for_export(
             graph_input_order: dict[int, int] = {}
             for inp in graph_inputs:
                 source = graph_inputs[inp]
-                assert isinstance(source, torch._dynamo.source.GetItemSource)
+                assert isinstance(source, torch._dynamo.source.GetItemSource), source
                 graph_input_order[source.index] = len(graph_input_order)
 
             for real_idx, graph_idx in graph_input_order.items():
