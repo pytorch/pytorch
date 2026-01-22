@@ -13,60 +13,62 @@
 
 #if ROCM_VERSION < 60400
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
-#if (defined(__gfx942__)) && \
-  __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
-  typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
-  static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
-  union {
-    __hip_bfloat162_raw bf162_raw;
-    vec_short2 vs2;
-  } u{static_cast<__hip_bfloat162_raw>(value)};
-  u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
-  return static_cast<__hip_bfloat162>(u.bf162_raw);
-#else
-  static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
-  union u_hold {
-    __hip_bfloat162_raw h2r;
-    unsigned int u32;
-  };
-  u_hold old_val, new_val;
-  old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  do {
-    new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong(
-        (unsigned int*)address, &old_val.u32, new_val.u32,
-        __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
-  return old_val.h2r;
-#endif
+  // Use runtime check for SPIR-V compatibility
+  if (__builtin_amdgcn_processor_is("gfx942") &&
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16)) {
+    typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
+    static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
+    union {
+      __hip_bfloat162_raw bf162_raw;
+      vec_short2 vs2;
+    } u{static_cast<__hip_bfloat162_raw>(value)};
+    u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
+    return static_cast<__hip_bfloat162>(u.bf162_raw);
+  } else {
+    static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
+    union u_hold {
+      __hip_bfloat162_raw h2r;
+      unsigned int u32;
+    };
+    u_hold old_val, new_val;
+    old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    do {
+      new_val.h2r = __hadd2(old_val.h2r, value);
+    } while (!__hip_atomic_compare_exchange_strong(
+          (unsigned int*)address, &old_val.u32, new_val.u32,
+          __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
+    return old_val.h2r;
+  }
 }
 
 __device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 value) {
-#if (defined(__gfx942__)) && \
-  __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
-  // The api expects an ext_vector_type of half
-  typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
-  static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
-  union {
-    __half2_raw h2r;
-    vec_fp162 fp16;
-  } u {static_cast<__half2_raw>(value)};
-  u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
-  return static_cast<__half2>(u.h2r);
-#else
-  static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
-  union u_hold {
-    __half2_raw h2r;
-    unsigned int u32;
-  };
-  u_hold old_val, new_val;
-  old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  do {
-    new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong(
-        (unsigned int*)address, &old_val.u32, new_val.u32,
-        __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
-  return old_val.h2r;
-#endif
+  // Use runtime check for SPIR-V compatibility
+  if (__builtin_amdgcn_processor_is("gfx942") &&
+      __builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16)) {
+    // The api expects an ext_vector_type of half
+    typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
+    static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
+    union {
+      __half2_raw h2r;
+      vec_fp162 fp16;
+    } u {static_cast<__half2_raw>(value)};
+    u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
+    return static_cast<__half2>(u.h2r);
+  } else {
+    static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
+    union u_hold {
+      __half2_raw h2r;
+      unsigned int u32;
+    };
+    u_hold old_val, new_val;
+    old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    do {
+      new_val.h2r = __hadd2(old_val.h2r, value);
+    } while (!__hip_atomic_compare_exchange_strong(
+          (unsigned int*)address, &old_val.u32, new_val.u32,
+          __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
+    return old_val.h2r;
+  }
 }
 #define ATOMICADD preview_unsafeAtomicAdd
 #else
@@ -253,27 +255,35 @@ __device__ inline void cmtdStore(void* address, T value) {
         for (int i=0; i<num_char_per_val; i++)
           __hip_atomic_store(reinterpret_cast<char *>(address)+i, _pnr.c[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
-#ifdef __gfx1250__
-      asm volatile("s_wait_loadcnt(0)" ::: "memory");
-#else
-      asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
-#endif
+      // Use runtime check for SPIR-V compatibility
+      if (__builtin_amdgcn_processor_is("gfx1250")) {
+        asm volatile("s_wait_loadcnt(0)" ::: "memory");
+      } else {
+        asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+      }
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 }
 #endif
 
-#if (defined(__gfx942__) || defined(__gfx950__))
 // This function implements warp-level opportunistic fastatomics
 // To reduce contention on an atomicAdd, this replaces per-thread atomicAdd with a per-warp atomicAdd.
 // We identify all the threads within a warp that will perform an atomicAdd on the same destination
 // address and perform the addition on the CU. Each warp elects a leader thread which does the
 // atomicAdd to the destination address.
+// Uses runtime checks for SPIR-V compatibility (previously guarded by gfx942/gfx950 macros).
 template <class scalar_t, class index_t>
 __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     scalar_t* self_ptr,
     index_t index,
     const index_t numel,
     scalar_t value) {
+
+    // Runtime check for supported architectures (for SPIR-V compatibility)
+    if (!(__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950"))) {
+        // Fall back to regular fastAtomicAdd on unsupported architectures
+        fastAtomicAdd(self_ptr, index, numel, value, true);
+        return;
+    }
 
     scalar_t* dst = self_ptr + index;
 
@@ -306,10 +316,18 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
             bfvs bfvs_ = {};
             bfvs_.bf[0] = value;
             bfvs_.bf[1] = oneUpVal;
-            if constexpr (std::is_same<scalar_t, c10::BFloat16>::value)
-              __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)dst, bfvs_.vs2);
-            else
-              __builtin_amdgcn_flat_atomic_fadd_v2f16((__half2*)dst, bfvs_.df16);
+            // Use runtime invocable check for SPIR-V compatibility
+            if constexpr (std::is_same<scalar_t, c10::BFloat16>::value) {
+              if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2bf16))
+                __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)dst, bfvs_.vs2);
+              else
+                fastAtomicAdd(self_ptr, index, numel, value, true);
+            } else {
+              if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_flat_atomic_fadd_v2f16))
+                __builtin_amdgcn_flat_atomic_fadd_v2f16((__half2*)dst, bfvs_.df16);
+              else
+                fastAtomicAdd(self_ptr, index, numel, value, true);
+            }
             return;
           }
         }
@@ -406,7 +424,6 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
       fastAtomicAdd(self_ptr, index, numel, crnt_val, true);
     }
 }
-#endif
 
 #undef ATOMICADD
 #undef NATIVE_ZERO_BF16
