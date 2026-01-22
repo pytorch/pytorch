@@ -12,6 +12,7 @@ import collections
 import contextlib
 import copy
 import re
+import warnings
 from collections.abc import Callable
 
 import torch
@@ -285,10 +286,20 @@ def collate_numpy_array_fn(
     if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
         raise TypeError(default_collate_err_msg_format.format(elem.dtype))
 
-    return collate(
-        [torch.as_tensor(b.copy() if not b.flags.writeable else b) for b in batch],
-        collate_fn_map=collate_fn_map,
+    # only suppress warning if tensors will be handled by collate_tensor_fn
+    actual_map = (
+        collate_fn_map if collate_fn_map is not None else default_collate_fn_map
     )
+    suppress_warning = actual_map.get(torch.Tensor) == collate_tensor_fn
+
+    if suppress_warning:
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*not writable.*")
+            return collate(
+                [torch.as_tensor(b) for b in batch], collate_fn_map=actual_map
+            )
+    else:
+        return collate([torch.as_tensor(b) for b in batch], collate_fn_map=actual_map)
 
 
 def collate_numpy_scalar_fn(
