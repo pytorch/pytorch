@@ -78,6 +78,82 @@ class NestedCompileRegionOptions:
     decompositions: Optional[dict[str, Any]] = None
 
 
+def unflatten_all_tensor_subclasses(
+    inner_operands: tuple[torch.Tensor, ...],
+    flatten_info_list: list[Any],
+) -> tuple[torch.Tensor, ...]:
+    """
+    Reconstruct all tensor subclasses from a flat tuple of inner tensors.
+
+    Takes a flat tuple of inner tensors and a list of flatten info (one per original
+    operand), and reconstructs the original operands including tensor subclasses.
+
+    Args:
+        inner_operands: Flat tuple of inner tensors
+        flatten_info_list: List where each entry is either:
+            - (subclass_type, tensor_attr_names, flatten_spec, outer_size, outer_stride) for subclasses
+            - None for regular tensors
+
+    Returns:
+        Tuple of reconstructed operands (tensor subclasses and regular tensors)
+    """
+    reconstructed_operands = []
+    inner_idx = 0
+    for flatten_info in flatten_info_list:
+        if flatten_info is not None:
+            (
+                subclass_type,
+                tensor_attr_names,
+                flatten_spec,
+                outer_size,
+                outer_stride,
+            ) = flatten_info
+            # Gather inner tensors for this subclass
+            num_inner = len(tensor_attr_names)
+            inner_tensors_dict = {
+                name: inner_operands[inner_idx + i]
+                for i, name in enumerate(tensor_attr_names)
+            }
+            inner_idx += num_inner
+            # Reconstruct the subclass
+            reconstructed = subclass_type.__tensor_unflatten__(
+                inner_tensors_dict, flatten_spec, outer_size, outer_stride
+            )
+            reconstructed_operands.append(reconstructed)
+        else:
+            reconstructed_operands.append(inner_operands[inner_idx])
+            inner_idx += 1
+
+    return tuple(reconstructed_operands)
+
+
+def flatten_all_tensor_subclasses(
+    result: tuple[torch.Tensor, ...],
+) -> tuple[torch.Tensor, ...]:
+    """
+    Flatten all tensor subclasses in a result tuple to their inner tensors.
+
+    Takes a tuple of tensors (some may be tensor subclasses) and returns a flat
+    tuple of inner tensors.
+
+    Args:
+        result: Tuple of tensors, some of which may be tensor subclasses
+
+    Returns:
+        Flat tuple of inner tensors (subclasses are expanded to their inner tensors)
+    """
+    output_inner_tensors = []
+    for r in result:
+        if is_traceable_wrapper_subclass(r):
+            tensor_attr_names, _ = r.__tensor_flatten__()
+            for name in tensor_attr_names:
+                output_inner_tensors.append(getattr(r, name))
+        else:
+            output_inner_tensors.append(r)
+
+    return tuple(output_inner_tensors)
+
+
 class TensorSubclassWrapper:
     """
     A wrapper that handles tensor subclass input reconstruction and output extraction.
@@ -89,9 +165,8 @@ class TensorSubclassWrapper:
 
     def __init__(self, inner_subgraph, input_flatten_info: list[Any]):
         self.subgraph = inner_subgraph
-        # Each entry is (subclass_type, tensor_attr_names, flatten_spec) or None for non-subclass
+        # Each entry is (subclass_type, tensor_attr_names, flatten_spec, outer_size, outer_stride) or None for non-subclass
         self.input_flatten_info = input_flatten_info
-        self.output_flatten_info: list[Any] = []
 
     def __hash__(self):
         return id(self.subgraph)
@@ -101,52 +176,15 @@ class TensorSubclassWrapper:
 
     def __call__(self, *inner_operands):
         # Reconstruct tensor subclasses from inner tensors using captured flatten info
-        reconstructed_operands = []
-        inner_idx = 0
-        for flatten_info in self.input_flatten_info:
-            if flatten_info is not None:
-                (
-                    subclass_type,
-                    tensor_attr_names,
-                    flatten_spec,
-                    outer_size,
-                    outer_stride,
-                ) = flatten_info
-                # Gather inner tensors for this subclass
-                inner_tensors = {
-                    name: inner_operands[inner_idx + i]
-                    for i, name in enumerate(tensor_attr_names)
-                }
-                inner_idx += len(tensor_attr_names)
-                # Reconstruct the subclass
-                reconstructed = subclass_type.__tensor_unflatten__(
-                    inner_tensors, flatten_spec, outer_size, outer_stride
-                )
-                reconstructed_operands.append(reconstructed)
-            else:
-                reconstructed_operands.append(inner_operands[inner_idx])
-                inner_idx += 1
+        reconstructed_operands = unflatten_all_tensor_subclasses(
+            inner_operands, self.input_flatten_info
+        )
 
         # Call the original subgraph with reconstructed subclasses
         result = self.subgraph(*reconstructed_operands)
 
-        # Process outputs: flatten subclasses and capture flatten info
-        output_inner_tensors = []
-        self.output_flatten_info = []
-        for r in result:
-            if is_traceable_wrapper_subclass(r):
-                tensor_attr_names, flatten_spec = r.__tensor_flatten__()
-                self.output_flatten_info.append(
-                    (type(r), tensor_attr_names, flatten_spec, r.shape, r.stride())
-                )
-                # Extract inner tensors
-                for name in tensor_attr_names:
-                    output_inner_tensors.append(getattr(r, name))
-            else:
-                self.output_flatten_info.append(None)
-                output_inner_tensors.append(r)
-
-        return tuple(output_inner_tensors)
+        # Flatten output subclasses to inner tensors
+        return flatten_all_tensor_subclasses(result)
 
 
 def _extract_nested_region_config(fn):
@@ -845,33 +883,27 @@ def invoke_subgraph_subclass(subgraph, identifier, *operands):
             input_flatten_info.append(None)
             inner_operands.append(op)
 
+    # Run subgraph once to determine output structure
+    trial_outputs = subgraph(*operands)
+
+    # Compute output_flatten_info from trial outputs
+    output_flatten_info = []
+    for r in trial_outputs:
+        if is_traceable_wrapper_subclass(r):
+            tensor_attr_names, flatten_spec = r.__tensor_flatten__()
+            output_flatten_info.append(
+                (type(r), tuple(tensor_attr_names), flatten_spec, r.shape, r.stride())
+            )
+        else:
+            output_flatten_info.append(None)
+
     wrapper_subgraph = TensorSubclassWrapper(subgraph, input_flatten_info)
 
     # Call invoke_subgraph with the wrapper and inner tensors
     inner_result = invoke_subgraph(wrapper_subgraph, identifier, *inner_operands)
 
     # Reconstruct output subclasses using captured flatten info
-    wrapped = []
-    inner_idx = 0
-    for flatten_info in wrapper_subgraph.output_flatten_info:
-        if flatten_info is not None:
-            subclass_type, tensor_attr_names, flatten_spec, outer_size, outer_stride = (
-                flatten_info
-            )
-            inner_tensors = {
-                name: inner_result[inner_idx + i]
-                for i, name in enumerate(tensor_attr_names)
-            }
-            inner_idx += len(tensor_attr_names)
-            reconstructed = subclass_type.__tensor_unflatten__(
-                inner_tensors, flatten_spec, outer_size, outer_stride
-            )
-            wrapped.append(reconstructed)
-        else:
-            wrapped.append(inner_result[inner_idx])
-            inner_idx += 1
-
-    return tuple(wrapped)
+    return unflatten_all_tensor_subclasses(inner_result, output_flatten_info)
 
 
 # Register the traceable wrapper subclass fallback for generic tensor subclass support.
