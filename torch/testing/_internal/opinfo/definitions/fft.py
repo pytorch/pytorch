@@ -161,6 +161,20 @@ op_db: list[OpInfo] = [
                 dtypes=[torch.complex32],
                 active_if=TEST_WITH_ROCM,
             ),
+            # RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+            ),
+            # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 3, 10]) != torch.Size([5, 3, 11]).
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
         ),
     ),
     SpectralFuncInfo(
@@ -185,6 +199,22 @@ op_db: list[OpInfo] = [
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
         decorators=[precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})],
+        skips=(
+            # RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+            ),
+            # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 3, 10]) != torch.Size([5, 3, 11]).
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+        ),
     ),
     SpectralFuncInfo(
         "fft.hfft",
@@ -375,6 +405,15 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        skips=(
+            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+            ),
+        ),
     ),
     SpectralFuncInfo(
         "fft.ifft2",
@@ -400,6 +439,22 @@ op_db: list[OpInfo] = [
                 "test_reference_nd",
             )
         ],
+        skips=(
+            # RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+            ),
+            # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 3, 10]) != torch.Size([5, 3, 11]).
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+        ),
     ),
     SpectralFuncInfo(
         "fft.ifftn",
@@ -429,6 +484,19 @@ op_db: list[OpInfo] = [
                 "test_reference_nd",
             )
         ],
+        skips=(
+            # RuntimeError: [srcBuf length] > 0 INTERNAL ASSERT FAILED
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 3, 10]) != torch.Size([5, 3, 11]).
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+        ),
     ),
     SpectralFuncInfo(
         "fft.ihfft",
@@ -445,7 +513,12 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-        skips=(),
+        skips=(
+            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+        ),
         check_batched_grad=False,
     ),
     SpectralFuncInfo(
@@ -650,6 +723,15 @@ python_ref_db: list[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfftn",
         torch_opinfo_name="fft.rfftn",
+        skips=(
+            # AssertionError: Resizing an out= argument with no elements threw a resize warning!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+            ),
+        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfftn",
