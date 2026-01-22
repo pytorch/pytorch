@@ -14,6 +14,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
@@ -294,9 +295,9 @@ class TestShapeOps(TestCase):
             test(shape)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float)
-    @dtypesIfCUDA(torch.float, torch.double)
-    @dtypesIfXPU(torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
+    # MPS doesn't support float64, see https://github.com/pytorch/pytorch/issues/115350
+    @dtypesIfMPS(torch.float)
     def test_trace_backward(self, device, dtype):
         """
         Test that torch.trace backward produces correct gradients for non-square inputs.
