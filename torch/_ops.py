@@ -186,9 +186,8 @@ class OperatorBase:
             from torch._subclasses.functional_tensor import FunctionalTensor
 
             if has_user_subclass(
-                args,
+                (args, kwargs),
                 allowed_subclasses=(FakeTensor, FunctionalTensor),
-                kwargs=kwargs,
             ):
                 return NotImplemented
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
