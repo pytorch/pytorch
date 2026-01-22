@@ -1,4 +1,3 @@
-# Minimal OpInfo template for new operators
 
 from torch.testing._internal.common_methods_invocations import OpInfo, SkipInfo
 from torch.testing._internal.common_dtype import all_types_and
@@ -57,4 +56,3 @@ example_op_info = OpInfo(
 #         expected = ...  # CPU reference
 #         self.assertTrue(torch.allclose(result, expected))
 
-print("OpInfo template created. Modify as needed and add to op_db.")
