@@ -901,9 +901,6 @@ class Reduced(Replicate):
     Subclasses Replicate so existing sharding propagation rules
     treat it as replicated data (which it is, at runtime).
 
-    Always uses sum for gradient reduction (the only practical case
-    for distributed training).
-
     The ``Reduced`` placement is the cotangent of ``Partial`` placement:
     - Forward: data is replicated (same as Replicate)
     - Backward: gradient becomes Partial (needs reduction)
