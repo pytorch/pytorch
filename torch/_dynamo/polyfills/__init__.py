@@ -89,6 +89,13 @@ def impl_IS_MAPPING(a: Any) -> bool:
     return isinstance(a, Mapping)
 
 
+def impl_MATCH_KEYS(obj: Any, keys: tuple[Any, ...]) -> tuple[Any, ...] | None:
+    if all(key in obj for key in keys):
+        return tuple(obj[key] for key in keys)
+    else:
+        return None
+
+
 def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # performs fallback "a in b"
     if hasattr(b, "__iter__"):
