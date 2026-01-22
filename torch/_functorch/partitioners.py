@@ -25,6 +25,7 @@ from torch._dynamo.utils import counters, is_node_meta_valid
 from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
+from torch._functorch._aot_autograd.utils import is_with_effects
 from torch._inductor import config as inductor_config
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import is_builtin
@@ -1122,6 +1123,7 @@ def default_partition(
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
 
+    force_save_effectful_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
 
     if static_lifetime_input_indices is None:
@@ -1731,70 +1733,43 @@ def force_save_collectives(joint_module: fx.GraphModule) -> None:
     By default, the partitioner is not allowed to recompute collectives
     unless they come from a user-annotated AC region.
     See Note [Recomputing collectives in the partitioner]
-
-    This handles two cases:
-    1. Direct _c10d_functional ops - mark the op node itself as MUST_SAVE
-    2. with_effects wrapping torchcomms ops - mark tensor output getitems as MUST_SAVE
-
-    For with_effects nodes wrapping torchcomms collectives, the partitioner needs to
-    save their tensor outputs for backward. Without this, backward ops that depend on
-    forward with_effects outputs would have invalid dependencies because with_effects
-    is marked must_be_in_forward.
     """
-
-    def is_tensor_node(node: fx.Node) -> bool:
-        """Check if a node produces a tensor (not a list/tuple)."""
-        val = node.meta.get("val")
-        if val is None:
-            return "tensor_meta" in node.meta
-        return isinstance(val, (torch.Tensor, torch._subclasses.FakeTensor))
-
-    def mark_tensor_leafs(node: fx.Node, depth: int = 0) -> None:
-        """Recursively find and mark tensor leaf getitems as MUST_SAVE."""
-        # If this getitem produces a tensor, mark it as MUST_SAVE
-        if is_tensor_node(node):
-            # Force MUST_SAVE unconditionally - override any existing recompute policy
-            # This is critical for torchcomms outputs that backward depends on
-            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
-        else:
-            # Otherwise, recurse on getitem users to find tensor leafs
-            for user in node.users:
-                if user.target == operator.getitem:
-                    mark_tensor_leafs(user, depth + 1)
-
     for node in joint_module.graph.nodes:
-        # Case 1: Direct _c10d_functional ops
         if (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target.namespace == "_c10d_functional"
             and not must_recompute(node)
         ):
             node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
-            continue
 
-        # Case 2: with_effects wrapping torchcomms ops
-        if not is_with_effects(node):
-            continue
 
-        # Check if the wrapped op is a torchcomms op
-        # with_effects args are: (effect_token, op, *op_args)
-        wrapped_op = node.args[1] if len(node.args) >= 2 else None
-        if not (
-            isinstance(wrapped_op, torch._ops.OpOverload)
-            and wrapped_op.namespace == "torchcomms"
-        ):
-            continue
+def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
+    """
+    Force save outputs from with_effects nodes wrapping effectful ops.
 
-        # Only force save forward with_effects outputs
-        if _has_tag_is_backward(node) or _has_tag_must_be_in_backward(node):
-            continue
+    Effectful ops (registered via _register_effectful_op) should not be recomputed
+    because they may have arbitrary global side effects (I/O, RNG state, collectives,
+    etc.). We mark the tensor outputs of with_effects as MUST_SAVE to prevent
+    recomputation of the effectful op.
 
-        # Force save ALL outputs (both tokens and tensors)
-        # Token (index 0) is needed for effect ordering in backward
-        # Tensors (index >= 1) are the actual data outputs
+    The with_effects node returns a tuple (token, result). We recursively find all
+    leaf outputs extracted via getitem and mark them as MUST_SAVE. Since these are
+    saved, the with_effects op doesn't need to be recomputed in backward.
+
+    TODO: we should probably have something similar to config.unsafe_allow_optimization_of_collectives
+          to allow certain effectful ops to opt out of this when safe.
+    """
+
+    def mark_getitem_outputs(node: fx.Node) -> None:
         for user in node.users:
-            if user.target == operator.getitem:
-                mark_tensor_leafs(user)
+            if user.target is operator.getitem:
+                mark_getitem_outputs(user)
+                if not isinstance(user.meta.get("val"), (tuple, list)):
+                    user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
+    for node in joint_module.graph.nodes:
+        if is_with_effects(node) and not must_recompute(node):
+            mark_getitem_outputs(node)
 
 
 def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
@@ -1976,8 +1951,6 @@ def solve_min_cut(
             return False
         if node.target is operator.getitem:
             return False
-        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
-            return True
         if config.recompute_views and op_types.is_view(node):
             return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
@@ -2095,7 +2068,16 @@ def solve_min_cut(
         if node.op == "output":
             continue
 
-        if node in node_info.required_bw_nodes:
+        # MUST_SAVE nodes should always be saved, not recomputed.
+        # ban recomputation and ad an edge to the sink to ensure
+        # it's in the min-cut.
+        #
+        # needed even if not in required_bw_nodes (e.g., getitem nodes
+        # extracting from effectful op outputs).
+        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
+            ban_recomputation_if_allowed(node)
+            nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
+        elif node in node_info.required_bw_nodes:
             if node not in node_info.inputs:
                 nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
                 continue
@@ -3116,6 +3098,8 @@ def min_cut_rematerialization_partition(
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=False)
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
+
+    force_save_effectful_ops(joint_module)
     force_save_bw_mutation_src(joint_module)
 
     if static_lifetime_input_indices is None:
