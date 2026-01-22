@@ -11,8 +11,12 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_masked_softmax_backward_native.h>
+#include <ATen/ops/_masked_softmax_native.h>
+#include <ATen/ops/_softmax.h>
 #include <ATen/ops/_softmax_backward_data_native.h>
 #include <ATen/ops/_softmax_native.h>
+#include <ATen/ops/masked_fill.h>
 #endif
 
 namespace at::native {
@@ -189,6 +193,110 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
     auto feeds = dictionaryFromPlaceholders(softmaxPlaceholder, gradOutputPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
+}
+
+// _masked_softmax for MPS - composite implementation
+// mask=True means the element should be masked out (replaced with 0 in output)
+Tensor masked_softmax_mps(
+    const Tensor& input_,
+    const Tensor& mask_,
+    const std::optional<int64_t> dim_,
+    const std::optional<int64_t> mask_type_) {
+  TORCH_CHECK(
+      mask_.scalar_type() == ScalarType::Bool,
+      "Mask should be a boolean tensor");
+
+  Tensor input = input_.contiguous();
+  Tensor mask = mask_.contiguous();
+  int64_t dim = dim_.has_value() ? dim_.value() : input.dim() - 1;
+  dim = maybe_wrap_dim(dim, input.dim());
+
+  auto mask_type = mask_type_;
+
+  // Handle mask type transformations similar to CPU implementation
+  if ((mask.dim() != 2) || (input.dim() != 4)) {
+    mask_type = 2;
+  }
+
+  if (mask_type == 2) {
+    TORCH_CHECK(
+        input.sizes() == mask.sizes(),
+        "For mask_type == 2 mask shape should match input shape");
+  } else if (mask_type == 1) {
+    // Padding mask of shape (B, L)
+    TORCH_CHECK(
+        (input.sizes()[0] == mask.sizes()[0]) &&
+            (input.sizes()[2] == mask.sizes()[1]),
+        "For mask_type == 1 mask shape should be (B, L)");
+    if (dim != input.dim() - 1) {
+      mask = mask_.view({input.sizes()[0], 1, 1, input.sizes()[2]});
+      mask = mask.expand(input.sizes()).contiguous();
+      mask_type = 2;
+    } else {
+      // Expand padding mask for broadcasting
+      mask = mask.view({input.sizes()[0], 1, 1, input.sizes()[2]});
+      mask = mask.expand(input.sizes()).contiguous();
+    }
+  } else if (mask_type == 0) {
+    // Attention mask of shape (L, L)
+    TORCH_CHECK(
+        (mask.dim() == 2) && (input.sizes()[2] == mask.sizes()[0]) &&
+            (input.sizes()[2] == mask.sizes()[1]),
+        "For mask_type == 0 mask shape should be (L, L)");
+    if (dim != input.dim() - 1) {
+      mask = mask.view({1, 1, input.sizes()[2], input.sizes()[2]});
+      mask = mask.expand(input.sizes()).contiguous();
+      mask_type = 2;
+    } else {
+      // Expand attention mask for broadcasting
+      mask = mask.view({1, 1, input.sizes()[2], input.sizes()[2]});
+      mask = mask.expand(input.sizes()).contiguous();
+    }
+  }
+
+  // Use -inf to mask out elements (they will become 0 after softmax)
+  auto neg_inf = -std::numeric_limits<float>::infinity();
+  Tensor masked_input = at::masked_fill(input, mask, neg_inf);
+
+  // Apply softmax
+  Tensor output = at::_softmax(masked_input, dim, /*half_to_float=*/false);
+
+  // Set masked positions to 0 (in case of all-masked rows producing NaN)
+  output = at::masked_fill(output, mask, 0.0f);
+
+  return output;
+}
+
+// _masked_softmax_backward for MPS
+Tensor masked_softmax_backward_mps(
+    const Tensor& grad_,
+    const Tensor& output_,
+    const Tensor& mask_,
+    const std::optional<int64_t> dim_) {
+  Tensor grad = grad_.contiguous();
+  Tensor output = output_.contiguous();
+  Tensor mask = mask_.contiguous();
+  int64_t dim = dim_.has_value() ? dim_.value() : grad.dim() - 1;
+  dim = maybe_wrap_dim(dim, grad.dim());
+
+  // Expand mask if needed to match grad shape
+  Tensor expanded_mask = mask;
+  if (mask.sizes() != grad.sizes()) {
+    // Try to expand the mask to match grad shape
+    expanded_mask = mask.expand(grad.sizes()).contiguous();
+  }
+
+  // Zero out gradients at masked positions
+  Tensor masked_grad = at::masked_fill(grad, expanded_mask, 0.0f);
+
+  // Standard softmax backward: grad_input = output * (grad - sum(output * grad, dim))
+  // Using existing _softmax_backward_data
+  Tensor grad_input = at::_softmax_backward_data(masked_grad, output, dim, output.scalar_type());
+
+  // Zero out gradients at masked positions
+  grad_input = at::masked_fill(grad_input, expanded_mask, 0.0f);
+
+  return grad_input;
 }
 
 } // namespace at::native

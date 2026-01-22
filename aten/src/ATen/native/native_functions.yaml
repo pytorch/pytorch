@@ -8348,12 +8348,14 @@
   dispatch:
     CUDA: masked_softmax_cuda
     CPU: masked_softmax_cpu
+    MPS: masked_softmax_mps
   autogen: _masked_softmax.out
 
 - func: _masked_softmax_backward(Tensor grad_output, Tensor output, Tensor mask, int? dim=None) -> Tensor
   dispatch:
     CUDA: masked_softmax_backward_cuda
     CPU: masked_softmax_backward_cpu
+    MPS: masked_softmax_backward_mps
   autogen: _masked_softmax_backward.out
 
 - func: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
