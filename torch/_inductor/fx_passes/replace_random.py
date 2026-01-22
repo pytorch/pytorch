@@ -27,6 +27,10 @@ def _shape_to_offset(shape, device: torch.device):
     for s in shape:
         nelem *= s
 
+    # Empty tensor: no random numbers are generated/consumed.
+    if nelem == 0:
+        return 0
+
     if device is None:
         device = torch.device("cpu")
     elif isinstance(device, str):
@@ -44,6 +48,8 @@ def _shape_to_offset(shape, device: torch.device):
     blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
     max_grid = device_property.multi_processor_count * blocks_per_sm
     grid_size = (nelem + block_size - 1) // block_size
+    if grid_size == 0:
+        return 0
     grid_size = torch.sym_min(grid_size, max_grid)
 
     return ((nelem - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls

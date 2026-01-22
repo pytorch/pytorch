@@ -124,9 +124,11 @@ def _reserve_rng_state(device: torch.device, used_offset):
 
     # NOTE: for correctness in eager, intra_t should be 0.
     # Keep everything as tensor math to avoid host sync.
-    if intra_t.device.type != "cuda":
-        intra_t = intra_t.to(device=device, non_blocking=True)
-    base = torch.div(off_t + intra_t, 4, rounding_mode="floor")
+    if intra_t.device.type != off_t.device.type:
+        intra = int(intra_t.item())
+        base = torch.div(off_t + intra, 4, rounding_mode="floor")
+    else:
+        base = torch.div(off_t + intra_t, 4, rounding_mode="floor")
     return seed_t, base
 
 
