@@ -13,6 +13,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
+from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.autotune_process import (
@@ -328,10 +329,7 @@ class TestSelectAlgorithm(TestCase):
         if not torch.version.hip:  # autotuning is not guaranteed to run on ROCm
             self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @pytest.mark.xfail(
-        condition=not torch.version.hip,
-        reason="C++ wrapper dynamic shapes fails on CUDA, fixed on ROCm",
-    )
+    @expectedFailureDynamicWrapper
     @patches
     def test_convolution1(self):
         @torch.compile
