@@ -1044,6 +1044,8 @@ class GuardedCache(Generic[T]):
             subdir = cls._get_tmp_dir_for_key(key)
             if os.path.exists(subdir):
                 for path in sorted(os.listdir(subdir)):
+                    if path.startswith("."):
+                        continue  # Skip temp files from concurrent write_atomic() calls
                     try:
                         with open(os.path.join(subdir, path), "rb") as f:
                             content = f.read()
@@ -3922,6 +3924,8 @@ def _nvcc_arch_as_compile_option() -> str:
     if arch == "90":
         # Required by cutlass compilation.
         return "90a"
+    if arch == "103":
+        return "100f"
     if arch == "100":
         return "100a"
     return arch

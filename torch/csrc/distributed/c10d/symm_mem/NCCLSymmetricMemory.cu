@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
@@ -110,7 +111,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Create NCCL device communicator if it doesn't exist. Skip if it already exists.
     auto& mr = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
-    mr.try_emplace_devcomm(group_name_, comm);
+    // Each CTA will need a separate barrier. Assume `symm_max_nblocks` as a starting point.
+    mr.try_emplace_devcomm(group_name_, comm, /*LSA*/ symm_max_nblocks, /*GIN*/ symm_max_nblocks);
 
     const size_t arr_size = sizeof(void*) * world_size_;
     buffers_dev_ = reinterpret_cast<void**>(
@@ -140,9 +142,11 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 #endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
-    C10D_NCCL_CHECK(
-        ncclGetLsaMultimemDevicePointer(buffer_win_, offset_, &mc_addr_),
-        "Failed to get multicast pointer");
+  // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
+  void* mc_addr = nullptr;
+  if (ncclGetLsaMultimemDevicePointer(buffer_win_, 0, &mc_addr) == ncclSuccess) {
+    mc_addr_ = mc_addr;
+  }
 #endif
   }
 
@@ -166,7 +170,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
   // Multicast address
-  void* mc_addr_ = nullptr;
+  void* mc_addr_{nullptr};
 
   friend class NCCLSymmetricMemory;
 };
