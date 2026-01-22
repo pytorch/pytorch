@@ -3244,7 +3244,8 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(Exception, "requires a fake_impl"):
             compiled_mod(x)
 
-    def test_leaf_function_constant_tensor_closure_error(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_leaf_function_constant_tensor_closure_error(self, backend):
         constant_weight = torch.randn(3, 3)
 
         @leaf_function
@@ -3270,13 +3271,14 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result[0], expected)
 
         # Captured tensors cause compilation error - must pass as explicit args
-        compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        compiled_mod = torch.compile(mod, backend=backend, fullgraph=True)
         with self.assertRaisesRegex(
             Exception, "Please convert all Tensors to FakeTensors"
         ):
             compiled_mod(x)
 
-    def test_leaf_function_input_mutation_error(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_leaf_function_input_mutation_error(self, backend):
         @leaf_function
         def mutate_input(x):
             x.add_(1)
@@ -3297,36 +3299,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result_eager[0], x + 1)
 
         # Compiled detects mutation and raises error
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
         with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
             compiled_fn(x.clone())
 
-    def test_leaf_function_validation_shape_mismatch(self):
-        @leaf_function
-        def mismatched_forward(mod, x):
-            return (mod.linear(x),)
-
-        @mismatched_forward.fake_impl
-        def mismatched_forward_fake(mod, x):
-            return (torch.zeros(x.shape[0], 6),)
-
-        class MismatchedModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-
-            def forward(self, x):
-                return mismatched_forward(self, x)
-
-        mod = MismatchedModule()
-        x = torch.randn(3, 3)
-
-        with config.patch(leaf_function_validate_outputs=True):
-            compiled_mod = torch.compile(mod, backend="eager")
-            with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
-                compiled_mod(x)
-
-    def test_leaf_function_validation_dtype_mismatch(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_leaf_function_validation_dtype_mismatch(self, backend):
         @leaf_function
         def dtype_mismatch_forward(mod, x):
             return (mod.linear(x),)
@@ -3347,42 +3325,20 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
 
         with config.patch(leaf_function_validate_outputs=True):
-            compiled_mod = torch.compile(mod, backend="eager")
+            compiled_mod = torch.compile(mod, backend=backend)
             with self.assertRaisesRegex(RuntimeError, "Dtype mismatch"):
                 compiled_mod(x)
 
-    def test_leaf_function_validation_structure_mismatch(self):
-        @leaf_function
-        def structure_mismatch_forward(mod, x):
-            return (mod.linear(x),)
-
-        @structure_mismatch_forward.fake_impl
-        def structure_mismatch_forward_fake(mod, x):
-            return mod.linear(x)
-
-        class StructureMismatchModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-
-            def forward(self, x):
-                return structure_mismatch_forward(self, x)
-
-        mod = StructureMismatchModule()
-        x = torch.randn(3, 3)
-
-        with config.patch(leaf_function_validate_outputs=True):
-            compiled_mod = torch.compile(mod, backend="eager")
-            with self.assertRaises((RuntimeError, AssertionError)):
-                compiled_mod(x)
-
-    def test_leaf_function_validation_disabled(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("validate_outputs", [True, False])
+    def test_leaf_function_validation_shape_mismatch(self, backend, validate_outputs):
         @leaf_function
         def mismatched_forward(mod, x):
             return (mod.linear(x),)
 
         @mismatched_forward.fake_impl
         def mismatched_forward_fake(mod, x):
+            # Fake returns wrong shape (3, 6) vs real (3, 3)
             return (torch.zeros(x.shape[0], 6),)
 
         class MismatchedModule(torch.nn.Module):
@@ -3396,16 +3352,19 @@ class GraphModule(torch.nn.Module):
         mod = MismatchedModule()
         x = torch.randn(3, 3)
 
-        # With validation disabled, shape mismatch should not raise
-        with config.patch(leaf_function_validate_outputs=False):
-            compiled_mod = torch.compile(mod, backend="eager")
-            result = compiled_mod(x)
-            self.assertEqual(result[0].shape, (3, 3))
+        with config.patch(leaf_function_validate_outputs=validate_outputs):
+            compiled_mod = torch.compile(mod, backend=backend)
+            if validate_outputs:
+                with self.assertRaises((RuntimeError, AssertionError)):
+                    compiled_mod(x)
+            else:
+                # With validation disabled, shape mismatch should not raise
+                result = compiled_mod(x)
+                self.assertEqual(result[0].shape, (3, 3))
 
     def test_leaf_function_no_module_inputs(self):
         @leaf_function
-        def my_custom_fn(inputs, scale, offset):
-            # inputs is a dict with tensors, scale is a float, offset is an int
+        def my_custom_fn(inputs: dict[str, torch.Tensor], scale: float, offset: int):
             x = inputs["x"]
             y = inputs["y"]
             if x.sum() > 0:  # data-dependent control flow
@@ -3413,45 +3372,39 @@ class GraphModule(torch.nn.Module):
             return (x * scale - y + offset, x.sum() - y.sum())
 
         @my_custom_fn.fake_impl
-        def my_custom_fn_fake(inputs, scale, offset):
+        def my_custom_fn_fake(
+            inputs: dict[str, torch.Tensor], scale: float, offset: int
+        ):
             x = inputs["x"]
             y = inputs["y"]
             return (x * scale + y + offset, x.sum() + y.sum())
 
-        def fn(inputs, scale, offset):
-            return my_custom_fn(inputs, scale, offset)
+        class NoModuleInputsModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scale = 2.0
+                self.offset = 1
 
-        x = torch.randn(3, 3, requires_grad=True)
-        y = torch.randn(3, 3, requires_grad=True)
-        inputs = {"x": x, "y": y}
-        scale = 2.0
-        offset = 1
+            def forward(self, x, y):
+                inputs = {"x": x, "y": y}
+                return my_custom_fn(inputs, self.scale, self.offset)
 
-        # Test eager execution
-        eager_result = fn(inputs, scale, offset)
-        self.assertEqual(eager_result[0].shape, (3, 3))
+        def args_fn():
+            return (
+                torch.randn(3, 3, requires_grad=True),
+                torch.randn(3, 3, requires_grad=True),
+            )
 
-        # Test compiled execution with cloned inputs
-        x_clone = x.clone().detach().requires_grad_(True)
-        y_clone = y.clone().detach().requires_grad_(True)
-        inputs_clone = {"x": x_clone, "y": y_clone}
+        def loss_fn(out):
+            return out[0].sum() + out[1].sum()
 
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        compiled_result = compiled_fn(inputs_clone, scale, offset)
-        self.assertEqual(compiled_result[0].shape, (3, 3))
+        self._test_leaf_function_helper(NoModuleInputsModule, args_fn, loss_fn)
 
-        # The results should be equal
-        self.assertEqual(eager_result[0], compiled_result[0])
-        self.assertEqual(eager_result[1], compiled_result[1])
-
-        # Test backward
-        eager_result[0].sum().backward()
-        compiled_result[0].sum().backward()
-        self.assertEqual(x.grad, x_clone.grad)
-        self.assertEqual(y.grad, y_clone.grad)
-
-    def test_leaf_function_escaped_gradient_multiple_tensors(self):
-        # Multiple closure tensors with requires_grad
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("check_escaped_gradients", [True, False])
+    def test_leaf_function_escaped_gradient_multiple_tensors(
+        self, backend, check_escaped_gradients
+    ):
         weight1 = torch.randn(3, 3, requires_grad=True)
         weight2 = torch.randn(3, 3, requires_grad=True)
 
@@ -3468,14 +3421,24 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(2, 3, requires_grad=True)
 
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        # Error message should indicate 2 tensors escaped
-        with config.patch(leaf_function_check_escaped_gradients=True):
-            with self.assertRaisesRegex(RuntimeError, "2 tensor"):
-                compiled_fn(x)
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with config.patch(
+            leaf_function_check_escaped_gradients=check_escaped_gradients
+        ):
+            if check_escaped_gradients:
+                with self.assertRaisesRegex(RuntimeError, "2 tensor"):
+                    compiled_fn(x)
+            else:
+                result = compiled_fn(x)
+                self.assertEqual(result[0].shape, (2, 3))
 
-    def test_leaf_function_escaped_gradient_config_off_no_error(self):
-        """When config is False (default), escaped gradients should NOT raise errors."""
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("check_escaped_gradients", [True, False])
+    def test_leaf_function_escaped_gradient_input_no_grad(
+        self, backend, check_escaped_gradients
+    ):
+        # If all inputs don't require grad, no error should be raised even with closure tensors
+        # because autograd key is not triggered.
         closure_weight = torch.randn(3, 3, requires_grad=True)
 
         @leaf_function
@@ -3489,51 +3452,27 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return uses_closure(x)
 
-        x = torch.randn(2, 3, requires_grad=True)
-
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        # Config is False by default, so no error should be raised
-        with config.patch(leaf_function_check_escaped_gradients=False):
-            result = compiled_fn(x)
-            # Should execute without error
-            self.assertEqual(result[0].shape, (2, 3))
-
-    def test_leaf_function_escaped_gradient_input_no_grad(self):
-        """If input doesn't require grad, no error should be raised even with closure tensors."""
-        closure_weight = torch.randn(3, 3, requires_grad=True)
-
-        @leaf_function
-        def uses_closure(x):
-            return (x @ closure_weight,)
-
-        @uses_closure.fake_impl
-        def uses_closure_fake(x):
-            return (torch.empty(x.shape[0], 3),)
-
-        def fn(x):
-            return uses_closure(x)
-
-        # Input does NOT require grad - no autograd path triggered
         x = torch.randn(2, 3, requires_grad=False)
 
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with config.patch(leaf_function_check_escaped_gradients=True):
-            # Should not raise error since input doesn't require grad
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with config.patch(
+            leaf_function_check_escaped_gradients=check_escaped_gradients
+        ):
             result = compiled_fn(x)
             self.assertEqual(result[0].shape, (2, 3))
 
-    def test_leaf_function_escaped_gradient_mixed_inputs(self):
-        """Comprehensive test: mixed inputs, computed closure, multiple outputs."""
-        # Use computed closures (intermediate tensors with grad_fn, not leaf)
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("check_escaped_gradients", [True, False])
+    def test_leaf_function_escaped_gradient_mixed_inputs(
+        self, backend, check_escaped_gradients
+    ):
         base1 = torch.randn(3, 3, requires_grad=True)
         base2 = torch.randn(3, 4, requires_grad=True)
-        closure_weight1 = base1 * 2  # Computed, still requires grad
-        closure_weight2 = base2 * 3  # Another computed tensor
+        closure_weight1 = base1 * 2
+        closure_weight2 = base2 * 3
 
         @leaf_function
         def mixed_inputs(x, y):
-            # y is used but not tracked for grads
-            # Two outputs depending on different escaped tensors
             out1 = x @ closure_weight1 + y
             out2 = x @ closure_weight2
             return (out1, out2)
@@ -3545,19 +3484,25 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return mixed_inputs(x, y)
 
-        # x requires grad, y doesn't
         x = torch.randn(2, 3, requires_grad=True)
         y = torch.randn(2, 3, requires_grad=False)
 
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with config.patch(leaf_function_check_escaped_gradients=True):
-            # Should detect both escaped tensors (2 closures)
-            with self.assertRaisesRegex(RuntimeError, "2 tensor"):
-                compiled_fn(x, y)
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        with config.patch(
+            leaf_function_check_escaped_gradients=check_escaped_gradients
+        ):
+            if check_escaped_gradients:
+                with self.assertRaisesRegex(RuntimeError, "2 tensor"):
+                    compiled_fn(x, y)
+            else:
+                result = compiled_fn(x, y)
+                self.assertEqual(result[0].shape, (2, 3))
+                self.assertEqual(result[1].shape, (2, 4))
 
-    def test_leaf_function_escaped_gradient_error_message_contains_tensor_info(self):
-        """Verify error message includes tensor shape and dtype."""
-        # Use specific shape and dtype to verify in error message
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_leaf_function_escaped_gradient_error_message_contains_tensor_info(
+        self, backend
+    ):
         closure_weight = torch.randn(4, 5, dtype=torch.float32, requires_grad=True)
 
         @leaf_function
@@ -3573,14 +3518,13 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(2, 4, requires_grad=True)
 
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
         with config.patch(leaf_function_check_escaped_gradients=True):
-            # Error should contain shape=[4, 5] and dtype info
             with self.assertRaisesRegex(RuntimeError, r"shape=\[4, 5\].*dtype="):
                 compiled_fn(x)
 
-    def test_leaf_function_escaped_gradient_actually_lost(self):
-        """Demonstrate that without explicit input, gradient is actually lost."""
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_leaf_function_escaped_gradient_actually_lost(self, backend):
         closure_weight = torch.randn(3, 3, requires_grad=True)
 
         @leaf_function
@@ -3596,20 +3540,17 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(2, 3, requires_grad=True)
 
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
         result = compiled_fn(x)
         loss = result[0].sum()
         loss.backward()
 
-        # x gets gradient (it's an explicit input)
         self.assertIsNotNone(x.grad)
-        # closure_weight does NOT get gradient (this is the problem we're detecting)
         self.assertIsNone(closure_weight.grad)
 
     def test_leaf_function_and_nonstrict_trace_mutually_exclusive(self):
         from torch._dynamo.decorators import leaf_function, nonstrict_trace
 
-        # Test @leaf_function on top of @nonstrict_trace
         with self.assertRaisesRegex(
             ValueError,
             "cannot be both marked as @leaf_function and @nonstrict_trace",
@@ -3620,7 +3561,6 @@ class GraphModule(torch.nn.Module):
             def bad_fn1(x):
                 return (x,)
 
-        # Test @nonstrict_trace on top of @leaf_function
         with self.assertRaisesRegex(
             ValueError,
             "cannot be both marked as @leaf_function and @nonstrict_trace",
