@@ -95,7 +95,11 @@ class TestExpandPlaceholder(TestCase):
     def test_foreach_ops_variants(self):
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
 
-        def _test_op(op, *args, linearity=None):
+        def _test_op(op, *args, linearity=None, inplace=None):
+            # Auto-detect inplace ops by checking for "_." in the op name (e.g., _foreach_add_.List)
+            if inplace is None:
+                inplace = "_." in str(op)
+
             # creates specs, computes single-dim strategy, and expands to mesh
             out_spec = None
             specs = []
@@ -134,7 +138,11 @@ class TestExpandPlaceholder(TestCase):
             self.assertEqual(
                 len(strategy.children), len(args[0])
             )  # no. of list elements
-            if linearity == 1:
+            if inplace:
+                # For inplace ops, the self argument cannot be redistributed,
+                # so there should be exactly 1 strategy (the input placement)
+                self.assertEqual(len(strategy.children[0].strategies), 1)
+            elif linearity == 1:
                 self.assertEqual(
                     len(strategy.children[0].strategies), 125
                 )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
@@ -195,9 +203,12 @@ class TestExpandPlaceholder(TestCase):
         ]:
             _test_op(op, [(shard0, t)], [(shard0, t)], [(shard0, t)], 1.0)
 
-        # Test inplace variant
+        # Test inplace variant (auto-detected via "_." in op name)
         _test_op(
-            torch.ops.aten._foreach_add_.List, [(shard0, t)], [(shard0, t)], linearity=1
+            torch.ops.aten._foreach_add_.List,
+            [(shard0, t)],
+            [(shard0, t)],
+            linearity=1,
         )
 
     def test_expand_foreach_add_to_3d_mesh(self):
@@ -763,6 +774,52 @@ class TestExpandPlaceholder(TestCase):
         # Verify result is valid
         self.assertIsInstance(result, OpStrategy)
         self.assertGreater(len(result.strategies), 0)
+
+    def test_expand_to_full_mesh_filters_out_variant_strategies(self):
+        """Test that expand_to_full_mesh_op_strategy filters strategies for out= variant ops.
+        For out-variant ops like torch.mul(..., out=...), the output placement must
+        match the 'out' kwarg's placement. This test verifies that strategies with
+        mismatched output placements are filtered out.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Create specs: args have Shard(0), out kwarg has Replicate
+        arg_spec = DTensorSpec(mesh, (Shard(0),), meta)
+        out_spec = DTensorSpec(mesh, (Replicate(),), meta)
+
+        # Create OpSchema for out-variant op (aten.mul.out)
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(arg_spec)]),
+                OpStrategy([OpSpec(arg_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(out_spec)])},
+        )
+
+        # Define strategies: output can be Shard(0) or Replicate
+        # [output, input1, input2, out_kwarg]
+        single_mesh_dim_strategies = [
+            [Shard(0), Shard(0), Shard(0), Shard(0)],  # All sharded
+            [Replicate(), Replicate(), Replicate(), Replicate()],  # All replicated
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+        )
+
+        # All strategies in result should have output placement matching out kwarg (Replicate)
+        for strategy in result.strategies:
+            output_spec = strategy.output_spec
+            self.assertEqual(
+                output_spec.placements,
+                (Replicate(),),
+                f"Output placement {output_spec.placements} should match out kwarg placement (Replicate(),)",
+            )
 
     def test_expand_multi_output_strategy(self):
         """Test expanding single-dim strategies for multi-output ops.
