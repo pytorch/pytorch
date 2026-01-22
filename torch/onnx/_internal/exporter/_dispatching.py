@@ -7,8 +7,8 @@ from typing import Any
 
 import torch
 import torch.fx
-from torch.onnx._internal.exporter import _registration, _schemas
 from torch.onnx._internal._lazy_import import onnx_ir as ir
+from torch.onnx._internal.exporter import _registration, _schemas
 
 
 logger = logging.getLogger(__name__)
