@@ -18,7 +18,9 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
+    "ThreadBasedRNGTracker",
     "set_use_thread_based_rng",
+    "_USE_THREAD_RNG_TRACKER",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
@@ -113,10 +115,9 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     global _rng_tracker
     if not _rng_tracker:
         if _USE_THREAD_RNG_TRACKER:
-            _rng_tracker = ThreadBasedRNGTracker(device_mesh)
+            _rng_tracker = ThreadBasedRNGTracker(device_mesh, run_state_sync=False)
         else:
             _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
-
 
     if device_mesh.get_coordinate() is None:
         raise RuntimeError(
