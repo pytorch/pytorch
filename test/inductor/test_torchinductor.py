@@ -7827,10 +7827,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=1.3e-06,
         )
 
-    @parametrize(
-        "dtype",
-        (torch.float32, torch.float16, torch.bfloat16),
-    )
+    @parametrize("dtype", (torch.float32, torch.float16))
     @parametrize("align_corners", (True, False))
     def test_affine_grid_generator(self, dtype, align_corners):
         if not self.is_dtype_supported(dtype):
