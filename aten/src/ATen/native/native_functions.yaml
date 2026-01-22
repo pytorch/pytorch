@@ -9035,6 +9035,7 @@
   tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: cauchy_
+    MPS: cauchy_mps_
   autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)

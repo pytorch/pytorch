@@ -227,6 +227,18 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   virtual bool isGPUArch(const std::vector<std::string>& /*archs*/, DeviceIndex = -1 /*device_index*/) const {
     TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
   }
+
+  virtual const std::vector<std::string>& getHipblasltPreferredArchs() const {
+    static const std::vector<std::string> empty;
+    TORCH_CHECK(false, "Cannot get hipBLASLt preferred archs without ATen_cuda library. ", CUDA_HELP);
+    return empty;
+  }
+
+  virtual const std::vector<std::string>& getHipblasltSupportedArchs() const {
+    static const std::vector<std::string> empty;
+    TORCH_CHECK(false, "Cannot get hipBLASLt supported archs without ATen_cuda library. ", CUDA_HELP);
+    return empty;
+  }
 #endif
 
   virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
