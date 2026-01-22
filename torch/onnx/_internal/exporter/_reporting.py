@@ -11,7 +11,7 @@ from torch.onnx._internal.exporter import _analysis, _registration, _verificatio
 if TYPE_CHECKING:
     import os
 
-    import onnx_ir as ir
+    import onnx_ir as ir  # type: ignore[import-untyped]
 
     import torch
 
