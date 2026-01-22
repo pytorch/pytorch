@@ -40,12 +40,12 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
-          { config: "inductor", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
-          { config: "inductor", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
-          { config: "inductor", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
-          { config: "inductor", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
-          { config: "inductor", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" }
+          { config: "inductor", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.m210.1" },
+          { config: "inductor", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.m210.1" },
+          { config: "inductor", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.m210.1" },
+          { config: "inductor", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.m210.1" },
+          { config: "inductor", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.m210.1" },
+          { config: "inductor", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.m210.1" }
         ]}
     secrets: inherit
 
