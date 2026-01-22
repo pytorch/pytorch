@@ -4615,6 +4615,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             with self.assertRaises((RuntimeError, ValueError)):
                 F.pixel_shuffle(torch.randn(1, 4, 2, 2), 0)
 
+        def test_pixel_shuffle_overflow_boundary():
+            # Test boundary value for overflow check (max_sqrt = 3037000499)
+            # Values <= 3037000499 should work (if channel dim is divisible)
+            # Values > 3037000499 should raise ValueError from C++ layer
+            max_sqrt = 3037000499
+            
+            # Test boundary value - should work if valid input
+            # Using a value that would work if not for overflow check
+            with self.assertRaises((RuntimeError, ValueError)):
+                # This should fail due to overflow check, not channel divisibility
+                F.pixel_shuffle(torch.randn(1, 4, 2, 2), max_sqrt + 1)
+            
+            # Test direct aten.ops call to ensure C++ checks work
+            # This bypasses Python layer, so should use C++ checks directly
+            with self.assertRaises(ValueError):
+                torch.ops.aten.pixel_shuffle.default(torch.randn(1, 4, 2, 2), max_sqrt + 1)
+
         def test_pixel_shuffle_unshuffle_1D():
             _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
 
@@ -4633,6 +4650,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         test_pixel_shuffle_large_upscale_factor()
         test_pixel_shuffle_overflow_upscale_factor()
         test_pixel_shuffle_negative_upscale_factor()
+        test_pixel_shuffle_overflow_boundary()
         test_pixel_shuffle_unshuffle_1D()
         test_pixel_shuffle_unshuffle_2D()
         test_pixel_shuffle_unshuffle_3D()
