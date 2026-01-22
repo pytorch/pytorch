@@ -38,8 +38,14 @@ from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
 from ..eval_frame import skip_code
-from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
+from ..exc import (
+    raise_observed_exception,
+    unimplemented,
+    UnsafeScriptObjectError,
+    Unsupported,
+)
 from ..source import AttrSource
+from ..utils import proxy_args_kwargs
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
@@ -49,6 +55,7 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 _P = ParamSpec("_P")
@@ -223,6 +230,13 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 name,
             )
             if member_type is None:
+                # Special case: __bool__ and __len__ are used for truthiness checks.
+                # If they're not registered and the real object doesn't have them,
+                # raise ObservedAttributeError so the caller can fall back to
+                # treating the object as truthy (Python default behavior
+                if name in ("__bool__", "__len__") and not hasattr(real_obj, name):
+                    raise_observed_exception(AttributeError, tx)
+
                 unimplemented(
                     gb_type="Attempted to access unregistered member on an OpaqueObject",
                     context=f"value={real_obj}, attr={name}",
@@ -242,6 +256,13 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     return super().var_getattr(tx, name)
 
             elif member_type == MemberType.INLINED:
+                value = getattr(real_obj, name)
+                if inspect.ismethod(value) and self.source is None:
+                    # When we don't have a source, fall back to call_method
+                    # which creates a proxy node.
+                    return LambdaVariable(
+                        lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+                    )
                 return super().var_getattr(tx, name)
 
         method = getattr(self.value, name, None)
@@ -288,6 +309,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
+        from .builder import wrap_fx_proxy
+
         if hasattr(self.value, "script_class_name") and is_opaque_type(
             self.value.script_class_name
         ):
@@ -308,49 +331,66 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     ],
                 )
 
-            assert member_type == MemberType.USE_REAL, (
-                f"Member `{name}` of opaque object `{real_obj}` was specified to be member type `{member_type}`"
-            )
+            if member_type == MemberType.INLINED:
+                proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
-            if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+                proxy = tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    args=(self.proxy, *proxy_args),
+                    kwargs=proxy_kwargs,
+                )
+
+                return wrap_fx_proxy(tx=tx, proxy=proxy)
+
+            elif member_type == MemberType.USE_REAL:
+                if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+                    unimplemented(
+                        gb_type="Opaque object with custom __getattr__ not supported",
+                        context=f"{value_type.__name__} with custom __getattr__",
+                        explanation="Dynamo does not support opaque objects types with custom __getattr__ methods",
+                        hints=[],
+                    )
+
+                args_const = [x.as_python_constant() for x in args]
+                kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+
+                method = getattr(real_obj, name)
+
+                if name == "__setattr__":
+                    method(*args_const, **kwargs_const)
+                    return real_obj  # pyrefly: ignore[bad-return]
+
+                constant_val = method(*args_const, **kwargs_const)
+
+                if any(
+                    is_opaque_reference_type(type(r))
+                    for r in pytree.tree_leaves(constant_val)
+                ):
+                    unimplemented(
+                        gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+                        context=f"Opaque object type: {value_type}. Method name: '{name}'",
+                        explanation=(
+                            "To properly guard reference-type opaque objects, "
+                            "we must lift them as inputs to the graph. In order "
+                            "to do this, they must all have a source, meaning they "
+                            "come from a global value or are an attribute of an input."
+                        ),
+                        hints=[
+                            f"Register member '{name}' with MemberType.INLINED in "
+                            "register_opaque_type({value_type}, members=...).",
+                        ],
+                    )
+
+                return VariableTracker.build(tx, constant_val)
+
+            else:
                 unimplemented(
-                    gb_type="Opaque object with custom __getattr__ not supported",
-                    context=f"{value_type.__name__} with custom __getattr__",
-                    explanation="Dynamo does not support opaque objects types with custom __getattr__ methods",
+                    gb_type="Unsupported member type on OpaqueObject",
+                    context=f"value={real_obj}, attr={name}, member_type={member_type}",
+                    explanation=f"Member type '{member_type}' is not supported for this operation.",
                     hints=[],
                 )
-
-            args_const = [x.as_python_constant() for x in args]
-            kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
-
-            method = getattr(real_obj, name)
-
-            if name == "__setattr__":
-                method(*args_const, **kwargs_const)
-                return real_obj  # pyrefly: ignore[bad-return]
-
-            constant_val = method(*args_const, **kwargs_const)
-
-            if any(
-                is_opaque_reference_type(type(r))
-                for r in pytree.tree_leaves(constant_val)
-            ):
-                unimplemented(
-                    gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
-                    context=f"Opaque object type: {value_type}. Method name: '{name}'",
-                    explanation=(
-                        "To properly guard reference-type opaque objects, "
-                        "we must lift them as inputs to the graph. In order "
-                        "to do this, they must all have a source, meaning they "
-                        "come from a global value or are an attribute of an input."
-                    ),
-                    hints=[
-                        f"Register member '{name}' with MemberType.INLINED in "
-                        "register_opaque_type({value_type}, members=...).",
-                    ],
-                )
-
-            return VariableTracker.build(tx, constant_val)
 
         unimplemented(
             gb_type="Weird method call on TorchScript object",
@@ -375,3 +415,17 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return is_opaque_value_type(
             type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
         )
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.source is not None:
+            self.source.reconstruct(codegen)
+            return
+
+        if hasattr(self.value, "real_obj") and is_opaque_value_type(
+            type(self.value.real_obj)
+        ):
+            real_obj = self.value.real_obj
+            codegen.append_output(codegen.create_load_const_unchecked(real_obj))
+            return
+
+        super().reconstruct(codegen)
