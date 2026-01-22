@@ -234,10 +234,10 @@ def aot_dispatch_base_graph(
     # (In contrast, strict mode errors on any attribute assignment.)
     mod_when_exporting_non_strict = root_module_when_exporting_non_strict(flat_fn)
     hook = None
+    assigned_buffers: dict[str, str] = {}
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # For any buffer that is assigned, we want to associate it to the final proxy node
         # that it is assigned to. This node can then be added as a buffer mutation output.
-        assigned_buffers: dict[str, str] = {}
         hook = register_buffer_assignment_hook(
             mod_when_exporting_non_strict, assigned_buffers
         )
