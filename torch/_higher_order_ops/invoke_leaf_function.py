@@ -409,9 +409,7 @@ def _make_forward(
                 )
 
                 # Capture output GradientInfo for tensors with grad_fn
-                flat_outputs = (
-                    outputs if isinstance(outputs, tuple) else (outputs,)
-                )
+                flat_outputs = outputs if isinstance(outputs, tuple) else (outputs,)
                 state["outputs"] = tuple(
                     GradientInfo(
                         edge=get_gradient_edge(out),
