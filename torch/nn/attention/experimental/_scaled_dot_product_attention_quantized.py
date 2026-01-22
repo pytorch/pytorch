@@ -124,23 +124,6 @@ def _scaled_dot_product_attention_quantized(
 
     Returns:
         Tensor: Attention output; shape :math:`(N, H_q, L, E_v)` dtype bfloat16
-
-    Example::
-        >>> # Requires FA3 to be activated
-        >>> from torch.nn.attention import activate_flash_attention_impl, sdpa_kernel, SDPBackend
-        >>> from torch.nn.attention.experimental._scaled_dot_product_attention_quantized import (
-        ...     _scaled_dot_product_attention_quantized,
-        ...     DescaleType,
-        ... )
-        >>> activate_flash_attention_impl("FA3")
-        >>> with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-        ...     out = _scaled_dot_product_attention_quantized(
-        ...         q, k, v,
-        ...         q_descale=dq, k_descale=dk, v_descale=dv,
-        ...         q_descale_type=DescaleType.PER_HEAD,
-        ...         k_descale_type=DescaleType.PER_HEAD,
-        ...         v_descale_type=DescaleType.PER_HEAD,
-        ...     )
     """
     # Validate descale tensors
     _validate_descale(q_descale, "q", query, key, q_descale_type)
