@@ -42,8 +42,8 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), set(), set(), mesh)
-        y = LTensor(torch.randn(4, 8), set(), set(), mesh)
+        x = LTensor(torch.randn(4, 8), set(), set(), mesh, False)
+        y = LTensor(torch.randn(4, 8), set(), set(), mesh, False)
 
         result = x + y
 
@@ -57,8 +57,8 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
-        y = LTensor(torch.randn(4, 8), set(), set(), mesh)
+        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
+        y = LTensor(torch.randn(4, 8), set(), set(), mesh, False)
 
         result = x + y
         self.assertEqual(result.variant_dims, {"dp"})
@@ -77,6 +77,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             {"dp"},
             set(),
             mesh,
+            False,
         )
 
         invariant_input = LTensor(
@@ -84,6 +85,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             set(),
             set(),
             mesh,
+            False,
         )
 
         output = variant_input + invariant_input
@@ -102,7 +104,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
+        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
         result = x.sin()
 
         self.assertEqual(result.variant_dims, {"dp"})
@@ -135,7 +137,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        data = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
+        data = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
         weight = torch.randn(8, 16)
         bias = torch.randn(16)
 
@@ -159,8 +161,8 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("pp", "dp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh1)
-        y = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh2)
+        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh1, False)
+        y = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh2, False)
 
         with self.assertRaisesRegex(
             AssertionError, "Cannot mix LTensors from different meshes"
@@ -175,7 +177,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp", "tp"}, set(), mesh)
+        x = LTensor(torch.randn(4, 8), {"dp", "tp"}, set(), mesh, False)
         self.assertEqual(x.variant_dims, {"dp", "tp"})
 
         import torch.distributed._functional_collectives as fcols
@@ -193,9 +195,9 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             mesh_dim_names=("dp", "tp"),
         )
 
-        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
-        y = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
-        z = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh)
+        x = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
+        y = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
+        z = LTensor(torch.randn(4, 8), {"dp"}, set(), mesh, False)
 
         result = torch.cat((x, y, z), dim=0)
 
@@ -257,7 +259,8 @@ class TestRegisterVarianceForFunction(MultiThreadedTestCase):
         # Create a variant LTensor (simulating sharded data)
         local_tensor = torch.randn(4, 8, device=DEVICE, requires_grad=True)
         ltensor = LTensor(
-            local_tensor, variant_dims={"dp"}, reduced_dims=set(), mesh=mesh
+            local_tensor, variant_dims={"dp"}, reduced_dims=set(), mesh=mesh,
+            custom_function_context=False,
         )
 
         # Apply custom all_reduce - should make output invariant
@@ -281,7 +284,8 @@ class TestRegisterVarianceForFunction(MultiThreadedTestCase):
         # Create LTensor variant on both dims
         local_tensor = torch.randn(4, 8, device=DEVICE)
         ltensor = LTensor(
-            local_tensor, variant_dims={"dp", "tp"}, reduced_dims=set(), mesh=mesh
+            local_tensor, variant_dims={"dp", "tp"}, reduced_dims=set(), mesh=mesh,
+            custom_function_context=False,
         )
 
         # Apply custom all_reduce on "dp" dim - should remove "dp" from variance
@@ -314,7 +318,8 @@ class TestRegisterVarianceForFunction(MultiThreadedTestCase):
         # Create a variant LTensor
         local_tensor = torch.randn(4, 8, device=DEVICE, requires_grad=True)
         ltensor = LTensor(
-            local_tensor, variant_dims={"dp"}, reduced_dims=set(), mesh=mesh
+            local_tensor, variant_dims={"dp"}, reduced_dims=set(), mesh=mesh,
+            custom_function_context=False,
         )
 
         # Apply unregistered function - should preserve variance (default behavior)
@@ -346,7 +351,7 @@ class TestLTensorFunctionCall(MultiThreadedTestCase):
 
         # Create variant LTensor
         local_tensor = torch.randn(4, 8, device=DEVICE)
-        ltensor = LTensor(local_tensor, {"dp"}, set(), mesh)
+        ltensor = LTensor(local_tensor, {"dp"}, set(), mesh, False)
 
         # Use the existing CustomAllReduceFunction which has a registered strategy
         group_name = mesh.get_group("dp").group_name
@@ -392,7 +397,7 @@ class TestLTensorFunctionCall(MultiThreadedTestCase):
                 return grad_output, None
 
         local_tensor = torch.randn(4, 8, device=DEVICE)
-        ltensor = LTensor(local_tensor, {"dp"}, set(), mesh)
+        ltensor = LTensor(local_tensor, {"dp"}, set(), mesh, False)
 
         group_name = mesh.get_group("dp").group_name
         result = ltensor_custom_function_call(AllReducePassthrough, ltensor, group_name)

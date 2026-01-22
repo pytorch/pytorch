@@ -112,7 +112,7 @@ class LTensor(torch.Tensor):
         variant_dims: set[str],
         reduced_dims: set[str],
         mesh: DeviceMesh,
-        custom_function_context: bool = False,
+        custom_function_context: bool,
     ):
         assert not (variant_dims & reduced_dims), (
             f"Dims cannot be both variant and reduced: {variant_dims=} {reduced_dims=}"
@@ -148,6 +148,7 @@ class LTensor(torch.Tensor):
             "mesh": mesh,
             "variant_dims": variant_dims,
             "reduced_dims": reduced_dims,
+            "custom_function_context": False,
         }
 
     @property
