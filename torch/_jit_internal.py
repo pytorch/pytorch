@@ -677,6 +677,9 @@ def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
     :class:`ScriptModule` and should be compiled.
 
+    .. deprecated:: 2.5
+        Please use :func:`torch.compile` instead.
+
     ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
     Functions and methods called from ``forward`` are compiled as they are seen
     by the compiler, so they do not need this decorator either.
@@ -714,6 +717,11 @@ def export(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         # any compiled methods and wasn't decorated with `@torch.jit.export`
         m = torch.jit.script(MyModule())
     """
+    warnings.warn(
+        "`torch.jit.export` is deprecated since 2.5. Please use `torch.compile` instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     fn._torchscript_modifier = FunctionModifiers.EXPORT  # type:ignore[attr-defined]
     return fn
 
@@ -796,6 +804,9 @@ def ignore(drop=False, **kwargs):
     ignored functions will dispatch the call to the Python interpreter. Models with ignored
     functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
 
+    .. deprecated:: 2.5
+        Please use :func:`torch.compile` instead.
+
     Example (using ``@torch.jit.ignore`` on a method)::
 
         import torch
@@ -852,6 +863,12 @@ def ignore(drop=False, **kwargs):
         import os
         os.remove('m.pt')
     """
+
+    warnings.warn(
+        "`torch.jit.ignore` is deprecated since 2.5. Please use `torch.compile` instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     if callable(drop):
         # used without any args, so drop is actually a function
