@@ -112,10 +112,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     # by the global _USE_THREAD_RNG_TRACKER.
     global _rng_tracker
     if not _rng_tracker:
-        if _USE_THREAD_RNG_TRACKER:
-            _rng_tracker = ThreadBasedRNGTracker(device_mesh)
-        else:
-            _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
+        _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
 
     if device_mesh.get_coordinate() is None:
         raise RuntimeError(
