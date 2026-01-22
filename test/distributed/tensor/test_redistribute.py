@@ -1561,37 +1561,43 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], _TransformInfo)
 
-    def test_reduce_scatter_with_intervening_shard_not_flattened(self):
-        """Reduce-scatter should NOT be flattened when intervening shard makes local size uneven.
+    def test_reduce_scatter_with_intervening_shard_flattened(self):
+        """Reduce-scatter SHOULD be flattened when intervening shard still allows even division.
 
         Scenario:
-        - Tensor shape: (12,)
-        - Mesh: (2, 2, 2) with dims A, B, C
+        - Tensor shape: (8,)
+        - Mesh: (2, 4, 1) with dims A, B, C
         - src_placements: (Partial, S(0), Partial)
         - dst_placements: (S(0), S(0), S(0))
 
         Transforms: dims 0 and 2 are Partial->S(0), dim 1 is S(0)->S(0) (no-op)
 
-        The global check would pass: 12 % 4 == 0 (flattened mesh size = 2*2 = 4)
-        But after S(0) on dim 1, local size = 6, and 6 % 4 != 0 (uneven!)
+        The intervening shard on dim 1 (size 4) means logical_shape = 8/4 = 2.
+        Flattened mesh for dims 0 and 2 has size 2*1 = 2.
+        2 % 2 == 0, so flattening SHOULD be allowed.
 
-        This tests that the optimization correctly accounts for intervening shards
-        that affect local tensor sizes.
+        This catches a bug where effective_shard_mesh_size incorrectly includes
+        the intervening shard (dim 1), computing 2*4*1=8 instead of 2, and
+        incorrectly rejecting flattening because 2 % 8 != 0.
+
+        The intervening shard is already accounted for in logical_shape, so it
+        should NOT be double-counted in effective_shard_mesh_size.
         """
-        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh = init_device_mesh("cpu", (2, 4, 1), mesh_dim_names=("A", "B", "C"))
         mesh["A", "C"]._flatten("A_C")
 
         # Transforms only for dims where src != dst (dim 1 is S(0)->S(0), no transform)
+        # logical_shape = [2] because tensor is already sharded on dim 1 (8/4=2)
         transform_infos = [
             _TransformInfo(
                 mesh_dim=0,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[12],  # global tensor shape
+                logical_shape=[2],
             ),
             _TransformInfo(
                 mesh_dim=2,
                 src_dst_placements=(Partial("sum"), Shard(0)),
-                logical_shape=[12],  # global shape (local size computed by optimizer)
+                logical_shape=[2],
             ),
         ]
 
@@ -1602,11 +1608,10 @@ class OptimizeFlattenedReductionsTest(TestCase):
             transform_infos, mesh, src_placements, dst_placements
         )
 
-        # With the fix, the optimization correctly accounts for intervening shards.
-        # Since local size (6) is not evenly divisible by flattened mesh size (4),
-        # the result should NOT be flattened - returns 2 separate transforms.
-        self.assertEqual(len(result), 2)
-        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+        # effective_shard_mesh_size should only count dims being transformed (0 and 2),
+        # giving 2*1=2. Since 2 % 2 == 0, flattening should succeed.
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
 
     def test_reduce_scatter_with_prior_shard_flattened(self):
         """Reduce-scatter should be flattened when prior shard is already in logical_shape.

@@ -253,6 +253,7 @@ def _optimize_transform_infos(
         # All transforms must have the same src_dst_placements to be merged
         # (e.g., can't merge Partial->Shard(0) with Partial->Shard(1))
         first_placements = infos[0].src_dst_placements
+        comm_type = infos[0]._comm_type_key()
         assert all(info.src_dst_placements == first_placements for info in infos)
         mesh_dims = tuple(sorted(info.mesh_dim for info in infos))
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
@@ -260,30 +261,36 @@ def _optimize_transform_infos(
             return None
 
         # For nested sharding, each transform has a different logical_shape.
-        # We use the outermost transform's logical_shape, which represents the
-        # tensor shape after all shards on mesh dims < outermost_info.mesh_dim.
-        # (This is global shape only if outermost_info.mesh_dim == 0.)
-        outermost_info = min(infos, key=lambda x: x.mesh_dim)
-
-        # For reduce_scatter (Partial -> Shard), we cannot flatten if the tensor
-        # dimension is not evenly divisible by the effective shard mesh size.
-        # The effective size includes shards on mesh dims >= outermost_info.mesh_dim
-        # (since logical_shape already accounts for shards on earlier dims).
-        # E.g., for mesh (2,2,2), src=(P,S(0),P), dst=(S(0),S(0),S(0)), transforms on 0,2:
-        # - outermost_info.mesh_dim=0, logical_shape=[12] (global)
-        # - effective_shard_mesh_size = 2*2*2 = 8 (all dims >= 0 with S(0))
-        # - 12 % 8 != 0, so we cannot flatten
+        # We need the outermost transform's logical_shape, which represents the
+        # tensor shape before any of the transforms in this group are applied.
+        # The outermost transform has the largest logical_shape on the affected
+        # tensor dimension (least divided by prior shards).
         src, dst = first_placements
-        if src.is_partial() and dst.is_shard():
-            shard_dim = cast(Shard, dst).dim
-            tensor_dim_size = outermost_info.logical_shape[shard_dim]
+        if comm_type == "all_gather":
+            # S->R (all_gather): affected dim is the source shard dim
+            affected_dim = cast(Shard, src).dim
+            outermost_info = max(infos, key=lambda x: x.logical_shape[affected_dim])
+        elif comm_type == "reduce_scatter":
+            affected_dim = cast(Shard, dst).dim
+            outermost_info = max(infos, key=lambda x: x.logical_shape[affected_dim])
+            tensor_dim_size = outermost_info.logical_shape[affected_dim]
             effective_shard_mesh_size = math.prod(
-                device_mesh.size(i)
-                for i, p in enumerate(dst_placements)
-                if p == dst and i >= outermost_info.mesh_dim
+                device_mesh.size(info.mesh_dim) for info in infos
             )
+            # For reduce_scatter (Partial -> Shard), we cannot flatten if the tensor
+            # dimension is not evenly divisible by the flattened mesh size.
+            # The effective size is the product of mesh sizes for dims being transformed
+            # (not all dims with matching placement - intervening shards are already
+            # accounted for in logical_shape).
             if tensor_dim_size % effective_shard_mesh_size != 0:
                 return None
+        elif comm_type == "all_reduce":
+            # no shape change, any info works
+            outermost_info = infos[0]
+        else:
+            raise NotImplementedError(
+                f"Unsupported comm type for try_create_flattened: {comm_type}"
+            )
 
         return _FlattenedTransformInfo(
             mesh_dim=0,
