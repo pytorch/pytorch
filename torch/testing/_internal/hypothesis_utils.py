@@ -7,7 +7,7 @@ import torch
 
 import hypothesis
 from functools import reduce
-from importlib.metadata import version
+from packaging.version import parse as parse_version
 from hypothesis import assume
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -351,13 +351,9 @@ def tensor_conv(
 # We set the deadline in the currently loaded profile.
 # Creating (and loading) a separate profile overrides any settings the user
 # already specified.
-try:
-    hypothesis_version_str = hypothesis.__version__
-    hypothesis_version = tuple(map(int, hypothesis_version_str.split(".")[:3]))
-except (AttributeError, ValueError):
-    hypothesis_version = (0, 0, 0)
+hypothesis_version = parse_version(hypothesis.__version__)
+if parse_version("3.16.0") <= hypothesis_version < parse_version("3.27.0"):
 
-if (3, 16, 0) <= hypothesis_version < (3, 27, 0):
     # Hypothesis 3.16 → 3.26: use `timeout` instead of `deadline`
     settings.register_profile("no_deadline", timeout=hypothesis.unlimited)
 else:
@@ -370,7 +366,7 @@ settings.load_profile("no_deadline")
 
 def assert_deadline_disabled():
     """Check that deadlines are effectively disabled across Hypothesis versions."""
-    if hypothesis_version < (3, 27, 0):
+    if hypothesis_version < parse_version("3.27.0"):
         import warnings
 
         warning_message = (
