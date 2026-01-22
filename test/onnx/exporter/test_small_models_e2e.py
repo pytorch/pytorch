@@ -952,15 +952,18 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
 
         x = torch.randn(8)
         y = torch.randn(8)
-        
+
         onnx_program = self.export(InvokeSubgraphModel(), (x, y), optimize=False)
         onnx_model = onnx_program.model
-        
+
         # Verify that the function is preserved in the ONNX graph
         # The function should appear in the model's functions list
-        self.assertGreater(len(onnx_model.functions), 0, 
-                          "Expected at least one function in the ONNX model")
-        
+        self.assertGreater(
+            len(onnx_model.functions),
+            0,
+            "Expected at least one function in the ONNX model",
+        )
+
         # Verify the output is correct
         onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
 
