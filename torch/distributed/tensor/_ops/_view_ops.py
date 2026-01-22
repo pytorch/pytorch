@@ -804,6 +804,15 @@ def propagate_shape_and_sharding(
                     input_dim_to_output_dims[in_dims.input_dim] = [output_dim]
                 else:
                     input_dim_to_output_dims[in_dims.input_dim].append(output_dim)
+            # For Split with split_id > 0, in_dims is None but we still need to track
+            # the output dim for _StridedShard unflatten support
+            elif isinstance(cmd, Split):
+                input_dim = cmd.input_dim
+                while isinstance(input_dim, (Flatten, Split)):
+                    input_dim = input_dim.input_dims[0]
+                if isinstance(input_dim, InputDim):
+                    if input_dim.input_dim in input_dim_to_output_dims:
+                        input_dim_to_output_dims[input_dim.input_dim].append(output_dim)
 
     input_tgt_placements: list[Placement] = []
     for mesh_dim, p in enumerate(input_src_placements):
