@@ -1254,7 +1254,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"Invalid group value ({args}) for constant pg "
                         f"function {self.value}"
                     )
-                args_as_value = [arg.as_python_constant() for arg in args]
+                args_as_value = [
+                    arg.value.real_obj  # pyrefly: ignore[missing-attribute]
+                    if isinstance(arg, TorchScriptObjectVariable)
+                    else arg.as_python_constant()
+                    for arg in args
+                ]
                 invocation_result = self.value(*args_as_value)
 
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
