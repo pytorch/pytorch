@@ -1020,3 +1020,142 @@ def generate_shard_orders(mesh, tensor_rank):
                             mesh_dims[0] : mesh_dims[-1] + 1
                         ]
                     yield _convert_shard_order_dict_to_ShardOrder(shard_order)
+
+
+def enumerate_placements(
+    ndim: int,
+    include_partial: bool = True,
+    include_strided_shard: bool = False,
+    strided_shard_split_factor: int = 2,
+) -> list[Placement]:
+    """
+    Enumerate all possible placements for a tensor with given ndim.
+
+    Args:
+        ndim: Number of tensor dimensions
+        include_partial: Whether to include Partial placement
+        include_strided_shard: Whether to include _StridedShard placements
+        strided_shard_split_factor: The split_factor for _StridedShard (typically mesh_size)
+
+    Returns list of: Replicate, Shard(0), ..., Shard(ndim-1), [_StridedShard(0, sf), ...], [Partial]
+    """
+    from torch.distributed.tensor import Partial, Replicate, Shard
+    from torch.distributed.tensor.placement_types import _StridedShard
+
+    placements: list[Placement] = [Replicate()]
+    placements.extend(Shard(d) for d in range(ndim))
+    if include_strided_shard:
+        placements.extend(
+            _StridedShard(d, strided_shard_split_factor) for d in range(ndim)
+        )
+    if include_partial:
+        placements.append(Partial())
+    return placements
+
+
+def enumerate_all_placement_combos(
+    input_ndims: list[int],
+    output_ndims: list[int],
+    include_partial_inputs: bool = True,
+    include_partial_outputs: bool = True,
+    include_strided_shard: bool = False,
+    strided_shard_split_factor: int = 2,
+) -> Iterator[tuple[list[Placement], list[Placement]]]:
+    """
+    Enumerate all (input_placements, output_placements) combinations.
+
+    Args:
+        input_ndims: List of ndim for each input tensor
+        output_ndims: List of ndim for each output tensor
+        include_partial_inputs: Whether to include Partial for inputs
+        include_partial_outputs: Whether to include Partial for outputs
+        include_strided_shard: Whether to include _StridedShard placements
+        strided_shard_split_factor: The split_factor for _StridedShard
+
+    Yields:
+        (input_placements, output_placements) tuples
+    """
+    input_options = [
+        enumerate_placements(
+            ndim,
+            include_partial_inputs,
+            include_strided_shard,
+            strided_shard_split_factor,
+        )
+        for ndim in input_ndims
+    ]
+    output_options = [
+        enumerate_placements(
+            ndim,
+            include_partial_outputs,
+            include_strided_shard,
+            strided_shard_split_factor,
+        )
+        for ndim in output_ndims
+    ]
+
+    for input_combo in itertools.product(*input_options):
+        for output_combo in itertools.product(*output_options):
+            yield list(input_combo), list(output_combo)
+
+
+def validate_sharding_rule_sample(
+    op,
+    full_args,
+    full_kwargs,
+    input_placements: list[Placement],
+    output_placements: list[Placement],
+    device_mesh: DeviceMesh,
+) -> bool:
+    """
+    Validate a sharding rule by running op with sharded inputs and checking output.
+
+    Args:
+        op: The operator to test
+        full_args: Full (unsharded) positional arguments
+        full_kwargs: Full (unsharded) keyword arguments
+        input_placements: Placement for each tensor input
+        output_placements: Expected placement for output
+        device_mesh: The device mesh to use
+
+    Returns:
+        True if the sharding rule is valid, False otherwise
+    """
+    from torch.utils import _pytree as pytree
+
+    # Extract tensors from args in order, pair with placements
+    full_tensors = [
+        a for a in pytree.tree_leaves(full_args) if isinstance(a, torch.Tensor)
+    ]
+    full_tensors += [
+        a for a in pytree.tree_leaves(full_kwargs) if isinstance(a, torch.Tensor)
+    ]
+
+    dtensors = [
+        distribute_tensor(t, device_mesh, (p,))
+        for t, p in zip(full_tensors, input_placements)
+    ]
+
+    # Build sharded args by replacing tensors with their sharded local versions
+    dtensor_idx = 0
+
+    def _to_local_shard(a):
+        nonlocal dtensor_idx
+        if isinstance(a, torch.Tensor):
+            local = dtensors[dtensor_idx].to_local()
+            dtensor_idx += 1
+            return local
+        return a
+
+    local_args, local_kwargs = pytree.tree_map(
+        _to_local_shard, (full_args, full_kwargs)
+    )
+
+    # Run and compare
+    ref_output = op(*full_args, **full_kwargs)
+    local_output = op(*local_args, **local_kwargs)
+    output_dt = DTensor.from_local(local_output, device_mesh, output_placements)
+    full_output = output_dt.redistribute(device_mesh, (Replicate(),)).to_local()
+    return ref_output.shape == full_output.shape and torch.allclose(
+        ref_output, full_output, atol=1e-5, rtol=1e-5
+    )
