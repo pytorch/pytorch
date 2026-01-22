@@ -26,8 +26,8 @@ clean:
 	$(RM) -r output
 
 .PHONY: magma-rocm72
-magma-rocm71: DESIRED_ROCM := 7.2
-magma-rocm71:
+magma-rocm72: DESIRED_ROCM := 7.2
+magma-rocm72:
 	$(DOCKER_RUN)
 
 .PHONY: magma-rocm71
