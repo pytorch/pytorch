@@ -265,7 +265,7 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
 def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
-    Decorator to mark a function as a leaf function for torch.compile.
+    Decorator to mark a function as a leaf function for :func:`torch.compile`.
 
     A leaf function appears as an opaque operation in the compiled graph. During
     compilation, Dynamo and AOT autograd do not trace into it. At runtime, the
@@ -328,7 +328,7 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
           at runtime (e.g., logging, external library calls).
 
         If your function has a static computation graph and no runtime side effects,
-        prefer ``allow_in_graph`` or ``nonstrict_trace`` instead. They allow AOT autograd
+        prefer :func:`allow_in_graph` or :func:`nonstrict_trace` instead. They allow AOT autograd
         to trace through and potentially optimize the code.
 
     Usage:
@@ -344,8 +344,8 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         - Inputs must use pytree-compatible types: tensors, Python primitives
         (int, float, bool, str), and built-in containers (list, tuple, dict).
         User-defined classes must be registered as pytree nodes via
-        :func:`torch.utils._pytree.register_pytree_node`.
-        - ``nn.Module`` can also be passed as input; its parameters and buffers are
+        :func:`torch.utils.pytree.register_pytree_node`.
+        - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers are
         tracked for autograd. The module must exist outside the compile region.
 
         **Supported Outputs**: Must be a tuple of tensors: ``return (tensor,)`` for one tensor,
@@ -369,12 +369,12 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         ``torch._dynamo.config.leaf_function_validate_outputs = True``. For more
         details, see :func:`torch.library.register_fake`.
 
-        **Limitations**: Currently, inductor backend and ``torch.export`` are not
-        yet supported.
+    Limitations:
+        Currently, inductor backend and :func:`torch.export.export` are not yet supported.
 
     Training / Autograd:
         Training is supported automatically if your leaf function is differentiable
-        in eager mode (e.g., it's implemented with PyTorch ops, ``torch.autograd.Function``,
+        in eager mode (e.g., it's implemented with PyTorch ops, :class:`torch.autograd.Function`,
         or differentiable custom ops).
 
         **Restriction**: Calling ``.backward()`` *inside* the leaf function is not
@@ -389,10 +389,10 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         Internally, inputs and outputs are detached from the outer autograd graph at the
         leaf function boundary. The leaf function builds its own local autograd
         graph. In backward, gradients propagate through this local graph to the
-        leaf function's inputs. If an nn.Module is passed in as input, the gradients
+        leaf function's inputs. If a :class:`torch.nn.Module` is passed in as input, the gradients
         will also flow back to its parameters and buffers.
 
-    How it Works:
+    How leaf_function Works:
         Understanding this helps avoid pitfalls:
 
         1. **Compilation**: Dynamo and AOT autograd do not trace into the leaf function.
@@ -400,8 +400,8 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
            shapes, and dtypes. The real function runs at runtime as eager Python.
 
         2. **Isolation**: Mutations to shared state (globals, closures) may not be
-           visible across the leaf function boundary. Pass data explicitly as
-           function arguments and return results as outputs.
+           visible across the boundary between leaf functions and compiled regions. Pass data
+           explicitly as function arguments and return results as outputs.
 
     Dangerous Patterns:
         These patterns may cause silent incorrectness or errors:
@@ -440,7 +440,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
           Bad::
 
-              # requires_grad must be False. Otherwise, you'll get a runtime error
               weight = torch.randn(3, 3)
 
 
@@ -479,9 +478,9 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
           execution.
 
     Example:
-        Wrapping an external library that implements custom CUDA kernels via
-        ``torch.autograd.Function``. The library has control flow Dynamo cannot
-        trace, but gradients flow because it defines backward logic::
+        Wrapping an external linear function as leaf_function. It implements custom kernels via
+        :class:`torch.autograd.Function`. The library has logging logic that needs to be
+        preserved. Gradients can flow back because it defines backward logic::
 
             @leaf_function
             def custom_forward(linear, x):
