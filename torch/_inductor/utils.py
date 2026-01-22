@@ -1857,8 +1857,11 @@ def can_use_tma(
         if rank < 2 or rank > 5:
             return False
 
-        # dtype ∈ {FP16, BF16, FP8-E4M3FN}
-        if dtype not in (torch.float16, torch.bfloat16, torch.float8_e4m3fn, torch.float8_e5m2) and (
+        # dtype ∈ {FP16, BF16, FP8-E4M3FN, FP8-E5M2}
+        supported_dtypes = (
+            torch.float16, torch.bfloat16, torch.float8_e4m3fn, torch.float8_e5m2
+        )
+        if dtype not in supported_dtypes and (
             not allow_float32 or dtype != torch.float32
         ):
             return False
@@ -1897,7 +1900,8 @@ def can_use_tma(
             return False
 
         # FP8 special case: inner ≥ 32
-        if dtype in (torch.float8_e4m3fn, torch.float8_e5m2) and not V.graph.sizevars.statically_known_geq(
+        fp8_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
+        if dtype in fp8_dtypes and not V.graph.sizevars.statically_known_geq(
             inner_dim, 32
         ):
             return False
