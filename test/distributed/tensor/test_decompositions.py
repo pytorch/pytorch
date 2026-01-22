@@ -45,16 +45,16 @@ class TestDecompSharding(TestCase):
         x_local = torch.randn(16)
         x = DTensor.from_local(x_local, mesh, [Shard(0)], run_check=False)
         out = torch.aminmax(x)
-        self.assertTrue(out.min.placements, Partial("min"))
-        self.assertTrue(out.max.placements, Partial("max"))
+        self.assertEqual(out.min.placements, (Partial("min"),))
+        self.assertEqual(out.max.placements, (Partial("max"),))
 
         # 2d mesh
         mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(-1, 2))
 
         x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(1), Partial("min")])
         out = torch.aminmax(x)
-        self.assertTrue(out.min.placements, (Partial("min"), Partial("min")))
-        self.assertTrue(out.max.placements, (Partial("max"), Replicate()))
+        self.assertEqual(out.min.placements, (Partial("min"), Partial("min")))
+        self.assertEqual(out.max.placements, (Partial("max"), Partial("max")))
 
     def test_custom_recursive_decomp(self):
         """

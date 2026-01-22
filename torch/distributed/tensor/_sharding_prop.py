@@ -469,6 +469,7 @@ class ShardingPropagator:
 
         single_dim_strategy = self.op_single_dim_strategy_funcs.get(op_schema.op)
         op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
+        decomp_exception = None
         if single_dim_strategy is not None or op_strategy_func is not None:
             """
             Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
@@ -515,8 +516,8 @@ class ShardingPropagator:
                     op_strategy = DecompShardingStrategy.propagate_strategy(
                         op_schema, self
                     )
-                except Exception:
-                    pass  # when we report no sharding strategy, should we say we tried the decomp?
+                except Exception as e:
+                    decomp_exception = e
 
         if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):
@@ -730,7 +731,7 @@ class ShardingPropagator:
         else:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
-            )
+            ) from decomp_exception
 
     def _adjust_shape_and_stride_args(
         self,

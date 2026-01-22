@@ -94,14 +94,14 @@ class DecompShardingStrategy:
     single-dimension strategies are then expanded to the full mesh.
     """
 
-    @classmethod
-    def has_decomp(cls, op: OpOverload) -> bool:
+    @staticmethod
+    def has_decomp(op: OpOverload) -> bool:
         # Check if op has a decomposition (explicit or CIA)
         return op in decomposition_table or op._can_decompose()
 
-    @classmethod
+    @staticmethod
     def propagate_strategy(
-        cls, op_schema: OpSchema, sharding_prop: ShardingPropagator
+        op_schema: OpSchema, sharding_prop: ShardingPropagator
     ) -> OpStrategy | None:
         if not tree_any(
             lambda x: isinstance(x, DTensorSpec),
@@ -109,7 +109,9 @@ class DecompShardingStrategy:
         ):
             return None
 
-        placements = cls._get_candidate_placements(op_schema)
+        candidate_placements = DecompShardingStrategy._get_candidate_placements(
+            op_schema
+        )
         mesh = try_find_mesh_from_args(
             op_schema.op,
             op_schema.args_schema + tuple(op_schema.kwargs_schema.values()),
@@ -121,10 +123,10 @@ class DecompShardingStrategy:
         fake_mesh = DeviceMesh(mesh.device_type, [0], _init_backend=False, _rank=0)
         single_dim_strategies = []
         output_placements: list[Placement | tuple[Placement, ...]] = []
-        for placement in placements:
+        for input_placements in candidate_placements:
             try:
-                output = cls._propagate_through_decomp(
-                    op_schema, placement, fake_mesh, sharding_prop
+                output = DecompShardingStrategy._propagate_through_decomp(
+                    op_schema, input_placements, fake_mesh, sharding_prop
                 )
             except NotImplementedError:
                 return None
@@ -135,7 +137,7 @@ class DecompShardingStrategy:
             output_placements = (
                 [output] if not isinstance(output, tuple) else list(output)
             )
-            single_dim_strategies.append(output_placements + list(placement))
+            single_dim_strategies.append(output_placements + list(input_placements))
 
         if not single_dim_strategies:
             raise AssertionError(
@@ -148,9 +150,8 @@ class DecompShardingStrategy:
             mesh, strategy_schema, single_dim_strategies, input_index=n_outputs
         )
 
-    @classmethod
+    @staticmethod
     def _propagate_through_decomp(
-        cls,
         op_schema: OpSchema,
         placement: tuple[Placement | None],
         mesh: DeviceMesh,
@@ -200,9 +201,9 @@ class DecompShardingStrategy:
             return flat[0] if len(flat) == 1 else tuple(flat)
         return result
 
-    @classmethod
+    @staticmethod
     def _get_candidate_placements(
-        cls, op_schema: OpSchema
+        op_schema: OpSchema,
     ) -> list[tuple[Placement | None]]:
         tensor_specs = _extract_input_specs(op_schema)
         flat_specs, _ = tree_flatten(list(tensor_specs))
