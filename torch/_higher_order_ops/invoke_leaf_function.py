@@ -68,14 +68,6 @@ class GradientInfo:
     - size: torch.Size for creating zero gradients when needed
     - dtype: torch.dtype for creating zero gradients
     - device: torch.device for creating zero gradients
-
-    Why we store metadata (size, dtype, device) instead of using weakref:
-    - The zeros fallback needs to create a tensor with the same shape/dtype/device
-      as the original input. With explicit metadata, we always have this info.
-    - Weakref would require a fallback path if the tensor is collected, adding
-      complexity. And if we need the fallback anyway, might as well always use it.
-    - The metadata overhead (a few bytes for size tuple + dtype + device) is
-      negligible compared to actual tensor data we'd otherwise store.
     """
 
     edge: torch.autograd.graph.GradientEdge
@@ -395,7 +387,6 @@ def _make_forward(
                 check_escaped_gradients(outputs, inputs, requires_grad_indices)
 
                 # Capture lightweight gradient info instead of storing full tensors.
-                # This significantly reduces memory usage for large tensors.
                 state["inputs"] = tuple(
                     GradientInfo(
                         edge=get_gradient_edge(inp),
@@ -408,7 +399,6 @@ def _make_forward(
                     for inp in inputs
                 )
 
-                # Capture output GradientInfo for tensors with grad_fn
                 flat_outputs = outputs if isinstance(outputs, tuple) else (outputs,)
                 state["outputs"] = tuple(
                     GradientInfo(
@@ -477,7 +467,6 @@ def make_tracing_wrappers(
             raise RuntimeError(
                 "invoke_leaf_function backward expects inputs to be set in forward."
             )
-        # Return fake gradients for tracing (shapes match inputs)
         return tuple(
             torch.empty(info.size, dtype=info.dtype, device=info.device)
             if info is not None
