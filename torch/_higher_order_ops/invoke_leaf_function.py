@@ -573,11 +573,12 @@ def _validate_outputs_match(
         RuntimeError: If outputs don't match with detailed error message.
     """
     # Outputs are already flattened tuples from the wrapper
-    assert len(fake_output) == len(real_output), (
-        f"Output count mismatch in @leaf_function decorator.\n"
-        f"fake_impl returned {len(fake_output)} values\n"
-        f"real_impl returned {len(real_output)} values"
-    )
+    if len(fake_output) != len(real_output):
+        raise AssertionError(
+            f"Output count mismatch in @leaf_function decorator.\n"
+            f"fake_impl returned {len(fake_output)} values\n"
+            f"real_impl returned {len(real_output)} values"
+        )
 
     # Check each tensor's shape and dtype
     for i, (fake_val, real_val) in enumerate(zip(fake_output, real_output)):
