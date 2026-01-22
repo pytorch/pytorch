@@ -504,6 +504,23 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     return insts[begin_idx + 1 : end_idx + 1]
 
 
+@functools.cache
+def get_comprehension_bytecode_prefix() -> list[str]:
+    """Get the bytecode instructions that precede BUILD_LIST in a list comprehension.
+
+    This dynamically discovers the bytecode pattern for list comprehensions,
+    making the code resilient to bytecode changes across Python versions.
+    """
+    def fn():
+        return [i for i in range(1)]
+
+    insts = [inst.opname for inst in dis.get_instructions(fn)]
+    # Find BUILD_LIST (the start of the comprehension body)
+    build_idx = insts.index("BUILD_LIST")
+    # Return the 2 instructions before BUILD_LIST
+    return insts[build_idx - 2 : build_idx]
+
+
 def _detect_and_normalize_assert_statement(
     self: InstructionTranslatorBase,
     truth_fn: Callable[[object], bool],
@@ -4353,21 +4370,22 @@ class InstructionTranslatorBase(
     def _is_comprehension_start(self) -> bool:
         """Detect if we're at the start of a list/dict comprehension in 3.12+.
 
-        In Python 3.12+, comprehensions are inlined with this bytecode pattern:
-            LOAD_FAST_AND_CLEAR i    # Save original value of iterator var
-            SWAP 2
-            BUILD_LIST 0             # <- Current instruction (or BUILD_MAP 0)
-            SWAP 2
-            FOR_ITER ...
+        In Python 3.12+, comprehensions are inlined with a bytecode pattern that
+        precedes BUILD_LIST/BUILD_MAP. This function dynamically discovers that
+        pattern to be resilient to bytecode changes across Python versions.
         """
         if sys.version_info < (3, 12):
             return False
+
         ip = self.instruction_pointer - 1  # Current instruction index
-        # Check for the exact pattern: LOAD_FAST_AND_CLEAR, SWAP, BUILD_LIST/BUILD_MAP
-        if ip >= 2:
-            prev1 = self.instructions[ip - 1]
-            prev2 = self.instructions[ip - 2]
-            if prev1.opname == "SWAP" and prev2.opname == "LOAD_FAST_AND_CLEAR":
+        pattern = get_comprehension_bytecode_prefix()
+
+        if ip >= len(pattern):
+            prev_insts = [
+                self.instructions[ip - len(pattern) + i].opname
+                for i in range(len(pattern))
+            ]
+            if prev_insts == pattern:
                 return True
         return False
 
