@@ -150,10 +150,10 @@ class CreateBackendTest(TestCase):
                 )
 
     def test_create_backend_returns_backend_if_is_host_is_false(self) -> None:
-        # Need variable assignment below to keep the store alive for the duration
-        # of the test or GC is removing it
-        _ = TCPStore(  # type: ignore[call-arg]
-            self._expected_endpoint_host, self._expected_endpoint_port, is_master=True
+        store = TCPStore(  # type: ignore[call-arg] # noqa: F841
+            self._expected_endpoint_host,
+            self._expected_endpoint_port,
+            is_master=True,
         )
 
         self._params.config["is_host"] = "false"

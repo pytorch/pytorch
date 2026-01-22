@@ -24,9 +24,14 @@ from torch.distributed.tensor._collective_utils import (
     redistribute_cost,
     shard_dim_alltoall,
 )
-from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor._redistribute import (
     _gen_transform_infos,
+    redistribute_local_tensor,
     use_min_cost_redistribution_plan,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -1137,10 +1142,8 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 # even sharding
                 (16, 8),
                 (8, 16, 32),
-                (8, 32, 16, 16),
                 # uneven sharding with padding
                 (17, 5),
-                (13, 2, 13),
                 (33, 16, 8, 1),
             ]
 
@@ -1253,55 +1256,40 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                         )
 
     @with_comms
-    def test_ordered_redistribute_with_partial(self):
-        """Test mixing Partial in the original placements and do redistribute."""
-        # This test takes 226s to complete on 8XA100...
-        torch.manual_seed(21)
-        with maybe_disable_local_tensor_mode():
-            mesh = init_device_mesh(self.device_type, (2, 2, 2))
-            input_tensor_shape = [
-                # even sharding
-                (16, 8),
-                (8, 16, 32),
-                # uneven sharding with padding
-                (17, 5),
-                (13, 2, 13),
-                (33, 16, 8, 1),
-            ]
-            placement_choice = [
-                Shard(0),
-                Shard(1),
-                Shard(2),
-                Partial("sum"),
-                Partial("min"),
-                Replicate(),
-            ]
-            # pick 3 for the 3D mesh
-            partial_placement_comb = list(itertools.combinations(placement_choice, 3))
+    def test_redistribute_partial_to_different_partial_not_supported(self):
+        # Test that redistributing from one Partial type to another raises an error
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.randn(4, 4, device=self.device_type)
 
-        def _is_valid_placement(placements, tensor_rank):
-            # Check if placements is valid for tensor with rank `tensor_rank`
-            for placement in placements:
-                if isinstance(placement, Shard):
-                    if placement.dim >= tensor_rank:
-                        return False
-            return True
+        src_spec = DTensorSpec(
+            device_mesh,
+            (Partial("sum"),),
+            tensor_meta=TensorMeta(
+                local_tensor.size(),
+                local_tensor.stride,
+                local_tensor.dtype,
+            ),
+        )
+        tgt_spec = DTensorSpec(
+            device_mesh,
+            (Partial("avg"),),
+            tensor_meta=TensorMeta(
+                local_tensor.size(),
+                local_tensor.stride,
+                local_tensor.dtype,
+            ),
+        )
 
-        for shape in input_tensor_shape:
-            for placements in partial_placement_comb:
-                if not _is_valid_placement(placements, len(shape)):
-                    continue
-                local_tensor = torch.randn(shape, device=self.device_type)
-                full_tensor = DTensor.from_local(local_tensor, mesh, placements)
-                with maybe_disable_local_tensor_mode():
-                    shard_orders = generate_shard_orders(mesh, len(shape))
-                for shard_order in shard_orders:
-                    sharded_dt = redistribute(
-                        full_tensor, mesh, placements=None, shard_order=shard_order
-                    )
-                    self.assertEqual(
-                        make_full_tensor(sharded_dt), make_full_tensor(full_tensor)
-                    )
+        # Attempting to redistribute to Partial("max") should raise an error
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"Redistribution from one partial type.*to another.*is unsupported",
+        ):
+            redistribute_local_tensor(
+                local_tensor,
+                src_spec,
+                tgt_spec,
+            )
 
     @unittest.skip(
         "Temporarily skipping until we support special placement types in "

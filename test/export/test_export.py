@@ -5283,6 +5283,49 @@ def forward(self, x):
         ):
             ref(torch.randn(4, 4), torch.randn(4, 4))
 
+    def test_detect_leak_nonstrict_buffer_in_hook(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.buffer.sum() + x.sum()
+
+        class Pipeline:
+            def __init__(self, model):
+                self.model = model
+                self.bank = []
+
+            def __call__(self, x):
+                def log(model, inps, outputs):
+                    for n, b in model.named_buffers():
+                        self.bank.append(b)
+
+                self.model.register_forward_hook(log)
+                ep = export(self.model, (x,), strict=False).module()
+                return ep(x)
+
+        # Real one
+        # Detected 1 fake tensors that are still alive after export.
+        # This is likely result of torch.export.export not being able to track side effects that is happening outside of model scope.
+        # Leaked tensors: FakeTensor(shape=torch.Size([4, 4]), dtype=torch.float32) from node 'b_buffer': Used by 'sum_1':
+        # test/export/test_export.py", line 5293, in forward return self.buffer.sum() + x.sum()
+
+        pattern = re.compile(
+            r"Detected\s+1\s+fake tensor.*?"
+            r"Used by\s+'.*?':.*?"
+            r"return\s+self\.buffer\.sum\(\)\s*\+\s*x\.sum\(\)",
+            re.DOTALL,
+        )
+
+        with (
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
+            self.assertWarnsRegex(UserWarning, pattern),
+        ):
+            p = Pipeline(model=Model())
+            p(torch.randn(4, 4))
+
     def test_detect_leak_nonstrict_with_stacktrace(self):
         global_list = []
 
@@ -8123,9 +8166,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 _ = export(mod, inp, strict=True)
 
     @requires_gpu
-    @skipIfRocm
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
     def test_export_lstm_gpu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -8149,9 +8189,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(eager_out, export_out)
 
     @requires_gpu
-    @skipIfRocm
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
     def test_export_gru_gpu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -8175,9 +8212,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertEqual(eager_out, export_out)
 
     @requires_gpu
-    @skipIfRocm
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
     def test_export_rnn_flatten_parameters_gpu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -9775,7 +9809,6 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
     @requires_cuda_and_triton
-    @testing.expectedFailureStrictV2
     def test_export_associative_scan_lifted_buffers(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
@@ -10020,7 +10053,6 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-    @testing.expectedFailureStrictV2
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -10340,7 +10372,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             # expected 4, but got 7
             ep_v2.module()(*test_inp)
 
-    @testing.expectedFailureStrictV2
     def test_constant_output(self):
         class ModuleConstant(torch.nn.Module):
             def __init__(self) -> None:
@@ -16484,13 +16515,10 @@ def forward(self, x):
     submod_6 = self.submod_1
     to = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_6, mod_embedding_weight);  submod_6 = mod_embedding_weight = None
     getitem = to[0];  to = None
-    submod_7 = self.submod_3
-    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_7);  submod_7 = wrap_with_set_grad_enabled = None
-    submod_8 = self.submod_4
-    view_as = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_8, detach, getitem);  submod_8 = detach = getitem = None
-    getitem_1 = view_as[0];  view_as = None
+    set_ = torch.ops.aten.set_.source_Tensor(detach, getitem);  detach = getitem = None
+    view_as = torch.ops.aten.view_as.default(set_, set_);  set_ = None
     ones = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='cuda', index=0), pin_memory = False)
-    embedding = torch.ops.aten.embedding.default(getitem_1, ones);  getitem_1 = ones = None
+    embedding = torch.ops.aten.embedding.default(view_as, ones);  view_as = ones = None
     sum_1 = torch.ops.aten.sum.default(embedding);  embedding = None
     sum_2 = torch.ops.aten.sum.default(args_0);  args_0 = None
     sum_3 = torch.ops.aten.sum.default(sum_1);  sum_1 = None

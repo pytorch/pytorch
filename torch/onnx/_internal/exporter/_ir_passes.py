@@ -5,7 +5,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter import _constants
 
 

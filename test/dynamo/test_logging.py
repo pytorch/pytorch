@@ -197,13 +197,132 @@ class LoggingTests(LoggingTestCase):
 
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
-        def fn(x, y):
-            return torch.add(x, y)
+        def outmost_fn(x, ys, zs):
+            return outer_fn(x, ys, zs)
 
-        fn_opt = torch.compile(fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000), torch.ones(1000, 1000))
-        fn_opt(torch.ones(1000, 1000), 1)
-        self.assertGreater(len(records), 0)
+        def outer_fn(x, ys, zs):
+            return fn(x, ys, zs)
+
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0, 3.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch.compile(outmost_fn, backend="eager")
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = re.sub(
+            r'"[^"]*"',
+            "[file_path]",
+            "\n".join(r.getMessage() for r in records),
+        )
+        self.assertIn(
+            """\
+    - User stack trace:
+    -   File [file_path], line 201, in outmost_fn
+    -     return outer_fn(x, ys, zs)
+    -   File [file_path], line 204, in outer_fn
+    -     return fn(x, ys, zs)
+    -   File [file_path], line 207, in fn
+    -     return inner(x, ys, zs)
+    -   File [file_path], line 210, in inner
+    -     for y, z in zip(ys, zs):""",
+            record_str,
+        )
+
+    @make_logging_test(recompiles=True)
+    def test_recompiles_closure_variable_hint(self, records):
+        def make_cl(n1, n2):
+            def inner(x):
+                return x + n1 + n2
+
+            return inner
+
+        @torch.compile(backend="eager")
+        def fn(cl, x):
+            return cl(x)
+
+        fn(make_cl(0, 1), torch.ones(3))
+        fn(make_cl(0, 2), torch.ones(3))
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The recompilation log should include a hint explaining which closure variable
+        # the cell_contents refers to
+        self.assertIn('(HINT: guard on "n2")', record_str)
+
+    @make_logging_test(recompiles=True)
+    def test_recompiles_nested_closure_variable_hint(self, records):
+        # block_mask.mask_mod.__closure__[0].cell_contents.__closure__[0].cell_contents
+        def make_inner_fn(inner_val):
+            def inner(x):
+                return x + inner_val
+
+            return inner
+
+        def make_outer_fn(outer_val, inner_fn):
+            def outer(x):
+                return inner_fn(x) * outer_val
+
+            return outer
+
+        class BlockMask:
+            def __init__(self, mask_mod):
+                self.mask_mod = mask_mod
+
+        @torch.compile(backend="eager")
+        def fn(block_mask, x):
+            return block_mask.mask_mod(x)
+
+        # inner_fn captures inner_val, outer captures (outer_val, inner_fn)
+        # This creates: block_mask.mask_mod.__closure__[0].cell_contents.__closure__[0].cell_contents
+        bm1 = BlockMask(make_outer_fn(2, make_inner_fn(10)))
+        bm2 = BlockMask(make_outer_fn(2, make_inner_fn(20)))
+
+        fn(bm1, torch.ones(3))
+        fn(bm2, torch.ones(3))
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The recompilation log should show the hint for the first closure variable
+        self.assertIn('(HINT: guard on "inner_val")', record_str)
+        # Verify it shows the full nested path
+        self.assertIn("cell_contents.__closure__", record_str)
+
+    @make_logging_test(recompiles=True)
+    def test_recompiles_closure_variable_attribute_hint(self, records):
+        # Test when guard is on an attribute of the closure cell contents
+        # e.g., block_mask.mask_mod.__closure__[0].cell_contents.__code__
+        # The hint should still show which closure variable is involved
+        class Transform:
+            def __init__(self, scale):
+                self.scale = scale
+
+            def __call__(self, x):
+                return x * self.scale
+
+        def make_fn(transform):
+            def fn(x):
+                return transform(x)
+
+            return fn
+
+        @torch.compile(backend="eager")
+        def outer(inner_fn, x):
+            return inner_fn(x)
+
+        outer(make_fn(Transform(2)), torch.ones(3))
+        outer(make_fn(Transform(3)), torch.ones(3))  # transform.scale changes
+
+        record_str = "\n".join(r.getMessage() for r in records)
+        # The hint should show the full path from closure var: "transform".scale
+        self.assertIn('(HINT: guard on "transform".scale)', record_str)
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
@@ -254,7 +373,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 28, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 33, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
 
     @make_logging_test()
