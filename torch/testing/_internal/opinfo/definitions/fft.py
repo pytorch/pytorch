@@ -125,6 +125,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -143,6 +145,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -176,6 +180,8 @@ op_db: list[OpInfo] = [
             torch.half,
             torch.complex32,
         ),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -199,6 +205,8 @@ op_db: list[OpInfo] = [
             torch.half,
             torch.complex32,
         ),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=2),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -231,6 +239,8 @@ op_db: list[OpInfo] = [
             torch.half,
             torch.complex32,
         ),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -272,6 +282,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -306,6 +318,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfXPU=all_types_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -325,6 +339,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfXPU=all_types_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -346,6 +362,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfXPU=all_types_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and(torch.bool),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -375,6 +393,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
     ),
     SpectralFuncInfo(
         "fft.ifft2",
@@ -393,6 +413,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         decorators=[
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
@@ -422,6 +444,8 @@ op_db: list[OpInfo] = [
             torch.half,
             torch.complex32,
         ),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         decorators=[
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
@@ -445,6 +469,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfXPU=all_types_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and(torch.bool),
         skips=(),
         check_batched_grad=False,
     ),
@@ -465,6 +491,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfXPU=all_types_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and(torch.bool),
         check_batched_grad=False,
         check_batched_gradgrad=False,
         decorators=(
@@ -495,6 +523,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archss
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfXPU=all_types_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and(torch.bool),
         check_batched_grad=False,
         check_batched_gradgrad=False,
         decorators=[
@@ -524,6 +554,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         check_batched_gradgrad=False,
     ),
     SpectralFuncInfo(
@@ -543,6 +575,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         check_batched_gradgrad=False,
         decorators=[
             DecorateInfo(
@@ -569,6 +603,8 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfXPU=all_types_and_complex_and(torch.bool),
+        backward_dtypesIfXPU=all_types_and_complex_and(torch.bool),
         check_batched_gradgrad=False,
         decorators=[
             DecorateInfo(
