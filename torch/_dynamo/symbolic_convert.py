@@ -515,10 +515,11 @@ def get_comprehension_bytecode_prefix() -> list[str]:
         return [i for i in range(1)]
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
-    # Find BUILD_LIST (the start of the comprehension body)
-    build_idx = insts.index("BUILD_LIST")
-    # Return the 2 instructions before BUILD_LIST
-    return insts[build_idx - 2 : build_idx]
+
+    start_idx = len(insts) - 1 - insts[::-1].index("LOAD_FAST_AND_CLEAR")
+    end_idx = insts.index("BUILD_LIST")
+
+    return insts[start_idx:end_idx]
 
 
 def _detect_and_normalize_assert_statement(
@@ -4377,17 +4378,11 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 12):
             return False
 
-        ip = self.instruction_pointer - 1  # Current instruction index
+        ip = self.instruction_pointer - 1
         pattern = get_comprehension_bytecode_prefix()
+        prefix = list(map(lambda x: x.opname, self.instructions[ip - len(pattern):ip]))
 
-        if ip >= len(pattern):
-            prev_insts = [
-                self.instructions[ip - len(pattern) + i].opname
-                for i in range(len(pattern))
-            ]
-            if prev_insts == pattern:
-                return True
-        return False
+        return prefix == pattern
 
     def _find_comprehension_end(self) -> int:
         """Find instruction position after the comprehension ends.
