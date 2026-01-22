@@ -18,6 +18,7 @@
 #include <ATen/ops/native_batch_norm_native.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
 #include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/batch_norm_update_stats_native.h>
 #endif
 
 namespace at::native {
@@ -1262,6 +1263,180 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
     }
   }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
+}
+
+// batch_norm_update_stats MPS implementation using MPSGraph
+std::tuple<Tensor, Tensor> batch_norm_update_stats_mps(
+    const Tensor& input,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    double momentum) {
+  using namespace at::native::mps;
+
+  TORCH_CHECK(input.dim() >= 2, "Expected at least 2D input (got ", input.dim(), "D input)");
+  
+  const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
+  const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
+  TORCH_CHECK(has_running_mean == has_running_var,
+              "running_mean and running_var must either both be None or neither be None");
+
+  const int64_t n_channels = input.size(1);
+  
+  // Output tensors: save_mean and save_invstd (inverse standard deviation)
+  Tensor save_mean = at::empty({n_channels}, input.options());
+  Tensor save_invstd = at::empty({n_channels}, input.options());
+
+  if (input.numel() == 0) {
+    save_mean.zero_();
+    save_invstd.fill_(std::numeric_limits<float>::infinity());
+    return std::make_tuple(save_mean, save_invstd);
+  }
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* runningMeanTensor_ = nil;
+    MPSGraphTensor* runningVarTensor_ = nil;
+    MPSGraphTensor* saveMeanTensor_ = nil;
+    MPSGraphTensor* saveInvstdTensor_ = nil;
+    MPSGraphTensor* runningMeanUpdateTensor_ = nil;
+    MPSGraphTensor* runningVarUpdateTensor_ = nil;
+  };
+
+  auto stream = at::mps::getCurrentMPSStream();
+
+  @autoreleasepool {
+    int num_input_dims = input.dim();
+    MPSShape* input_shape_readonly = getMPSShape(input);
+    
+    // Build reduction axes (all except channel dimension)
+    // For input of shape [N, C, ...], reduce over dim 0 and dims 2+
+    NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_input_dims - 1)];
+    axes[0] = @0;
+    for (int i = 2; i < num_input_dims; i++) {
+      axes[i - 1] = [NSNumber numberWithInt:i];
+    }
+
+    // Number of elements per channel (for Bessel correction)
+    int64_t N = input.numel() / n_channels;
+    
+    NSString* ns_shape_key = [[getMPSShape(input) valueForKey:@"description"] componentsJoinedByString:@","];
+    std::string key = "batch_norm_update_stats_mps:" + std::to_string(momentum) + ":" +
+        std::to_string(has_running_mean) + ":" + [ns_shape_key UTF8String] + ":" +
+        getTensorsStringKey({input});
+    
+    auto input_mps_dtype = getMPSDataType(input);
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape_readonly);
+      MPSGraphTensor* runningMeanTensor = nil;
+      MPSGraphTensor* runningVarTensor = nil;
+      
+      if (has_running_mean) {
+        runningMeanTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, @[@(n_channels)]);
+        runningVarTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, @[@(n_channels)]);
+      }
+
+      // Compute batch mean and variance
+      MPSGraphTensor* batchMeanTensor = [mpsGraph meanOfTensor:inputTensor axes:axes name:nil];
+      MPSGraphTensor* batchVarianceTensor = [mpsGraph varianceOfTensor:inputTensor axes:axes name:nil];
+
+      // Reshape to [C] for output
+      MPSGraphTensor* saveMeanTensor = [mpsGraph reshapeTensor:batchMeanTensor withShape:@[@(n_channels)] name:nil];
+      
+      // Compute inverse standard deviation: 1 / sqrt(var + eps)
+      // Note: batch_norm_update_stats uses eps=0, but we need to handle zero variance
+      MPSGraphTensor* epsTensor = [mpsGraph constantWithScalar:1e-5 shape:@[@1] dataType:input_mps_dtype];
+      MPSGraphTensor* varPlusEps = [mpsGraph additionWithPrimaryTensor:batchVarianceTensor
+                                                       secondaryTensor:epsTensor
+                                                                  name:nil];
+      MPSGraphTensor* sqrtVar = [mpsGraph squareRootWithTensor:varPlusEps name:nil];
+      MPSGraphTensor* invStd = [mpsGraph reciprocalWithTensor:sqrtVar name:nil];
+      MPSGraphTensor* saveInvstdTensor = [mpsGraph reshapeTensor:invStd withShape:@[@(n_channels)] name:nil];
+
+      MPSGraphTensor* runningMeanUpdateTensor = nil;
+      MPSGraphTensor* runningVarUpdateTensor = nil;
+      
+      if (has_running_mean) {
+        // Bessel correction for unbiased variance estimate
+        float besselCorrection = float(N) / float(N - 1.0f);
+        MPSGraphTensor* besselTensor = [mpsGraph constantWithScalar:(double)besselCorrection
+                                                              shape:@[@1]
+                                                           dataType:input_mps_dtype];
+        MPSGraphTensor* unbiasedVar = [mpsGraph multiplicationWithPrimaryTensor:batchVarianceTensor
+                                                                secondaryTensor:besselTensor
+                                                                           name:nil];
+
+        // Exponential moving average update:
+        // running_stat = (1 - momentum) * running_stat + momentum * batch_stat
+        MPSGraphTensor* momentumTensor = [mpsGraph constantWithScalar:(double)momentum
+                                                                shape:@[@1]
+                                                             dataType:input_mps_dtype];
+        MPSGraphTensor* oneMinusMomentum = [mpsGraph constantWithScalar:(double)(1.0 - momentum)
+                                                                  shape:@[@1]
+                                                               dataType:input_mps_dtype];
+
+        // Update running mean
+        MPSGraphTensor* scaledBatchMean = [mpsGraph multiplicationWithPrimaryTensor:saveMeanTensor
+                                                                    secondaryTensor:momentumTensor
+                                                                               name:nil];
+        MPSGraphTensor* scaledRunningMean = [mpsGraph multiplicationWithPrimaryTensor:runningMeanTensor
+                                                                      secondaryTensor:oneMinusMomentum
+                                                                                 name:nil];
+        runningMeanUpdateTensor = [mpsGraph additionWithPrimaryTensor:scaledBatchMean
+                                                      secondaryTensor:scaledRunningMean
+                                                                 name:nil];
+
+        // Update running var (using unbiased variance)
+        MPSGraphTensor* reshapedUnbiasedVar = [mpsGraph reshapeTensor:unbiasedVar withShape:@[@(n_channels)] name:nil];
+        MPSGraphTensor* scaledBatchVar = [mpsGraph multiplicationWithPrimaryTensor:reshapedUnbiasedVar
+                                                                   secondaryTensor:momentumTensor
+                                                                              name:nil];
+        MPSGraphTensor* scaledRunningVar = [mpsGraph multiplicationWithPrimaryTensor:runningVarTensor
+                                                                     secondaryTensor:oneMinusMomentum
+                                                                                name:nil];
+        runningVarUpdateTensor = [mpsGraph additionWithPrimaryTensor:scaledBatchVar
+                                                     secondaryTensor:scaledRunningVar
+                                                                name:nil];
+      }
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->runningMeanTensor_ = runningMeanTensor;
+      newCachedGraph->runningVarTensor_ = runningVarTensor;
+      newCachedGraph->saveMeanTensor_ = saveMeanTensor;
+      newCachedGraph->saveInvstdTensor_ = saveInvstdTensor;
+      newCachedGraph->runningMeanUpdateTensor_ = runningMeanUpdateTensor;
+      newCachedGraph->runningVarUpdateTensor_ = runningVarUpdateTensor;
+    });
+
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
+    auto saveMeanPlaceholder = Placeholder(cachedGraph->saveMeanTensor_, save_mean);
+    auto saveInvstdPlaceholder = Placeholder(cachedGraph->saveInvstdTensor_, save_invstd);
+
+    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
+    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
+
+    NSMutableDictionary* results = [[NSMutableDictionary new] autorelease];
+    results[saveMeanPlaceholder.getMPSGraphTensor()] = saveMeanPlaceholder.getMPSGraphTensorData();
+    results[saveInvstdPlaceholder.getMPSGraphTensor()] = saveInvstdPlaceholder.getMPSGraphTensorData();
+
+    if (has_running_mean) {
+      auto runningMeanPlaceholder = Placeholder(cachedGraph->runningMeanTensor_, running_mean_opt.value());
+      auto runningVarPlaceholder = Placeholder(cachedGraph->runningVarTensor_, running_var_opt.value());
+      feeds[runningMeanPlaceholder.getMPSGraphTensor()] = runningMeanPlaceholder.getMPSGraphTensorData();
+      feeds[runningVarPlaceholder.getMPSGraphTensor()] = runningVarPlaceholder.getMPSGraphTensorData();
+
+      // For in-place update of running stats, we use the same tensors as outputs
+      auto runningMeanUpdatePlaceholder = Placeholder(cachedGraph->runningMeanUpdateTensor_, running_mean_opt.value());
+      auto runningVarUpdatePlaceholder = Placeholder(cachedGraph->runningVarUpdateTensor_, running_var_opt.value());
+      results[runningMeanUpdatePlaceholder.getMPSGraphTensor()] = runningMeanUpdatePlaceholder.getMPSGraphTensorData();
+      results[runningVarUpdatePlaceholder.getMPSGraphTensor()] = runningVarUpdatePlaceholder.getMPSGraphTensorData();
+    }
+
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+
+  return std::make_tuple(save_mean, save_invstd);
 }
 
 } // namespace at::native

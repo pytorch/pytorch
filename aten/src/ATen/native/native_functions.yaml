@@ -4561,6 +4561,7 @@
   dispatch:
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
+    MPS: batch_norm_update_stats_mps
   autogen: batch_norm_update_stats.out
 
 - func: is_vulkan_available() -> bool
