@@ -462,7 +462,8 @@ class DTensorTestBase(MultiProcessTestCase):
             # accelerator is also available.
             dist.barrier()
         else:
-            dist.barrier(device_ids=[device_id])
+            pass
+            # dist.barrier(device_ids=[device_id])
 
         dist.destroy_process_group()
 
@@ -535,7 +536,7 @@ def with_comms(
             try:
                 func(self, *args, **kwargs)  # type: ignore[misc]
             except Exception as e:
-                dist.destroy_process_group()
+                # dist.destroy_process_group()
                 raise e
 
             self.destroy_pg()
