@@ -1,14 +1,13 @@
-# mypy: ignore-errors
+from __future__ import annotations
 
 import copy
 import logging
 import os
 import pickle
 import random
-from collections.abc import Callable
 from contextlib import contextmanager
 from functools import partial
-from typing import Union
+from typing import Any, TYPE_CHECKING, Union
 
 import sympy
 
@@ -29,12 +28,19 @@ from .partitioners import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Generator, Sequence
+
+    from torch.fx.node import Node
+    from torch.types import IntLikeType
+
+
 log = logging.getLogger(__name__)
 
 
 # These canonicalization are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
-def _canonicalize(fx_g):
+def _canonicalize(fx_g: fx.GraphModule) -> fx.GraphModule:
     for node in fx_g.graph.find_nodes(
         op="call_function", target=torch.ops.aten._to_copy
     ):
@@ -44,7 +50,7 @@ def _canonicalize(fx_g):
 
 
 @contextmanager
-def _disable_jit_autocast():
+def _disable_jit_autocast() -> Generator[None, None, None]:
     old_jit_autocast_flag = torch._C._jit_set_autocast_mode(False)
     try:
         yield
@@ -53,7 +59,7 @@ def _disable_jit_autocast():
 
 
 @make_boxed_compiler
-def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
+def ts_compile(fx_g: fx.GraphModule, inps: Sequence[Any]) -> torch.jit.ScriptModule:
     """
     Compiles the :attr:`fx_g` with Torchscript compiler.
 
@@ -99,18 +105,22 @@ def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     return f
 
 
-def _draw_graph_compile(fx_g, _, name, clear_meta=True):
+def _draw_graph_compile(
+    fx_g: fx.GraphModule, _: Any, name: str, clear_meta: bool = True
+) -> fx.GraphModule:
     print(fx_g.code)
     draw_graph(fx_g, name, clear_meta=clear_meta)
     return fx_g
 
 
-def draw_graph_compile(name):
+def draw_graph_compile(
+    name: str,
+) -> Callable[[fx.GraphModule, list[Any]], fx.GraphModule]:
     return make_boxed_compiler(partial(_draw_graph_compile, name=name))
 
 
 @make_boxed_compiler
-def nop(fx_g: fx.GraphModule, _) -> Callable:
+def nop(fx_g: fx.GraphModule, _: Any) -> fx.GraphModule:
     """
     Returns the :attr:`fx_g` Fx graph module as it is. This is a no-op compiler
     and can be used to check accuracy.
@@ -123,22 +133,33 @@ def nop(fx_g: fx.GraphModule, _) -> Callable:
 
 
 class DebugInterpreter(fx.Interpreter):
-    def run(self, *args):
-        self.symbol_mapping = bind_symbols(self.module, *args)
-        super().run(*args)
+    def run(
+        self,
+        *args: Any,
+        initial_env: dict[Node, Any] | None = None,
+        enable_io_processing: bool = True,
+    ) -> Any:
+        self.symbol_mapping = bind_symbols(
+            # pyrefly: ignore[bad-argument-type]
+            self.module,
+            *args,
+        )
+        return super().run(
+            *args, initial_env=initial_env, enable_io_processing=enable_io_processing
+        )
 
-    def run_node(self, n):
-        def subst_symint(ni):
+    def run_node(self, n: Node) -> Any:
+        def subst_symint(ni: IntLikeType) -> int:
             if not isinstance(ni, SymInt):
                 return ni
             r = sympy.expand(ni.node.expr.xreplace(self.symbol_mapping))
             assert r.is_number, r
             return int(r)
 
-        def subst_symint_tuple(nis):
+        def subst_symint_tuple(nis: tuple[IntLikeType, ...]) -> tuple[int, ...]:
             return tuple(subst_symint(ni) for ni in nis)
 
-        def check_significant_strides(a, b):
+        def check_significant_strides(a: torch.Tensor, b: torch.Tensor) -> bool:
             if subst_symint(a.numel()) > 0:
                 for idx in range(a.ndim):
                     if (
@@ -148,7 +169,7 @@ class DebugInterpreter(fx.Interpreter):
                         return False
             return True
 
-        def check(nv, rv, desc):
+        def check(nv: torch.Tensor, rv: torch.Tensor, desc: Callable[[], str]) -> None:
             assert callable(desc)
             assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
             assert subst_symint_tuple(nv.size()) == rv.size(), (
@@ -178,7 +199,9 @@ class DebugInterpreter(fx.Interpreter):
 
 
 @make_boxed_compiler
-def debug_nop(fx_g: fx.GraphModule, _) -> Callable:
+def debug_nop(
+    fx_g: fx.GraphModule, _: Any
+) -> Callable[[DebugInterpreter, Any, dict[Node, Any] | None, bool], Any]:
     """
     Returns a (slow) interpreter over the FX graph module that also checks
     various debugging properties (e.g., that tracing strides matched real
@@ -188,14 +211,14 @@ def debug_nop(fx_g: fx.GraphModule, _) -> Callable:
 
 
 @make_boxed_compiler
-def simple_ts_compile(fx_g, _):
+def simple_ts_compile(fx_g: fx.GraphModule, _: Any) -> torch.jit.ScriptModule:
     strip_overloads(fx_g)
     f = torch.jit.script(fx_g)
     f = torch.jit.freeze(f.eval())
     return f
 
 
-def nnc_jit(f):
+def nnc_jit(f: Callable[..., Any]) -> Callable[..., Any]:
     return aot_function(f, simple_ts_compile)
 
 
@@ -225,19 +248,20 @@ default_decompositions = {
     aten.is_same_size,
 }
 
+# pyrefly: ignore[bad-argument-type]
 default_decompositions = get_decompositions(default_decompositions)
 
 
 @make_boxed_compiler
-def print_compile(fx_g, _):
+def print_compile(fx_g: fx.GraphModule, _: Any) -> fx.GraphModule:
     print(fx_g.code)
     return fx_g
 
 
 def memory_efficient_fusion(
-    fn: Union[Callable, nn.Module],
-    **kwargs,
-):
+    fn: Union[Callable[..., Any], nn.Module],
+    **kwargs: Any,
+) -> Union[Callable[..., Any], nn.Module]:
     """
     Wrapper function over :func:`aot_function` and :func:`aot_module` to perform
     memory efficient fusion. It uses the
@@ -268,12 +292,14 @@ def memory_efficient_fusion(
     }
     config.update(kwargs)
     if isinstance(fn, torch.nn.Module):
-        return aot_module(fn, **config)
+        return aot_module(fn, **config)  # pyrefly: ignore[bad-argument-type]
     else:
-        return aot_function(fn, **config)
+        return aot_function(fn, **config)  # pyrefly: ignore[bad-argument-type]
 
 
-def debug_compile(fx_g, inps):
+def debug_compile(
+    fx_g: fx.GraphModule, inps: Sequence[torch.Tensor]
+) -> torch.jit.ScriptModule:
     fx_g.to_folder("foo")
     print(
         f"""
@@ -295,17 +321,17 @@ with torch.jit.fuser("fuser2"):
   minifier(fx.symbolic_trace(mod), inps, check_nvfuser_subprocess)
 """
     )
-    from foo import FxModule
+    from foo import FxModule  # pyrefly: ignore[missing-import]
 
     FxModule().cuda()(*inps)
 
     return ts_compile(fx_g, inps)
 
 
-graph_index = 0
+graph_index: int = 0
 
 
-def get_inputs(input_data_path):
+def get_inputs(input_data_path: str) -> list[torch.Tensor]:
     """
     Return a random input for the given inputs meta generated from _save_fx_default.
     """
@@ -316,7 +342,7 @@ def get_inputs(input_data_path):
         for meta in inputs_meta:
             if len(meta) == 1:
                 type = meta
-                input = type(random.rand())
+                input = type(random.random())
             else:
                 type, shape, _stride, dtype, device = meta
                 if dtype in {
@@ -336,7 +362,13 @@ def get_inputs(input_data_path):
     return inputs
 
 
-def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_inputs):
+def _save_fx_default(
+    current_name: str,
+    folder_name: str,
+    dump_example_input: bool,
+    gm: nn.Module,
+    example_inputs: list[torch.Tensor],
+) -> nn.Module:
     """
     The forward, backward, and joint computation graph will be stored in
     {folder_name}/{current_name}/{current_name}_forward_{graph_index},
@@ -354,7 +386,7 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
     """
     from functorch.compile import aot_module_simplified
 
-    def get_input_meta(args):
+    def get_input_meta(args: Any) -> list[Any]:
         input_meta = []
         if len(args) > 0 and isinstance(args[0], tuple):  # joint input
             input_meta += get_input_meta(args[0])
@@ -369,7 +401,9 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
                 )
         return input_meta
 
-    def graph_saver_helper(gm_to_save, args, type_name):
+    def graph_saver_helper(
+        gm_to_save: fx.GraphModule, args: Any, type_name: str
+    ) -> None:
         global graph_index
         if len(gm_to_save.graph.nodes) == 0:
             log.log(
@@ -392,7 +426,8 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
             f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}"
         )
         with open(
-            f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input"
+            f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input",
+            "wb",
         ) as f:
             pickle.dump(input_meta, f)
         if dump_example_input:
@@ -401,32 +436,40 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
                 f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.pt",  # noqa: B950
             )  # noqa: E501
 
-    def graph_saver_forward(gm, fw_args):
-        graph_saver_helper(gm, fw_args, "forward")
+    def graph_saver_forward(
+        gm: fx.GraphModule, example_inputs: list[torch.Tensor]
+    ) -> fx.GraphModule:
+        graph_saver_helper(gm, example_inputs, "forward")
         return gm
 
-    def graph_saver_backward(gm, bw_args):
-        graph_saver_helper(gm, bw_args, "backward")
+    def graph_saver_backward(
+        gm: fx.GraphModule, example_inputs: list[torch.Tensor]
+    ) -> fx.GraphModule:
+        graph_saver_helper(gm, example_inputs, "backward")
         global graph_index
         graph_index += 1
         return gm
 
-    def graph_saver_joint(gm, joint_args):
+    def graph_saver_joint(
+        gm: fx.GraphModule, joint_args: list[torch.Tensor]
+    ) -> tuple[fx.GraphModule, fx.GraphModule]:
         graph_saver_helper(gm, joint_args, "joint")
-        return default_partition(gm, joint_args)
+        return default_partition(gm, joint_args)  # pyrefly: ignore[missing-argument]
 
     return aot_module_simplified(
         gm,
         example_inputs,
-        fw_compiler=graph_saver_forward,
-        bw_compiler=graph_saver_backward,
+        fw_compiler=graph_saver_forward,  # pyrefly: ignore[bad-argument-type]
+        bw_compiler=graph_saver_backward,  # pyrefly: ignore[bad-argument-type]
         partition_fn=graph_saver_joint,
-        decompositions=default_decompositions,
+        decompositions=default_decompositions,  # pyrefly: ignore[bad-argument-type]
     )
 
 
 # WARNING: This isn't tested anywhere!!
-def graph_dumper_aot(current_name, folder_name, dump_example_input=False):
+def graph_dumper_aot(
+    current_name: str, folder_name: str, dump_example_input: bool = False
+) -> Callable[[bool, nn.Module], Any]:
     """
     Dump the forward, backward, and joint computation graph.
     Example Usage:

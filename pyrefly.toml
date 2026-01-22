@@ -164,7 +164,7 @@ implicit-import = false
 implicit-any = true
 
 [[sub-config]]
-matches = "torch/_functorch/_aot_autograd/schemas.py"
+matches = "torch/_functorch/compilers.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
