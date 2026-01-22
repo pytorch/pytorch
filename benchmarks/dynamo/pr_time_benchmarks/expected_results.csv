@@ -82,7 +82,7 @@ mm_loop_inductor_dynamic_gpu,compile_time_instruction_count,9051000000,0.1
 
 
 
-basic_NestedModule_eager,compile_time_instruction_count,13890000000,0.1
+basic_NestedModule_eager,compile_time_instruction_count,15698000000,0.1
 
 
 
