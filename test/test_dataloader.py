@@ -3026,8 +3026,6 @@ except RuntimeError as e:
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_non_writeable_numpy(self):
-        import warnings
-
         import numpy as np
 
         arr = np.arange(5.0)
@@ -3035,13 +3033,64 @@ except RuntimeError as e:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            dataloader.default_collate([arr])
+            result = dataloader.default_collate([arr])
 
             # check that no warning about non-writeable numpy arrays was raised
             numpy_writable_warnings = [
                 warning for warning in w if "given NumPy array" in str(warning.message)
             ]
             self.assertEqual(len(numpy_writable_warnings), 0)
+
+        # Verify the data is copied, not shared
+        result[0][0] = 99.0
+        self.assertEqual(arr[0], 0.0)  # Original array unchanged
+        self.assertEqual(result[0][0].item(), 99.0)  # Tensor was modified
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_non_writeable_numpy_with_custom_collate_fn_map(self):
+        import numpy as np
+
+        from torch.utils.data._utils.collate import (
+            collate,
+            collate_tensor_fn,
+            default_collate_fn_map,
+        )
+
+        arr = np.arange(5.0)
+        arr.flags.writeable = False
+
+        # Test 1: Using default collate_fn_map (should suppress warning)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result1 = dataloader.default_collate([arr])
+            numpy_writable_warnings = [
+                warning for warning in w if "not writable" in str(warning.message)
+            ]
+            self.assertEqual(
+                len(numpy_writable_warnings),
+                0,
+                "Default collate should suppress warning",
+            )
+
+        # Test 2: Custom map that still uses collate_tensor_fn (should suppress)
+        custom_map_with_default = default_collate_fn_map.copy()
+        custom_map_with_default[torch.Tensor] = collate_tensor_fn
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result2 = collate([arr], collate_fn_map=custom_map_with_default)
+            numpy_writable_warnings = [
+                warning for warning in w if "not writable" in str(warning.message)
+            ]
+            self.assertEqual(
+                len(numpy_writable_warnings),
+                0,
+                "Custom map with collate_tensor_fn should suppress",
+            )
+
+        # Test 3: Verify both results are equivalent and copied data
+        self.assertEqual(result1.tolist(), result2.tolist())
+        result1[0][0] = 99.0
+        self.assertEqual(arr[0], 0.0, "Original array should remain unchanged")
 
     def test_excessive_thread_creation_warning(self):
         with self.assertWarnsRegex(
