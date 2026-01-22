@@ -937,7 +937,7 @@ def invoke_subgraph_subclass(subgraph, identifier, *operands):
     assert isinstance(operands, tuple), "operands are expected to be a tuple"
     assert isinstance(subgraph, GraphModule), "subgraph must be a GraphModule"
 
-    # Capture flatten info and extract inner tensors for each operand
+    # Extract inner tensors for each operand
     input_flatten_info = []
     inner_operands = []
     for op in operands:
@@ -959,24 +959,50 @@ def invoke_subgraph_subclass(subgraph, identifier, *operands):
             input_flatten_info.append(None)
             inner_operands.append(op)
 
-    # Run subgraph once to determine output structure
-    trial_outputs = subgraph(*operands)
+    # Check if we have a cached wrapper for this identifier
+    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    cached_entry = None
+    if invoke_subgraph_cache:
+        cached_entry = invoke_subgraph_cache.get_subclass_wrapper_entry(identifier)
 
-    # Compute output_flatten_info from trial outputs
-    output_flatten_info = []
-    for r in trial_outputs:
-        if is_traceable_wrapper_subclass(r):
-            tensor_attr_names, flatten_spec = r.__tensor_flatten__()
-            output_flatten_info.append(
-                (type(r), tuple(tensor_attr_names), flatten_spec, r.shape, r.stride())
+    if cached_entry is not None:
+        wrapper_subgraph, cached_input_flatten_info, output_flatten_info = cached_entry
+        # Validate that the cached input_flatten_info matches the current one
+        assert cached_input_flatten_info == input_flatten_info, (
+            f"Mismatch in input_flatten_info for identifier {identifier}. "
+            f"Cached: {cached_input_flatten_info}, Current: {input_flatten_info}"
+        )
+    else:
+        # Run subgraph once to determine output structure
+        trial_outputs = subgraph(*operands)
+
+        # Compute output_flatten_info from trial outputs
+        output_flatten_info = []
+        for r in trial_outputs:
+            if is_traceable_wrapper_subclass(r):
+                tensor_attr_names, flatten_spec = r.__tensor_flatten__()
+                output_flatten_info.append(
+                    (
+                        type(r),
+                        tuple(tensor_attr_names),
+                        flatten_spec,
+                        r.shape,
+                        r.stride(),
+                    )
+                )
+            else:
+                output_flatten_info.append(None)
+
+        # Create the wrapper GraphModule
+        wrapper_subgraph = make_subclass_wrapper_graph(
+            subgraph, input_flatten_info, len(inner_operands)
+        )
+
+        # Cache the wrapper
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_subclass_wrapper_entry(
+                identifier, wrapper_subgraph, input_flatten_info, output_flatten_info
             )
-        else:
-            output_flatten_info.append(None)
-
-    # Create the wrapper GraphModule
-    wrapper_subgraph = make_subclass_wrapper_graph(
-        subgraph, input_flatten_info, len(inner_operands)
-    )
 
     # Call invoke_subgraph with the wrapper and inner tensors
     inner_result = invoke_subgraph(wrapper_subgraph, identifier, *inner_operands)

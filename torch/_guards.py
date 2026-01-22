@@ -748,6 +748,10 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
+        # Maps identifier -> (wrapper_subgraph, input_flatten_info, output_flatten_info) for tensor subclass handling
+        self.subclass_wrapper_cache: dict[
+            str, tuple[torch.fx.GraphModule, list, list]
+        ] = {}
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
         self.dynamo_installed_submodules[fn_id].append(identifier)
@@ -801,6 +805,26 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def get_effects(self, identifier: str) -> set | None:
         """Retrieve the effect types for a given invoke_subgraph identifier."""
         return self.effects_cache.get(identifier, None)
+
+    def add_subclass_wrapper_entry(
+        self,
+        identifier: str,
+        wrapper_subgraph: torch.fx.GraphModule,
+        input_flatten_info: list,
+        output_flatten_info: list,
+    ) -> None:
+        """Store the wrapper subgraph and flatten info for tensor subclass handling."""
+        self.subclass_wrapper_cache[identifier] = (
+            wrapper_subgraph,
+            input_flatten_info,
+            output_flatten_info,
+        )
+
+    def get_subclass_wrapper_entry(
+        self, identifier: str
+    ) -> tuple[torch.fx.GraphModule, list, list] | None:
+        """Retrieve the wrapper subgraph and flatten info for a given identifier."""
+        return self.subclass_wrapper_cache.get(identifier, None)
 
 
 class HopDispatchSetCache:
