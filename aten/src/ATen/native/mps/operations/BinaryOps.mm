@@ -16,6 +16,7 @@
 #include <ATen/ops/eq_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
+#include <ATen/ops/heaviside_native.h>
 #include <ATen/ops/le_native.h>
 #include <ATen/ops/logical_and_native.h>
 #include <ATen/ops/logical_or_native.h>
@@ -297,6 +298,37 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
     return outputTensor;
   };
   mps::binaryOpTensor(self, other, output, "xlogy_out_mps", xlogy_op_block);
+}
+
+TORCH_IMPL_FUNC(heaviside_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
+  // heaviside(self, values) = values when self == 0, 0 when self < 0, 1 when self > 0
+  mps::BinaryOpBlock heaviside_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
+    MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
+
+    // Check if self == 0
+    MPSGraphTensor* selfIsZeroTensor = [mpsGraph equalWithPrimaryTensor:primaryCastTensor
+                                                        secondaryTensor:zeroTensor
+                                                                   name:nil];
+    // Check if self > 0
+    MPSGraphTensor* selfIsPositiveTensor = [mpsGraph greaterThanWithPrimaryTensor:primaryCastTensor
+                                                                  secondaryTensor:zeroTensor
+                                                                             name:nil];
+
+    // result = self > 0 ? 1 : 0
+    MPSGraphTensor* stepResult = [mpsGraph selectWithPredicateTensor:selfIsPositiveTensor
+                                                 truePredicateTensor:oneTensor
+                                                falsePredicateTensor:zeroTensor
+                                                                name:nil];
+    // result = self == 0 ? values : stepResult
+    MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:selfIsZeroTensor
+                                                   truePredicateTensor:secondaryCastTensor
+                                                  falsePredicateTensor:stepResult
+                                                                  name:nil];
+    return outputTensor;
+  };
+  mps::binaryOpTensor(self, other, output, "heaviside_out_mps", heaviside_op_block);
 }
 
 } // namespace at::native

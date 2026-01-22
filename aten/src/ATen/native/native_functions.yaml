@@ -7200,6 +7200,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: heaviside_out
+    MPS: heaviside_out_mps
   tags: pointwise
 
 - func: heaviside(Tensor self, Tensor values) -> Tensor

@@ -318,7 +318,6 @@ if torch.backends.mps.is_available():
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
-            "heaviside": None,
             "index_reduceprod": None,
             "index_reducemean": None,
             "index_reduceamax": None,
