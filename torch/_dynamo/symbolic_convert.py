@@ -522,6 +522,95 @@ def get_comprehension_bytecode_prefix() -> list[str]:
     return insts[start_idx:end_idx]
 
 
+@functools.cache
+def get_comprehension_result_patterns() -> dict[str, str]:
+    """Dynamically discover bytecode patterns for comprehension result handling.
+
+    Returns dict with:
+        - "stored_indicator": opcode after END_FOR when result is stored in variable
+        - "on_stack_indicator": opcode after END_FOR when result stays on stack
+        - "discard_indicator": opcode that discards result from stack
+        - "return_indicator": opcode that returns result directly
+    """
+    # Pattern 1: Result assigned to variable
+    def fn_assigned():
+        result = [i for i in range(1)]
+        return result
+
+    # Pattern 2: Result discarded
+    def fn_discarded():
+        [i for i in range(1)]
+        return 1
+
+    # Pattern 3: Result returned directly
+    def fn_returned():
+        return [i for i in range(1)]
+
+    def find_post_end_for_opcode(fn):
+        """Find the opcode immediately after END_FOR."""
+        insts = list(dis.get_instructions(fn))
+        for i, inst in enumerate(insts):
+            if inst.opname == "END_FOR" and i + 1 < len(insts):
+                return insts[i + 1].opname
+        return None
+
+    def find_discard_opcode(fn):
+        """Find the opcode after STORE_FAST that discards the result."""
+        insts = list(dis.get_instructions(fn))
+        for i, inst in enumerate(insts):
+            if inst.opname == "END_FOR":
+                # Look for STORE_FAST after END_FOR (iterator restoration)
+                j = i + 1
+                while j < len(insts) and insts[j].opname in ("SWAP", "STORE_FAST"):
+                    j += 1
+                if j < len(insts):
+                    return insts[j].opname
+        return None
+
+    def find_return_after_iterator_restore(fn):
+        """Find the return opcode after iterator restoration."""
+        insts = list(dis.get_instructions(fn))
+        for i, inst in enumerate(insts):
+            if inst.opname == "END_FOR":
+                # Look for STORE_FAST after END_FOR (iterator restoration)
+                j = i + 1
+                while j < len(insts) and insts[j].opname in ("SWAP", "STORE_FAST"):
+                    j += 1
+                if j < len(insts) and insts[j].opname.startswith("RETURN"):
+                    return insts[j].opname
+        return None
+
+    stored_indicator = find_post_end_for_opcode(fn_assigned)
+    on_stack_indicator = find_post_end_for_opcode(fn_discarded)
+    discard_indicator = find_discard_opcode(fn_discarded)
+    return_indicator = find_return_after_iterator_restore(fn_returned)
+
+    return {
+        "stored_indicator": stored_indicator,
+        "on_stack_indicator": on_stack_indicator,
+        "discard_indicator": discard_indicator,
+        "return_indicator": return_indicator,
+    }
+
+
+@dataclasses.dataclass
+class ComprehensionAnalysis:
+    """Metadata about a comprehension's bytecode structure.
+
+    Attributes:
+        end_ip: Instruction pointer after all comprehension bytecode
+        result_var: Name of result variable, or None if result stays on stack
+        result_on_stack: True if result stays on stack (discarded, returned, or in expression)
+        result_disposition: What happens to result - "stored", "discarded", "returned", or "consumed"
+        iterator_vars: Variables from LOAD_FAST_AND_CLEAR (need restoration)
+    """
+    end_ip: int
+    result_var: Optional[str]
+    result_on_stack: bool
+    result_disposition: str  # "stored", "discarded", "returned", "consumed"
+    iterator_vars: list[str]
+
+
 def _detect_and_normalize_assert_statement(
     self: InstructionTranslatorBase,
     truth_fn: Callable[[object], bool],
@@ -4384,16 +4473,40 @@ class InstructionTranslatorBase(
 
         return prefix == pattern
 
-    def _find_comprehension_end(self) -> int:
-        """Find instruction position after the comprehension ends.
+    def _analyze_comprehension(self) -> ComprehensionAnalysis:
+        """Analyze comprehension bytecode to determine result handling pattern.
 
         Tracks FOR_ITER/END_FOR nesting depth to find the outermost END_FOR,
-        then consumes all following STORE_FASTs.
+        then analyzes what happens to the result using dynamically discovered patterns.
+
+        Returns ComprehensionAnalysis with:
+        - end_ip: instruction after all comprehension bytecode
+        - result_var: name of result variable (or None if on stack)
+        - result_on_stack: True if result stays on stack
+        - result_disposition: "stored", "discarded", "returned", or "consumed"
+        - iterator_vars: variables that need restoration
         """
         assert self.instruction_pointer is not None
+        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
         ip = self.instruction_pointer
         depth = 0
+        patterns = get_comprehension_result_patterns()
 
+        # Collect iterator variables from LOAD_FAST_AND_CLEAR before BUILD_LIST/BUILD_MAP
+        iterator_vars: list[str] = []
+        scan_ip = start_ip - 1
+        while scan_ip >= 0:
+            scan_inst = self.instructions[scan_ip]
+            if scan_inst.opname == "LOAD_FAST_AND_CLEAR":
+                iterator_vars.insert(0, scan_inst.argval)
+                scan_ip -= 1
+            elif scan_inst.opname in ("SWAP", "GET_ITER"):
+                scan_ip -= 1
+            else:
+                break
+
+        # Find the outermost END_FOR
+        end_for_ip = -1
         while ip < len(self.instructions):
             inst = self.instructions[ip]
             if inst.opname == "FOR_ITER":
@@ -4401,16 +4514,95 @@ class InstructionTranslatorBase(
             elif inst.opname == "END_FOR":
                 depth -= 1
                 if depth == 0:
-                    # Found the outermost END_FOR, consume all STORE_FASTs
-                    ip += 1
-                    while ip < len(self.instructions):
-                        if self.instructions[ip].opname == "STORE_FAST":
-                            ip += 1
-                        else:
-                            break
-                    return ip
+                    end_for_ip = ip
+                    break
             ip += 1
-        return -1
+
+        if end_for_ip == -1:
+            raise AssertionError("Could not find END_FOR for comprehension")
+
+        # Check what happens after END_FOR
+        ip = end_for_ip + 1
+        post_end_for_inst = self.instructions[ip]
+
+        if post_end_for_inst.opname == patterns["stored_indicator"]:
+            # Pattern: END_FOR → STORE_FAST result → STORE_FAST iterator(s)
+            result_var = post_end_for_inst.argval
+            ip += 1
+            # Consume iterator STORE_FASTs
+            while ip < len(self.instructions) and self.instructions[ip].opname == "STORE_FAST":
+                ip += 1
+            return ComprehensionAnalysis(
+                end_ip=ip,
+                result_var=result_var,
+                result_on_stack=False,
+                result_disposition="stored",
+                iterator_vars=iterator_vars,
+            )
+
+        elif post_end_for_inst.opname == patterns["on_stack_indicator"]:
+            # Pattern: END_FOR → SWAP → STORE_FAST iterator(s) → ???
+            # Result stays on stack, skip SWAP and iterator STORE_FASTs
+            ip += 1  # Skip SWAP
+            while ip < len(self.instructions) and self.instructions[ip].opname == "STORE_FAST":
+                ip += 1
+
+            # Now check what happens to the result on stack
+            if ip < len(self.instructions):
+                disposition_inst = self.instructions[ip]
+
+                if disposition_inst.opname == patterns["discard_indicator"]:
+                    # Pattern: ... → POP_TOP (result discarded)
+                    return ComprehensionAnalysis(
+                        end_ip=ip + 1,  # After POP_TOP
+                        result_var=None,
+                        result_on_stack=True,
+                        result_disposition="discarded",
+                        iterator_vars=iterator_vars,
+                    )
+
+                elif disposition_inst.opname == patterns["return_indicator"]:
+                    # Pattern: ... → RETURN_VALUE (result returned directly)
+                    return ComprehensionAnalysis(
+                        end_ip=ip,  # At RETURN_VALUE (resume will handle it)
+                        result_var=None,
+                        result_on_stack=True,
+                        result_disposition="returned",
+                        iterator_vars=iterator_vars,
+                    )
+
+                else:
+                    # Pattern: ... → CALL/other (result consumed by expression)
+                    # We don't expand to include the consuming call - just mark as consumed
+                    return ComprehensionAnalysis(
+                        end_ip=ip,  # At the consuming instruction
+                        result_var=None,
+                        result_on_stack=True,
+                        result_disposition="consumed",
+                        iterator_vars=iterator_vars,
+                    )
+
+            # Fallback - result on stack but no disposition found
+            return ComprehensionAnalysis(
+                end_ip=ip,
+                result_var=None,
+                result_on_stack=True,
+                result_disposition="consumed",
+                iterator_vars=iterator_vars,
+            )
+
+        else:
+            # Unexpected pattern - fallback to old behavior
+            ip = end_for_ip + 1
+            while ip < len(self.instructions) and self.instructions[ip].opname == "STORE_FAST":
+                ip += 1
+            return ComprehensionAnalysis(
+                end_ip=ip,
+                result_var=None,
+                result_on_stack=False,
+                result_disposition="stored",
+                iterator_vars=iterator_vars,
+            )
 
     def _handle_comprehension_graph_break(
         self, inst: Instruction
@@ -4423,61 +4615,26 @@ class InstructionTranslatorBase(
         3. Generates code to load comprehension-created locals
         4. Creates a resume function for code after the comprehension
         """
-        end_ip = self._find_comprehension_end()
-        assert end_ip > 0, "Could not find END_FOR for comprehension"
+        analysis = self._analyze_comprehension()
 
         assert self.instruction_pointer is not None
         start_ip = (
             self.instruction_pointer - 1
         )  # Current instruction (BUILD_LIST/BUILD_MAP)
 
-        # Parse the comprehension bytecode to find the result STORE_FAST after outermost END_FOR
-        # In Python 3.12+, the pattern after END_FOR is:
-        #   STORE_FAST result_var   # The comprehension result (list/dict)
-        #   STORE_FAST iter_var     # Restoration of the iterator variable (original value)
-        # We only want the FIRST STORE_FAST after the OUTERMOST END_FOR
-        # Use depth tracking for nested comprehensions
-        comprehension_result_var: Optional[str] = None
-        ip = start_ip
-        depth = 0
-        found_outermost_end_for = False
-        while ip < end_ip:
-            inst_at_ip = self.instructions[ip]
-            if inst_at_ip.opname == "FOR_ITER":
-                depth += 1
-            elif inst_at_ip.opname == "END_FOR":
-                depth -= 1
-                if depth == 0:
-                    found_outermost_end_for = True
-            elif found_outermost_end_for and inst_at_ip.opname == "STORE_FAST":
-                comprehension_result_var = inst_at_ip.argval
-                break
-            ip += 1
-
         log.debug(
-            "Handling comprehension graph break from ip %s to %s, result var: %s",
+            "Handling comprehension graph break from ip %s to %s, result_var=%s, disposition=%s",
             start_ip,
-            end_ip,
-            comprehension_result_var,
+            analysis.end_ip,
+            analysis.result_var,
+            analysis.result_disposition,
         )
 
         reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
         log.debug("comprehension triggered compile")
 
-        # Calculate stack_pops by counting LOAD_FAST_AND_CLEAR instructions before BUILD_LIST/BUILD_MAP
-        # Simple comprehension: [saved_i, iterator] → 2 values
-        # Multi-iterator: [saved_j, saved_i, iterator] → 3 values
-        stack_pops = 1  # Start with 1 for the iterator
-        scan_ip = start_ip - 1
-        while scan_ip >= 0:
-            scan_inst = self.instructions[scan_ip]
-            if scan_inst.opname == "LOAD_FAST_AND_CLEAR":
-                stack_pops += 1
-                scan_ip -= 1
-            elif scan_inst.opname in ("SWAP", "GET_ITER"):
-                scan_ip -= 1
-            else:
-                break
+        # Calculate stack_pops: 1 for iterator + len(iterator_vars) for saved values
+        stack_pops = 1 + len(analysis.iterator_vars)
 
         log.debug("comprehension stack_pops=%s", stack_pops)
 
@@ -4494,7 +4651,7 @@ class InstructionTranslatorBase(
         inst_map: dict[Instruction, Instruction] = {}
         copied_insts: list[Instruction] = []
 
-        for ip in range(start_ip, end_ip):
+        for ip in range(start_ip, analysis.end_ip):
             original_inst = self.instructions[ip]
             copied_inst = copy.copy(original_inst)
             copied_inst.exn_tab_entry = None  # Clear exception table
@@ -4508,48 +4665,42 @@ class InstructionTranslatorBase(
 
         self.output.add_output_instructions(copied_insts)
 
-        # After the comprehension bytecode runs, the stack has the frame values list.
-        # We need to extend it with the comprehension-created locals.
-        # The frame values list structure is: [[frame N stack+locals], [frame N-1 ...], ...]
-        # For single frame case, we access element 0 and append our new locals.
-
         # Get the metadata for the current frame (first in list for single frame)
         meta = all_stack_locals_metadata[0]
 
-        log.debug(
-            "Comprehension graph break: result_var=%s",
-            comprehension_result_var,
-        )
-
-        # If we have a result variable, we need to:
-        # 1. Add it to meta.locals_names so create_call_resume_at knows about it
-        # 2. Add it to symbolic_locals so it's included in argnames
-        # 3. Generate bytecode to load the local and append it to the frame values list
-
         from .variables.misc import UnknownVariable
 
-        if comprehension_result_var is not None:
-            if comprehension_result_var not in meta.locals_names:
-                # Assign the next index in locals_names
-                # meta.locals_names stores local indices (0, 1, 2, ...)
-                # The actual index in frame values is meta.num_stack + this index
-                meta.locals_names[comprehension_result_var] = len(meta.locals_names)
-            # Also add to symbolic_locals so create_call_resume_at includes it in argnames
-            self.symbolic_locals[comprehension_result_var] = UnknownVariable()
+        # Handle different result dispositions
+        if analysis.result_disposition == "stored":
+            # Result is stored in a named variable - add it to resume function args
+            if analysis.result_var is not None:
+                if analysis.result_var not in meta.locals_names:
+                    meta.locals_names[analysis.result_var] = len(meta.locals_names)
+                self.symbolic_locals[analysis.result_var] = UnknownVariable()
 
-        # Generate bytecode to extend the frame values list
-        # Stack state: [cells_list, frame_values_list]
-        # We need to:
-        # 1. Access frame_values_list[0] (our frame's values)
-        # 2. Append the comprehension result to it
+        elif analysis.result_disposition == "discarded":
+            # Result is discarded (POP_TOP) - nothing to pass to resume
+            pass
 
+        elif analysis.result_disposition == "returned":
+            # Result is returned directly - the comprehension bytecode leaves result on stack
+            # and the resume instruction is RETURN_VALUE which will return it.
+            # Push a placeholder onto the symbolic stack to represent the result.
+            self.push(UnknownVariable())
+
+        elif analysis.result_disposition == "consumed":
+            # Result stays on stack and is consumed by next instruction (e.g., CALL)
+            # Push a placeholder onto the symbolic stack to represent the result.
+            self.push(UnknownVariable())
+
+        # Generate bytecode to extend the frame values list with result variable
         from .codegen import PyCodegen
         from .bytecode_transformation import create_dup_top, create_instruction
 
         cg = PyCodegen(self)
 
-        # Generate bytecode to extend frame_values_list[0] with comprehension result
-        if comprehension_result_var is not None:
+        # Only generate extension bytecode if we have a result variable
+        if analysis.result_var is not None:
             # Stack: [..., frame_values_list]
             cg.append_output(create_dup_top())
             # Stack: [..., frame_values_list, frame_values_list]
@@ -4557,7 +4708,7 @@ class InstructionTranslatorBase(
             # Stack: [..., frame_values_list, frame_values_list, 0]
             cg.append_output(cg.create_binary_subscr())
             # Stack: [..., frame_values_list, frame_values_list[0]]
-            cg.append_output(create_instruction("LOAD_FAST", argval=comprehension_result_var))
+            cg.append_output(create_instruction("LOAD_FAST", argval=analysis.result_var))
             # Stack: [..., frame_values_list, frame_values_list[0], value]
             # LIST_APPEND: append TOS to TOS[-2], pops TOS
             cg.append_output(create_instruction("LIST_APPEND", arg=1))
@@ -4568,7 +4719,7 @@ class InstructionTranslatorBase(
 
         self.output.add_output_instructions(cg.get_instructions())
 
-        resume_inst = self.instructions[end_ip]
+        resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
             self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
         )
