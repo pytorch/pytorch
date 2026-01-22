@@ -18,13 +18,11 @@ from typing import Any, Literal
 
 import onnxscript
 import onnxscript.evaluator
-from onnxscript import ir
-from onnxscript.ir import convenience as ir_convenience
 
 import torch
 import torch.fx
 from torch.export import graph_signature
-from torch.onnx._internal._lazy_import import onnxscript_apis
+from torch.onnx._internal._lazy_import import onnxscript_apis, onnx_ir as ir, onnx_passes
 from torch.onnx._internal.exporter import (
     _analysis,
     _building,
@@ -425,7 +423,7 @@ def _handle_call_function_node(
         "pkg.torch.ops",
         op,
         inputs,
-        attributes=ir_convenience.convert_attributes(attributes),
+        attributes=ir.convenience.convert_attributes(attributes),
         outputs=outputs,
         name=node.name,
     )
@@ -1494,10 +1492,14 @@ def export(
         onnx_program._capture_strategy = capture_strategy
 
         # Run the ONNX passes
+        onnx_passes.OutputFixPass()(onnx_program.model)
+
         if input_names:
             _ir_passes.rename_inputs(onnx_program.model, input_names)
         if output_names:
             _ir_passes.rename_outputs(onnx_program.model, output_names)
+
+        onnx_passes.NameFixPass()(onnx_program.model)
 
         export_status.onnx_translation = True
         verbose_print("Translate the graph into ONNX... ✅")
