@@ -90,6 +90,7 @@ if torch.backends.mps.is_available():
             "linalg.diagonal",
             "linalg.householder_product",
             "linalg.svd",
+            "linalg.vecdot",
             "log10",
             "log1p",
             "log2",
@@ -292,6 +293,7 @@ if torch.backends.mps.is_available():
             "trace",
             "trapz",
             "trapezoid",
+            "vdot",
             "vstack",
             "where",
             "byte",
@@ -310,8 +312,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "cauchy_": None,
-            "cauchy": None,
             "cholesky_solve": None,
             "frexp": None,
             "gcd": None,
@@ -338,7 +338,6 @@ if torch.backends.mps.is_available():
             "linalg.normsubgradients_at_zero": [torch.float32],
             "linalg.qr": None,
             "linalg.svdvals": None,
-            "linalg.vecdot": None,
             "masked.median": None,
             "matrix_exp": None,
             "mode": None,
@@ -376,7 +375,6 @@ if torch.backends.mps.is_available():
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
             "special.airy_ai": None,
-            "special.erfcx": None,
             "special.laguerre_polynomial_l": None,
             "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
@@ -385,14 +383,11 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "vdot": None,
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
             "geometric": None,
             "geometric_": None,
-            "log_normal_": None,
-            "log_normal": None,
             "cdouble": None,
             "double": None,
             "log_softmaxwith_dtype": [
@@ -485,6 +480,8 @@ if torch.backends.mps.is_available():
             "randn_like": None,
             "bernoulli": [torch.float16, torch.float32, torch.bfloat16],
             "exponential": [torch.float16, torch.float32, torch.bfloat16],
+            "log_normal": [torch.float16, torch.float32, torch.bfloat16],
+            "cauchy": [torch.float16, torch.float32, torch.bfloat16],
             "nn.functional.feature_alpha_dropoutwith_train": [
                 torch.float16,
                 torch.float32,
@@ -693,7 +690,7 @@ if torch.backends.mps.is_available():
             "linalg.householder_product": None,
             "unique_consecutive": [torch.float16, torch.float32],
             "scalar_tensor": [torch.float16, torch.float32],
-            "cdist": [torch.float32],
+            "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
             "grid_sampler_3d": None,
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
@@ -719,6 +716,8 @@ if torch.backends.mps.is_available():
             "msort": [torch.float16],
             # Random output
             "exponential": [torch.float16, torch.float32],
+            "log_normal": [torch.float16, torch.float32],
+            "cauchy": [torch.float16, torch.float32],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,

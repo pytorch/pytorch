@@ -2084,7 +2084,7 @@ class BlockParameters:
 
         def revert(self, attr):
             if not self.is_identity:
-                return [attr[i] for i in self.sort_idx]
+                return [attr[i] for i in self.revert_sort_idx]
             return attr
 
     @dataclasses.dataclass
@@ -3674,13 +3674,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # With broadcast:
             # tl.store(out_ptr0 + (tl.full([1, 1], 0, tl.int32).broadcast_to((XBLOCK,1)), tmp4, xmask)
             indexing_str = indexing.index_str
-            if (
-                is_sympy_integer_like(index)
-                and value.shape is not None
-                and not all(str(x) == "1" for x in value.shape)
-            ):
-                value_shape = ", ".join(map(str, value.shape))
-                indexing_str += f".broadcast_to({value_shape})"
+            if is_sympy_integer_like(index):
+                if self.is_combo_kernel:
+                    # In combo kernels, broadcast pointer to match mask shape
+                    indexing_str += f".broadcast_to({self.dense_size_str()})"
+                elif value.shape is not None and not all(
+                    str(x) == "1" for x in value.shape
+                ):
+                    value_shape = ", ".join(map(str, value.shape))
+                    indexing_str += f".broadcast_to({value_shape})"
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
             self.atomic_add_found = True
@@ -5037,15 +5039,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(arg, int):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
-                    hint = V.graph.sizevars.optimization_hint_with_override(
+                    hint = V.graph.sizevars.size_hint(
                         arg.inner_expr,
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     args.append(str(hint))
                 elif isinstance(arg, sympy.Expr):
-                    hint = V.graph.sizevars.optimization_hint_with_override(
+                    hint = V.graph.sizevars.size_hint(
                         arg,
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     args.append(str(hint))
                 else:
@@ -5074,13 +5078,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.try_get_buffer(arg_name)
                 if buf:
-                    size = V.graph.sizevars.optimization_hints_with_override(
+                    size = V.graph.sizevars.size_hints(
                         buf.get_size(),
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
-                    stride = V.graph.sizevars.optimization_hints_with_override(
+                    stride = V.graph.sizevars.size_hints(
                         buf.get_stride(),
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
@@ -5088,21 +5094,24 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
-                    size = V.graph.sizevars.optimization_hints_with_override(
+                    size = V.graph.sizevars.size_hints(
                         const_tensor.size(),
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
-                    stride = V.graph.sizevars.optimization_hints_with_override(
+                    stride = V.graph.sizevars.size_hints(
                         const_tensor.stride(),
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.optimization_hint_with_override(
+                    symval_hint = V.graph.sizevars.size_hint(
                         arg_sig.expr,
                         hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
 
                     # Force the seed_offset to be 0 so calls to the same kernel
@@ -5113,7 +5122,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.optimization_hint_with_override(
+                    count = V.graph.sizevars.size_hint(
                         arg_sig.count, hint_override=self.hint_override
                     )
                     result.writeline(
@@ -6239,7 +6248,16 @@ class TritonScheduling(SIMDScheduling):
             kernels.sort(key=lambda k: k.persistent_reduction)
         return kernels
 
-    def benchmark_combo_kernel(self, node_list):
+    def benchmark_combo_kernel(self, node_list, node_benchmark_results):
+        """
+        Benchmark combo kernel partitions and return total execution time.
+
+        Generates kernel code for each partition and benchmarks them.
+        Single-node partitions use benchmark_fused_nodes(), while multi-node
+        partitions use the combo kernel benchmarking path.
+
+        Returns (total_ms, total_clone_ms, file_list).
+        """
         mod: ModuleType
         ms: float
         ms_clone: float
@@ -6276,10 +6294,20 @@ class TritonScheduling(SIMDScheduling):
         )
 
         # pyrefly: ignore [bad-assignment]
-        for src_code, _, node_group in kernel_code_list:
+        for src_code, kernel, node_group in kernel_code_list:
             fused_node_lists = [node.get_nodes() for node in node_group]
             names = [n.get_name() for nodes in fused_node_lists for n in nodes]
 
+            if len(node_group) == 1:
+                # Single-node partition: use cached benchmark results from speedup_by_combo_kernel
+                node_ms, path = node_benchmark_results[node_group[0]]
+                # Regular kernels have negligible clone overhead
+                total_ms += node_ms
+                total_clone_ms += 0
+                file_list.append(path)
+                continue
+
+            assert src_code is not None
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
             mod = PyCodeCache.load(src_code)
 

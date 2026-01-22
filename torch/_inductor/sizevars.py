@@ -22,7 +22,6 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
 
-from . import config
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
     has_free_symbols,
@@ -565,6 +564,7 @@ class SizeVarAllocator:
     def symbolic_hint(
         self,
         expr: Union[Expr, int],
+        hint_override: Optional[int] = None,
         # Only flip this flag if you don't plan on guarding/adding runtime
         # asserts based on this value and promise to only use this value
         # in a heuristic nature.
@@ -584,6 +584,9 @@ class SizeVarAllocator:
             except TypeError:
                 return expr  # inf/nan/I
 
+        if hint_override:
+            return hint_override
+
         expr = self.remove_precomputed_replacements(expr)
 
         if use_user_provided_hint_override:
@@ -596,6 +599,7 @@ class SizeVarAllocator:
         expr: Union[Expr, int],
         *,
         fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> int:
         if isinstance(expr, SymInt):
             raise TypeError(
@@ -604,6 +608,7 @@ class SizeVarAllocator:
 
         out = self.symbolic_hint(
             expr,
+            hint_override=hint_override,
             use_user_provided_hint_override=fallback is not None,
         )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
@@ -634,7 +639,7 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out, exc_info=True)
             raise
 
-    def _handle_special_expr_values(self, expr: Expr, fallback: int) -> Optional[int]:
+    def _maybe_realize_expr(self, expr: Expr, fallback: int) -> Optional[int]:
         """
         Handle special sympy values in optimization hints.
 
@@ -682,9 +687,9 @@ class SizeVarAllocator:
         # Read config at call time to respect runtime patches (e.g., in tests)
         if fallback is None:
             fallback = config.unbacked_symint_fallback
-
+        assert fallback is not None
         simplified = self.simplify(expr)
-        result = self._handle_special_expr_values(simplified, fallback)
+        result = self._maybe_realize_expr(simplified, fallback)
         if result is not None:
             return result
 
@@ -697,7 +702,7 @@ class SizeVarAllocator:
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
 
-        result = self._handle_special_expr_values(expr, fallback)
+        result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
 
@@ -735,8 +740,8 @@ class SizeVarAllocator:
 
         final_result = expr.subs(size_dict)
 
-        result = self._handle_special_expr_values(final_result, fallback)
-        assert result is not None
+        final_result = self._handle_special_expr_values(final_result, fallback)
+        assert final_result is not None, final_result
 
         return int(final_result)
 
@@ -804,11 +809,13 @@ class SizeVarAllocator:
         exprs: Iterable[Union[Expr, int]],
         *,
         fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> tuple[int, ...]:
         return tuple(
             self.size_hint(
                 x,
                 fallback=fallback,
+                hint_override=hint_override,
             )
             for x in exprs
         )
@@ -1069,6 +1076,38 @@ class SizeVarAllocator:
         log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
         return expr
 
+<<<<<<< HEAD
+    def atomically_apply_size_hint(
+        self,
+        expr: Union[Expr, int],
+        *,
+        fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
+    ) -> Union[Expr, int]:
+        if isinstance(expr, (int, sympy.Integer)):
+            return int(expr)
+
+        if has_free_unbacked_symbols(expr):
+            # Make sure to substitute with the factored version
+            # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
+            expr = self._sub_unbacked_exprs(sympy.factor(expr))
+
+        # For multiple expressions that depend on an unbacked symint,
+        # we want to compute them consistently for a size hint we have chosen.
+        # So, recursively compute expressions via size hints of contained symbols.
+        # For example: u1 * u2 - 10 ==> fallback * fallback - 10
+        assert isinstance(expr, Expr), type(expr)
+        free_symbols = expr.free_symbols
+        size_dict = {
+            symbol: V.graph.sizevars.size_hint(
+                symbol, fallback=fallback, hint_override=hint_override
+            )
+            for symbol in free_symbols
+        }
+        return expr.subs(size_dict)
+
+=======
+>>>>>>> 569712ad3b3 (introduce optimization_hint)
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
