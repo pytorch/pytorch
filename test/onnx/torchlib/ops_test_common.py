@@ -24,7 +24,7 @@ import onnxruntime.capi.onnxruntime_pybind11_state
 import onnxscript
 import onnxscript.evaluator
 import pytest
-from onnxscript import ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter import _building, _ir_passes, _tensors

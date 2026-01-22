@@ -7,7 +7,7 @@ import logging
 
 import pytest
 import transformers
-from onnxscript import ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing

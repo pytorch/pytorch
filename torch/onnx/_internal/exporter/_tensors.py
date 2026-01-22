@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import onnxscript
-from onnxscript import ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 
 
 class SymbolicTensor(ir.Value):

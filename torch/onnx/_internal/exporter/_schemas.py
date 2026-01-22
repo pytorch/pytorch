@@ -13,7 +13,7 @@ from typing import Any, Optional, TypeVar, Union
 import onnx
 
 import onnxscript
-from onnxscript import ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 
 
 logger = logging.getLogger(__name__)
