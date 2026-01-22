@@ -104,10 +104,10 @@ def infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]
 
 class InputObserverInfo:
     def __init__(self, signature: inspect.Signature):
-        # pyrefly: ignore
+        # pyright: ignore
         self.inputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
         self.flat_inputs: list[list[torch.Tensor | None]] = []
-        # pyrefly: ignore
+        # pyright: ignore
         self.outputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
         self.flat_outputs: list[list[torch.Tensor]] = []
         self.signature = signature
