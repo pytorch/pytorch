@@ -10,6 +10,7 @@ import argparse
 import json
 import logging
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -55,7 +56,7 @@ def run_command(
 
 
 def _is_x86_64() -> bool:
-    return os.uname().machine == "x86_64"
+    return platform.machine() == "x86_64"
 
 
 def _shellcheck_candidates() -> list[str]:
