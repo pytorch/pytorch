@@ -330,13 +330,10 @@ op_db: list[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_erfcx,
-        skips=(
-            # The operator 'aten::special_erfcx.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
     ),
     UnaryUfuncInfo(
         "special.airy_ai",
@@ -974,8 +971,20 @@ python_ref_db: list[OpInfo] = [
             ),
         ),
         skips=(
-            # The operator 'aten::special_erfcx.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -1033,7 +1042,18 @@ python_ref_db: list[OpInfo] = [
         op_db=op_db,
         skips=(
             # The operator 'aten::special_log_ndtr.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
