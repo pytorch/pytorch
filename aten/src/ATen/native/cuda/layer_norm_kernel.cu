@@ -608,8 +608,8 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
     const T_ACC* rstd,
     T* dg,
     T* db) {
-    const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-    if (j < N) {
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  if (j < N) {
 		if constexpr (!rms_norm) {
 			if (dg != nullptr) {
 				if (db != nullptr) {
