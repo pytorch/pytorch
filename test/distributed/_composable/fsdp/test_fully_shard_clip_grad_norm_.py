@@ -119,7 +119,7 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_clip_grad_norm_powsum_efficiency(self):
+    def test_clip_grad_norm_dtensor_powsum(self):
         """Test that powsum optimization uses one allreduce and one pow for p-norms."""
         dp_mesh = init_device_mesh(device_type.type, (self.world_size,))
 
@@ -143,23 +143,26 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
         )
 
         with DebugMode() as debug_mode:
-            torch.nn.utils._get_total_norm([x.grad, y.grad], norm_type=2.0)
+            torch.nn.utils.get_total_norm([x.grad, y.grad], norm_type=2.0)
 
         # Verify: foreach_powsum on local tensors -> stack -> sum -> allreduce -> pow
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.nn.utils.clip_grad._get_total_norm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 8]| S(0), 2.0)  ->  dt$8: f32[]| R
-    aten::_foreach_powsum.Scalar([dt$0: f32[8, 8]| S(0), dt$1: f32[8, 8]| S(0)], 2.0)
-      aten::_foreach_powsum.Scalar([t$2: f32[4, 8], t$3: f32[4, 8]], 2.0)  ->  [t$4: f32[], t$5: f32[]]
-    aten::stack([dt$4: f32[]| P(sum), dt$5: f32[]| P(sum)])  ->  dt$6: f32[2]| P(sum)
-      aten::stack([t$4: f32[], t$5: f32[]])  ->  t$6: f32[2]
-    aten::sum.default(dt$6: f32[2]| P(sum))  ->  dt$7: f32[]| P(sum)
-      aten::sum.default(t$6: f32[2])  ->  t$7: f32[]
-    _c10d_functional::all_reduce(t$7: f32[], 'sum', '0')  ->  t$8: f32[]
-    _c10d_functional::wait_tensor(t$8: f32[])  ->  t$8: f32[]
-    aten::pow.Tensor_Scalar(dt$8: f32[]| R, 0.5)  ->  dt$9: f32[]| R
-      aten::pow.Tensor_Scalar(t$8: f32[], 0.5)  ->  t$9: f32[]""",
+  aten::_foreach_powsum.Scalar(['dt: f32[8, 8]| S(0)', 'dt: f32[8, 8]| S(0)'], 2.0)
+    aten::_foreach_powsum.Scalar(['t: f32[4, 8]', 't: f32[4, 8]'], 2.0)  ->  ['t: f32[]', 't: f32[]']
+  aten::stack(['dt: f32[]| P(sum)', 'dt: f32[]| P(sum)'])
+    aten::stack(['t: f32[]', 't: f32[]'])  ->  t: f32[2]
+  aten::sum(dt: f32[2]| P(sum))
+    aten::sum(t: f32[2])  ->  t: f32[]
+  aten::pow.Tensor_Scalar(dt: f32[]| P(sum), 0.5)
+    -> output: R
+    redistribute_input(0, P(sum) -> R)
+      redistribute_input(t: f32[], trace: P(sum)->R)
+        _c10d_functional::all_reduce(t: f32[], sum, 0)  ->  t: f32[]
+        _c10d_functional::_wrap_tensor_autograd(t: f32[])  ->  t: f32[]
+        _c10d_functional::wait_tensor(t: f32[])  ->  t: f32[]
+    aten::pow.Tensor_Scalar(t: f32[], 0.5)  ->  t: f32[]""",
         )
 
 
