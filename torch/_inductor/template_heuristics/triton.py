@@ -999,6 +999,17 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
 
+        if not config.max_autotune:
+            fallbacks = [
+                default_config,
+                FlexBwDConfig(32, 32, 32, 32, 1, 4),
+            ]
+            configs: list[FlexBwDConfig] = []
+            for cfg in fallbacks:
+                if cfg not in configs:
+                    configs.append(cfg)
+            return configs
+
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
@@ -1015,6 +1026,18 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             flex_decode_configs += self.flex_decode_autotune_configs
 
         default_config = FlexDecodeConfig(block_n=64, num_stages=1, num_warps=2)
+
+        if not config.max_autotune:
+            fallbacks = [
+                default_config,
+                FlexDecodeConfig(block_n=32, num_stages=1, num_warps=2),
+                FlexDecodeConfig(block_n=16, num_stages=1, num_warps=2),
+            ]
+            configs: list[FlexDecodeConfig] = []
+            for cfg in fallbacks:
+                if cfg not in configs:
+                    configs.append(cfg)
+            return configs
 
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)
@@ -1205,6 +1228,34 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             else:
                 default_config = FlexConfig(64, 32, 3, 4)
 
+        fallbacks: list[FlexConfig] = []
+        for stages in range(default_config.num_stages, 0, -1):
+            fallbacks.append(dataclasses.replace(default_config, num_stages=stages))
+        fallbacks.extend(
+            [
+                FlexConfig(
+                    min(default_config.block_m, 64),
+                    min(default_config.block_n, 32),
+                    2,
+                    4,
+                ),
+                FlexConfig(
+                    min(default_config.block_m, 32),
+                    min(default_config.block_n, 32),
+                    1,
+                    4,
+                ),
+                FlexConfig(16, 16, 1, 4),
+            ]
+        )
+
+        if not config.max_autotune:
+            configs: list[FlexConfig] = []
+            for cfg in fallbacks:
+                if cfg not in configs:
+                    configs.append(cfg)
+            return configs
+
         if default_config not in flex_attn_fwd_configs:
             flex_attn_fwd_configs.append(default_config)
 
@@ -1270,6 +1321,19 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         else:
             default_config = FlexBwDConfig(16, 16, 16, 16, 1, 4)
 
+        if not config.max_autotune:
+            fallbacks: list[FlexBwDConfig] = [
+                default_config,
+                dataclasses.replace(default_config, num_stages=1),
+                FlexBwDConfig(32, 32, 32, 32, 1, 4),
+                FlexBwDConfig(16, 16, 16, 16, 1, 4),
+            ]
+            configs: list[FlexBwDConfig] = []
+            for cfg in fallbacks:
+                if cfg not in configs:
+                    configs.append(cfg)
+            return configs
+
         if default_config not in flex_attn_bwd_configs:
             flex_attn_bwd_configs.append(default_config)
 
@@ -1296,6 +1360,18 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 default_config = FlexDecodeConfig(64, 3, 2)
         else:
             default_config = FlexDecodeConfig(64, 1, 2)
+
+        if not config.max_autotune:
+            fallbacks = [
+                default_config,
+                FlexDecodeConfig(32, 1, 2),
+                FlexDecodeConfig(16, 1, 2),
+            ]
+            configs: list[FlexDecodeConfig] = []
+            for cfg in fallbacks:
+                if cfg not in configs:
+                    configs.append(cfg)
+            return configs
 
         if default_config not in flex_decode_configs:
             flex_decode_configs.append(default_config)

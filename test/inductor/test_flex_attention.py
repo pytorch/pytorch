@@ -2962,6 +2962,226 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
     @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_fallback_on_postcompile_validation(self, device):
+        import torch._inductor.kernel.flex.flex_attention as flex_lowering
+        from torch._inductor.select_algorithm import TritonTemplateCaller
+
+        checked: list[str] = []
+        selected: list[str] = []
+
+        def compiled_shared_mem_bytes_override(choice):
+            checked.append(choice.description)
+            return 2 if len(checked) == 1 else 0
+
+        def shared_mem_limit_override(_device):
+            return 1
+
+        original_output_node = TritonTemplateCaller.output_node
+
+        def wrapped_output_node(self):
+            selected.append(self.description)
+            return original_output_node(self)
+
+        with (
+            mock.patch.object(
+                flex_lowering,
+                "_compiled_shared_mem_bytes",
+                new=compiled_shared_mem_bytes_override,
+            ),
+            mock.patch.object(
+                flex_lowering,
+                "_device_shared_mem_limit_bytes",
+                new=shared_mem_limit_override,
+            ),
+            mock.patch.object(
+                TritonTemplateCaller,
+                "output_node",
+                new=wrapped_output_node,
+            ),
+        ):
+            q, k, v = (torch.randn(1, 1, 256, 64, device=device) for _ in range(3))
+            torch.compile(flex_attention, fullgraph=True)(q, k, v, _identity)
+
+        self.assertGreaterEqual(len(checked), 2)
+        self.assertEqual(selected[0], checked[1])
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_fallback_respects_max_configs(self, device):
+        import torch._inductor.kernel.flex.flex_attention as flex_lowering
+
+        checked: list[str] = []
+
+        def compiled_shared_mem_bytes_override(choice):
+            checked.append(choice.description)
+            return 2 if len(checked) == 1 else 0
+
+        def shared_mem_limit_override(_device):
+            return 1
+
+        q, k, v = (torch.randn(1, 1, 256, 64, device=device) for _ in range(3))
+        with (
+            mock.patch.object(
+                flex_lowering,
+                "_compiled_shared_mem_bytes",
+                new=compiled_shared_mem_bytes_override,
+            ),
+            mock.patch.object(
+                flex_lowering,
+                "_device_shared_mem_limit_bytes",
+                new=shared_mem_limit_override,
+            ),
+            patch.object(torch._inductor.config, "flex_fallback_max_configs", 1),
+            self.assertRaisesRegex(RuntimeError, "could not find a compilable"),
+        ):
+            torch.compile(flex_attention, fullgraph=True)(q, k, v, _identity)
+
+        self.assertEqual(len(checked), 1)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_no_fallback_when_user_pins_fwd_config(self, device):
+        import torch._inductor.kernel.flex.flex_attention as flex_lowering
+
+        checked: list[str] = []
+
+        def compiled_shared_mem_bytes_override(choice):
+            checked.append(choice.description)
+            return 2 if len(checked) == 1 else 0
+
+        def shared_mem_limit_override(_device):
+            return 1
+
+        q, k, v = (torch.randn(1, 1, 256, 64, device=device) for _ in range(3))
+        with (
+            mock.patch.object(
+                flex_lowering,
+                "_compiled_shared_mem_bytes",
+                new=compiled_shared_mem_bytes_override,
+            ),
+            mock.patch.object(
+                flex_lowering,
+                "_device_shared_mem_limit_bytes",
+                new=shared_mem_limit_override,
+            ),
+            self.assertRaisesRegex(RuntimeError, "specified by kernel_options"),
+        ):
+            torch.compile(flex_attention, fullgraph=True)(
+                q,
+                k,
+                v,
+                _identity,
+                kernel_options={"fwd_BLOCK_M": 64},
+            )
+
+        self.assertEqual(len(checked), 1)
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_fallback_finds_working_config_after_out_of_resources(self, device):
+        from torch._inductor.template_heuristics.triton import FlexConfig
+        from torch._inductor.virtualized import V
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return torch.ones((), dtype=torch.bool, device=device)
+
+        q, k, v = (
+            torch.randn(1, 1, 256, 128, device=device, dtype=torch.float16)
+            for _ in range(3)
+        )
+        block_mask = create_block_mask(
+            mask_mod,
+            1,
+            1,
+            256,
+            256,
+            device=device,
+            BLOCK_SIZE=256,
+        )
+
+        bad = [FlexConfig(256, 256, 8, 4)]
+        good = [FlexConfig(64, 64, 1, 4)]
+
+        with mock.patch.object(
+            V.choices, "get_flex_attention_fwd_configs", return_value=bad
+        ):
+            with self.assertRaises(InductorError):
+                torch.compile(flex_attention, fullgraph=True)(
+                    q, k, v, _identity, block_mask=block_mask
+                )
+
+        with mock.patch.object(
+            V.choices, "get_flex_attention_fwd_configs", return_value=bad + good
+        ):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, _identity, block_mask=block_mask
+            )
+            self.assertEqual(out.shape, (1, 1, 256, 128))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_xpu
+    @patch.object(torch._inductor.config, "max_autotune", False)
+    def test_bwd_fallback_on_postcompile_validation(self, device):
+        import torch._inductor.kernel.flex.flex_attention as flex_lowering
+        from torch._inductor.select_algorithm import TritonTemplateCaller
+
+        bwd_checked: list[str] = []
+        bwd_selected: list[str] = []
+
+        def compiled_shared_mem_bytes_override(choice):
+            if "flex_attention_backward" in getattr(choice, "name", ""):
+                bwd_checked.append(choice.description)
+                return 2 if len(bwd_checked) == 1 else 0
+            return 0
+
+        def shared_mem_limit_override(_device):
+            return 1
+
+        original_output_node = TritonTemplateCaller.output_node
+
+        def wrapped_output_node(self):
+            if "flex_attention_backward" in getattr(self, "name", ""):
+                bwd_selected.append(self.description)
+            return original_output_node(self)
+
+        q, k, v = (
+            torch.randn(1, 1, 256, 64, device=device, requires_grad=True)
+            for _ in range(3)
+        )
+        with (
+            mock.patch.object(
+                flex_lowering,
+                "_compiled_shared_mem_bytes",
+                new=compiled_shared_mem_bytes_override,
+            ),
+            mock.patch.object(
+                flex_lowering,
+                "_device_shared_mem_limit_bytes",
+                new=shared_mem_limit_override,
+            ),
+            mock.patch.object(
+                TritonTemplateCaller, "output_node", new=wrapped_output_node
+            ),
+        ):
+            out = torch.compile(flex_attention, fullgraph=True)(
+                q, k, v, _identity, kernel_options={"BACKEND": "TRITON"}
+            )
+            out.sum().backward()
+
+        self.assertGreaterEqual(len(bwd_checked), 2)
+        self.assertEqual(bwd_selected[0], bwd_checked[1])
+
+    @supported_platform
     @skip("TODO: Figure out why this is erroring")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self, device):
