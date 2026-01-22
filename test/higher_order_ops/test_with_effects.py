@@ -17,6 +17,7 @@ from functorch.compile import (
     min_cut_rematerialization_partition,
     nop,
 )
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.effects import (
@@ -1051,6 +1052,66 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         out2 = torch.compile(model)(x)
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
+
+    @skipIfTorchDynamo()
+    def test_effect_autograd_function(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            @torch.library.custom_op("mylib::log_grad", mutates_args=())
+            def log_grad(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @torch.library.register_fake("mylib::log_grad")
+            def log_grad_fake(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            log_grad.register_effect(_EffectType.ORDERED)
+
+            class NoOpWithLoggingBackward(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x * x
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    logged_grad = torch.ops.mylib.log_grad(grad_output)
+                    return logged_grad
+
+            def fn(x):
+                y = NoOpWithLoggingBackward.apply(x)
+                return y.sum()
+
+            x = torch.randn(3, 4, requires_grad=True)
+            x_clone = x.detach().clone().requires_grad_(True)
+
+            backend = AotEagerAndRecordGraphs()
+            compiled_fn = torch.compile(fn, backend=backend)
+            loss = compiled_fn(x)
+            loss.backward()
+
+            loss_ref = fn(x_clone)
+            loss_ref.backward()
+            self.assertEqual(loss, loss_ref)
+
+            self.assertExpectedInline(
+                backend.fw_graphs[0].code.strip(),
+                """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, primals_1);  primals_1 = None
+    sum_1 = torch.ops.aten.sum.default(mul);  mul = None
+    return (sum_1,)""",  # noqa: B950
+            )
+
+            self.assertExpectedInline(
+                backend.bw_graphs[0].code.strip(),
+                """\
+def forward(self, tangents_1, tangents_token):
+    expand = torch.ops.aten.expand.default(tangents_1, [3, 4]);  tangents_1 = None
+    with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.mylib.log_grad.default, expand);  tangents_token = expand = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    return (getitem_1, getitem)""",  # noqa: B950
+            )
 
 
 if __name__ == "__main__":

@@ -1284,6 +1284,8 @@ class CheckpointPolicy(enum.Enum):
       pass and will not be recomputed during the backward pass
     - ``{MUST,PREFER}_RECOMPUTE``: The operation's output will not be saved during the
       forward pass and will be recomputed during the backward pass
+    - ``{MUST,PREFER}_CPU_OFFLOAD``: The operation's output will be saved during the
+      forward pass, offloaded to CPU, and reloaded to GPU during the backward pass
 
     Use ``MUST_*`` over ``PREFER_*`` to indicate that the policy should not be overridden
     by other subsystems like `torch.compile`.
@@ -1301,6 +1303,8 @@ class CheckpointPolicy(enum.Enum):
     PREFER_SAVE = 1
     MUST_RECOMPUTE = 2
     PREFER_RECOMPUTE = 3
+    MUST_CPU_OFFLOAD = 4
+    PREFER_CPU_OFFLOAD = 5
 
 
 def _policy_from_bool(b):
