@@ -53,14 +53,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     markDynamoStrictTest,
-    MI200_ARCH,
-    MI300_ARCH,
     NestedTensorTestCase,
     parametrize,
     run_tests,
     serialTest,
     skipIfRocm,
-    skipIfRocmArch,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
@@ -7236,7 +7233,7 @@ torch.cuda.synchronize()
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
     # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
-    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
+    @skipIfRocm
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -7268,7 +7265,7 @@ torch.cuda.synchronize()
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
     # flash_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
-    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
+    @skipIfRocm
     @skipIfTorchDynamo()
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
