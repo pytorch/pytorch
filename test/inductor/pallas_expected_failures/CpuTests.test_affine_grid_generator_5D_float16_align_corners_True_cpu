@@ -1,0 +1,2 @@
+ERROR
+ValueError: Cannot broadcast to shape with fewer dimensions: arr_shape=(1, 1, 8, 8, 4) shape=(8, 8, 8, 4)

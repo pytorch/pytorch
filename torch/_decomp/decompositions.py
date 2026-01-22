@@ -4331,11 +4331,36 @@ def _sum_tensors(ts: Iterable[Tensor]) -> Tensor:
 def _linspace_from_neg_one(
     num_steps: int, align_corners: bool, dtype: torch.dtype, device: torch.device
 ):
+    # Mirror the C++ implementation in aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp
+    # The native linspace kernel uses a two-sided algorithm for numerical stability:
+    # - For idx < halfway: start + step * idx
+    # - For idx >= halfway: end - step * (steps - idx - 1)
+    # Critically, step is computed in the native dtype, not float64.
     if num_steps <= 1:
         return torch.tensor(0, device=device, dtype=dtype)
 
-    a = ((num_steps - 1) / num_steps) if not align_corners else 1
-    return torch.linspace(-a, a, steps=num_steps, device=device, dtype=dtype)
+    n = num_steps
+    halfway = n // 2
+
+    # Compute start, end, step in native dtype to match C++ kernel
+    start = torch.tensor(-1.0, device=device, dtype=dtype)
+    end = torch.tensor(1.0, device=device, dtype=dtype)
+    step = (end - start) / (n - 1)
+
+    # Single index tensor
+    idx = torch.arange(n, device=device, dtype=dtype)
+
+    # Two-sided computation using where instead of flip/cat
+    # Forward: start + step * idx
+    # Backward: end - step * (n - 1 - idx)
+    forward = start + step * idx
+    backward = end - step * (n - 1 - idx)
+    result = torch.where(idx < halfway, forward, backward)
+
+    if not align_corners:
+        result = result * ((n - 1) / n)
+
+    return result
 
 
 def _make_base_grid_4d(theta: Tensor, h: int, w: int, align_corners: bool):
@@ -4376,9 +4401,10 @@ def _affine_grid_generator_4d(theta: Tensor, size: list[int], align_corners: boo
     n, _, h, w = size
     base_grid = _make_base_grid_4d(theta, h, w, align_corners=align_corners)
     # base_grid shape is (h, w, 3) and theta shape is (n, 2, 3)
-    # We do manually a matrix multiplication which is faster than mm()
-    # (h * w, 3, 1) * (n, 1, 3, 2) -> (n, h * w, 2)
-    grid = (base_grid.view(-1, 3, 1) * theta.mT.unsqueeze(1)).sum(-2)
+    # Use bmm to match C++ kernel behavior for consistent floating-point results
+    # Expand base_grid to (n, h, w, 3), then view as (n, h*w, 3)
+    # bmm: (n, h*w, 3) @ (n, 3, 2) -> (n, h*w, 2)
+    grid = base_grid.view(1, h * w, 3).expand(n, -1, -1).bmm(theta.transpose(1, 2))
     return grid.view(n, h, w, 2)
 
 
@@ -4386,15 +4412,15 @@ def _affine_grid_generator_5d(theta: Tensor, size: list[int], align_corners: boo
     n, _, d, h, w = size
     base_grid = _make_base_grid_5d(theta, d, h, w, align_corners=align_corners)
     # base_grid shape is (d, h, w, 4) and theta shape is (n, 3, 4)
-    # We do manually a matrix multiplication which is faster than mm()
-    # (d * h * w, 4, 1) * (n, 1, 4, 3) -> (n, h * w, 3)
-    grid = (base_grid.view(-1, 4, 1) * theta.mT.unsqueeze(1)).sum(-2)
+    # Use bmm to match C++ kernel behavior for consistent floating-point results
+    # Expand base_grid to (n, d, h, w, 4), then view as (n, d*h*w, 4)
+    # bmm: (n, d*h*w, 4) @ (n, 4, 3) -> (n, d*h*w, 3)
+    grid = base_grid.view(1, d * h * w, 4).expand(n, -1, -1).bmm(theta.transpose(1, 2))
     return grid.view(n, d, h, w, 3)
 
 
 @register_decomposition(aten.affine_grid_generator)
 @out_wrapper()
-@pw_cast_for_opmath
 def affine_grid_generator(theta: Tensor, size: list[int], align_corners: bool):
     torch._check(
         len(size) in (4, 5),
