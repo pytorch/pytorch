@@ -2007,7 +2007,7 @@ inline float hermite_polynomial_he_forward(T x, int64_t n) {
 template <typename T>
 inline float special_ndtri(T p_input) {
   const float p = static_cast<float>(p_input);
-  
+
   // Handle edge cases
   if (p <= 0.0f) {
     return -INFINITY;
@@ -2018,78 +2018,64 @@ inline float special_ndtri(T p_input) {
   if (::metal::isnan(p)) {
     return NAN;
   }
-  
-  // Coefficients for the rational approximation
-  // Low region: 0 < p < p_low
+
+  // Coefficients for the rational approximation (Acklam's algorithm)
+  // Low/High region coefficients
+  constexpr float c0 = -7.784894002430293e-03f;
+  constexpr float c1 = -3.223964580411365e-01f;
+  constexpr float c2 = -2.400758277161838e+00f;
+  constexpr float c3 = -2.549732539343734e+00f;
+  constexpr float c4 =  4.374664141464968e+00f;
+  constexpr float c5 =  2.938163982698783e+00f;
+
+  constexpr float d0 =  7.784695709041462e-03f;
+  constexpr float d1 =  3.224671290700398e-01f;
+  constexpr float d2 =  2.445134137142996e+00f;
+  constexpr float d3 =  3.754408661907416e+00f;
+
+  // Central region coefficients
+  constexpr float a0 = -3.969683028665376e+01f;
+  constexpr float a1 =  2.209460984245205e+02f;
+  constexpr float a2 = -2.759285104469687e+02f;
+  constexpr float a3 =  1.383577518672690e+02f;
+  constexpr float a4 = -3.066479806614716e+01f;
+  constexpr float a5 =  2.506628277459239e+00f;
+
+  constexpr float b0 = -5.447609879822406e+01f;
+  constexpr float b1 =  1.615858368580409e+02f;
+  constexpr float b2 = -1.556989798598866e+02f;
+  constexpr float b3 =  6.680131188771972e+01f;
+  constexpr float b4 = -1.328068155288572e+01f;
+
+  // Region boundaries
   constexpr float p_low = 0.02425f;
-  // High region: p_high < p < 1
   constexpr float p_high = 1.0f - p_low;
-  
+
   float q, r, x;
-  
+
   if (p < p_low) {
     // Rational approximation for lower region
     q = ::metal::sqrt(-2.0f * ::metal::log(p));
-    
-    const float c0 = -7.784894002430293e-03f;
-    const float c1 = -3.223964580411365e-01f;
-    const float c2 = -2.400758277161838e+00f;
-    const float c3 = -2.549732539343734e+00f;
-    const float c4 =  4.374664141464968e+00f;
-    const float c5 =  2.938163982698783e+00f;
-    
-    const float d0 =  7.784695709041462e-03f;
-    const float d1 =  3.224671290700398e-01f;
-    const float d2 =  2.445134137142996e+00f;
-    const float d3 =  3.754408661907416e+00f;
-    
     float num = c0 + q * (c1 + q * (c2 + q * (c3 + q * (c4 + q * c5))));
     float den = 1.0f + q * (d0 + q * (d1 + q * (d2 + q * d3)));
     x = num / den;
-    
+
   } else if (p > p_high) {
-    // Rational approximation for upper region
+    // Rational approximation for upper region (symmetric to lower)
     q = ::metal::sqrt(-2.0f * ::metal::log(1.0f - p));
-    
-    const float c0 =  7.784894002430293e-03f;
-    const float c1 =  3.223964580411365e-01f;
-    const float c2 =  2.400758277161838e+00f;
-    const float c3 =  2.549732539343734e+00f;
-    const float c4 = -4.374664141464968e+00f;
-    const float c5 = -2.938163982698783e+00f;
-    
-    const float d0 =  7.784695709041462e-03f;
-    const float d1 =  3.224671290700398e-01f;
-    const float d2 =  2.445134137142996e+00f;
-    const float d3 =  3.754408661907416e+00f;
-    
     float num = c0 + q * (c1 + q * (c2 + q * (c3 + q * (c4 + q * c5))));
     float den = 1.0f + q * (d0 + q * (d1 + q * (d2 + q * d3)));
     x = -num / den;
-    
+
   } else {
     // Rational approximation for central region
     q = p - 0.5f;
     r = q * q;
-    
-    const float a0 = -3.969683028665376e+01f;
-    const float a1 =  2.209460984245205e+02f;
-    const float a2 = -2.759285104469687e+02f;
-    const float a3 =  1.383577518672690e+02f;
-    const float a4 = -3.066479806614716e+01f;
-    const float a5 =  2.506628277459239e+00f;
-    
-    const float b0 = -5.447609879822406e+01f;
-    const float b1 =  1.615858368580409e+02f;
-    const float b2 = -1.556989798598866e+02f;
-    const float b3 =  6.680131188771972e+01f;
-    const float b4 = -1.328068155288572e+01f;
-    
     float num = q * (a0 + r * (a1 + r * (a2 + r * (a3 + r * (a4 + r * a5)))));
     float den = 1.0f + r * (b0 + r * (b1 + r * (b2 + r * (b3 + r * b4))));
     x = num / den;
   }
-  
+
   return x;
 } // special_ndtri(T p)
 
