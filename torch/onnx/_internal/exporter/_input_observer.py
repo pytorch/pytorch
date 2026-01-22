@@ -126,7 +126,10 @@ class InputObserverInfo:
         }
         flat_args, spec = torch.utils._pytree.tree_flatten((args, kwargs))
         self.inputs_specs.append(spec)
-        cloned = [(None if t is None else t.clone().detach()) for t in flat_args]
+        cloned = [
+            (None if not isinstance(t, torch.Tensor) else t.clone().detach())
+            for t in flat_args
+        ]
         self.flat_inputs.append(cloned)
 
         cloned_args, cloned_kwargs = torch.utils._pytree.tree_unflatten(cloned, spec)
