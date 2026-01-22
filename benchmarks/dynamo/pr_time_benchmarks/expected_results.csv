@@ -87,3 +87,35 @@ basic_NestedModule_eager,compile_time_instruction_count,6307000000,0.1
 
 
 basic_InlineMod_eager,compile_time_instruction_count,8536000000,0.1
+
+
+
+dtensor_dispatch_detach,instruction_count,54000,0.1
+
+
+
+dtensor_dispatch_to_from_local,instruction_count,189000,0.1
+
+
+
+dtensor_dispatch_collectives,instruction_count,25300000,0.1
+
+
+
+dtensor_dispatch_add_backward,instruction_count,626000,0.1
+
+
+
+dtensor_dispatch_inplace,instruction_count,54000,0.1
+
+
+
+dtensor_dispatch_view,instruction_count,64000,0.1
+
+
+
+dtensor_dispatch_random,instruction_count,580000,0.1
+
+
+
+dtensor_dispatch_custom_handler,instruction_count,34000,0.1

@@ -142,7 +142,7 @@
       "Context": "str(value)",
       "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
       "Hints": [
-        "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+        "Set torch._dynamo.config.allow_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     },
@@ -2276,6 +2276,14 @@
         "Check if the key exists in the dictionary before accessing it.",
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
+    }
+  ],
+  "GB1739": [
+    {
+      "Gb_type": "Unsupported member type on OpaqueObject",
+      "Context": "value={real_obj}, attr={name}, member_type={member_type}",
+      "Explanation": "Member type '{member_type}' is not supported for this operation.",
+      "Hints": []
     }
   ],
   "GB0197": [
