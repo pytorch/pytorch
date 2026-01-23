@@ -2229,8 +2229,8 @@ class FakeTensorMode(TorchDispatchMode):
                     )
                 if (
                     not fake.node.expr.free_symbols
-                    - self.shape_env.var_to_val.keys()
-                    - self.shape_env.unbacked_var_to_val.keys()
+                    - self.shape_env.backed_var_to_val.keys()
+                    - self.shape_env.real_tensor_prop_unbacked_vals.keys()
                 ):
                     if (
                         self.shape_env._maybe_evaluate_static(
@@ -2589,8 +2589,8 @@ class FakeTensorMode(TorchDispatchMode):
                         "self.shape_env must not be None for symbolic types"
                     )
                 return t.node.pytype(
-                    t.node.expr.xreplace(self.shape_env.var_to_val).xreplace(
-                        self.shape_env.unbacked_var_to_val
+                    t.node.expr.xreplace(self.shape_env.backed_var_to_val).xreplace(
+                        self.shape_env.real_tensor_prop_unbacked_vals
                     )
                 )
             elif isinstance(t, FakeScriptObject):
@@ -2614,7 +2614,10 @@ class FakeTensorMode(TorchDispatchMode):
                     isinstance(a, py_sym_types)
                     and (syms := free_unbacked_symbols(a))
                     and self.shape_env is not None
-                    and any(s not in self.shape_env.unbacked_var_to_val for s in syms)
+                    and any(
+                        s not in self.shape_env.real_tensor_prop_unbacked_vals
+                        for s in syms
+                    )
                 )
                 for a in flat_args
             )
@@ -2657,7 +2660,9 @@ class FakeTensorMode(TorchDispatchMode):
                 func,
                 flat_arg_fake_tensors,
                 flat_args,
-                self.shape_env.unbacked_var_to_val if self.shape_env else None,
+                self.shape_env.real_tensor_prop_unbacked_vals
+                if self.shape_env
+                else None,
             )
 
         def maybe_propagate_real_tensors(fake_out: T) -> T:
@@ -2683,7 +2688,9 @@ class FakeTensorMode(TorchDispatchMode):
                             raise AssertionError(
                                 "self.shape_env must not be None for symbolic Symbol"
                             )
-                        self.shape_env.set_unbacked_var_to_val(t.node.expr, real_t)
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(
+                            t.node.expr, real_t
+                        )
                     elif (
                         isinstance(s := t.node.expr, sympy.Eq)
                         and isinstance(s.lhs, sympy.Symbol)
@@ -2694,7 +2701,9 @@ class FakeTensorMode(TorchDispatchMode):
                                 "self.shape_env must not be None for symbolic Eq"
                             )
 
-                        self.shape_env.set_unbacked_var_to_val(s, int(real_t))
+                        self.shape_env.set_real_tensor_prop_unbacked_vals(
+                            s, int(real_t)
+                        )
 
             if real_out is not nil:
                 # cross check fake/real outputs, and optionally override fake kernel mismatches
@@ -2716,7 +2725,7 @@ class FakeTensorMode(TorchDispatchMode):
                         real_out,
                     )
 
-                # populate unbacked_var_to_val
+                # populate real_tensor_prop_unbacked_vals
                 if (
                     not isinstance(fake_out, Tensor)
                     and not isinstance(real_out, Tensor)
