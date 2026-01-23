@@ -116,7 +116,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   // Check if this type is registered as an opaque type first
   if (isRegisteredOpaqueType(text)) {
-    return c10::PyObjectType::get();
+    return c10::PyObjectType::create(text);
   }
 
   auto it = type_map.find(text);

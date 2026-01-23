@@ -240,6 +240,9 @@ PyObjectTypePtr PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
   return value;
 }
+PyObjectTypePtr PyObjectType::create(std::string class_name) {
+  return PyObjectTypePtr(new PyObjectType(std::move(class_name)));
+}
 CapsuleTypePtr CapsuleType::get() {
   static CapsuleTypePtr value(new CapsuleType());
   return value;
