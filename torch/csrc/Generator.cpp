@@ -12,10 +12,6 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/detail/XPUHooksInterface.h>
 
-#ifdef USE_CUDA
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#endif
-
 #include <structmember.h>
 #include <utility>
 
@@ -228,50 +224,35 @@ static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPGenerator_setUseThreadBasedRng(
     PyObject* _self,
-    PyObject* value) {
+    PyObject* use_thread_based) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPGenerator*>(_self);
   auto& gen = self->cdata;
-
   TORCH_CHECK(
-      PyBool_Check(value),
+      PyBool_Check(use_thread_based),
       "set_use_thread_based_rng expected a bool, but got ",
-      THPUtils_typename(value));
-  bool use_thread_based = (value == Py_True);
-
-  // Check if this is a CUDA generator
-  if (gen.device().type() == at::kCUDA) {
-    auto cuda_gen = at::check_generator<at::CUDAGeneratorImpl>(gen);
-    std::scoped_lock<std::mutex> lock(gen.mutex());
-    cuda_gen->set_use_thread_based_rng(use_thread_based);
-  } else {
-    TORCH_CHECK(
-        false,
-        "set_use_thread_based_rng is only supported for CUDA generators");
-  }
-
+      THPUtils_typename(use_thread_based));
+  bool value = use_thread_based == Py_True;
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(gen.mutex());
+  gen.unsafeGetGeneratorImpl()->set_use_thread_based_rng(value);
   Py_INCREF(self);
   return reinterpret_cast<PyObject*>(self);
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_getUseThreadBasedRng(
+static PyObject* THPGenerator_useThreadBasedRng(
     PyObject* _self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPGenerator*>(_self);
   auto& gen = self->cdata;
-
-  // Check if this is a CUDA generator
-  if (gen.device().type() == at::kCUDA) {
-    auto cuda_gen = at::check_generator<at::CUDAGeneratorImpl>(gen);
-    std::scoped_lock<std::mutex> lock(gen.mutex());
-    bool result = cuda_gen->use_thread_based_rng();
-    return PyBool_FromLong(result);
-  } else {
-    TORCH_CHECK(
-        false, "use_thread_based_rng is only supported for CUDA generators");
+  // See Note [Acquire lock when using random generators]
+  std::scoped_lock<std::mutex> lock(gen.mutex());
+  if (gen.unsafeGetGeneratorImpl()->use_thread_based_rng()) {
+    Py_RETURN_TRUE;
   }
+  Py_RETURN_FALSE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -362,7 +343,7 @@ static PyMethodDef THPGenerator_methods[] = {
      METH_O,
      nullptr},
     {"use_thread_based_rng",
-     THPGenerator_getUseThreadBasedRng,
+     THPGenerator_useThreadBasedRng,
      METH_NOARGS,
      nullptr},
     {nullptr}};

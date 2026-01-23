@@ -79,6 +79,13 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   virtual c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const;
   Device device() const;
 
+  // Thread-based RNG methods (used by DTensor for CUDA generators).
+  // Default implementations for generators that don't support this feature.
+  virtual bool use_thread_based_rng() const {
+    return false;
+  }
+  virtual void set_use_thread_based_rng(bool /*value*/) {}
+
   // See Note [Acquire lock when using random generators]
   std::mutex mutex_;
 
