@@ -756,10 +756,16 @@ kernel void upsample_2d_aa_backward(
           auto weight = (dx * dy) / ws;
           auto grad_val = grad_out * weight;
 
-          // Atomically add to input gradient
-          auto idx = n * input_strides.x + c * input_strides.y +
-                     y * input_strides.z + x * input_strides.w;
-          atomic_add_float(&gradInputData[idx], static_cast<float>(grad_val));
+          // Atomically add to input gradient using the proper atomic helper
+          upsample_increment_value_bounded<T>(
+              gradInputData,
+              input_sizes.wz,
+              input_strides,
+              n,
+              c,
+              y,
+              x,
+              static_cast<float>(grad_val));
         }
       }
     }
