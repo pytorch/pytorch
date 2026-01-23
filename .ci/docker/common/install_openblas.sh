@@ -3,7 +3,7 @@
 
 set -ex
 
-OPENBLAS_VERSION=${OPENBLAS_VERSION:-"v0.3.30"}
+OPENBLAS_VERSION=${OPENBLAS_VERSION:-"v0.3.31"}
 
 # Clone OpenBLAS
 git clone https://github.com/OpenMathLib/OpenBLAS.git -b "${OPENBLAS_VERSION}" --depth 1 --shallow-submodules
