@@ -4061,15 +4061,27 @@ class TestAutograd(TestCase):
                 self.assertIsNone(ref())
 
     def test_checkpoint_compile_no_recompile(self):
+        from torch.overrides import _get_current_function_mode_stack
+
+        # Check for ambient TorchFunctionMode, e.g. when PYTORCH_TEST_WITH_CROSSREF=1
+        expect_fail = len(torch.overrides._get_current_function_mode_stack()) > 0
+
         @torch.compile(backend="aot_eager")
         def fn(x):
             return x.sin().cos()
 
         x = torch.rand(10, 10, requires_grad=True)
 
-        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+        def run():
             out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
             out.sum().backward()
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            if expect_fail:
+                with self.assertRaises(RuntimeError):
+                    run()
+            else:
+                run()
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
