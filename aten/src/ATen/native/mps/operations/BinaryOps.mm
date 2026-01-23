@@ -29,6 +29,7 @@
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/sub_native.h>
 #include <ATen/ops/view_as_real.h>
+#include <ATen/ops/heaviside_native.h>
 #include <ATen/ops/xlogy_native.h>
 #endif
 
@@ -297,6 +298,37 @@ TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Te
     return outputTensor;
   };
   mps::binaryOpTensor(self, other, output, "xlogy_out_mps", xlogy_op_block);
+}
+
+TORCH_IMPL_FUNC(heaviside_out_mps)(const Tensor& self, const Tensor& values, const Tensor& output) {
+  // heaviside(x, values) = 0 if x < 0, values if x == 0, 1 if x > 0
+  mps::BinaryOpBlock heaviside_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
+    MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
+
+    // Check if x == 0
+    MPSGraphTensor* xEqualZeroTensor = [mpsGraph equalWithPrimaryTensor:primaryCastTensor
+                                                        secondaryTensor:zeroTensor
+                                                                   name:nil];
+    // Check if x > 0
+    MPSGraphTensor* xGreaterZeroTensor = [mpsGraph greaterThanWithPrimaryTensor:primaryCastTensor
+                                                                secondaryTensor:zeroTensor
+                                                                           name:nil];
+
+    // First select: x > 0 ? 1 : 0
+    MPSGraphTensor* positiveResultTensor = [mpsGraph selectWithPredicateTensor:xGreaterZeroTensor
+                                                           truePredicateTensor:oneTensor
+                                                          falsePredicateTensor:zeroTensor
+                                                                          name:nil];
+    // Second select: x == 0 ? values : (x > 0 ? 1 : 0)
+    MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:xEqualZeroTensor
+                                                   truePredicateTensor:secondaryCastTensor
+                                                  falsePredicateTensor:positiveResultTensor
+                                                                  name:nil];
+    return outputTensor;
+  };
+  mps::binaryOpTensor(self, values, output, "heaviside_out_mps", heaviside_op_block);
 }
 
 } // namespace at::native
