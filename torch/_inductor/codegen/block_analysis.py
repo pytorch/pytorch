@@ -6,7 +6,7 @@ from typing import Optional
 import sympy
 from sympy import Expr, Symbol
 
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import Identity, FloorDiv, ModularIndexing
 
 from ..utils import sympy_dot, sympy_subs
 from ..virtualized import V
@@ -53,7 +53,11 @@ class BlockPatternMatcher:
     @staticmethod
     def _preprocess(expr: Expr) -> Expr:
         # Remove any Identity nodes, e.g. expand x + (5 * y) to x + 5 * y.
-        return expr.expand(identity=True)
+        # Disable mul and multinomial as those expansions affect op trees:
+        # e.g. sympy expects to match Mul(a, b), but expansion has simplified
+        # to Add(...). Even though they may be algebraically equivalent,
+        # sympy `match` performs structural pattern matching
+        return expr.expand(mul=False, multinomial=False, identity=True)
 
     @classmethod
     def match_mod_div_block_expr(
@@ -66,6 +70,11 @@ class BlockPatternMatcher:
         """
         Matches modular indexing expressions, converting them to implied block dimensions and strides.
         See triton.py for more information.
+
+        Warning: this function requires that `index`, `numel` and any other sympy
+        expression does not have precomputed replacements since otherwise block
+        pattern matching may fail.
+        See [Note: Precomputed replacements with BlockPatternMatch]
         """
         index = cls._preprocess(index)
 
@@ -135,16 +144,13 @@ class BlockPatternMatcher:
             if stride not in match:
                 match[stride] = sympy.S.Zero
 
-        sizevars = V.graph.sizevars
-
-        def get_match(expr: Expr) -> Expr:
-            return sizevars.lookup_precomputed_size(match[expr])
-
         # Replace wildcards with matched expressions.
-        dims = [dims[0]] + [get_match(dim) for dim in dims[1:]]
-        strides = [get_match(stride) for stride in strides]
+        dims = [dims[0]] + [match[ dim ] for dim in dims[1:]]
+        strides = [match[ stride ] for stride in strides]
         slice_numels = cls.get_slice_numels(dims)
         block_index_exprs = [sympy_subs(expr, match) for expr in block_index_exprs]
+
+        sizevars = V.graph.sizevars
 
         # The leading dimension is not directly matched in our expression.
         # We solve for it by dividing the range tree numel by the product of
@@ -157,12 +163,8 @@ class BlockPatternMatcher:
         # Sanity check that we can recover the index from the matched subexpressions.
         matched_index = sympy_dot(strides, block_index_exprs)
         assert sizevars.statically_known_equals(
-            # New precomputed replacements may be generated when the `get_match` function
-            # above is called, but the `index` that is being matched has not been updated.
-            # So remove them when checking for equivalence e.g. if ps0=3*s0 and
-            # index=3*s0*expr, matched_index=ps0*expr, then index == matched_index
-            sizevars.remove_precomputed_replacements(matched_index),
-            sizevars.remove_precomputed_replacements(index),
+            matched_index,
+            index,
         ), textwrap.dedent(
             f"""
             Invalid match!
