@@ -818,7 +818,6 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
-
     @parametrize(
         "size,expected_num_block_pointers,expected_num_triton_kernels,expect_fallback",
         [
