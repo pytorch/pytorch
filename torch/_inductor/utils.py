@@ -1662,7 +1662,7 @@ class DelayReplaceLine(DeferredLineBase):
 
 @functools.cache
 def is_warp_size_64(device: torch.device) -> bool:
-    if isinstance(device, torch.device("cuda")):
+    if device == torch.device("cuda"):
         prop = DeviceProperties.create(device)
         return prop.warp_size == 64
     else:
