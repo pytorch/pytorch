@@ -41,6 +41,8 @@
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/view_as_real.h>
+#include <ATen/ops/index_reduce_native.h>
+#include <ATen/native/ReductionType.h>
 #endif
 
 constexpr auto nonZeroMaxSize = 1UL << 24;
@@ -975,6 +977,180 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Scalar& source) {
   return self.index_fill_(dim, index, mps::wrapped_scalar_tensor_mps(source, self.device()));
+}
+
+TORCH_IMPL_FUNC(index_reduce_mps_out)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const Tensor& source,
+ const std::string_view reduce,
+ bool include_self,
+ const Tensor& result) {
+  using namespace mps;
+
+  TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
+
+  if (self.numel() == 0 || index.numel() == 0 || source.numel() == 0) {
+    if (!result.is_same(self)) {
+      result.copy_(self);
+    }
+    return;
+  }
+
+  TORCH_CHECK(index.dim() <= 1, "index_reduce(): Index must be a vector or scalar");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+              "index_reduce(): Expected dtype int32 or int64 for index");
+  TORCH_CHECK(!self.is_complex(), "index_reduce(): Complex types are not yet supported on MPS");
+
+  // Get the reduction type
+  auto op = get_operator_enum(reduce, true);
+
+  // Copy self to result if not the same
+  if (!result.is_same(self)) {
+    result.copy_(self);
+  }
+
+  // If include_self is false, we need to initialize the result at the indexed positions
+  // with appropriate identity values
+  if (!include_self) {
+    Tensor init_values;
+    switch (op) {
+      case ReductionType::PROD:
+        init_values = at::ones_like(source);
+        break;
+      case ReductionType::MAX:
+        if (at::isFloatingType(self.scalar_type())) {
+          init_values = at::full_like(source, -std::numeric_limits<double>::infinity());
+        } else {
+          init_values = at::full_like(source, std::numeric_limits<int64_t>::lowest());
+        }
+        break;
+      case ReductionType::MIN:
+        if (at::isFloatingType(self.scalar_type())) {
+          init_values = at::full_like(source, std::numeric_limits<double>::infinity());
+        } else {
+          init_values = at::full_like(source, std::numeric_limits<int64_t>::max());
+        }
+        break;
+      default:  // SUM, MEAN
+        init_values = at::zeros_like(source);
+        break;
+    }
+    // Use scatter to initialize result at indexed positions
+    result.scatter_(dim, index.unsqueeze(-1).expand_as(source), init_values);
+  }
+
+  // Determine the scatter mode based on reduction type
+  MPSGraphScatterMode scatter_mode;
+  switch (op) {
+    case ReductionType::SUM:
+    case ReductionType::MEAN:
+      scatter_mode = MPSGraphScatterModeAdd;
+      break;
+    case ReductionType::PROD:
+      scatter_mode = MPSGraphScatterModeMul;
+      break;
+    case ReductionType::MAX:
+      scatter_mode = MPSGraphScatterModeMax;
+      break;
+    case ReductionType::MIN:
+      scatter_mode = MPSGraphScatterModeMin;
+      break;
+    default:
+      TORCH_CHECK(false, "index_reduce(): Unsupported reduction type");
+  }
+
+  // For index_reduce, index is 1D and we need to expand it to match source shape
+  // The index values apply along dim, so we need to broadcast index to source shape
+  auto expanded_index = index;
+  if (index.dim() == 0) {
+    expanded_index = index.unsqueeze(0);
+  }
+  // Expand index to have the same shape as source along all dims except dim
+  std::vector<int64_t> expand_shape(source.dim(), 1);
+  expand_shape[dim] = expanded_index.size(0);
+  expanded_index = expanded_index.view(expand_shape).expand_as(source);
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* indexTensor_ = nil;
+    MPSGraphTensor* srcTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  auto inputType = getMPSDataType(result);
+  auto srcType = getMPSDataType(source);
+  bool needsCast = false;
+  if (inputType == MPSDataTypeUInt8 || inputType == MPSDataTypeBool) {
+    inputType = MPSDataTypeInt32;
+    needsCast = true;
+  }
+  // For non-set modes, we need float32 or int32
+  if (srcType == MPSDataTypeUInt8 || srcType == MPSDataTypeBool) {
+    srcType = isFloatingType(source.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+    needsCast = true;
+  }
+
+  @autoreleasepool {
+    std::string key = "index_reduce_mps_" + getTensorsStringKey({result, expanded_index, source}) + ":" +
+        std::to_string(dim) + ":" + std::string(reduce) + ":" + std::to_string(include_self);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(result));
+      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, expanded_index);
+      MPSGraphTensor* srcTensor = mpsGraphRankedPlaceHolder(mpsGraph, srcType, getMPSShape(source));
+
+      MPSGraphTensor* castInputTensor = inputTensor;
+      MPSGraphTensor* castSrcTensor = srcTensor;
+      if (needsCast || inputType != srcType) {
+        auto targetType = isFloatingType(source.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+        castInputTensor = [mpsGraph castTensor:inputTensor toType:targetType name:@"castInput"];
+        castSrcTensor = [mpsGraph castTensor:srcTensor toType:targetType name:@"castSrc"];
+      }
+
+      MPSGraphTensor* castIndexTensor = [mpsGraph castTensor:indexTensor toType:MPSDataTypeInt32 name:@"castIndex"];
+
+      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wobjc-method-access")
+      MPSGraphTensor* scatterTensor = [mpsGraph scatterAlongAxis:(NSInteger)dim
+                                                  withDataTensor:castInputTensor
+                                                   updatesTensor:castSrcTensor
+                                                   indicesTensor:castIndexTensor
+                                                            mode:scatter_mode
+                                                            name:nil];
+      C10_DIAGNOSTIC_POP()
+
+      MPSGraphTensor* outputTensor = scatterTensor;
+      if (needsCast) {
+        outputTensor = [mpsGraph castTensor:scatterTensor toType:getMPSDataType(result) name:@"castOutput"];
+      }
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->indexTensor_ = indexTensor;
+      newCachedGraph->srcTensor_ = srcTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, result, nullptr, true, inputType);
+    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, expanded_index);
+    Placeholder srcPlaceholder = Placeholder(cachedGraph->srcTensor_, source, nullptr, true, srcType);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result, nullptr, false);
+
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder, srcPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  // For mean reduction, we need to divide by count
+  if (op == ReductionType::MEAN) {
+    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+    counts.index_add_(dim, index, at::ones_like(source));
+    counts.masked_fill_(counts == 0, 1);
+    if (result.is_floating_point() || result.is_complex()) {
+      result.div_(counts);
+    } else {
+      result.div_(counts, "floor");
+    }
+  }
 }
 
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
