@@ -1455,11 +1455,40 @@ def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
     return _unwrap_functional_tensor(maybe_tensor, reapply_views)
 
 
+def _unwrap_functional_pytree(pytree_obj, *, reapply_views: bool):
+    """
+    Unwrap all functional tensors in the pytree and return flags indicating
+    whether any tensors or functional tensors were found.
+
+    Returns:
+        A tuple of (unwrapped_pytree, any_tensor_inputs, any_functional_inputs)
+    """
+    any_tensor_inputs = False
+    any_functional_inputs = False
+
+    def unwrap_with_flags(t):
+        nonlocal any_tensor_inputs, any_functional_inputs
+        if not isinstance(t, torch.Tensor):
+            return t
+        any_tensor_inputs = True
+        if isinstance(t, FunctionalTensor):
+            any_functional_inputs = True
+            t = t.elem
+        if torch._is_functional_tensor(t):
+            any_functional_inputs = True
+            torch._sync(t)
+            return _unwrap_functional_tensor(t, reapply_views)
+        return t
+
+    unwrapped = tree_map(unwrap_with_flags, pytree_obj)
+    return unwrapped, any_tensor_inputs, any_functional_inputs
+
+
 def _unwrap_all_tensors_from_functional(tensor_pytree, *, reapply_views: bool):
-    return tree_map(
-        lambda t: _maybe_unwrap_functional_tensor(t, reapply_views=reapply_views),
-        tensor_pytree,
+    unwrapped, _, _ = _unwrap_functional_pytree(
+        tensor_pytree, reapply_views=reapply_views
     )
+    return unwrapped
 
 
 @exposed_in("torch.func")

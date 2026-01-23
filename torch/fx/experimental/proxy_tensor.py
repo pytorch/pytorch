@@ -43,7 +43,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_value, OpaqueType
 from torch._logging import trace_structured
-from torch._ops import HigherOrderOperator
+from torch._ops import has_pytree_input, HigherOrderOperator
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -1181,13 +1181,27 @@ def proxy_call(
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    proxy_out = proxy_mode.tracer.create_proxy(
-        "call_function",
-        func,
-        proxy_args,
-        proxy_kwargs,
-        name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
-    )
+    if has_pytree_input(func._schema):
+        # If the op has pytree inputs, wrap it with flat_apply
+        from torch._higher_order_ops.flat_apply import flat_apply
+
+        proxy_flat_args_list, in_spec = pytree.tree_flatten((proxy_args, proxy_kwargs))
+
+        proxy_out = proxy_mode.tracer.create_proxy(
+            "call_function",
+            flat_apply,
+            (func, in_spec, *proxy_flat_args_list),
+            {},
+            name=f"flat_apply_{func.overloadpacket.__name__}",
+        )
+    else:
+        proxy_out = proxy_mode.tracer.create_proxy(
+            "call_function",
+            func,
+            proxy_args,
+            proxy_kwargs,
+            name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
+        )
 
     with _enable_thunkify(proxy_mode.tracer):
         out = func(*args, **kwargs)
@@ -1436,6 +1450,7 @@ def _should_save_eager_input_vals(
     if args_kwargs is not None and (
         target is torch.ops.higher_order.auto_functionalized
         or target is torch.ops.higher_order.auto_functionalized_v2
+        or target is torch.ops.higher_order.flat_apply
     ):
         args = args_kwargs[0]
         assert isinstance(

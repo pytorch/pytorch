@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.utils._pytree as pytree
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._library.infer_schema import infer_schema
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -104,6 +105,58 @@ class TestPytreeOps(TestCase):
         }
         y = torch.ops._TestPytreeOps.nested_op(d)
         self.assertEqual(y, torch.sin(d["a"][0] + d["b"]["x"]))
+
+    def test_compile(self):
+        @torch.library.custom_op("mylib::foo", mutates_args=())
+        def foo(p: Point, t: torch.Tensor) -> torch.Tensor:
+            return torch.sin(p.x - p.y + t)
+
+        @foo.register_fake
+        def _(p: Point, t: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(t)
+
+        p = Point(x=torch.randn(2, 3), y=torch.randn(2, 3))
+        t = torch.randn(2, 3)
+
+        backend = AotEagerAndRecordGraphs()
+
+        def fn(p, t):
+            return torch.ops.mylib.foo(p, t)
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(compiled_fn(p, t), fn(p, t))
+
+        actual_graph = torch._dynamo.testing.normalize_gm(
+            backend.graphs[0].print_readable(print_output=False)
+        )
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_t_: "f32[2, 3]", L_p_x: "f32[2, 3]", L_p_y: "f32[2, 3]"):
+        l_t_ = L_t_
+        l_p_x = L_p_x
+        l_p_y = L_p_y
+
+        mylib_foo_input_spec : torch.utils._pytree.TreeSpec = self.mylib_foo_input_spec
+        flat_apply: "f32[2, 3]" = torch.ops.higher_order.flat_apply(torch.ops.mylib.foo.default, mylib_foo_input_spec, l_p_x, l_p_y, l_t_);  mylib_foo_input_spec = l_p_x = l_p_y = l_t_ = None
+        return (flat_apply,)
+""",  # noqa: B950
+        )
+
+        actual_graph = torch._dynamo.testing.normalize_gm(
+            backend.fw_graphs[0].print_readable(print_output=False)
+        )
+        self.assertExpectedInline(
+            actual_graph,
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 3]", arg1_1: "f32[2, 3]", arg2_1: "f32[2, 3]"):
+        _tree_spec_constant0 = self._tree_spec_constant0
+        flat_apply_foo: "f32[2, 3]" = torch.ops.higher_order.flat_apply(torch.ops.mylib.foo.default, _tree_spec_constant0, arg1_1, arg2_1, arg0_1);  _tree_spec_constant0 = arg1_1 = arg2_1 = arg0_1 = None
+        return (flat_apply_foo,)
+""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":

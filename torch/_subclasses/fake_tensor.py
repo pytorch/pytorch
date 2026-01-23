@@ -1787,6 +1787,11 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(hash(arg))
                 id_hashed_objects.append(arg.orig_callable)
+            elif type(arg) in pytree.SUPPORTED_NODES:
+                # Flatten and hash the flattened values plus the spec.
+                flat_values, spec = pytree.tree_flatten(arg)
+                result.append(spec)
+                self._prep_args_for_hash(result, flat_values, state, id_hashed_objects)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
