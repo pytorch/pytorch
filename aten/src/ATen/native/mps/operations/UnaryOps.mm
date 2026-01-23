@@ -448,8 +448,6 @@ std::tuple<Tensor&, Tensor&> frexp_out_mps(const Tensor& self,
       MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
       MPSGraphTensor* zeroInt = [mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt32];
       MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:inputTensor.dataType];
-      MPSGraphTensor* oneInt = [mpsGraph constantWithScalar:1 dataType:MPSDataTypeInt32];
-      MPSGraphTensor* half = [mpsGraph constantWithScalar:0.5 dataType:inputTensor.dataType];
 
       // Check for special cases
       MPSGraphTensor* isZero = [mpsGraph equalWithPrimaryTensor:inputTensor
