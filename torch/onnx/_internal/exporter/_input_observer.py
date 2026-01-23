@@ -358,7 +358,10 @@ class InputObserver:
 
     @contextlib.contextmanager
     def __call__(
-        self, model: torch.nn.Module, store_n_calls: int = 3, method_name: str = "forward"
+        self,
+        model: torch.nn.Module,
+        store_n_calls: int = 3,
+        method_name: str = "forward",
     ):
         """Starts collecting inputs and outputs of a specific method.
         The model method is replaced by a new one collecting tensors
@@ -376,7 +379,9 @@ class InputObserver:
                 "This class was already used to capture a model. Please create a new one."
             )
         if not hasattr(model, method_name):
-            raise ValueError(f"Model type {model} does not have a method {method_name!r}")
+            raise ValueError(
+                f"Model type {model} does not have a method {method_name!r}"
+            )
         captured_method = getattr(model, method_name)
         self.info = InputObserverInfo(
             signature_names=list(inspect.signature(captured_method).parameters)
@@ -384,7 +389,10 @@ class InputObserver:
         setattr(
             model,
             method_name,
-            lambda *args, _cm=captured_method, _snc=store_n_calls, **kwargs: self._replaced_method(  # noqa: E501
+            lambda *args,
+            _cm=captured_method,
+            _snc=store_n_calls,
+            **kwargs: self._replaced_method(
                 *args,
                 _captured_method=_cm,
                 _store_n_calls=_snc,
