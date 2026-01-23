@@ -603,12 +603,14 @@ class ComprehensionAnalysis:
         result_on_stack: True if result stays on stack (discarded, returned, or in expression)
         result_disposition: What happens to result - "stored", "discarded", "returned", or "consumed"
         iterator_vars: Variables from LOAD_FAST_AND_CLEAR (need restoration)
+        walrus_vars: Variables assigned via walrus operator (:=) inside comprehension
     """
     end_ip: int
     result_var: Optional[str]
     result_on_stack: bool
     result_disposition: str  # "stored", "discarded", "returned", "consumed"
     iterator_vars: list[str]
+    walrus_vars: list[str]
 
 
 def _detect_and_normalize_assert_statement(
@@ -4522,6 +4524,47 @@ class InstructionTranslatorBase(
         if end_for_ip == -1:
             raise AssertionError("Could not find END_FOR for comprehension")
 
+        # Scan loop body for COPY + STORE_FAST walrus pattern
+        # Walrus operators compile to: COPY 1 followed by STORE_FAST <varname>
+        walrus_vars: list[str] = []
+
+        # Find first FOR_ITER to know where loop body starts
+        for_iter_ip = -1
+        for scan_ip in range(start_ip, end_for_ip):
+            if self.instructions[scan_ip].opname == "FOR_ITER":
+                for_iter_ip = scan_ip
+                break
+
+        if for_iter_ip >= 0:
+            scan_ip = for_iter_ip + 1
+            while scan_ip < end_for_ip:
+                inst = self.instructions[scan_ip]
+
+                # Skip nested loops to only capture outermost comprehension
+                if inst.opname == "FOR_ITER":
+                    nested_depth = 1
+                    while nested_depth > 0 and scan_ip < end_for_ip:
+                        scan_ip += 1
+                        nested_inst = self.instructions[scan_ip]
+                        if nested_inst.opname == "FOR_ITER":
+                            nested_depth += 1
+                        elif nested_inst.opname == "END_FOR":
+                            nested_depth -= 1
+                    scan_ip += 1
+                    continue
+
+                # Detect walrus pattern: COPY 1 followed by STORE_FAST
+                if inst.opname == "COPY" and inst.arg == 1:
+                    if scan_ip + 1 < end_for_ip:
+                        next_inst = self.instructions[scan_ip + 1]
+                        if next_inst.opname == "STORE_FAST":
+                            var_name = next_inst.argval
+                            # Exclude iterator variables and deduplicate
+                            if var_name not in iterator_vars and var_name not in walrus_vars:
+                                walrus_vars.append(var_name)
+
+                scan_ip += 1
+
         # Check what happens after END_FOR
         ip = end_for_ip + 1
         post_end_for_inst = self.instructions[ip]
@@ -4539,6 +4582,7 @@ class InstructionTranslatorBase(
                 result_on_stack=False,
                 result_disposition="stored",
                 iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
             )
 
         elif post_end_for_inst.opname == patterns["on_stack_indicator"]:
@@ -4560,6 +4604,7 @@ class InstructionTranslatorBase(
                         result_on_stack=True,
                         result_disposition="discarded",
                         iterator_vars=iterator_vars,
+                        walrus_vars=walrus_vars,
                     )
 
                 elif disposition_inst.opname == patterns["return_indicator"]:
@@ -4570,6 +4615,7 @@ class InstructionTranslatorBase(
                         result_on_stack=True,
                         result_disposition="returned",
                         iterator_vars=iterator_vars,
+                        walrus_vars=walrus_vars,
                     )
 
                 else:
@@ -4581,6 +4627,7 @@ class InstructionTranslatorBase(
                         result_on_stack=True,
                         result_disposition="consumed",
                         iterator_vars=iterator_vars,
+                        walrus_vars=walrus_vars,
                     )
 
             # Fallback - result on stack but no disposition found
@@ -4590,6 +4637,7 @@ class InstructionTranslatorBase(
                 result_on_stack=True,
                 result_disposition="consumed",
                 iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
             )
 
         else:
@@ -4603,6 +4651,7 @@ class InstructionTranslatorBase(
                 result_on_stack=False,
                 result_disposition="stored",
                 iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
             )
 
     def _handle_comprehension_graph_break(
@@ -4694,6 +4743,12 @@ class InstructionTranslatorBase(
             # Push a placeholder onto the symbolic stack to represent the result.
             self.push(UnknownVariable())
 
+        # Handle walrus operator variables - add them to resume function args
+        for walrus_var in analysis.walrus_vars:
+            if walrus_var not in meta.locals_names:
+                meta.locals_names[walrus_var] = len(meta.locals_names)
+            self.symbolic_locals[walrus_var] = UnknownVariable()
+
         # Generate bytecode to extend the frame values list with result variable
         from .codegen import PyCodegen
         from .bytecode_transformation import create_dup_top, create_instruction
@@ -4710,6 +4765,24 @@ class InstructionTranslatorBase(
             cg.append_output(cg.create_binary_subscr())
             # Stack: [..., frame_values_list, frame_values_list[0]]
             cg.append_output(create_instruction("LOAD_FAST", argval=analysis.result_var))
+            # Stack: [..., frame_values_list, frame_values_list[0], value]
+            # LIST_APPEND: append TOS to TOS[-2], pops TOS
+            cg.append_output(create_instruction("LIST_APPEND", arg=1))
+            # Stack: [..., frame_values_list, frame_values_list[0]]
+            # Pop the frame_values_list[0] reference
+            cg.append_output(create_instruction("POP_TOP"))
+            # Stack: [..., frame_values_list]
+
+        # Generate bytecode to append walrus variables to frame values list
+        for walrus_var in analysis.walrus_vars:
+            # Stack: [..., frame_values_list]
+            cg.append_output(create_dup_top())
+            # Stack: [..., frame_values_list, frame_values_list]
+            cg.append_output(cg.create_load_const(0))
+            # Stack: [..., frame_values_list, frame_values_list, 0]
+            cg.append_output(cg.create_binary_subscr())
+            # Stack: [..., frame_values_list, frame_values_list[0]]
+            cg.append_output(create_instruction("LOAD_FAST", argval=walrus_var))
             # Stack: [..., frame_values_list, frame_values_list[0], value]
             # LIST_APPEND: append TOS to TOS[-2], pops TOS
             cg.append_output(create_instruction("LIST_APPEND", arg=1))
