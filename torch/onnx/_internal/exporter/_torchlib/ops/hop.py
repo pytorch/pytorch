@@ -360,16 +360,17 @@ def higher_order_invoke_subgraph(
     assert _core.current_tracer is not None
     tracer = _core.current_tracer
 
+    # This key can be used by downstream to avoid inlining
+    subgraph.metadata_props["pkg.torch.ops.higher_order.invoke_subgraph.identifier"] = (
+        str(identifier)
+    )
+
     # Create the function call node
     node = ir.Node(
         subgraph.domain,
         subgraph.name,
         list(operands),
         num_outputs=len(subgraph.outputs),
-        metadata_props={
-            # This key can be used by downstream to avoid inlining
-            "pkg.torch.ops.higher_order.invoke_subgraph.identifier": str(identifier),
-        },
     )
 
     # ONNX Runtime complains about duplicate output names if we don't rename them.
