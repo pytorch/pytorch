@@ -88,7 +88,7 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
                         .attr("_unwrap_functional_pytree");
     bool reapply_views =
         at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-    py::tuple result = fn(py_obj_, "reapply_views"_a = reapply_views);
+    py::tuple result = fn(py_obj_, py::arg("reapply_views") = reapply_views);
     py::object unwrapped = result[0];
     bool any_tensor_inputs = result[1].cast<bool>();
     bool any_functional_inputs = result[2].cast<bool>();

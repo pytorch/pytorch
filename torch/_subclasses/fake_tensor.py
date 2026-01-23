@@ -29,7 +29,6 @@ from weakref import ReferenceType
 
 import torch
 import torch._library.utils as library_utils
-import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject

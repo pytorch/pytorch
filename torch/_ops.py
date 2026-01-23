@@ -1485,12 +1485,10 @@ def has_pytree_input(op_schema: torch.FunctionSchema) -> bool:
     Check if an operator schema has any pytree input arguments.
     """
     for arg in op_schema.arguments:
-        if (
-            isinstance(
-                arg.type, torch.PyObjectType  # pyrefly: ignore[missing-attribute]
-            )
-            and pytree.is_pytree_type(str(arg.type))
-        ):
+        if isinstance(
+            arg.type,
+            torch.PyObjectType,  # pyrefly: ignore[missing-attribute]
+        ) and pytree.is_pytree_type(str(arg.type)):
             return True
     return False
 
