@@ -4,7 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/accumulate.h>
 #include <c10/core/SymBool.h>
-#include <c10/core/SymInt.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/StringUtil.h>
 
 
