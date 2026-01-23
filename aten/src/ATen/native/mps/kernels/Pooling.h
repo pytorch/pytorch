@@ -59,3 +59,56 @@ struct MaxUnpoolingParams {
   ::c10::metal::array<idx_type_t, N> output_strides;
   ::c10::metal::array<idx_type_t, N> indices_strides;
 };
+
+// Parameters for fractional max pooling 2D
+template <typename idx_type_t = int32_t>
+struct FractionalMaxPool2dParams {
+  idx_type_t numBatch;
+  idx_type_t numPlanes;
+  idx_type_t inputH;
+  idx_type_t inputW;
+  idx_type_t outputH;
+  idx_type_t outputW;
+  idx_type_t poolSizeH;
+  idx_type_t poolSizeW;
+};
+
+// Parameters for fractional max pooling 3D
+template <typename idx_type_t = int32_t>
+struct FractionalMaxPool3dParams {
+  idx_type_t numBatch;
+  idx_type_t numPlanes;
+  idx_type_t inputT;
+  idx_type_t inputH;
+  idx_type_t inputW;
+  idx_type_t outputT;
+  idx_type_t outputH;
+  idx_type_t outputW;
+  idx_type_t poolSizeT;
+  idx_type_t poolSizeH;
+  idx_type_t poolSizeW;
+};
+
+// Parameters for fractional max pooling backward 2D
+template <typename idx_type_t = int32_t>
+struct FractionalMaxPool2dBackwardParams {
+  idx_type_t numBatch;
+  idx_type_t numPlanes;
+  idx_type_t inputH;
+  idx_type_t inputW;
+  idx_type_t outputH;
+  idx_type_t outputW;
+};
+
+// Parameters for fractional max pooling backward 3D
+template <typename idx_type_t = int32_t>
+struct FractionalMaxPool3dBackwardParams {
+  idx_type_t numBatch;
+  idx_type_t numPlanes;
+  idx_type_t inputT;
+  idx_type_t inputH;
+  idx_type_t inputW;
+  idx_type_t outputT;
+  idx_type_t outputH;
+  idx_type_t outputW;
+};

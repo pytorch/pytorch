@@ -387,8 +387,6 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.int32,
             ],
-            "nn.functional.fractional_max_pool2d": None,
-            "nn.functional.fractional_max_pool3d": None,
             "nn.functional.group_norm": [torch.int16, torch.int32],
             "nn.functional.glu": [
                 torch.int32,
