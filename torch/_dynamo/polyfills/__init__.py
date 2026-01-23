@@ -85,11 +85,11 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
-def impl_IS_MAPPING(a: Any) -> bool:
+def impl_IS_MAPPING(a: object) -> bool:
     return isinstance(a, Mapping)
 
 
-def impl_MATCH_SEQUENCE(a: Any) -> bool:
+def impl_MATCH_SEQUENCE(a: object) -> bool:
     return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
 
 
@@ -153,7 +153,8 @@ def impl_MATCH_CLASS(
     return tuple(attrs)
 
 
-def impl_MATCH_KEYS(obj: Any, keys: tuple[Any, ...]) -> tuple[Any, ...] | None:
+def impl_MATCH_KEYS(obj: Mapping[T, U], keys: tuple[T, ...]) -> tuple[U, ...] | None:
+    assert isinstance(obj, Mapping)
     if all(key in obj for key in keys):
         return tuple(obj[key] for key in keys)
     else:
