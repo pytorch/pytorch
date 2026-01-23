@@ -168,7 +168,6 @@ class NVUniversalGemmKernel(Kernel):
             scale_mode_b_str = scale_mode_b.name if scale_mode_b else ""
             swizzle_mode_a_str = swizzle_mode_a.name if swizzle_mode_a else ""
             swizzle_mode_b_str = swizzle_mode_b.name if swizzle_mode_b else ""
-            preprocess_inputs = ""
             cache_key_code = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape, in_ptr3.shape)"
             create_args_code = f"""scaled_a = ScaledTensor(
                     in_ptr0, in_ptr2, ScaleMode.{scale_mode_a_str}, ScaleSwizzleMode.{swizzle_mode_a_str}
