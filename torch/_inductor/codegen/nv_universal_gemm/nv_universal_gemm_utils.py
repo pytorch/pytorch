@@ -24,6 +24,10 @@ def to_cutlass_scale_mode(
 
     The returned enum objects can be used directly with cutlass_api, or their
     .name attribute can be used for codegen (e.g., scale_mode.name -> "Blockwise1x32").
+
+    NOTE:
+        Currently on Blackwell (SM100), NVGEMM only supports MXFP8 scaling modes.
+        Update this mapping when additional scaling modes are added.
     """
     from cutlass_api.library import ScaleMode, ScaleSwizzleMode
 
