@@ -634,7 +634,7 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out, exc_info=True)
             raise
 
-    def _maybe_realize_expr(self, expr: Expr, fallback: int) -> Optional[int]:
+    def _maybe_realize_expr(self, expr: Expr, fallback: Optional[int]) -> Optional[int]:
         """
         Handle special sympy values in optimization hints.
 
@@ -658,7 +658,7 @@ class SizeVarAllocator:
                 return sys.maxsize
             if expr in (-int_oo, -sympy.oo):
                 return -sys.maxsize
-            if expr is sympy.nan or expr.has(sympy.nan):
+            if fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
                 return fallback
 
         return None
@@ -771,7 +771,8 @@ class SizeVarAllocator:
         Returns:
             int: A concrete integer hint for the expression.
         """
-        simplified = self.simplify(expr)
+        simplified = self._maybe_realize_expr(self.simplify(expr), None)
+
         if isinstance(simplified, (int, sympy.Integer)):
             return int(simplified)
         if simplified in (int_oo, sympy.oo):
