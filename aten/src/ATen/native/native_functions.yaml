@@ -2317,6 +2317,7 @@
   dispatch:
     CPU: vdot
     CUDA: vdot_cuda
+    MPS: vdot_mps
 
 - func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -9034,6 +9035,7 @@
   tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: cauchy_
+    MPS: cauchy_mps_
   autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
@@ -9042,6 +9044,7 @@
   variants: method
   dispatch:
     CPU, CUDA: log_normal_
+    MPS: log_normal_mps_
   autogen: log_normal, log_normal.out
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
@@ -13645,7 +13648,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_erfcx_out
+    CPU, CUDA, MPS: special_erfcx_out
   tags: pointwise
 
 - func: special_erfinv(Tensor self) -> Tensor
