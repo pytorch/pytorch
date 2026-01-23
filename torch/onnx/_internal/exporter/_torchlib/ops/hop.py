@@ -366,6 +366,10 @@ def higher_order_invoke_subgraph(
         subgraph.name,
         list(operands),
         num_outputs=len(subgraph.outputs),
+        metadata_props={
+            # This key can be used by downstream to avoid inlining
+            "pkg.torch.ops.higher_order.invoke_subgraph.identifier": str(identifier),
+        },
     )
 
     # ONNX Runtime complains about duplicate output names if we don't rename them.
