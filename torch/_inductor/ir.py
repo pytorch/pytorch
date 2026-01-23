@@ -3223,8 +3223,16 @@ class View(GenericView):
                 x, new_size, FlexibleLayout.contiguous_strides(new_size)
             )
 
-        # Input is non-contiguous. Try to compute valid output strides.
+        # Input is non-contiguous. Check if we can get storage/layout.
+        if not is_storage_and_layout(x):
+            # Can't get storage/layout (e.g., for Pointwise nodes),
+            # fall back to dynamic_reshape_indexer
+            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
+            return cls(data=x, size=list(new_size), reindex=reindex)
+
+        # Try to compute valid output strides.
         storage, old_layout = as_storage_and_layout(x, freeze=False)
+
         old_stride = old_layout.stride
 
         # Convert sympy exprs to SymInt for _compute_stride, then convert back
