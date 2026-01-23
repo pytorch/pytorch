@@ -33,7 +33,11 @@ C10_HOST_DEVICE __forceinline__ opmath_t pointwise_op_impl(
       return input + op(tensor1, tensor2);
     }
   }
-  return input + alpha * op(tensor1, tensor2);
+  if constexpr(std::is_floating_point_v<opmath_t>) {
+    return std::fma(alpha, op(tensor1, tensor2), input);
+  } else {
+    return input + alpha * op(tensor1, tensor2);
+  }
 }
 
 } // namespace
@@ -205,6 +209,7 @@ void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
       using accscalar_t = at::acc_type<scalar_t, true>;
       auto alpha = value.to<accscalar_t>();
       gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+        //return a + alpha * (b / static_cast<accscalar_t>(c));
         return pointwise_op_impl<accscalar_t>(a, b, c, alpha, std::divides<accscalar_t>());
       });
     });

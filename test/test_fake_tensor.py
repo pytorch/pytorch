@@ -1061,6 +1061,60 @@ class FakeTensorTest(TestCase):
                 == torch.channels_last
             )
 
+    def test_suggest_memory_format_with_degenerate_dimensions(self):
+        """
+        Test that suggest_memory_format correctly returns contiguous_format for
+        tensors with degenerate dimensions (H=1, W=1) that have ambiguous strides.
+        This is a regression test for a bug where the Python implementation checked
+        strides[d] > 1 instead of shape[d] > 1, causing incorrect channels_last
+        classification. See c10/core/MemoryFormat.h is_channels_last_strides_2d_s4.
+        """
+        # Create a tensor that mimics the problematic case:
+        # shape (1, 512, 1, 1) with strides (512, 1, 512, 1)
+        # This comes from permute(0, 2, 1).contiguous().unsqueeze(-1)
+        x = torch.randn(1, 1, 512)
+        x = x.permute(0, 2, 1).contiguous()  # shape (1, 512, 1), strides (512, 1, 512)
+        x = x.unsqueeze(-1)  # shape (1, 512, 1, 1), strides (512, 1, 512, 1)
+
+        # In eager mode, this should be contiguous_format
+        self.assertEqual(
+            torch._prims_common.suggest_memory_format(x),
+            torch.contiguous_format,
+            "Eager tensor with degenerate dims should be contiguous_format",
+        )
+
+        # In FakeTensor mode, it should also be contiguous_format (not channels_last)
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(torch.randn(1, 1, 512))
+            fake_x = fake_x.permute(0, 2, 1).contiguous()
+            fake_x = fake_x.unsqueeze(-1)
+
+            self.assertEqual(
+                torch._prims_common.suggest_memory_format(fake_x),
+                torch.contiguous_format,
+                "FakeTensor with degenerate dims should be contiguous_format",
+            )
+
+        # Test that upsample output has matching strides in eager vs FakeTensor
+        upsample = torch.nn.Upsample(
+            scale_factor=2, mode="bilinear", align_corners=False
+        )
+
+        eager_out = upsample(x)
+        self.assertTrue(
+            eager_out.is_contiguous(), "Eager upsample output should be contiguous"
+        )
+
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(torch.randn(1, 1, 512))
+            fake_x = fake_x.permute(0, 2, 1).contiguous().unsqueeze(-1)
+            fake_out = upsample(fake_x)
+
+            self.assertTrue(
+                fake_out.is_contiguous(),
+                f"FakeTensor upsample output should be contiguous, got strides {fake_out.stride()}",
+            )
+
     def test_export_numpy(self):
         class MyNumpyModel(torch.nn.Module):
             def forward(self, input):
@@ -2611,6 +2665,7 @@ class FakeTensorDispatchCache(TestCase):
         run()
         torch.compiler.reset()
         gc.collect()
+        gc.collect()  # second collection needed for 3.14t
         self.assertTrue(count_invoke_subgraph_keys() == 0)
 
     @skipIfTorchDynamo("cache hit/miss changes with invoke_subgraph caching")
