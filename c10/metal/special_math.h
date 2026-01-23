@@ -3025,3 +3025,154 @@ float erfcx(T x) {
 
 } // namespace metal
 } // namespace c10
+
+// ndtri (inverse normal CDF) implementation for Metal
+// Based on ATen/native/Math.h implementation
+namespace c10 {
+namespace metal {
+
+/*
+ * Polynomial evaluation for ndtri
+ * Evaluates polynomial with coefficients in array at point x
+ */
+template <typename T, int N>
+inline T polevl(T x, constant const float (&coeff)[N]) {
+  T result = coeff[0];
+  for (int i = 1; i < N; ++i) {
+    result = result * x + coeff[i];
+  }
+  return result;
+}
+
+/*
+ * Computes the argument, x, for which the area under the Gaussian probability density function
+ * (integrated from minus infinity to x) is equal to y.
+ * This is the inverse of the normal cumulative distribution function (CDF).
+ */
+template <typename T>
+inline T ndtri(T y0) {
+  /* sqrt(2pi) */
+  constexpr float s2pi = 2.50662827463100050242f;
+  constexpr float one = 1.0f;
+  constexpr float zero = 0.0f;
+
+  /* approximation for 0 <= |y - 0.5| <= 3/8 */
+  constant const float P0[5] = {
+      -5.99633501014107895267e1f,
+      9.80010754185999661536e1f,
+      -5.66762857469070293439e1f,
+      1.39312609387279679503e1f,
+      -1.23916583867381258016e0f,
+  };
+
+  constant const float Q0[9] = {
+      1.00000000000000000000e0f,
+      1.95448858338141759834e0f,
+      4.67627912898881538453e0f,
+      8.63602421390890590575e1f,
+      -2.25462687854119370527e2f,
+      2.00260212380060660359e2f,
+      -8.20372256168333339912e1f,
+      1.59056225126211695515e1f,
+      -1.18331621121330003142e0f,
+  };
+
+  /* Approximation for interval z = sqrt(-2 log y ) between 2 and 8
+   * i.e., y between exp(-2) = .135 and exp(-32) = 1.27e-14.
+   */
+  constant const float P1[9] = {
+      4.05544892305962419923e0f,
+      3.15251094599893866154e1f,
+      5.71628192246421288162e1f,
+      4.40805073893200834700e1f,
+      1.46849561928858024014e1f,
+      2.18663306850790267539e0f,
+      -1.40256079171354495875e-1f,
+      -3.50424626827848203418e-2f,
+      -8.57456785154685413611e-4f,
+  };
+
+  constant const float Q1[9] = {
+      1.00000000000000000000e0f,
+      1.57799883256466749731e1f,
+      4.53907635128879210584e1f,
+      4.13172038254672030440e1f,
+      1.50425385692907503408e1f,
+      2.50464946208309415979e0f,
+      -1.42182922854787788574e-1f,
+      -3.80806407691578277194e-2f,
+      -9.33259480895457427372e-4f,
+  };
+
+  /* Approximation for interval z = sqrt(-2 log y ) between 8 and 64
+   * i.e., y between exp(-32) = 1.27e-14 and exp(-2048) = 3.67e-890.
+   */
+  constant const float P2[9] = {
+      3.23774891776946035970e0f,
+      6.91522889068984211695e0f,
+      3.93881025292474443415e0f,
+      1.33303460815807542389e0f,
+      2.01485389549179081538e-1f,
+      1.23716634817820021358e-2f,
+      3.01581553508235416007e-4f,
+      2.65806974686737550832e-6f,
+      6.23974539184983293730e-9f,
+  };
+
+  constant const float Q2[9] = {
+      1.00000000000000000000e0f,
+      6.02427039364742014255e0f,
+      3.67983563856160859403e0f,
+      1.37702099489081330271e0f,
+      2.16236993594496635890e-1f,
+      1.34204006088543189037e-2f,
+      3.28014464682127739104e-4f,
+      2.89247864745380683936e-6f,
+      6.79019408009981274425e-9f,
+  };
+
+  float y = static_cast<float>(y0);
+  
+  if (y == zero) {
+    return static_cast<T>(-::metal::numeric_limits<float>::infinity());
+  }
+  if (y == one) {
+    return static_cast<T>(::metal::numeric_limits<float>::infinity());
+  }
+  if (y < zero || y > one) {
+    return static_cast<T>(NAN);
+  }
+  
+  bool code = true;
+  if (y > one - 0.13533528323661269189f) { /* 0.135... = exp(-2) */
+    y = one - y;
+    code = false;
+  }
+
+  if (y > 0.13533528323661269189f) {
+    y = y - 0.5f;
+    const float y2 = y * y;
+    float x = y + y * (y2 * polevl(y2, P0) / polevl(y2, Q0));
+    return static_cast<T>(x * s2pi);
+  }
+
+  float x = ::metal::sqrt(-2.0f * ::metal::log(y));
+  const float x0 = x - ::metal::log(x) / x;
+
+  const float z = one / x;
+  float x1;
+  if (x < 8.0f) /* y > exp(-32) = 1.2664165549e-14 */
+  {
+    x1 = z * polevl(z, P1) / polevl(z, Q1);
+  } else {
+    x1 = z * polevl(z, P2) / polevl(z, Q2);
+  }
+  x = x0 - x1;
+  if (code) {
+    x = -x;
+  }
+  return static_cast<T>(x);
+}
+
+} // namespace metal
+} // namespace c10
