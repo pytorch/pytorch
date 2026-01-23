@@ -84,10 +84,7 @@ def unflatten_all_tensor_subclasses(
     flatten_info_list: list[Any],
 ) -> tuple[torch.Tensor, ...]:
     """
-    Reconstruct all tensor subclasses from a flat tuple of inner tensors.
-
-    Takes a flat tuple of inner tensors and a list of flatten info (one per original
-    operand), and reconstructs the original operands including tensor subclasses.
+    Reconstruct all tensor subclasses from a flat tuple of inner tensors and a spec.
 
     Args:
         inner_operands: Flat tuple of inner tensors
@@ -133,9 +130,6 @@ def flatten_all_tensor_subclasses(
 ) -> tuple[torch.Tensor, ...]:
     """
     Flatten all tensor subclasses in a result tuple to their inner tensors.
-
-    Takes a tuple of tensors (some may be tensor subclasses) and returns a flat
-    tuple of inner tensors.
 
     Args:
         result: Tuple of tensors, some of which may be tensor subclasses
@@ -183,7 +177,7 @@ def make_subclass_wrapper_graph(
 
     The returned graph:
     1. Takes flattened inner operands as input
-    2. Calls unflatten_all_tensor_subclasses to reconstruct subclasses
+    2. Calls unflatten_all_tensor_subclasses to reconstruct tensor subclasses
     3. Calls the original subgraph as a submodule
     4. Calls flatten_all_tensor_subclasses on the output
 
@@ -224,10 +218,7 @@ def make_subclass_wrapper_graph(
     # Get the number of outputs from the subgraph's output node
     output_node = next(n for n in subgraph.graph.nodes if n.op == "output")
     output_args = output_node.args[0]
-    if isinstance(output_args, (list, tuple)):
-        num_outputs = len(output_args)
-    else:
-        num_outputs = 1
+    num_outputs = len(output_args)
 
     # Unpack subgraph outputs
     unpacked_outputs = []
@@ -959,7 +950,8 @@ def invoke_subgraph_subclass(subgraph, identifier, *operands):
             input_flatten_info.append(None)
             inner_operands.append(op)
 
-    # Check if we have a cached wrapper for this identifier
+    # Check if we have a cached wrapper for this identifier - using the same
+    # subgraph leads to fake tensor cache hits
     invoke_subgraph_cache = get_invoke_subgraph_cache()
     cached_entry = None
     if invoke_subgraph_cache:
