@@ -1113,6 +1113,41 @@ def forward(self, tangents_1, tangents_token):
     return (getitem_1, getitem)""",  # noqa: B950
             )
 
+    def test_with_effects_through_functional_tensor_mode(self):
+        """Test that with_effects can flow through FunctionalTensorMode."""
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        def fn_with_effects(x, y):
+            token = torch.ops.prims._make_token()
+            new_token, result = with_effects(
+                token,
+                torch.ops.aten.add.Tensor,
+                x,
+                y,
+            )
+            return result
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        with (
+            torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+            ),
+            FunctionalTensorMode(),
+        ):
+            x_func = FunctionalTensor.to_functional(x)
+            y_func = FunctionalTensor.to_functional(y)
+            result = fn_with_effects(x_func, y_func)
+
+        expected = x + y
+        if isinstance(result, FunctionalTensor):
+            result = torch._from_functional_tensor(result.elem)
+        self.assertEqual(result, expected)
+
 
 if __name__ == "__main__":
     run_tests()
