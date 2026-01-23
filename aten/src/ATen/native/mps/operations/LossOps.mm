@@ -1325,6 +1325,15 @@ Tensor& multi_margin_loss_mps_out(
     return output;
   }
 
+  // Check that target indices are within [0, dim)
+  // Use CPU tensor for bounds checking since we need to examine actual values
+  auto target_cpu = target.to(at::kCPU);
+  auto target_accessor = target_cpu.accessor<int64_t, 1>();
+  for (int64_t i = 0; i < nframe; i++) {
+    TORCH_CHECK(target_accessor[i] >= 0 && target_accessor[i] < dim,
+                "target out of range: target[", i, "] = ", target_accessor[i], ", should be in [0, ", dim, ")");
+  }
+
   // Ensure contiguous tensors
   auto self_contiguous = self.contiguous();
   auto target_contiguous = target.contiguous();
@@ -1348,7 +1357,8 @@ Tensor& multi_margin_loss_mps_out(
   @autoreleasepool {
     bool has_weight = weight.defined();
     std::string key = "multi_margin_loss_mps:" + std::to_string(p_val) + ":" +
-                      std::to_string(reduction) + ":" + std::to_string(has_weight) + ":" +
+                      std::to_string(reduction) + ":" + std::to_string(margin.toDouble()) + ":" +
+                      std::to_string(has_weight) + ":" +
                       mps::getTensorsStringKey({input_2d, target_1d});
 
     auto cachedGraph = mps::LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -1533,6 +1543,7 @@ Tensor& multi_margin_loss_backward_mps_out(
   @autoreleasepool {
     bool has_weight = weight.defined();
     std::string key = "multi_margin_loss_backward_mps:" + std::to_string(p_val) + ":" +
+                      std::to_string(margin.toDouble()) + ":" +
                       std::to_string(reduction) + ":" + std::to_string(has_weight) + ":" +
                       mps::getTensorsStringKey({input_2d, target_1d, grad_output_contiguous});
 
