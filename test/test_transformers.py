@@ -4925,9 +4925,9 @@ class TestAttnBias(NNTestCase):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
 
 if NOTEST_CPU:
-    device_types = ("cuda", "mps")
+    device_types = ("cuda", "mps", "mtia")
 else:
-    device_types = ("cpu", "cuda", "mps")
+    device_types = ("cpu", "cuda", "mps", "mtia")
 
 if TEST_XPU:
     device_types += ("xpu", )
@@ -4935,7 +4935,7 @@ if TEST_XPU:
 instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
+instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda", "mtia"))
 instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
 instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
