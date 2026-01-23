@@ -16,6 +16,7 @@
 #include <ATen/ops/eq_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
+#include <ATen/ops/heaviside_native.h>
 #include <ATen/ops/le_native.h>
 #include <ATen/ops/logical_and_native.h>
 #include <ATen/ops/logical_or_native.h>
@@ -29,7 +30,6 @@
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/sub_native.h>
 #include <ATen/ops/view_as_real.h>
-#include <ATen/ops/heaviside_native.h>
 #include <ATen/ops/xlogy_native.h>
 #endif
 
