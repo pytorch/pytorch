@@ -1258,18 +1258,6 @@ def decompose_auto_functionalized(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
-    # First, recursively process any subgraphs (e.g., while_loop body, cond branches)
-    gm = graph.owning_module
-    if gm is not None:
-        subgraph_names: OrderedSet[str] = OrderedSet(
-            x.target for x in graph.find_nodes(op="get_attr")
-        )
-        for child_name, child_mod in gm.named_children():
-            if child_name in subgraph_names and isinstance(
-                child_mod, torch.fx.GraphModule
-            ):
-                decompose_auto_functionalized(child_mod.graph)
-
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
