@@ -56,6 +56,7 @@ jobs:
           { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "linux.arm64.2xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "rocm7.0",           runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "rocm7.2",           runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cpu",               runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28_aarch64-builder",  tag: "cpu-aarch64",       runner: "linux.arm64.2xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "xpu",               runner: "linux.9xlarge.ephemeral" },

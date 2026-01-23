@@ -60,6 +60,7 @@ def _insert_single_dim_replication_strategy(
     single_dim_strategies_with_placeholders: list[
         list[Placement | _ShardingPlaceholder]
     ],
+    num_outputs: int,
     num_input_tensors: int,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """
@@ -67,8 +68,8 @@ def _insert_single_dim_replication_strategy(
     """
     for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
-    single_dim_strategies_with_placeholders.append(
-        [Replicate()] * (1 + num_input_tensors)
+    single_dim_strategies_with_placeholders.insert(
+        0, [Replicate()] * (num_outputs + num_input_tensors)
     )
     return single_dim_strategies_with_placeholders
 
@@ -189,8 +190,7 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
-    @functools.lru_cache
-    def _create_expanded_strategy(
+    def _create_expanded_strategy_impl(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
     ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
@@ -207,6 +207,12 @@ def _expand_single_dim_strategy_to_mesh(
             unique_input_placements = _get_unique_placements(op_schema)
             num_inputs = _get_num_tensor_inputs(op_schema)
 
+            # Compute num_outputs from output_tensor_meta
+            if isinstance(output_tensor_meta, TensorMeta):
+                num_outputs = 1
+            else:
+                num_outputs = len(output_tensor_meta)
+
             # Note: Trees vs Flat Lists
             # -------------------------
             # op_schema.args_schema may contain a TupleStrategy with child strategies for List[Tensor] inputs.
@@ -220,7 +226,7 @@ def _expand_single_dim_strategy_to_mesh(
                 op, args_schema, kwargs_schema
             )
             strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
-                strategies_over_one_mesh_dim, num_inputs
+                strategies_over_one_mesh_dim, num_outputs, num_inputs
             )
             expanded_strategies_over_one_mesh_dim = (
                 _fill_single_dim_strategy_placeholders(
@@ -231,14 +237,38 @@ def _expand_single_dim_strategy_to_mesh(
             # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
             # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
             # dims
+            # Detect inplace ops by checking if the base op name ends with '_'
+            op_name = op.name()
+            base_name = op_name.split("::")[1].split(".")[0]
+            is_inplace = base_name.endswith("_")
+
             return expand_to_full_mesh_op_strategy(
                 mesh,
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
                 output_tensor_meta=output_tensor_meta,
+                inplace_op=is_inplace,
+                input_index=num_outputs,
             )
 
         return expanded_strategy
+
+    # Create a cached version of the impl
+    _cached_create_expanded_strategy = functools.lru_cache(
+        _create_expanded_strategy_impl
+    )
+
+    def _create_expanded_strategy(
+        op_schema: OpSchema,
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+    ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
+        # Try to use cache, but fall back to uncached version if hashing fails
+        # (e.g., when TensorMeta contains SymInts from dynamic shapes)
+        try:
+            return _cached_create_expanded_strategy(op_schema, output_tensor_meta)
+        except TypeError:
+            # Unhashable types (SymInts), skip caching
+            return _create_expanded_strategy_impl(op_schema, output_tensor_meta)
 
     def _translate_foreach_op_schema(
         op_schema: OpSchema, output_tensor_meta: Sequence[TensorMeta], index: int
