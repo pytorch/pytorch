@@ -3,12 +3,13 @@
 import json
 import os
 import tempfile
+import unittest
 from collections import defaultdict
 from pathlib import Path
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 
 
 Verbose = False
@@ -130,10 +131,8 @@ class XpuScopeProfilerTest(TestCase):
             ]
         )
 
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_scope_profiler(self):
-        if not torch.xpu.is_available():
-            self.skipTest("XPU not available")
-
         if not self.required_env_setting():
             self.skipTest("ZET_ENABLE_METRICS not set")
 
