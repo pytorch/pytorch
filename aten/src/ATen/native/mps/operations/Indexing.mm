@@ -983,8 +983,8 @@ Tensor& put_mps_(Tensor& self, const Tensor& index, const Tensor& source, const 
 
   // Type and device checks
   TORCH_CHECK(
-      index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
-      "put_(): Expected a long or int tensor for index, but got ",
+      index.scalar_type() == ScalarType::Long,
+      "put_(): Expected a Long tensor for index, but got ",
       index.scalar_type());
   TORCH_CHECK(
       self.scalar_type() == source.scalar_type(),
@@ -992,6 +992,14 @@ Tensor& put_mps_(Tensor& self, const Tensor& index, const Tensor& source, const 
       self.scalar_type(),
       " and source.dtype = ",
       source.scalar_type());
+  TORCH_CHECK(
+      self.device() == index.device() && self.device() == source.device(),
+      "put_(): expected self, index, and source to be on the same device, but got self.device = ",
+      self.device(),
+      ", index.device = ",
+      index.device(),
+      ", and source.device = ",
+      source.device());
 
   // Index checks
   TORCH_CHECK_INDEX(
