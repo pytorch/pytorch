@@ -647,7 +647,8 @@ def generic_jump(
         self.output.add_output_instructions([jump_inst] + if_next + if_jump)
 
     def inner(self: InstructionTranslatorBase, inst: Instruction) -> None:
-        value: VariableTracker = self.pop()
+        # completely realize value especially LazyConstants - since we branch on it!
+        value: VariableTracker = LazyVariableTracker.realize_all(self.pop())
         if (
             config.rewrite_assert_with_torch_assert
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
@@ -3590,20 +3591,29 @@ class InstructionTranslatorBase(
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
-        value = self.pop()
-        if isinstance(value, SymNodeVariable):
-            from torch._dynamo.variables.lazy import (
-                LazySymNodeFormatString,
-                LazyVariableTracker,
-            )
+        from torch._dynamo.variables.lazy import (
+            ComputedLazyConstantVariable,
+            LazyConstantVariable,
+            LazySymNodeFormatString,
+            LazyVariableTracker,
+        )
 
+        value = self.pop()
+
+        # Check for SymNodeVariable using type() instead of isinstance() to avoid
+        # triggering realization of lazy constants
+        if type(value) is SymNodeVariable:
             value = LazyVariableTracker.create(
                 LazySymNodeFormatString(value, fmt_spec), source=value.source
             )
             self.push(value)
             return
 
-        value = self._convert_value(value, flags & 0x03)
+        # For lazy constants, we want to keep them unrealized.
+        # Skip _convert_value as it may realize the value.
+        # The conversion will be handled by str.format at runtime.
+        if not isinstance(value, (LazyConstantVariable, ComputedLazyConstantVariable)):
+            value = self._convert_value(value, flags & 0x03)
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
@@ -4821,12 +4831,14 @@ class InstructionTranslator(InstructionTranslatorBase):
 
 
 if sys.version_info >= (3, 11):
+    from .bytecode_transformation import _NB_OP_NAMES
+
     _binary_op_lookup = [
         getattr(
             InstructionTranslator,
             opname[3:] if "INPLACE" in opname else f"BINARY_{opname[3:]}",
         )
-        for opname, _ in dis._nb_ops  # type: ignore[attr-defined]
+        for opname in _NB_OP_NAMES
     ]
 
 
