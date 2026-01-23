@@ -477,6 +477,12 @@ struct ExpandableSegment {
 #endif
       if (status != CUDA_SUCCESS) {
         if (status == CUDA_ERROR_OUT_OF_MEMORY) {
+#ifdef USE_ROCM
+          // hipMemCreate above returned hipErrorOutOfMemory and treated it
+          // like a sticky runtime error. Which means we need to clear it.
+          // Unlike the corresponding CUDA Driver API.
+          (void)hipGetLastError();
+#endif
           for (auto j : c10::irange(begin, i)) {
             // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
             auto h = handles_.at(j).value();
