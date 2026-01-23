@@ -641,8 +641,14 @@ class CodeGen:
             if node.op not in {"placeholder", "output"}:
                 annotation_str = ""
                 annotation = node.meta.get("custom", {})
+                annotation_trunc = {}
                 if annotation:
-                    annotation_str = f" Annotation: {annotation}"
+                    for key, value in annotation.items():
+                        value_str = str(value)
+                        if len(value_str) > 40:
+                            value_str = value_str[:40] + "..."
+                        annotation_trunc[key] = value_str
+                    annotation_str = f" Annotation: {annotation_trunc}"
 
                 stack_trace_str = "No stacktrace found for following nodes"
                 if stack_trace := node.stack_trace:
@@ -658,11 +664,13 @@ class CodeGen:
                     ac_graph_id = node.meta.get("ac_graph_id", None)
 
                     if recompute is not None and ac_graph_id is not None:
-                        maybe_recompute_info = f" # ac_graph_id: {str(ac_graph_id)} - {str(recompute.name)}"
+                        maybe_recompute_info = (
+                            f" ac_graph_id: {str(ac_graph_id)} - {str(recompute.name)}"
+                        )
                     elif recompute is not None:
-                        maybe_recompute_info = f" # recompute: {str(recompute.name)}"
+                        maybe_recompute_info = f" recompute: {str(recompute.name)}"
                     elif ac_graph_id is not None:
-                        maybe_recompute_info = f" # ac_graph_id: {str(ac_graph_id)}"
+                        maybe_recompute_info = f" ac_graph_id: {str(ac_graph_id)}"
 
                 summary_str = f"\n{dim(f'#{annotation_str}{maybe_recompute_info} {stack_trace_str}')}\n"
 
