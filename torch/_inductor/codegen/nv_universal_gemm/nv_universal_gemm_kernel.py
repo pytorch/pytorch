@@ -17,6 +17,9 @@ from torch._inductor.codegen.common import (
     WorkspaceZeroMode,
 )
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+    to_cutlass_scale_mode,
+)
 from torch._inductor.ir import (
     BaseView,
     Buffer,
@@ -65,6 +68,10 @@ class NVUniversalGemmKernel(Kernel):
         accumulator_type: Any,
         variant: GemmVariant,
         workspace_size: int = 0,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -74,6 +81,10 @@ class NVUniversalGemmKernel(Kernel):
         self.accumulator_type = accumulator_type
         self.workspace_size = workspace_size
         self.variant = variant
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
 
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
@@ -110,6 +121,7 @@ class NVUniversalGemmKernel(Kernel):
 
         kernel_name_str = self.kernel_metadata["kernel_name"]
         is_grouped = self.variant == GemmVariant.GROUPED_GEMM
+        is_scaled = self.variant == GemmVariant.SCALED_GEMM
 
         acc_dtype_str = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
             self.accumulator_type, "cutlass.Float32"
@@ -128,6 +140,11 @@ class NVUniversalGemmKernel(Kernel):
         cache_var = f"_{var_prefix}_compiled_cache"
         kernel_name_var = f"_{var_prefix}_KERNEL_NAME"
 
+        extra_imports = ""
+        if is_scaled:
+            extra_imports = """from cutlass_api.arguments import ScaledTensor
+            from cutlass_api.library import ScaleMode, ScaleSwizzleMode"""
+
         # Variant-specific code generation:
         # - cache_key_code: expression for cache key
         # - create_args_code: code to create Arguments object
@@ -140,6 +157,30 @@ class NVUniversalGemmKernel(Kernel):
                         accumulator_type={acc_dtype_str},
                         offsets=in_ptr2,
                     )"""
+        elif is_scaled:
+            scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
+                self.scale_type_a, self.swizzle_type_a
+            )
+            scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
+                self.scale_type_b, self.swizzle_type_b
+            )
+            scale_mode_a_str = scale_mode_a.name if scale_mode_a else ""
+            scale_mode_b_str = scale_mode_b.name if scale_mode_b else ""
+            swizzle_mode_a_str = swizzle_mode_a.name if swizzle_mode_a else ""
+            swizzle_mode_b_str = swizzle_mode_b.name if swizzle_mode_b else ""
+            cache_key_code = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape, in_ptr3.shape)"
+            create_args_code = f"""scaled_a = ScaledTensor(
+                    in_ptr0, in_ptr2, ScaleMode.{scale_mode_a_str}, ScaleSwizzleMode.{swizzle_mode_a_str}
+                )
+                scaled_b = ScaledTensor(
+                    in_ptr1, in_ptr3, ScaleMode.{scale_mode_b_str}, ScaleSwizzleMode.{swizzle_mode_b_str}
+                )
+                args = cutlass_api.arguments.GemmArguments(
+                    scaled_a,
+                    scaled_b,
+                    out_ptr0,
+                    accumulator_type={acc_dtype_str},
+                )"""
         else:
             cache_key_code = (
                 "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)"
@@ -157,6 +198,7 @@ class NVUniversalGemmKernel(Kernel):
             import cutlass
             import cutlass_api
             from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_kernel_by_name
+            {extra_imports}
 
             {kernel_name_var} = "{kernel_name_str}"
             {cache_var} = {{}}
