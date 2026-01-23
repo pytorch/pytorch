@@ -9,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_dropout_native.h>
 #include <ATen/ops/bernoulli.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/native_dropout_backward_native.h>
@@ -40,6 +41,23 @@ std::tuple<Tensor, Tensor> native_dropout_mps(const Tensor& input, double p, std
 Tensor native_dropout_backward_mps(const Tensor& grad, const Tensor& mask, double scale) {
   auto grad_float = isFloatingType(grad.scalar_type()) ? grad : grad.to(c10::kFloat);
   return native_dropout_mask_and_scale(grad_float, mask, scale);
+}
+
+std::tuple<Tensor, Tensor> fused_dropout_mps(const Tensor& self, double p, std::optional<Generator> gen) {
+  // Note: _fused_dropout takes probability to KEEP (p), unlike native_dropout which takes probability to DROP
+  // Also uses uint8 mask instead of bool
+
+  if (self.numel() == 0) {
+    return {self.clone(), at::empty_like(self, self.options().dtype(c10::kByte))};
+  }
+
+  Tensor mask = at::empty_like(self, self.options().dtype(c10::kByte));
+  // Bernoulli with p = probability to keep
+  mask.bernoulli_(p, gen);
+
+  float scale = p == 0 ? 0.0f : 1.0f / p;
+  Tensor output = native_dropout_mask_and_scale(self, mask, scale);
+  return {std::move(output), std::move(mask)};
 }
 
 } // namespace at::native

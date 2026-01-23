@@ -274,6 +274,7 @@
   variants: function
   dispatch:
     CUDA: fused_dropout_cuda
+    MPS: fused_dropout_mps
   tags: nondeterministic_seeded
   autogen: _fused_dropout.out
 
