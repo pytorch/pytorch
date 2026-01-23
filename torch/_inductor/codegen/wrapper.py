@@ -2307,7 +2307,7 @@ class PythonWrapperCodegen(CodeGen):
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value, sympy.Symbol) and isinstance(
-                    V.graph.sizevars.var_to_val.get(value, None), SingletonInt
+                    V.graph.sizevars.backed_var_to_val.get(value, None), SingletonInt
                 ):
                     # Inductor should only work with dense -> dense graph, and
                     # SingletonInts belong to metadata that should only live on

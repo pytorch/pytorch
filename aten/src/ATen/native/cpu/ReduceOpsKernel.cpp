@@ -473,9 +473,9 @@ template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>
 void powsum_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   using acc_t = at::opmath_type<typename scalar_value_type<scalar_t>::type>;
   if (val == 2.0) {
-    binary_kernel_reduce(iter, NormTwoNoRootOps<scalar_t, acc_t, out_t>(), acc_t(0));
+    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t, false>(), acc_t(0));
   } else {
-    binary_kernel_reduce(iter, NormNoRootOps<scalar_t, acc_t, out_t>{acc_t(val)}, acc_t(0));
+    binary_kernel_reduce(iter, NormOps<scalar_t, acc_t, out_t, false>{acc_t(val)}, acc_t(0));
   }
 }
 
