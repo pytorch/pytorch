@@ -1033,7 +1033,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
             self (_StridedShard): The _StridedShard placement instance.
             curr_local_size (int): The current size of the tensor dimension to be sharded.
             num_chunks (int): Number of chunks to split the dimension into (typically the mesh dimension size).
-            rank (int): The rank index to compute the shard for.
+            rank (RankType): The rank index to compute the shard for.
             return_first_offset (bool): If True, return only the first offset as an int. If False,
                 return all offsets as a list. Defaults to True.
 

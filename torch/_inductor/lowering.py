@@ -2694,7 +2694,7 @@ def searchsorted(
 
 
 @register_lowering(
-    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+    aten.bucketize.Tensor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
 )
 def bucketize(
     input: TensorBox,
@@ -3140,6 +3140,10 @@ make_fallback(
     warn=False,
 )
 make_fallback(
+    aten._scaled_dot_product_flash_attention.quantized,
+    warn=False,
+)
+make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
     sdpa_constraint,
     warn=False,
@@ -3175,6 +3179,7 @@ make_fallback(
     warn=False,
 )
 make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_forward.quantized)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
@@ -6985,9 +6990,6 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         self_val = self_loader(idx)
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
-
-        if value == 1 and use_fma:
-            return ops.fma(t1_val, t2_val, self_val)
 
         # Match eager order: self + value * (tensor1 * tensor2)
         # Compute tensor1 * tensor2 first
