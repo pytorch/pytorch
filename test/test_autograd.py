@@ -4076,6 +4076,18 @@ class TestAutograd(TestCase):
             out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
             out.sum().backward()
 
+            torch._dynamo.reset()
+
+            prev = torch.get_default_device()
+            try:
+                # Using torch.device("cuda") directly doesn't work here because
+                # it has some issues.
+                torch.set_default_device("cuda")
+                out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
+                out.sum().backward()
+            finally:
+                torch.set_default_device(prev)
+
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             if expect_fail:
                 with self.assertRaises(RuntimeError):

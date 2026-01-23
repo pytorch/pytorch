@@ -1620,7 +1620,7 @@ def _checkpoint_without_reentrant_generator(
         yield
         return
 
-    with _checkpoint_hook(new_frame), forward_context, device_ctx:
+    with _checkpoint_hook(new_frame), forward_context:
         yield
     new_frame.forward_completed = True
 
