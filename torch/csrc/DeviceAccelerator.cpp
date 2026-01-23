@@ -179,6 +179,10 @@ void initModule(PyObject* module) {
   });
 
   // Accelerator Graph class binding
+  m.def("_accelerator_generateGraphPoolHandle", []() {
+    return c10::generate_mempool_id(true);
+  });
+
   py::class_<at::accelerator::Graph, std::shared_ptr<at::accelerator::Graph>>(
       m, "_acceleratorGraph")
       .def(py::init<bool>(), py::arg("keep_graph") = false)
