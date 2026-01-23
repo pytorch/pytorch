@@ -40,6 +40,7 @@
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
 #include <ATen/ops/nonzero_native.h>
+#include <ATen/ops/put_native.h>
 #include <ATen/ops/view_as_real.h>
 #endif
 
@@ -975,6 +976,127 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Scalar& source) {
   return self.index_fill_(dim, index, mps::wrapped_scalar_tensor_mps(source, self.device()));
+}
+
+Tensor& put_mps_(Tensor& self, const Tensor& index, const Tensor& source, const bool accumulate) {
+  using namespace mps;
+
+  // Type and device checks
+  TORCH_CHECK(
+      index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+      "put_(): Expected a long or int tensor for index, but got ",
+      index.scalar_type());
+  TORCH_CHECK(
+      self.scalar_type() == source.scalar_type(),
+      "put_(): self and source expected to have the same dtype, but got self.dtype = ",
+      self.scalar_type(),
+      " and source.dtype = ",
+      source.scalar_type());
+
+  // Index checks
+  TORCH_CHECK_INDEX(
+      source.numel() == index.numel(),
+      "put_(): Expected source and index to have the same number of elements, but got source.numel() = ",
+      source.numel(),
+      ", index.numel() = ",
+      index.numel());
+  TORCH_CHECK_INDEX(
+      !(self.numel() == 0 && index.numel() != 0),
+      "put_(): Tried to put elements into an empty tensor");
+
+  at::assert_no_internal_overlap(self);
+  at::assert_no_overlap(self, index);
+  at::assert_no_overlap(self, source);
+
+  // Early return if index is empty
+  if (index.numel() == 0) {
+    return self;
+  }
+
+  // Note: put_ is non-deterministic when index contains duplicates and accumulate=false
+  // or on GPU with accumulate=true (due to atomics)
+  at::globalContext().alertNotDeterministic("put_");
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  // Flatten tensors for 1D scatter operation
+  // We'll reshape self to 1D, scatter, then reshape back
+  auto original_shape = self.sizes().vec();
+  int64_t numel = self.numel();
+
+  // For in-place operation on flattened view
+  Tensor self_flat = self.view({numel});
+  Tensor source_flat = source.view({-1});
+  Tensor index_flat = index.view({-1});
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* indexTensor_ = nil;
+    MPSGraphTensor* updateTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  auto inputType = getMPSDataType(self_flat);
+  auto sourceType = getMPSDataType(source_flat);
+  if (inputType == MPSDataTypeUInt8 || inputType == MPSDataTypeBool) {
+    inputType = MPSDataTypeInt8;
+  }
+  if (sourceType == MPSDataTypeUInt8 || sourceType == MPSDataTypeBool) {
+    sourceType = MPSDataTypeInt8;
+  }
+
+  MPSGraphScatterMode scatterMode = accumulate ? MPSGraphScatterModeAdd : MPSGraphScatterModeSet;
+
+  @autoreleasepool {
+    std::string key = "put_mps_" + getTensorsStringKey({self_flat, index_flat, source_flat}) +
+                      ":" + std::to_string(accumulate);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self_flat));
+      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index_flat);
+      MPSGraphTensor* updateTensor = mpsGraphRankedPlaceHolder(mpsGraph, sourceType, getMPSShape(source_flat));
+
+      MPSGraphTensor* castedUpdateTensor = updateTensor;
+      if (inputType != sourceType) {
+        castedUpdateTensor = castMPSTensor(mpsGraph, updateTensor, inputType);
+      }
+
+      // Use scatterWithDataTensor for 1D scatter (put operation)
+      MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:inputTensor
+                                                       updatesTensor:castedUpdateTensor
+                                                       indicesTensor:indexTensor
+                                                                axis:0
+                                                                mode:scatterMode
+                                                                name:nil];
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->indexTensor_ = indexTensor;
+      newCachedGraph->updateTensor_ = updateTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_,
+                                              self_flat,
+                                              /*mpsShape=*/nullptr,
+                                              /*gatherTensorData=*/true,
+                                              /*dataType=*/inputType);
+    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index_flat);
+    Placeholder updatePlaceholder = Placeholder(cachedGraph->updateTensor_,
+                                                source_flat,
+                                                /*mpsShape=*/nullptr,
+                                                /*gatherTensorData=*/true,
+                                                /*dataType=*/sourceType);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
+                                                self_flat,
+                                                /*mpsShape=*/nullptr,
+                                                /*gatherTensorData=*/false,
+                                                /*dataType=*/inputType);
+
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder, updatePlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  return self;
 }
 
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)

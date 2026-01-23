@@ -8383,6 +8383,7 @@
   variants: method
   dispatch:
     CPU, CUDA: put_
+    MPS: put_mps_
   autogen: put.out
 
 - func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
