@@ -1950,6 +1950,130 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
                 expected_full = global_tensor * num_partial_sums
                 self.assertEqual(result_full, expected_full)
 
+    @with_comms
+    def test_partial_to_shard_with_shard_order_even(self):
+        """Test (Partial, Partial) -> (Shard(0), Shard(0)) with different shard orders.
+
+        When sharding tensor_dim=0 across mesh dims 0 and 1, the shard_order controls
+        whether we shard on mesh dim 0 first then 1, or dim 1 first then 0.
+
+        This tests whether the flattened mesh optimization correctly respects shard_order.
+        If the flattening always uses order (0, 1) regardless of shard_order, then the
+        (1, 0) case would produce incorrect results.
+        """
+        # Use asymmetric mesh to clearly distinguish order effects
+        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("A", "B"))
+        mesh["A", "B"]._flatten("A_B")
+
+        local = torch.randn(16, dtype=torch.float32, device=self.device_type)
+
+        # Create source DTensor with Partial placements (replicate first, then reinterpret)
+        src_placements = (Partial("sum"), Partial("sum"))
+        dst_placements = [Shard(0), Shard(0)]
+
+        # Test shard order (0, 1): mesh dim 0 first, then mesh dim 1
+        dt_01 = DTensor.from_local(
+            local.clone(), mesh, list(src_placements), run_check=False
+        )
+        expected_full = dt_01.full_tensor()
+        shard_order_01 = (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result_01 = redistribute(
+                dt_01, mesh, dst_placements, shard_order=shard_order_01
+            )
+        # Should be 1 merged reduce_scatter, not 2 separate ones
+        self.assertEqual(
+            comm_mode.get_comm_counts().get(funcol.reduce_scatter_tensor, 0),
+            1,
+            "shard_order (0, 1): expected 1 merged reduce_scatter",
+        )
+        self.assertEqual(tuple(result_01.placements), tuple(dst_placements))
+        self.assertEqual(make_full_tensor(result_01), expected_full)
+
+        # Test shard order (1, 0): mesh dim 1 first, then mesh dim 0
+        dt_10 = DTensor.from_local(
+            local.clone(), mesh, list(src_placements), run_check=False
+        )
+        shard_order_10 = (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result_10 = redistribute(
+                dt_10, mesh, dst_placements, shard_order=shard_order_10
+            )
+        # Should be 1 merged reduce_scatter, not 2 separate ones
+        self.assertEqual(
+            comm_mode.get_comm_counts().get(funcol.reduce_scatter_tensor, 0),
+            1,
+            "shard_order (1, 0): expected 1 merged reduce_scatter",
+        )
+        self.assertEqual(tuple(result_10.placements), tuple(dst_placements))
+        self.assertEqual(make_full_tensor(result_10), expected_full)
+
+    @with_comms
+    def test_partial_to_shard_with_shard_order_uneven(self):
+        """Test (Partial, Partial) -> (Shard(0), Shard(0)) with uneven tensor shape.
+
+        When the tensor size is not evenly divisible by the total mesh size,
+        the flattening optimization cannot be applied. This test verifies:
+        1. The optimization falls back to 2 separate reduce_scatters
+        2. The numerical results are still correct for both shard orders
+
+        KNOWN BUG: This test currently fails because uneven tensor sharding
+        across multiple mesh dimensions with shard_order produces incorrect
+        numerical results. The comm count fallback to 2 reduce_scatters is
+        correct, but the numerical output is wrong.
+        """
+        # Use asymmetric mesh to clearly distinguish order effects
+        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("A", "B"))
+        mesh["A", "B"]._flatten("A_B")
+
+        # Global tensor size 10 is NOT evenly divisible by total mesh size (8)
+        # 10 % 8 = 2, so flattening should not be possible
+        local = torch.randn(10, dtype=torch.float32, device=self.device_type)
+
+        src_placements = (Partial("sum"), Partial("sum"))
+        dst_placements = [Shard(0), Shard(0)]
+
+        # Test shard order (0, 1): mesh dim 0 first, then mesh dim 1
+        dt_01 = DTensor.from_local(
+            local.clone(), mesh, list(src_placements), run_check=False
+        )
+        expected_full = dt_01.full_tensor()
+        shard_order_01 = (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result_01 = redistribute(
+                dt_01, mesh, dst_placements, shard_order=shard_order_01
+            )
+        # Should be 2 separate reduce_scatters since flattening cannot be applied
+        self.assertEqual(
+            comm_mode.get_comm_counts().get(funcol.reduce_scatter_tensor, 0),
+            2,
+            "shard_order (0, 1) uneven: expected 2 separate reduce_scatters",
+        )
+        self.assertEqual(tuple(result_01.placements), tuple(dst_placements))
+        self.assertEqual(make_full_tensor(result_01), expected_full)
+
+        # Test shard order (1, 0): mesh dim 1 first, then mesh dim 0
+        dt_10 = DTensor.from_local(
+            local.clone(), mesh, list(src_placements), run_check=False
+        )
+        shard_order_10 = (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result_10 = redistribute(
+                dt_10, mesh, dst_placements, shard_order=shard_order_10
+            )
+        # Should be 2 separate reduce_scatters since flattening cannot be applied
+        self.assertEqual(
+            comm_mode.get_comm_counts().get(funcol.reduce_scatter_tensor, 0),
+            2,
+            "shard_order (1, 0) uneven: expected 2 separate reduce_scatters",
+        )
+        self.assertEqual(tuple(result_10.placements), tuple(dst_placements))
+        self.assertEqual(make_full_tensor(result_10), expected_full)
+
 
 class FlattenedReductionIntegrationTest(DTensorTestBase):
     """Integration tests for flattened reduction optimization.

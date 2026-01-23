@@ -283,7 +283,7 @@ def _optimize_transform_infos(
     """
     if not transform_infos:
         return []
-
+    print(f"Before optimizaiton: {transform_infos=}")
     # Comm types that are safe to merge (all_to_all excluded for now)
     MERGEABLE_COMM_TYPES = frozenset({"all_gather", "all_reduce", "reduce_scatter"})
 
@@ -408,6 +408,7 @@ def _optimize_transform_infos(
                 )
 
         i = j
+    print(f"After optimizaiton: {result=}")
 
     return result
 
