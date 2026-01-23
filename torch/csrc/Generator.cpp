@@ -224,35 +224,26 @@ static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPGenerator_setUseThreadBasedRng(
     PyObject* _self,
-    PyObject* use_thread_based) {
+    PyObject* value) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPGenerator*>(_self);
-  auto& gen = self->cdata;
   TORCH_CHECK(
-      PyBool_Check(use_thread_based),
+      PyBool_Check(value),
       "set_use_thread_based_rng expected a bool, but got ",
-      THPUtils_typename(use_thread_based));
-  bool value = use_thread_based == Py_True;
-  // See Note [Acquire lock when using random generators]
-  std::scoped_lock<std::mutex> lock(gen.mutex());
-  gen.unsafeGetGeneratorImpl()->set_use_thread_based_rng(value);
-  Py_INCREF(self);
-  return reinterpret_cast<PyObject*>(self);
+      THPUtils_typename(value));
+  std::scoped_lock<std::mutex> lock(self->cdata.mutex());
+  self->cdata.unsafeGetGeneratorImpl()->set_use_thread_based_rng(
+      value == Py_True);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_useThreadBasedRng(
-    PyObject* _self,
-    PyObject* noargs) {
+static PyObject* THPGenerator_useThreadBasedRng(PyObject* _self, PyObject*) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPGenerator*>(_self);
-  auto& gen = self->cdata;
-  // See Note [Acquire lock when using random generators]
-  std::scoped_lock<std::mutex> lock(gen.mutex());
-  if (gen.unsafeGetGeneratorImpl()->use_thread_based_rng()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  std::scoped_lock<std::mutex> lock(self->cdata.mutex());
+  return PyBool_FromLong(
+      self->cdata.unsafeGetGeneratorImpl()->use_thread_based_rng());
   END_HANDLE_TH_ERRORS
 }
 
