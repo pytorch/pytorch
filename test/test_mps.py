@@ -6501,6 +6501,64 @@ class TestMPS(TestCaseMPS):
             for dim in range(len(shape)):
                 helper(shape, dim)
 
+    # Test glu_jvp (JVP for GLU forward pass)
+    def test_glu_jvp(self):
+        def helper(shape, dim=0):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
+            cpu_dx = torch.randn_like(cpu_x)
+            mps_x = cpu_x.clone().to('mps')
+            mps_dx = cpu_dx.clone().to('mps')
+
+            # Compute glu
+            cpu_glu = torch.nn.functional.glu(cpu_x, dim=dim)
+            mps_glu = torch.nn.functional.glu(mps_x, dim=dim)
+
+            # Compute glu_jvp
+            cpu_result = torch.ops.aten.glu_jvp(cpu_glu, cpu_x, cpu_dx, dim)
+            mps_result = torch.ops.aten.glu_jvp(mps_glu, mps_x, mps_dx, dim)
+
+            self.assertEqual(mps_result, cpu_result)
+
+        for shape in [(4,), (2, 4), (2, 8, 4, 6)]:
+            for dim in range(len(shape)):
+                helper(shape, dim)
+
+    # Test glu_backward_jvp (JVP for GLU backward pass)
+    def test_glu_backward_jvp(self):
+        def helper(shape, dim=0):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            cpu_dx = torch.randn_like(cpu_x)
+            mps_x = cpu_x.detach().clone().to('mps').requires_grad_()
+            mps_dx = cpu_dx.clone().to('mps')
+
+            glu_size = shape[dim] // 2
+
+            # Compute glu and backward
+            cpu_glu = torch.nn.functional.glu(cpu_x, dim=dim)
+            cpu_grad_glu = torch.randn_like(cpu_glu)
+            mps_glu = torch.nn.functional.glu(mps_x, dim=dim)
+            mps_grad_glu = cpu_grad_glu.clone().to('mps')
+
+            cpu_grad_x = torch.autograd.grad(cpu_glu, cpu_x, cpu_grad_glu, create_graph=True)[0]
+            mps_grad_x = torch.autograd.grad(mps_glu, mps_x, mps_grad_glu, create_graph=True)[0]
+
+            # Compute glu_backward_jvp
+            cpu_dgrad_glu = torch.randn_like(cpu_grad_glu)
+            mps_dgrad_glu = cpu_dgrad_glu.clone().to('mps')
+
+            cpu_result = torch.ops.aten.glu_backward_jvp(
+                cpu_grad_x, cpu_grad_glu, cpu_x.detach(), cpu_dgrad_glu, cpu_dx, dim
+            )
+            mps_result = torch.ops.aten.glu_backward_jvp(
+                mps_grad_x, mps_grad_glu, mps_x.detach(), mps_dgrad_glu, mps_dx, dim
+            )
+
+            self.assertEqual(mps_result, cpu_result)
+
+        for shape in [(4,), (2, 4), (2, 8, 4, 6)]:
+            for dim in range(len(shape)):
+                helper(shape, dim)
+
     # Test softplus
     def test_softplus(self):
         def helper(shape, beta, threshold, dtype):

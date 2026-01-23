@@ -14,6 +14,7 @@
 #include <ATen/ops/gelu_backward_native.h>
 #include <ATen/ops/gelu_native.h>
 #include <ATen/ops/glu_backward_native.h>
+#include <ATen/ops/glu_jvp_native.h>
 #include <ATen/ops/glu_native.h>
 #include <ATen/ops/hardtanh_backward_native.h>
 #include <ATen/ops/log_sigmoid_backward_native.h>
@@ -823,6 +824,97 @@ Tensor glu_backward_mps(const Tensor& grad_output, const Tensor& self, const int
   Tensor grad_input = at::empty(self.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   grad_input = glu_backward_mps_out(grad_output, self, dim, grad_input);
   return grad_input;
+}
+
+Tensor glu_jvp_mps(const Tensor& glu, const Tensor& x, const Tensor& dx, int64_t dim) {
+  // Computes the JVP (Jacobian-Vector Product) for GLU forward pass.
+  // Formula: dglu = da * sigmoid(b) + glu * db * (1 - sigmoid(b))
+  //               = da * sig_b + glu * (db - sig_b * db)
+  // where: a = x[..., :glu_size], b = x[..., glu_size:]
+  //        da = dx[..., :glu_size], db = dx[..., glu_size:]
+  using namespace mps;
+
+  TORCH_CHECK(glu.is_mps(), "glu must be an MPS tensor");
+  TORCH_CHECK(x.dim() > 0, "glu_jvp does not support 0-dimensional tensors");
+
+  dim = maybe_wrap_dim(dim, x.dim());
+  const auto glu_size = glu.size(dim);
+
+  // Empty output
+  if (glu.numel() == 0) {
+    return at::empty_like(glu);
+  }
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* gluTensor_ = nil;
+    MPSGraphTensor* bTensor_ = nil;
+    MPSGraphTensor* daTensor_ = nil;
+    MPSGraphTensor* dbTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  // Extract b, da, db from x and dx
+  const auto b = x.narrow(dim, glu_size, glu_size);
+  const auto da = dx.narrow(dim, 0, glu_size);
+  const auto db = dx.narrow(dim, glu_size, glu_size);
+
+  Tensor dglu = at::empty_like(glu);
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    std::string key = "glu_jvp_mps" + getTensorsStringKey({glu, b, da, db}) + ":" + std::to_string(dim);
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* gluTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(glu), getMPSShape(glu));
+      MPSGraphTensor* bTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(b), getMPSShape(b));
+      MPSGraphTensor* daTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(da), getMPSShape(da));
+      MPSGraphTensor* dbTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(db), getMPSShape(db));
+
+      // sig_b = sigmoid(b)
+      MPSGraphTensor* sigBTensor = [mpsGraph sigmoidWithTensor:bTensor name:nil];
+
+      // term1 = da * sig_b
+      MPSGraphTensor* term1Tensor = [mpsGraph multiplicationWithPrimaryTensor:daTensor
+                                                              secondaryTensor:sigBTensor
+                                                                         name:nil];
+
+      // db_minus_sigb_db = db - sig_b * db = db * (1 - sig_b)
+      MPSGraphTensor* sigbDbTensor = [mpsGraph multiplicationWithPrimaryTensor:sigBTensor
+                                                               secondaryTensor:dbTensor
+                                                                          name:nil];
+      MPSGraphTensor* dbMinusSigbDbTensor = [mpsGraph subtractionWithPrimaryTensor:dbTensor
+                                                                   secondaryTensor:sigbDbTensor
+                                                                              name:nil];
+
+      // term2 = glu * (db - sig_b * db)
+      MPSGraphTensor* term2Tensor = [mpsGraph multiplicationWithPrimaryTensor:gluTensor
+                                                              secondaryTensor:dbMinusSigbDbTensor
+                                                                         name:nil];
+
+      // output = term1 + term2 = da * sig_b + glu * (db - sig_b * db)
+      MPSGraphTensor* outputTensor = [mpsGraph additionWithPrimaryTensor:term1Tensor
+                                                         secondaryTensor:term2Tensor
+                                                                    name:nil];
+
+      newCachedGraph->gluTensor_ = gluTensor;
+      newCachedGraph->bTensor_ = bTensor;
+      newCachedGraph->daTensor_ = daTensor;
+      newCachedGraph->dbTensor_ = dbTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
+
+    Placeholder gluPlaceholder = Placeholder(cachedGraph->gluTensor_, glu);
+    Placeholder bPlaceholder = Placeholder(cachedGraph->bTensor_, b);
+    Placeholder daPlaceholder = Placeholder(cachedGraph->daTensor_, da);
+    Placeholder dbPlaceholder = Placeholder(cachedGraph->dbTensor_, db);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, dglu);
+
+    auto feeds = dictionaryFromPlaceholders(gluPlaceholder, bPlaceholder, daPlaceholder, dbPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  return dglu;
 }
 
 TORCH_IMPL_FUNC(softplus_out_mps)

@@ -12155,12 +12155,13 @@
   python_module: nn
   dispatch:
     CPU, CUDA: glu_jvp
+    MPS: glu_jvp_mps
   autogen: glu_jvp.out
 
 - func: glu_backward_jvp(Tensor grad_x, Tensor grad_glu, Tensor x, Tensor dgrad_glu, Tensor dx, int dim) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA: glu_backward_jvp
+    CPU, CUDA, MPS: glu_backward_jvp
   autogen: glu_backward_jvp.out
 
 - func: hardsigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
