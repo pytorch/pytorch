@@ -21,7 +21,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
-from torch._inductor import config, metrics
+from torch._inductor import metrics
 from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -211,6 +211,7 @@ if HAS_GPU:
     elif TEST_ON_XPU:
         torch._C._set_onednn_allow_tf32(True)
         test_device = ("xpu",)
+
 
 class SubstringSet:
     def __init__(self, items):

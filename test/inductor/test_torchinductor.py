@@ -14681,10 +14681,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         return code_allowed != code_disallowed
 
     # If matmul is implemented by triton there is more reuse
-    @config.patch({
-        "max_autotune_gemm_backends": "ATEN",
-        "triton.native_matmul": False,
-    })
+    @config.patch(
+        {
+            "max_autotune_gemm_backends": "ATEN",
+            "triton.native_matmul": False,
+        }
+    )
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
         def fn(inp):  # 1*N^2
