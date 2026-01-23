@@ -7301,6 +7301,7 @@
     CPU: addmm_activation_out_cpu
     CUDA: addmm_activation_out_cuda
     XPU: addmm_activation_out_xpu
+    MPS: addmm_activation_out_mps
 
 - func: _addmm_activation(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False) -> Tensor
   structured_delegate: _addmm_activation.out

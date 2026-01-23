@@ -20,12 +20,15 @@
 #include <ATen/ops/_linalg_solve_ex_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
+#include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/eye.h>
 #include <ATen/ops/eye_native.h>
+#include <ATen/ops/gelu.h>
+#include <ATen/ops/relu.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
@@ -1568,6 +1571,24 @@ TORCH_IMPL_FUNC(addmm_out_mps)
  const Scalar& alpha,
  const Tensor& result) {
   mps::addmm_out_mps_impl(self, mat1, mat2, beta, alpha, const_cast<Tensor&>(result));
+}
+
+TORCH_IMPL_FUNC(addmm_activation_out_mps)
+(const Tensor& self,
+ const Tensor& mat1,
+ const Tensor& mat2,
+ const Scalar& beta,
+ const Scalar& alpha,
+ bool use_gelu,
+ const Tensor& result) {
+  // Perform addmm first
+  mps::addmm_out_mps_impl(self, mat1, mat2, beta, alpha, const_cast<Tensor&>(result));
+  // Then apply activation in-place
+  if (use_gelu) {
+    at::gelu_(const_cast<Tensor&>(result));
+  } else {
+    at::relu_(const_cast<Tensor&>(result));
+  }
 }
 
 TORCH_IMPL_FUNC(bmm_out_mps)(const Tensor& batch1, const Tensor& batch2, const Tensor& result) {
