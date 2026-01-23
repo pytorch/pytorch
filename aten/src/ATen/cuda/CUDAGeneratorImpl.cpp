@@ -300,6 +300,7 @@ uint64_t CUDAGeneratorImpl::get_offset() const {
 
 /**
  * Gets the current sharding spec of CUDAGeneratorImpl.
+ * Returns 0 when use_thread_based_rng_ is false.
  */
 uint64_t CUDAGeneratorImpl::get_sharding_spec(
     std::array<uint64_t, MAX_DIMS>& local_shape,
@@ -308,6 +309,9 @@ uint64_t CUDAGeneratorImpl::get_sharding_spec(
     std::array<uint64_t, MAX_DIMS>& global_strides) const {
   at::cuda::assertNotCapturing(
       "Cannot call CUDAGeneratorImpl::get_sharding_spec");
+  if (!use_thread_based_rng_) {
+    return 0;
+  }
   local_shape = this->local_shape_;
   global_offset = this->global_offset_;
   global_shape = this->global_shape_;
@@ -599,12 +603,15 @@ std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
 CUDAGeneratorImpl* CUDAGeneratorImpl::clone_impl() const {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::clone_impl");
   auto gen = new CUDAGeneratorImpl(this->device().index(), state_->clone());
-  gen->set_sharding_spec(
-      this->tensor_ndim_,
-      this->local_shape_,
-      this->global_offset_,
-      this->global_shape_,
-      this->global_strides_);
+  gen->use_thread_based_rng_ = this->use_thread_based_rng_;
+  if (use_thread_based_rng_) {
+    gen->set_sharding_spec(
+        this->tensor_ndim_,
+        this->local_shape_,
+        this->global_offset_,
+        this->global_shape_,
+        this->global_strides_);
+  }
   return gen;
 }
 
