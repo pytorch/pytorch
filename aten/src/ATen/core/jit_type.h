@@ -1674,21 +1674,36 @@ private:
 };
 
 struct PyObjectType;
-using PyObjectTypePtr = SingletonTypePtr<PyObjectType>;
-// This type represents a PyObject Type
+using PyObjectTypePtr = std::shared_ptr<PyObjectType>;
+// This type represents a PyObject Type, optionally with a Python class name
+// The class name is used to identify the Python type
 struct TORCH_API PyObjectType : public Type {
   bool equals(const Type& rhs) const override {
-    return rhs.kind() == kind();
+    if (rhs.kind() != kind()) {
+      return false;
+    }
+    const auto& other = static_cast<const PyObjectType&>(rhs);
+    return class_name_ == other.class_name_;
   }
   std::string str() const override {
+    if (class_name_.has_value()) {
+      return *class_name_;
+    }
     return "PyObject";
   }
   static const TypeKind Kind = TypeKind::PyObjectType;
   // global singleton
   static PyObjectTypePtr get();
+  static PyObjectTypePtr create(std::string class_name);
+
 private:
+  std::optional<std::string> class_name_;
+
   PyObjectType()
-  : Type(TypeKind::PyObjectType) {}
+  : Type(TypeKind::PyObjectType), class_name_(std::nullopt) {}
+
+  explicit PyObjectType(std::string class_name)
+  : Type(TypeKind::PyObjectType), class_name_(std::move(class_name)) {}
 };
 
 enum class TypeVerbosity {

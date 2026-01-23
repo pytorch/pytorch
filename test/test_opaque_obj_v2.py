@@ -778,6 +778,12 @@ class TestOpaqueObject(TestCase):
     def test_ops(self):
         queue = OpaqueQueue([], torch.zeros(3))
 
+        opaque_queue_cls = get_opaque_type_name(OpaqueQueue)
+        self.assertExpectedInline(
+            str(torch.ops._TestOpaqueObject.queue_push.default._schema),
+            f"""_TestOpaqueObject::queue_push({opaque_queue_cls} a, Tensor b) -> ()""",
+        )
+
         torch.ops._TestOpaqueObject.queue_push(queue, torch.ones(3) + 1)
         size = torch.ops._TestOpaqueObject.queue_size(queue)
         self.assertEqual(size, 1)
