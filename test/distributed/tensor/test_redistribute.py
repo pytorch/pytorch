@@ -1454,5 +1454,9 @@ DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
     DistributeWithDeviceOrderTest,
 )
 
+DistributeWithStridedShardTestLocalTensor = create_local_tensor_test_class(
+    DistributeWithStridedShardTest,
+)
+
 if __name__ == "__main__":
     run_tests()
