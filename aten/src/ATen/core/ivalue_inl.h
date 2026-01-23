@@ -1635,6 +1635,10 @@ struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
   virtual std::string toStr() = 0;
   virtual std::vector<at::Tensor> extractTensors() = 0;
 
+  // Sync and unwrap functional tensors contained in this PyObject.
+  virtual std::tuple<c10::intrusive_ptr<PyObjectHolder>, bool, bool>
+  functionalizePyObject() = 0;
+
   ~PyObjectHolder() override = default;
 };
 
