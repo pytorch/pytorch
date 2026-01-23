@@ -60,8 +60,8 @@ C10_REGISTER_TYPED_CLASS(
 REGISTER_PRIM_KERNEL("prim.ListUnpack", prim_listunpack, {
   RECORD_USER_SCOPE("nativert::OpKernel_prim_listunpack");
   auto inputListRef = KernelInput(0).toListRef();
-  for (const auto& [i, ivalue] : c10::enumerate(inputListRef)) {
-    KernelOutput(i) = ivalue;
+  for (size_t i = 0; i < inputListRef.size(); ++i) {
+    KernelOutput(i) = inputListRef[i];
   }
 })
 
@@ -98,7 +98,6 @@ class OpKernel_variadic_concat : public OpKernel {
         return;
       }
       auto& out_t = KernelOutput(0).toTensor();
-      fastResizeToZero(out_t);
       at::cpu::cat_outf(inputs, dim, out_t);
     }
   }
@@ -143,7 +142,6 @@ class OpKernel_variadic_stack : public OpKernel {
         return;
       }
       auto& out_t = out.toTensor();
-      fastResizeToZero(out_t);
       at::native::_stack_out_cpu(inputs, dim, out_t);
     }
   }

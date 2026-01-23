@@ -21,7 +21,6 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensor
-from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.amp.autocast_mode import _cast as _autocast_cast
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
@@ -522,22 +521,6 @@ def flex_attention_functionalize(
     are free variables.
     """
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
-
-    if has_user_subclass(
-        (
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        ),
-        allowed_subclasses=(FakeTensor, FunctionalTensor),
-    ):
-        return NotImplemented
 
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
@@ -1275,24 +1258,6 @@ def flex_attention_backward_functionalize(
     to the other_buffers, we skip that mutate check and go straight to redispatching.
     """
 
-    if has_user_subclass(
-        (
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            grad_logsumexp,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        ),
-        allowed_subclasses=(FakeTensor, FunctionalTensor),
-    ):
-        return NotImplemented
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
     value_unwrapped = ctx.unwrap_tensors(value)
