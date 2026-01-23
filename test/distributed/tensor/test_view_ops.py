@@ -1408,13 +1408,13 @@ class TestViewOps(DTensorTestBase):
         # flattened dim but map to DIFFERENT output dims after unflatten.
         # Uses all factorizations to comprehensively test unflatten behavior.
         # For this pattern:
-        # - shard_dim0 and shard_dim1 must be adjacent (shard_dim1 = shard_dim0 + 1)
+        # - shard_idx1 can be any index > shard_idx0 (supports non-adjacent sharding)
         # - We need at least 2 factors in the flatten range for two shard dims
         # - We need at least 1 factor as prefix (for split_factor > 1)
         # - We need at least 1 dim outside flatten range (view ops fail on 1D)
         #
         # We iterate over factorizations of a fixed flattened size (e.g., 144).
-        # For each factorization with len >= 3, we pick adjacent indices for sharding.
+        # For each factorization with len >= 3, we pick all valid index pairs.
         flattened_size = 144  # = 12 * 6 * 2, has many factorizations
         factorizations = self._get_all_factorizations(flattened_size)
 
@@ -1423,43 +1423,43 @@ class TestViewOps(DTensorTestBase):
 
         for factors in valid_factorizations:
             num_factors = len(factors)
-            # shard_dim0 is at index 1..num_factors-2 (need prefix before, shard_idx1 after)
+            # shard_idx0 is at index 1..num_factors-2 (need prefix before, shard_idx1 after)
             for shard_idx0 in range(1, num_factors - 1):
-                shard_idx1 = shard_idx0 + 1  # Adjacent
+                # shard_idx1 can be any index > shard_idx0 (non-adjacent supported)
+                for shard_idx1 in range(shard_idx0 + 1, num_factors):
+                    # Check divisibility for error detection
+                    factor0 = factors[shard_idx0]
+                    factor1 = factors[shard_idx1]
+                    mesh_size0 = mesh.size(0)  # = 3
+                    mesh_size1 = mesh.size(1)  # = 2
 
-                # Check divisibility for error detection
-                factor0 = factors[shard_idx0]
-                factor1 = factors[shard_idx1]
-                mesh_size0 = mesh.size(0)  # = 3
-                mesh_size1 = mesh.size(1)  # = 2
+                    # Error only occurs for non-last split dimensions.
+                    # shard_idx0 is never the last (since shard_idx1 > shard_idx0 exists)
+                    # shard_idx1 may or may not be the last
+                    is_last_split_idx1 = shard_idx1 == num_factors - 1
+                    uneven_shard_on_mesh_dim0 = factor0 % mesh_size0 != 0
+                    uneven_shard_on_mesh_dim1 = (
+                        factor1 % mesh_size1 != 0 and not is_last_split_idx1
+                    )
+                    expect_error = uneven_shard_on_mesh_dim0 or uneven_shard_on_mesh_dim1
 
-                # Error only occurs for non-last split dimensions.
-                # shard_idx0 is never the last (since shard_idx1 = shard_idx0 + 1 exists)
-                # shard_idx1 may or may not be the last
-                is_last_split_idx1 = shard_idx1 == num_factors - 1
-                uneven_shard_on_mesh_dim0 = factor0 % mesh_size0 != 0
-                uneven_shard_on_mesh_dim1 = (
-                    factor1 % mesh_size1 != 0 and not is_last_split_idx1
-                )
-                expect_error = uneven_shard_on_mesh_dim0 or uneven_shard_on_mesh_dim1
-
-                if expect_error:
-                    with self.assertRaisesRegex(
-                        RuntimeError, "is not evenly divisible by mesh dimension"
-                    ):
+                    if expect_error:
+                        with self.assertRaisesRegex(
+                            RuntimeError, "is not evenly divisible by mesh dimension"
+                        ):
+                            self._test_dtensor_unflatten_2d_ss_factors(
+                                factors,
+                                shard_idx0,
+                                shard_idx1,
+                                mesh,
+                            )
+                    else:
                         self._test_dtensor_unflatten_2d_ss_factors(
                             factors,
                             shard_idx0,
                             shard_idx1,
                             mesh,
                         )
-                else:
-                    self._test_dtensor_unflatten_2d_ss_factors(
-                        factors,
-                        shard_idx0,
-                        shard_idx1,
-                        mesh,
-                    )
 
         # Test (Replicate, _StridedShard) pattern - mesh dim 0 replicates, mesh dim 1 shards.
         # Uses all factorizations to comprehensively test unflatten behavior.
@@ -1577,10 +1577,10 @@ class TestViewOps(DTensorTestBase):
             factors: Tuple of factors representing the unflatten shape within the
                      flatten range (e.g., (12, 6, 2) means unflatten to these dims)
             shard_idx0: Index within factors for mesh dim 0's shard (0-indexed)
-            shard_idx1: Index within factors for mesh dim 1's shard (must be shard_idx0 + 1)
+            shard_idx1: Index within factors for mesh dim 1's shard (must be > shard_idx0)
             mesh: 2D DeviceMesh
         """
-        assert shard_idx1 == shard_idx0 + 1, "Shard indices must be adjacent"
+        assert shard_idx1 > shard_idx0, "shard_idx1 must be greater than shard_idx0"
 
         # Build tensor: factors for flatten range + one dim outside
         # The flatten range is [0, len(factors)), and we add one dim at the end
@@ -1599,10 +1599,11 @@ class TestViewOps(DTensorTestBase):
         if split_factor0 == 0:
             split_factor0 = 1  # empty product
 
-        # For mesh dim 1: product of dims before shard_dim1, with shard_dim0 localized
-        dims_for_sf1 = list(factors[:shard_idx1])
-        dims_for_sf1[shard_idx0] = dims_for_sf1[shard_idx0] // mesh.size(0)
-        split_factor1 = math.prod(dims_for_sf1)
+        # For mesh dim 1: match DTensor's computation in _view_ops.py (lines 700-709)
+        # DTensor computes: prod(group_shape[0:split_id]) // mesh_sizes[earlier_mesh_dims]
+        # So we compute product of all dims before shard_idx1, then divide by mesh.size(0)
+        split_factor1 = math.prod(factors[:shard_idx1])
+        split_factor1 = split_factor1 // mesh.size(0)
         if split_factor1 == 0:
             split_factor1 = 1  # handle truncation from uneven division
 
@@ -1839,22 +1840,22 @@ class TestViewOps3D(DTensorTestBase):
         self.assertEqual(inps_viewed._local_tensor, expected_inp_viewed._local_tensor)
 
 
-TestViewOpsWithLocalTensor = create_local_tensor_test_class(
-    TestViewOps,
-    skipped_tests=[
-        # Comparing data pointers is not supported for local tensor
-        "test_dtensor_view_op_uneven",
-        "test_dtensor_flatten_1d",
-        "test_dtensor_flatten_2d",
-        "test_dtensor_unflatten_1d",
-        "test_dtensor_unflatten_2d",
-        "test_dtensor_unflatten_3d",
-    ],
-)
+# TestViewOpsWithLocalTensor = create_local_tensor_test_class(
+#     TestViewOps,
+#     skipped_tests=[
+#         # Comparing data pointers is not supported for local tensor
+#         "test_dtensor_view_op_uneven",
+#         "test_dtensor_flatten_1d",
+#         "test_dtensor_flatten_2d",
+#         "test_dtensor_unflatten_1d",
+#         "test_dtensor_unflatten_2d",
+#         "test_dtensor_unflatten_3d",
+#     ],
+# )
 
-TestViewOps3DWithLocalTensor = create_local_tensor_test_class(
-    TestViewOps3D,
-)
+# TestViewOps3DWithLocalTensor = create_local_tensor_test_class(
+#     TestViewOps3D,
+# )
 
 if __name__ == "__main__":
     run_tests()

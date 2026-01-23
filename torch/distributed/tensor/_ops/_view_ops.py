@@ -842,7 +842,34 @@ def propagate_shape_and_sharding(
 
         if isinstance(p, _StridedShard):
             tgt_shard_dims = input_dim_to_output_dims[p.dim]
-            tgt_shard_dim = tgt_shard_dims.pop(0)
+            # Find the output dimension that matches this placement's split_factor.
+            # For non-adjacent sharding, we can't just pop the first one - we need
+            # to compute the expected split_factor for each candidate output dim
+            # and match it with p.split_factor.
+            matched_idx = None
+            for idx, candidate_dim in enumerate(tgt_shard_dims):
+                cmd = rule[candidate_dim]
+                if isinstance(cmd, Split):
+                    # Compute expected split_factor for this output dimension
+                    expected_split_factor = math.prod(cmd.group_shape[0 : cmd.split_id])
+                    if expected_split_factor == 0:
+                        expected_split_factor = 1
+                    # Divide by mesh sizes of earlier mesh dims sharding the same input
+                    for m in range(mesh_dim):
+                        earlier_p = placements[m]
+                        if (
+                            isinstance(earlier_p, Shard | _StridedShard)
+                            and earlier_p.dim == p.dim
+                        ):
+                            expected_split_factor = expected_split_factor // mesh_sizes[m]
+                    if p.split_factor == expected_split_factor:
+                        matched_idx = idx
+                        break
+            if matched_idx is not None:
+                tgt_shard_dim = tgt_shard_dims.pop(matched_idx)
+            else:
+                # Fallback to original behavior if no match found
+                tgt_shard_dim = tgt_shard_dims.pop(0)
             if tgt_shard_dim > 0:
                 # unfaltten from SS to S
                 return Shard(tgt_shard_dim)
@@ -853,9 +880,22 @@ def propagate_shape_and_sharding(
                 )
         else:
             assert isinstance(p, Shard)
-            tgt_shard_dim = input_dim_to_output_dims[p.dim]
-            assert len(tgt_shard_dim) == 1
-            tgt_shard_dim = tgt_shard_dim[0]
+            tgt_shard_dims = input_dim_to_output_dims[p.dim]
+            if len(tgt_shard_dims) == 1:
+                # Simple case: input dim maps to exactly one output dim
+                tgt_shard_dim = tgt_shard_dims[0]
+            else:
+                # Unflatten case: input dim maps to multiple output dims (Split).
+                # For Shard, find the output dim with split_id=0 (the first in the split).
+                tgt_shard_dim = None
+                for candidate_dim in tgt_shard_dims:
+                    cmd = rule[candidate_dim]
+                    if isinstance(cmd, Split) and cmd.split_id == 0:
+                        tgt_shard_dim = candidate_dim
+                        break
+                if tgt_shard_dim is None:
+                    # Fallback to first output dim
+                    tgt_shard_dim = tgt_shard_dims[0]
             cmd = rule[tgt_shard_dim]
             if isinstance(cmd, Split):
                 # unflatten from S to S
