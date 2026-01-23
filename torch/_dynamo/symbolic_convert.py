@@ -604,6 +604,7 @@ class ComprehensionAnalysis:
         result_disposition: What happens to result - "stored", "discarded", "returned", or "consumed"
         iterator_vars: Variables from LOAD_FAST_AND_CLEAR (need restoration)
         walrus_vars: Variables assigned via walrus operator (:=) inside comprehension
+        captured_vars: Variables read from outer scope via LOAD_FAST inside comprehension
     """
     end_ip: int
     result_var: Optional[str]
@@ -611,6 +612,7 @@ class ComprehensionAnalysis:
     result_disposition: str  # "stored", "discarded", "returned", "consumed"
     iterator_vars: list[str]
     walrus_vars: list[str]
+    captured_vars: list[str]
 
 
 def _detect_and_normalize_assert_statement(
@@ -4565,6 +4567,41 @@ class InstructionTranslatorBase(
 
                 scan_ip += 1
 
+        # Scan loop body for LOAD_FAST instructions that reference outer scope variables
+        # These are variables accessed from the enclosing function scope
+        captured_vars: list[str] = []
+        defined_inside: set[str] = set(iterator_vars) | set(walrus_vars)
+
+        if for_iter_ip >= 0:
+            scan_ip = for_iter_ip + 1
+            while scan_ip < end_for_ip:
+                inst = self.instructions[scan_ip]
+
+                # Skip nested loops
+                if inst.opname == "FOR_ITER":
+                    nested_depth = 1
+                    while nested_depth > 0 and scan_ip < end_for_ip:
+                        scan_ip += 1
+                        nested_inst = self.instructions[scan_ip]
+                        if nested_inst.opname == "FOR_ITER":
+                            nested_depth += 1
+                        elif nested_inst.opname == "END_FOR":
+                            nested_depth -= 1
+                    scan_ip += 1
+                    continue
+
+                # Track variables defined inside the loop via STORE_FAST
+                if inst.opname == "STORE_FAST":
+                    defined_inside.add(inst.argval)
+                # Detect LOAD_FAST instructions that reference outer variables
+                elif inst.opname == "LOAD_FAST":
+                    var_name = inst.argval
+                    # Skip if it's defined inside the comprehension or already captured
+                    if var_name not in defined_inside and var_name not in captured_vars:
+                        captured_vars.append(var_name)
+
+                scan_ip += 1
+
         # Check what happens after END_FOR
         ip = end_for_ip + 1
         post_end_for_inst = self.instructions[ip]
@@ -4583,6 +4620,7 @@ class InstructionTranslatorBase(
                 result_disposition="stored",
                 iterator_vars=iterator_vars,
                 walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
             )
 
         elif post_end_for_inst.opname == patterns["on_stack_indicator"]:
@@ -4605,6 +4643,7 @@ class InstructionTranslatorBase(
                         result_disposition="discarded",
                         iterator_vars=iterator_vars,
                         walrus_vars=walrus_vars,
+                        captured_vars=captured_vars,
                     )
 
                 elif disposition_inst.opname == patterns["return_indicator"]:
@@ -4616,6 +4655,7 @@ class InstructionTranslatorBase(
                         result_disposition="returned",
                         iterator_vars=iterator_vars,
                         walrus_vars=walrus_vars,
+                        captured_vars=captured_vars,
                     )
 
                 else:
@@ -4628,6 +4668,7 @@ class InstructionTranslatorBase(
                         result_disposition="consumed",
                         iterator_vars=iterator_vars,
                         walrus_vars=walrus_vars,
+                        captured_vars=captured_vars,
                     )
 
             # Fallback - result on stack but no disposition found
@@ -4638,6 +4679,7 @@ class InstructionTranslatorBase(
                 result_disposition="consumed",
                 iterator_vars=iterator_vars,
                 walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
             )
 
         else:
@@ -4652,6 +4694,7 @@ class InstructionTranslatorBase(
                 result_disposition="stored",
                 iterator_vars=iterator_vars,
                 walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
             )
 
     def _handle_comprehension_graph_break(
@@ -4687,6 +4730,71 @@ class InstructionTranslatorBase(
         stack_pops = 1 + len(analysis.iterator_vars)
 
         log.debug("comprehension stack_pops=%s", stack_pops)
+
+        # Handle captured variables BEFORE compile_subgraph.
+        # For mutable objects (lists, dicts) that are captured by the comprehension,
+        # we need to ensure object identity is preserved - the same object must be:
+        # 1. Stored to the local slot (for comprehension access via LOAD_FAST)
+        # 2. Passed to the resume function (so mutations are visible)
+        #
+        # For variables without LocalSource, compile_subgraph would reconstruct them
+        # (creating a NEW object), and we'd also reconstruct them here (another new
+        # object). These would be different objects, breaking mutation semantics.
+        #
+        # Solution: For captured variables without LocalSource, we:
+        # 1. Reconstruct them ONCE and store to local slot (before compile_subgraph)
+        # 2. Set their source to LocalSource so compile_subgraph loads from local slot
+        # This ensures the same object is used everywhere.
+        pre_subgraph_insts = []
+        if analysis.captured_vars:
+            from .codegen import PyCodegen
+            from .bytecode_transformation import create_instruction, create_load_const
+            from .source import LocalSource
+            from .utils import is_safe_constant
+            from .variables.tensor import TensorVariable, SymNodeVariable
+
+            cg = PyCodegen(self)
+            cg.value_from_source = False  # Don't try to load from source
+
+            for var_name in analysis.captured_vars:
+                if var_name in self.symbolic_locals:
+                    var = self.symbolic_locals[var_name]
+
+                    # Skip tensor variables - they're handled by the graph
+                    if isinstance(var, (TensorVariable, SymNodeVariable)):
+                        continue
+
+                    # Skip variables that already have LocalSource matching their name
+                    if (
+                        isinstance(var.source, LocalSource)
+                        and var.source.local_name == var_name
+                    ):
+                        continue
+
+                    # For python constants, use create_load_const directly
+                    if var.is_python_constant():
+                        const_val = var.as_python_constant()
+                        if is_safe_constant(const_val):
+                            cg.append_output(create_load_const(const_val))
+                            cg.append_output(
+                                create_instruction("STORE_FAST", argval=var_name)
+                            )
+                            # Set LocalSource so compile_subgraph loads from local slot
+                            var.source = LocalSource(var_name)
+                            continue
+
+                    # For other variable types (lists, dicts, etc.)
+                    # Reconstruct once, store to local slot, set LocalSource
+                    cg(var)
+                    cg.append_output(create_instruction("STORE_FAST", argval=var_name))
+                    # Update source so compile_subgraph loads from local slot
+                    var.source = LocalSource(var_name)
+
+            pre_subgraph_insts = cg.get_instructions()
+
+        # Add pre-subgraph instructions that store captured variables to local slots
+        if pre_subgraph_insts:
+            self.output.add_output_instructions(pre_subgraph_insts)
 
         all_stack_locals_metadata = self.output.compile_subgraph(
             self,
