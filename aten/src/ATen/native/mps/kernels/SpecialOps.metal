@@ -3,6 +3,32 @@
 using namespace c10::metal;
 using namespace metal;
 
+// log_ndtr: Logarithm of the cumulative distribution function of the standard normal distribution
+// log(ndtr(x)) = log(0.5 * erfc(-x / sqrt(2)))
+// Using the numerically stable formula from PyTorch's Math.h:
+// For x < -1: log(erfcx(-t) / 2) - t*t  where t = x * sqrt(2) / 2
+// Otherwise:  log1p(-erfc(t) / 2)       where t = x * sqrt(2) / 2
+inline float log_ndtr(float x) {
+  constexpr float FRAC_SQRT_2 = 0.7071067811865476f;  // 1 / sqrt(2)
+  float t = x * FRAC_SQRT_2;
+  if (x < -1.0f) {
+    return ::metal::log(c10::metal::erfcx(-t) / 2.0f) - t * t;
+  } else {
+    return c10::metal::log1p(-c10::metal::erfc(t) / 2.0f);
+  }
+}
+
+struct log_ndtr_functor {
+  template <typename T>
+  inline enable_if_t<is_floating_point_v<T>, T> operator()(const T x) {
+    return static_cast<T>(log_ndtr(static_cast<float>(x)));
+  }
+  template <typename T>
+  inline enable_if_t<is_integral_v<T>, float> operator()(const T x) {
+    return log_ndtr(static_cast<float>(x));
+  }
+};
+
 DEFINE_UNARY_FLOATING_FUNCTOR(bessel_j0_forward);
 DEFINE_UNARY_FLOATING_FUNCTOR(bessel_j1_forward);
 DEFINE_UNARY_FLOATING_FUNCTOR(modified_bessel_i0_forward);
@@ -79,6 +105,7 @@ struct entr_functor {
   REGISTER_UNARY_OP(i1, DTI, DTO);                                \
   REGISTER_UNARY_OP(i1e, DTI, DTO);                               \
   REGISTER_UNARY_OP(spherical_bessel_j0, DTI, DTO);               \
+  REGISTER_UNARY_OP(log_ndtr, DTI, DTO);                          \
   REGISTER_UNARY_OP(entr, DTI, DTO)
 
 REGISTER_SPECIAL(float, float);

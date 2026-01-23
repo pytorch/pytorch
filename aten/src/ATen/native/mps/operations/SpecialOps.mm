@@ -76,6 +76,10 @@ static void bessel_y1_kernel_mps(TensorIteratorBase& iter) {
   lib.exec_unary_kernel(iter, "bessel_y1_forward");
 }
 
+static void log_ndtr_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "log_ndtr");
+}
+
 REGISTER_DISPATCH(i0_stub, &i0_kernel_mps)
 REGISTER_DISPATCH(special_i0e_stub, &i0e_kernel_mps)
 REGISTER_DISPATCH(special_i1_stub, &i1_kernel_mps)
@@ -91,5 +95,6 @@ REGISTER_DISPATCH(special_scaled_modified_bessel_k1_stub, &scaled_modified_besse
 REGISTER_DISPATCH(special_bessel_y0_stub, &bessel_y0_kernel_mps)
 REGISTER_DISPATCH(special_bessel_y1_stub, &bessel_y1_kernel_mps)
 REGISTER_DISPATCH(special_spherical_bessel_j0_stub, &spherical_bessel_j0_kernel_mps)
+REGISTER_DISPATCH(special_log_ndtr_stub, &log_ndtr_kernel_mps)
 REGISTER_DISPATCH(special_entr_stub, &entr_kernel_mps)
 } // namespace at::native
