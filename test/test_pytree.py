@@ -834,7 +834,7 @@ class TestPythonPytree(TestCase):
                 lambda xs, _: DummyType(*xs),
             )
 
-        with self.assertWarnsRegex(UserWarning, "already registered"):
+        with self.assertWarnsRegex(ValueError, "already registered"):
             python_pytree._register_pytree_node(
                 DummyType,
                 lambda dummy: ([dummy.x, dummy.y], None),

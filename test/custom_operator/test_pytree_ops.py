@@ -4,14 +4,8 @@ from dataclasses import dataclass
 
 import torch
 import torch.utils._pytree as pytree
-from torch.testing._internal.common_utils import (
-    run_tests,
-    skipIfTorchDynamo,
-    TestCase,
-)
-from torch._dynamo.testing import (
-    AotEagerAndRecordGraphs,
-)
+from torch._library.infer_schema import infer_schema
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 @dataclass
@@ -19,8 +13,8 @@ class Point:
     x: torch.Tensor
     y: torch.Tensor
 
-pytree.register_dataclass(Point)
 
+pytree.register_dataclass(Point)
 
 
 class TestPytreeOps(TestCase):
@@ -32,10 +26,33 @@ class TestPytreeOps(TestCase):
         self.lib._destroy()
         super().tearDown()
 
+    def test_schema_inference_list_types_before_pytree(self):
+        def fn_list_tensor(
+            list_tensor: list[torch.Tensor],
+            list_int: list[int],
+            list_float: list[float],
+            list_bool: list[bool],
+            pytree_list: list,
+        ) -> torch.Tensor:
+            return list_tensor[0]
+
+        schema = infer_schema(fn_list_tensor, mutates_args=())
+        self.assertEqual(
+            schema,
+            "(Tensor[] list_tensor, SymInt[] list_int, float[] list_float, bool[] list_bool, builtins.list pytree_list) -> Tensor",
+        )
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_dict_input(self):
-        @torch.library.custom_op("_TestPytreeOps::dict_op", mutates_args=())
-        def foo(d: dict, t: torch.Tensor) -> torch.Tensor:
+        # Use define/impl API instead of custom_op
+        torch.library.define(
+            "_TestPytreeOps::dict_op",
+            "(builtins.dict d, Tensor t) -> Tensor",
+            lib=self.lib,
+        )
+
+        @torch.library.impl("_TestPytreeOps::dict_op", "CPU", lib=self.lib)
+        def dict_op_impl(d: dict, t: torch.Tensor) -> torch.Tensor:
             return torch.sin(d["x"] - d["y"] + t)
 
         d = {"x": torch.randn(2, 3), "y": torch.randn(2, 3)}
@@ -57,7 +74,7 @@ class TestPytreeOps(TestCase):
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_dataclass_input(self):
         @torch.library.custom_op("_TestPytreeOps::dataclass_op", mutates_args=())
-        def foo(a: Point) -> torch.Tensor:
+        def dataclass_op_impl(a: Point) -> torch.Tensor:
             return torch.sqrt(torch.sum((a.x - a.y) ** 2))
 
         x = Point(x=torch.randn(2, 3), y=torch.randn(2, 3))
