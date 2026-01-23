@@ -316,7 +316,10 @@ class TestNVUniversalGemm(TestCase):
         """Test grouped GEMM with NVGEMM backend.
 
         This test runs the same shape twice with different offsets to verify that
-        different offset distributions produce correct results
+        different offset distributions produce correct results.
+
+        Note: GroupedGemm currently only supports TN layout (column-major B).
+        B is created with shape (g, k, n) but column-major inner layout via permute.
         """
         g, k, n = 4, 256, 256
         dtype = torch.bfloat16
@@ -325,7 +328,7 @@ class TestNVUniversalGemm(TestCase):
         def grouped_mm(a, b, offsets):
             return torch._grouped_mm(a, b, offs=offsets)
 
-        b = torch.randn(g, k, n, device=device, dtype=dtype)
+        b = torch.randn(g, n, k, device=device, dtype=dtype).permute(0, 2, 1)
 
         m_per_group_1 = [64, 64, 64, 64]
         total_m_1 = sum(m_per_group_1)
