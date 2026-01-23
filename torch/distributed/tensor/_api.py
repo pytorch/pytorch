@@ -211,18 +211,15 @@ class _FromTorchTensor(torch.autograd.Function):
 
             # for backward shard -> partial, we do shard -> replicate
             # for backward replicate -> partial, we do replicate -> replicate / skip transformation
-            # TODO: for backward partial -> partial, right now we keep it unchanged,
-            # but this might need revisit
+            # for backward partial -> partial, we do partial -> replicate.
+            # Otherwise, if use specify target partial, there will be ambiguity where they get either partial or replicate.
+            # NOTE: in reality, there should never be a case that we have partial gradients given forward partial
             normalized_placements: list[Placement] = []
             for current, target in zip(
                 current_spec.placements, forward_input_placements
             ):
-                if (
-                    current.is_shard() or current.is_replicate()
-                ) and target.is_partial():
+                if target.is_partial():
                     normalized_placements.append(Replicate())
-                else:
-                    normalized_placements.append(target)
 
             target_spec = DTensorSpec(
                 forward_input_device_mesh,
