@@ -1014,31 +1014,31 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   // If include_self is false, we need to initialize the result at the indexed positions
   // with appropriate identity values
   if (!include_self) {
-    Tensor init_values;
+    Scalar identity;
     switch (op) {
       case ReductionType::PROD:
-        init_values = at::ones_like(source);
+        identity = 1;
         break;
       case ReductionType::MAX:
         if (at::isFloatingType(self.scalar_type())) {
-          init_values = at::full_like(source, -std::numeric_limits<double>::infinity());
+          identity = -std::numeric_limits<double>::infinity();
         } else {
-          init_values = at::full_like(source, std::numeric_limits<int64_t>::lowest());
+          identity = std::numeric_limits<int64_t>::lowest();
         }
         break;
       case ReductionType::MIN:
         if (at::isFloatingType(self.scalar_type())) {
-          init_values = at::full_like(source, std::numeric_limits<double>::infinity());
+          identity = std::numeric_limits<double>::infinity();
         } else {
-          init_values = at::full_like(source, std::numeric_limits<int64_t>::max());
+          identity = std::numeric_limits<int64_t>::max();
         }
         break;
       default:  // SUM, MEAN
-        init_values = at::zeros_like(source);
+        identity = 0;
         break;
     }
-    // Use scatter to initialize result at indexed positions
-    result.scatter_(dim, index.unsqueeze(-1).expand_as(source), init_values);
+    // Initialize result at indexed positions along dimension dim with the identity value
+    result.index_fill_(dim, index, identity);
   }
 
   // Determine the scatter mode based on reduction type
@@ -1089,13 +1089,13 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   }
   // For non-set modes, we need float32 or int32
   if (srcType == MPSDataTypeUInt8 || srcType == MPSDataTypeBool) {
-    srcType = isFloatingType(source.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+    srcType = isFloatingType(result.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
     needsCast = true;
   }
 
   @autoreleasepool {
     std::string key = "index_reduce_mps_" + getTensorsStringKey({result, expanded_index, source}) + ":" +
-        std::to_string(dim) + ":" + std::string(reduce) + ":" + std::to_string(include_self);
+        std::to_string(dim) + ":" + std::string(reduce);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(result));
       MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, expanded_index);
@@ -1104,7 +1104,7 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
       MPSGraphTensor* castInputTensor = inputTensor;
       MPSGraphTensor* castSrcTensor = srcTensor;
       if (needsCast || inputType != srcType) {
-        auto targetType = isFloatingType(source.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
+        auto targetType = isFloatingType(result.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
         castInputTensor = [mpsGraph castTensor:inputTensor toType:targetType name:@"castInput"];
         castSrcTensor = [mpsGraph castTensor:srcTensor toType:targetType name:@"castSrc"];
       }
