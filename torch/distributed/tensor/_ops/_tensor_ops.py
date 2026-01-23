@@ -155,7 +155,7 @@ def _to_copy_strategy(op_schema: OpSchema) -> StrategyType:
         src_dtype = input_spec.tensor_meta.dtype
         output_placements = list(input_spec.placements)
 
-        # Check if any Partial placement needs to be reduced before cast
+        # Reduce Partial for non-linear casts
         for i, placement in enumerate(input_spec.placements):
             if isinstance(placement, Partial):
                 if _partial_needs_reduce_for_dtype_cast(
