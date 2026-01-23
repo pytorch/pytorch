@@ -11487,6 +11487,49 @@ class TestAdvancedIndexing(TestCaseMPS):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+    def test_nonzero_static(self):
+        # Test nonzero_static on MPS device
+        device = "mps"
+
+        # Test case 1: size equals number of nonzeros
+        x = torch.tensor([0, 1, 0, 2, 0, 3], device=device)
+        result = torch.nonzero_static(x, size=3)
+        expected = torch.tensor([[1], [3], [5]], device=device)
+        self.assertEqual(result, expected)
+
+        # Test case 2: size greater than number of nonzeros (padding)
+        result = torch.nonzero_static(x, size=5, fill_value=-1)
+        expected = torch.tensor([[1], [3], [5], [-1], [-1]], device=device)
+        self.assertEqual(result, expected)
+
+        # Test case 3: size less than number of nonzeros (truncation)
+        result = torch.nonzero_static(x, size=2)
+        expected = torch.tensor([[1], [3]], device=device)
+        self.assertEqual(result, expected)
+
+        # Test case 4: 2D tensor
+        x_2d = torch.tensor([[0, 1], [2, 0], [0, 3]], device=device)
+        result = torch.nonzero_static(x_2d, size=5, fill_value=-1)
+        expected = torch.tensor([[0, 1], [1, 0], [2, 1], [-1, -1], [-1, -1]], device=device)
+        self.assertEqual(result, expected)
+
+        # Test case 5: size=0
+        result = torch.nonzero_static(x, size=0)
+        self.assertEqual(result.shape, torch.Size([0, 1]))
+
+        # Test case 6: empty nonzeros
+        x_zeros = torch.zeros(5, device=device)
+        result = torch.nonzero_static(x_zeros, size=3, fill_value=-1)
+        expected = torch.tensor([[-1], [-1], [-1]], device=device)
+        self.assertEqual(result, expected)
+
+        # Test comparison with CPU
+        x_cpu = torch.tensor([0, 1, 0, 2, 0, 3])
+        x_mps = x_cpu.to(device)
+        result_cpu = torch.nonzero_static(x_cpu, size=5, fill_value=-1)
+        result_mps = torch.nonzero_static(x_mps, size=5, fill_value=-1)
+        self.assertEqual(result_mps.cpu(), result_cpu)
+
     def test_nonzero_multi_threading(self):
         # Test that MPS doesn't crash if nonzero called concurrently
         # See https://github.com/pytorch/pytorch/issues/100285

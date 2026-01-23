@@ -9566,12 +9566,14 @@
   dispatch:
     CPU: nonzero_static_out_cpu
     CUDA: nonzero_static_out_cuda
+    MPS: nonzero_static_out_mps
 
 - func: nonzero_static(Tensor self, *, SymInt size, int fill_value=-1) -> Tensor
   variants: method, function
   dispatch:
     CPU: nonzero_static_cpu
     CUDA: nonzero_static_cuda
+    MPS: nonzero_static_mps
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
