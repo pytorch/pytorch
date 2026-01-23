@@ -3017,6 +3017,7 @@
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU, CUDA: native_group_norm
+    MPS: native_group_norm_mps
     CompositeExplicitAutograd: math_group_norm
   autogen: native_group_norm.out
   tags: core
@@ -3024,6 +3025,7 @@
 - func: native_group_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, SymInt N, SymInt C, SymInt HxW, int group, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU, CUDA: native_group_norm_backward
+    MPS: native_group_norm_backward_mps
   autogen: native_group_norm_backward.out
   tags: core
 
