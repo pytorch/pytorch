@@ -419,7 +419,15 @@ class DTensor(torch.Tensor):
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
 
+        .. note:: During backward, if the target placement is :class:`Partial`, we always
+            redistribute to :class:`Replicate` instead. This means:
 
+            - For backward ``Replicate`` -> ``Partial``, we do ``Replicate`` -> ``Replicate``
+            - For backward ``Partial`` -> ``Partial``, we do ``Partial`` -> ``Replicate``
+
+            Redistributing to ``Replicate`` in the ``Partial`` -> ``Partial`` case may not be the
+            most efficient option, but we choose to do so to avoid ambiguity and provide clearer
+            gradient semantics to users.
         """
         # `local_tensor` argument cannot be DTensor
         if isinstance(local_tensor, DTensor):
