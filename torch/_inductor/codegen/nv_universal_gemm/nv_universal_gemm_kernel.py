@@ -146,16 +146,13 @@ class NVUniversalGemmKernel(Kernel):
             from cutlass_api.library import ScaleMode, ScaleSwizzleMode"""
 
         # Variant-specific code generation:
-        # - preprocess_inputs: input transformations before args creation
         # - cache_key_code: expression for cache key
         # - create_args_code: code to create Arguments object
         if is_grouped:
-            preprocess_inputs = """# Transpose B from K-major to N-major for CUTLASS compatibility
-                in_ptr1_transposed = in_ptr1.permute(0, 2, 1).contiguous().permute(0, 2, 1)"""
             cache_key_code = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape)"
             create_args_code = f"""args = cutlass_api.arguments.GroupedGemmArguments(
                         in_ptr0,
-                        in_ptr1_transposed,
+                        in_ptr1,
                         out_ptr0,
                         accumulator_type={acc_dtype_str},
                         offsets=in_ptr2,
@@ -186,7 +183,6 @@ class NVUniversalGemmKernel(Kernel):
                     accumulator_type={acc_dtype_str},
                 )"""
         else:
-            preprocess_inputs = ""
             cache_key_code = (
                 "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)"
             )
@@ -215,8 +211,6 @@ class NVUniversalGemmKernel(Kernel):
                 kernel = get_kernel_by_name({kernel_name_var})
                 if kernel is None:
                     raise RuntimeError(f"Could not find kernel: {{{kernel_name_var}}}")
-
-                {preprocess_inputs}
 
                 {create_args_code}
 
