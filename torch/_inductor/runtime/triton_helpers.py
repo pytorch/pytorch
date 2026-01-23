@@ -332,10 +332,17 @@ def bucketize_binary_search(
             mask=mask,
             other=0,
         )
+        # Use negated comparisons to correctly handle NaN values.
+        # NaN comparisons always return False, so:
+        #   - `values > x` returns False for NaN, causing search to go left (wrong)
+        #   - `~(x >= values)` returns True for NaN, causing search to go right (correct)
+        # This matches the eager C++ implementation in Bucketization.cpp which uses
+        # `!(mid_val >= val)` instead of `mid_val < val` to handle NaN correctly.
+        # See https://github.com/pytorch/pytorch/issues/173133
         if right:
-            is_above = values >= bucket_upper_bound
+            is_above = ~(bucket_upper_bound > values)
         else:
-            is_above = values > bucket_upper_bound
+            is_above = ~(bucket_upper_bound >= values)
 
         low = tl.where(is_above & mask, mid + 1, low)
         high = tl.where(is_above, high, mid)
