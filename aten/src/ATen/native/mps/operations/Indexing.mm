@@ -992,6 +992,18 @@ Tensor& take_out_mps(const Tensor& self, const Tensor& index, Tensor& out) {
       self.scalar_type(),
       " and out.dtype = ",
       out.scalar_type());
+  TORCH_CHECK(
+      self.device() == index.device(),
+      "take(): self and index expected to be on the same device, but got self.device = ",
+      self.device(),
+      " and index.device = ",
+      index.device());
+  TORCH_CHECK(
+      self.device() == out.device(),
+      "take(): self and out expected to be on the same device, but got self.device = ",
+      self.device(),
+      " and out.device = ",
+      out.device());
 
   // Index checks
   TORCH_CHECK_INDEX(
