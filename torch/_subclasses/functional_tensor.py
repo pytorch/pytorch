@@ -174,7 +174,8 @@ class FunctionalTensor(torch.Tensor):
                 )
                 if torch.is_inference_mode_enabled():
                     # In inference mode, all views must have a tracked base
-                    assert base_from_storage is not None
+                    if base_from_storage is None:
+                        raise AssertionError("base_from_storage must not be None")
                     out._inference_mode_base = base_from_storage
                 elif base_from_storage is not None:
                     # In training mode with requires_grad=False, only set if we found a base
