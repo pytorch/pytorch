@@ -53,7 +53,7 @@ def _get_rng_tracker(device_mesh: DeviceMesh) -> Optional["_RNGStateTracker"]:
         if _USE_THREAD_RNG_TRACKER:
             _rng_tracker = ThreadBasedRNGTracker(device_mesh)
         else:
-            _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
+            _rng_tracker = OffsetBasedRNGTracker(device_mesh)
     return _rng_tracker
 
 
