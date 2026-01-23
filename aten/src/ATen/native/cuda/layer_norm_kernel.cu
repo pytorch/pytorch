@@ -619,7 +619,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
             const int64_t index = i * N + j;
             sum1 += static_cast<T_ACC>(dY[index]) * (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) * static_cast<T_ACC>(rstd[i]);
             sum2 += static_cast<T_ACC>(dY[index]);
-            }
+          }
           dg[j] = sum1;
           db[j] = sum2;
         } else {
