@@ -18,3 +18,4 @@ Details:
 - For 2) & 3), rely on the code in `torch/testing/_internal/distributed/_tensor/common_dtensor.py`: enumerate_placements() and enumerate_all_placement_combos().
 - Regarding handling of ShardPlaceholder in 3):
   - Some strategies work for Shard/StridedShard with any split_factor, but some may only work for Shard. To distinguish this, for each ShardPlaceholder combination, replace the placeholder with Shard, and StridedShard(split_factor = 2 and 4 and 8). If all of those are valid, keep ShardPlaceholder in the final strategy. If not, use Shard.
+- If you see any existing untracked testing files that may have been previously written or generated, IGNORE THEM AND WRITE YOUR OWN TESTING SCRIPTS.
