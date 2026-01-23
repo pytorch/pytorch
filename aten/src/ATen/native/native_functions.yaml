@@ -4697,6 +4697,7 @@
 - func: channel_shuffle(Tensor self, SymInt groups) -> Tensor
   dispatch:
     CPU, CUDA: channel_shuffle
+    MPS: channel_shuffle_mps
     QuantizedCPU: channel_shuffle_quantized_cpu
   autogen: channel_shuffle.out
 
