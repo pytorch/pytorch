@@ -209,11 +209,10 @@ class _FromTorchTensor(torch.autograd.Function):
         if grad_output.placements != forward_input_placements:
             current_spec = grad_output._spec
 
-            # for backward shard -> partial, we do shard -> replicate
-            # for backward replicate -> partial, we do replicate -> replicate / skip transformation
+            # if target gradient placement is partial, we always redistribute to replicate, this means
+            # for backward replicate -> partial, we do replicate -> replicate
             # for backward partial -> partial, we do partial -> replicate.
-            # Otherwise, if use specify target partial, there will be ambiguity where they get either partial or replicate.
-            # NOTE: in reality, there should never be a case that we have partial gradients given forward partial
+            # For partial -> partial, redistributing to replicate might not be efficient but we choose to do so to avoid ambiguity
             normalized_placements: list[Placement] = []
             for current, target in zip(
                 current_spec.placements, forward_input_placements
@@ -419,6 +418,8 @@ class DTensor(torch.Tensor):
 
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
+
+
         """
         # `local_tensor` argument cannot be DTensor
         if isinstance(local_tensor, DTensor):
