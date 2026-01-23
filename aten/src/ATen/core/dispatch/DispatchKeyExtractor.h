@@ -168,6 +168,16 @@ struct TORCH_API DispatchKeyExtractor final {
           }
         }
       }
+      // PyObject arguments (e.g., pytree inputs like dataclasses containing
+      // tensors) need to have their tensors extracted to determine dispatch
+      // keys.
+      else if (C10_UNLIKELY(ivalue.isPyObject())) {
+        auto py_obj_holder = ivalue.toPyObjectHolder();
+        auto tensors = py_obj_holder->extractTensors();
+        for (const auto& tensor : tensors) {
+          ks = ks | tensor.key_set();
+        }
+      }
     });
     // Keys that are fallthrough should be skipped
     if (requiresBitsetPerBackend_) {
@@ -221,12 +231,14 @@ struct TORCH_API DispatchKeyExtractor final {
     return type.isSubtypeOf(c10::TypeFactory::get<TensorType>()) ||
         type.isSubtypeOf(ct.listOfTensors) ||
         type.isSubtypeOf(ct.listOfOptionalTensors) ||
-        type.isSubtypeOf(ct.optionalOfTensor);
+        type.isSubtypeOf(ct.optionalOfTensor) ||
+        type.kind() == TypeKind::PyObjectType;
 #else // C10_MOBILE
     return type.isSubtypeOf(*TensorType::get()) ||
         type.isSubtypeOf(*ListType::ofTensors()) ||
         type.isSubtypeOf(*ListType::ofOptionalTensors()) ||
-        type.isSubtypeOf(*OptionalType::ofTensor());
+        type.isSubtypeOf(*OptionalType::ofTensor()) ||
+        type.kind() == TypeKind::PyObjectType;
 #endif // C10_MOBILE
   }
   static c10::utils::bitset makeBitsetForDispatchArgs(

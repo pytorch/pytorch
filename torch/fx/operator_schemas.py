@@ -92,7 +92,7 @@ def _torchscript_type_to_python_type(ts_type: "torch._C.JitType") -> Any:
     eval'ing the annotation_str. _type_eval_globals sets up expressions
     like "List" and "Future" to map to actual types (typing.List and jit.Future)
     """
-    if isinstance(ts_type, torch.PyObjectType):
+    if isinstance(ts_type, torch.PyObjectType):  # pyrefly: ignore[missing-attribute]
         # PyObjects have the python class as the annotation_str
         # so the eval doesn't work well.
         return Any

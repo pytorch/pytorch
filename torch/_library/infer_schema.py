@@ -6,6 +6,7 @@ from types import GenericAlias
 from typing import Optional, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
@@ -129,6 +130,9 @@ def infer_schema(
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
                 schema_type = _OPAQUE_TYPES[annotation_type].class_name
+            elif annotation_type in pytree.SUPPORTED_SERIALIZED_TYPES:
+                node_def = pytree.SUPPORTED_SERIALIZED_TYPES[annotation_type]
+                schema_type = node_def.class_name
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "

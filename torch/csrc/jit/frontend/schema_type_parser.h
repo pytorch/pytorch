@@ -10,9 +10,11 @@ namespace torch::jit {
 
 using TypePtr = c10::TypePtr;
 
-TORCH_API void registerOpaqueType(const std::string& type_name);
-TORCH_API void unregisterOpaqueType(const std::string& type_name);
-TORCH_API bool isRegisteredOpaqueType(const std::string& type_name);
+// Register a Python type name to be treated as PyObjectType in schema parsing.
+// This is used for both opaque objects and pytree types.
+TORCH_API void registerPythonType(const std::string& type_name);
+TORCH_API void unregisterPythonType(const std::string& type_name);
+TORCH_API bool isRegisteredPythonType(const std::string& type_name);
 
 struct TORCH_API SchemaTypeParser {
   TypePtr parseBaseType();

@@ -1875,23 +1875,23 @@ void initJITBindings(PyObject* module) {
       py::arg("schema"),
       py::arg("allow_typevars") = true);
   m.def(
-      "_register_opaque_type",
+      "_register_python_type",
       [](const std::string& type_name) {
-        torch::jit::registerOpaqueType(type_name);
+        torch::jit::registerPythonType(type_name);
       },
-      R"doc(Registers a type name to be treated as an opaque type (PyObject) in schema parsing.)doc");
+      R"doc(Registers a type name to be treated as a Python type (PyObject) in schema parsing. Used for opaque objects and pytree types.)doc");
   m.def(
-      "_is_opaque_type_registered",
+      "_is_python_type_registered",
       [](const std::string& type_name) -> bool {
-        return torch::jit::isRegisteredOpaqueType(type_name);
+        return torch::jit::isRegisteredPythonType(type_name);
       },
-      R"doc(Checks if a type name is registered as an opaque type.)doc");
+      R"doc(Checks if a type name is registered as a Python type.)doc");
   m.def(
-      "_unregister_opaque_type",
+      "_unregister_python_type",
       [](const std::string& type_name) {
-        torch::jit::unregisterOpaqueType(type_name);
+        torch::jit::unregisterPythonType(type_name);
       },
-      R"doc(Unregisters a type name from the opaque type registry.)doc");
+      R"doc(Unregisters a type name from the Python type registry.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);

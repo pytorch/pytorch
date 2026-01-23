@@ -43,28 +43,30 @@ using c10::VarType;
 
 namespace torch::jit {
 
-static std::unordered_set<std::string>& getOpaqueTypes() {
-  static std::unordered_set<std::string> global_opaque_types;
-  return global_opaque_types;
+// Registry of Python type names that should be treated as PyObjectType.
+// This includes opaque objects and pytree types.
+static std::unordered_set<std::string>& getPythonTypes() {
+  static std::unordered_set<std::string> global_python_types;
+  return global_python_types;
 }
 
-void registerOpaqueType(const std::string& type_name) {
-  auto& global_opaque_types = getOpaqueTypes();
-  auto [_, inserted] = global_opaque_types.insert(type_name);
+void registerPythonType(const std::string& type_name) {
+  auto& global_python_types = getPythonTypes();
+  auto [_, inserted] = global_python_types.insert(type_name);
   if (!inserted) {
     throw std::runtime_error(
-        "Type '" + type_name + "' is already registered as an opaque type");
+        "Type '" + type_name + "' is already registered as a Python type");
   }
 }
 
-void unregisterOpaqueType(const std::string& type_name) {
-  auto& global_opaque_types = getOpaqueTypes();
-  global_opaque_types.erase(type_name);
+void unregisterPythonType(const std::string& type_name) {
+  auto& global_python_types = getPythonTypes();
+  global_python_types.erase(type_name);
 }
 
-bool isRegisteredOpaqueType(const std::string& type_name) {
-  auto& global_opaque_types = getOpaqueTypes();
-  return global_opaque_types.find(type_name) != global_opaque_types.end();
+bool isRegisteredPythonType(const std::string& type_name) {
+  auto& global_python_types = getPythonTypes();
+  return global_python_types.find(type_name) != global_python_types.end();
 }
 
 TypePtr SchemaTypeParser::parseBaseType() {
@@ -115,7 +117,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
   }
 
   // Check if this type is registered as an opaque type first
-  if (isRegisteredOpaqueType(text)) {
+  if (isRegisteredPythonType(text)) {
     return c10::PyObjectType::create(text);
   }
 

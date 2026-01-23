@@ -206,7 +206,7 @@ def register_opaque_type(
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
-    torch._C._register_opaque_type(name)
+    torch._C._register_python_type(name)
 
 
 def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
@@ -218,12 +218,9 @@ def is_opaque_type(cls: Any) -> bool:
     Checks if the given type is an opaque type.
     """
     if isinstance(cls, str):
-        return torch._C._is_opaque_type_registered(cls)
+        return cls in _OPAQUE_TYPES_BY_NAME
 
-    if cls not in _OPAQUE_TYPES:
-        return False
-
-    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls].class_name)
+    return cls in _OPAQUE_TYPES
 
 
 def is_opaque_value_type(cls: Any) -> bool:
