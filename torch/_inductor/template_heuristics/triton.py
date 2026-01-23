@@ -741,9 +741,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         for hint_override in [None] + config.multi_kernel_hints:
             m_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         m,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -751,9 +750,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             n_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         n,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -761,9 +759,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             k_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         k,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
