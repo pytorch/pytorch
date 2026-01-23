@@ -504,7 +504,6 @@ if torch.backends.mps.is_available():
                 torch.int8,
                 torch.int16,
             ],
-            "nn.functional.multi_margin_loss": None,
             "nn.functional.multilabel_margin_loss": [
                 torch.int8,
                 torch.uint8,

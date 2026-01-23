@@ -3994,8 +3994,6 @@ module_db: list[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # 'aten::multi_margin_loss' is not currently implemented for the MPS device.
-                   DecorateInfo(skipIfMPS, 'TestModule', device_type='mps'),
                    # RuntimeError: derivative for aten::multi_margin_loss_backward is not implemented
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),)
                ),

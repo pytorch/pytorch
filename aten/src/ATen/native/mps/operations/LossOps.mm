@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/LossMulti.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -12,6 +13,8 @@
 #include <ATen/ops/huber_loss_native.h>
 #include <ATen/ops/mse_loss_backward_native.h>
 #include <ATen/ops/mse_loss_native.h>
+#include <ATen/ops/multi_margin_loss_backward_native.h>
+#include <ATen/ops/multi_margin_loss_native.h>
 #include <ATen/ops/nll_loss2d_backward_native.h>
 #include <ATen/ops/nll_loss2d_forward_native.h>
 #include <ATen/ops/nll_loss_backward_native.h>
@@ -1286,6 +1289,414 @@ Tensor nll_loss2d_backward_mps(const Tensor& grad_output,
 
   auto grad_input = at::zeros_like(self);
   nll_loss2d_backward_out_mps(grad_output, self, target, weight, reduction, ignore_index, total_weight, grad_input);
+  return grad_input;
+}
+
+// Multi Margin Loss implementation for MPS
+// Loss formula: L = (1/dim) * sum_{i != y}(max(0, margin - x[y] + x[i])^p)
+// where y is the target class index
+
+Tensor& multi_margin_loss_mps_out(
+    const Tensor& self,
+    const Tensor& target,
+    const Scalar& p,
+    const Scalar& margin,
+    const std::optional<Tensor>& weight_opt,
+    int64_t reduction,
+    Tensor& output) {
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  int64_t nframe = 0, dim = 0;
+  const auto ndims = self.dim();
+  const int p_val = p.toInt();
+
+  TORCH_CHECK(p_val == 1 || p_val == 2, "multi_margin_loss: only p == 1 and p == 2 supported");
+  multi_margin_loss_shape_check(nframe, dim, ndims, self, target, weight);
+
+  // Produce a scalar output for 1d input
+  if (reduction == Reduction::None && target.dim() > 0) {
+    output.resize_({nframe});
+  } else {
+    output.resize_({});
+  }
+
+  if (self.numel() == 0) {
+    return output;
+  }
+
+  // Ensure contiguous tensors
+  auto self_contiguous = self.contiguous();
+  auto target_contiguous = target.contiguous();
+  Tensor weight_contiguous;
+  if (weight.defined()) {
+    weight_contiguous = weight.contiguous();
+  }
+
+  // Reshape input to 2D [nframe, dim]
+  auto input_2d = self_contiguous.dim() <= 1 ? self_contiguous.view({1, dim}) : self_contiguous;
+  auto target_1d = target_contiguous.view({nframe});
+
+  struct CachedGraph : public mps::MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor = nil;
+    MPSGraphTensor* targetTensor = nil;
+    MPSGraphTensor* weightTensor = nil;
+    MPSGraphTensor* outputTensor = nil;
+  };
+
+  @autoreleasepool {
+    bool has_weight = weight.defined();
+    std::string key = "multi_margin_loss_mps:" + std::to_string(p_val) + ":" +
+                      std::to_string(reduction) + ":" + std::to_string(has_weight) + ":" +
+                      mps::getTensorsStringKey({input_2d, target_1d});
+
+    auto cachedGraph = mps::LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSDataType inputType = mps::getMPSDataType(input_2d);
+      newCachedGraph->inputTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, input_2d);
+      newCachedGraph->targetTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, target_1d);
+      if (has_weight) {
+        newCachedGraph->weightTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, weight_contiguous);
+      }
+
+      // Get x[y] for each sample using gather
+      // target shape: [nframe], input shape: [nframe, dim]
+      // Expand target to [nframe, 1] for gather
+      MPSGraphTensor* targetExpanded = [mpsGraph expandDimsOfTensor:newCachedGraph->targetTensor
+                                                               axis:-1
+                                                               name:@"targetExpanded"];
+      // Gather x[y]: shape [nframe, 1]
+      MPSGraphTensor* inputTarget = [mpsGraph gatherWithUpdatesTensor:newCachedGraph->inputTensor
+                                                        indicesTensor:targetExpanded
+                                                                 axis:1
+                                                      batchDimensions:1
+                                                                 name:@"inputTarget"];
+
+      // Compute margin - x[y] + x[i] for all i
+      // margin - x[y]: shape [nframe, 1]
+      MPSGraphTensor* marginTensor = [mpsGraph constantWithScalar:margin.toDouble()
+                                                         dataType:inputType];
+      MPSGraphTensor* marginMinusTarget = [mpsGraph subtractionWithPrimaryTensor:marginTensor
+                                                                 secondaryTensor:inputTarget
+                                                                            name:@"marginMinusTarget"];
+      // margin - x[y] + x[i]: shape [nframe, dim]
+      MPSGraphTensor* marginDiff = [mpsGraph additionWithPrimaryTensor:marginMinusTarget
+                                                       secondaryTensor:newCachedGraph->inputTensor
+                                                                  name:@"marginDiff"];
+
+      // Apply max(0, ...)
+      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputType];
+      MPSGraphTensor* clampedDiff = [mpsGraph maximumWithPrimaryTensor:marginDiff
+                                                       secondaryTensor:zeroTensor
+                                                                  name:@"clampedDiff"];
+
+      // Apply power p
+      MPSGraphTensor* lossTensor;
+      if (p_val == 2) {
+        lossTensor = [mpsGraph multiplicationWithPrimaryTensor:clampedDiff
+                                               secondaryTensor:clampedDiff
+                                                          name:@"squaredLoss"];
+      } else {
+        lossTensor = clampedDiff;
+      }
+
+      // Zero out the contribution from the target class i == y
+      // Create a mask: 1 where i != y, 0 where i == y
+      // indices: [dim] -> broadcast to [nframe, dim]
+      MPSGraphTensor* indices = [mpsGraph coordinateAlongAxis:1
+                                        withShapeTensor:[mpsGraph shapeOfTensor:newCachedGraph->inputTensor name:nil]
+                                                   name:@"indices"];
+      // Broadcast target to [nframe, dim] for comparison
+      // targetExpanded is [nframe, 1], use it directly
+      MPSGraphTensor* mask = [mpsGraph notEqualWithPrimaryTensor:indices
+                                                 secondaryTensor:targetExpanded
+                                                            name:@"mask"];
+      MPSGraphTensor* maskFloat = [mpsGraph castTensor:mask toType:inputType name:@"maskFloat"];
+      lossTensor = [mpsGraph multiplicationWithPrimaryTensor:lossTensor
+                                             secondaryTensor:maskFloat
+                                                        name:@"maskedLoss"];
+
+      // Apply weight if provided
+      if (has_weight) {
+        // weight[y] for each sample
+        MPSGraphTensor* sampleWeight = [mpsGraph gatherWithUpdatesTensor:newCachedGraph->weightTensor
+                                                           indicesTensor:newCachedGraph->targetTensor
+                                                                    axis:0
+                                                         batchDimensions:0
+                                                                    name:@"sampleWeight"];
+        // Expand to [nframe, 1] for broadcast
+        sampleWeight = [mpsGraph expandDimsOfTensor:sampleWeight axis:-1 name:@"weightExpanded"];
+        lossTensor = [mpsGraph multiplicationWithPrimaryTensor:lossTensor
+                                               secondaryTensor:sampleWeight
+                                                          name:@"weightedLoss"];
+      }
+
+      // Sum over classes and divide by dim
+      MPSGraphTensor* dimTensor = [mpsGraph constantWithScalar:(double)dim dataType:inputType];
+      MPSGraphTensor* lossPerSample = [mpsGraph reductionSumWithTensor:lossTensor axis:1 name:@"lossPerSample"];
+      lossPerSample = [mpsGraph divisionWithPrimaryTensor:lossPerSample
+                                          secondaryTensor:dimTensor
+                                                     name:@"normalizedLoss"];
+      lossPerSample = [mpsGraph squeezeTensor:lossPerSample axis:-1 name:@"squeezedLoss"];
+
+      // Apply reduction
+      if (reduction == Reduction::None) {
+        newCachedGraph->outputTensor = lossPerSample;
+      } else if (reduction == Reduction::Sum) {
+        newCachedGraph->outputTensor = [mpsGraph reductionSumWithTensor:lossPerSample
+                                                                   axis:0
+                                                                   name:@"sumReduction"];
+      } else { // Mean
+        newCachedGraph->outputTensor = [mpsGraph meanOfTensor:lossPerSample
+                                                         axes:@[@0]
+                                                         name:@"meanReduction"];
+      }
+    });
+
+    mps::Placeholder inputPlaceholder = mps::Placeholder(cachedGraph->inputTensor, input_2d);
+    mps::Placeholder targetPlaceholder = mps::Placeholder(cachedGraph->targetTensor, target_1d);
+    mps::Placeholder outputPlaceholder = mps::Placeholder(cachedGraph->outputTensor, output);
+
+    NSMutableDictionary* feeds = [[NSMutableDictionary alloc] init];
+    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
+    feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
+    if (weight.defined()) {
+      mps::Placeholder weightPlaceholder = mps::Placeholder(cachedGraph->weightTensor, weight_contiguous);
+      feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
+    }
+
+    mps::runMPSGraph(mps::getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  return output;
+}
+
+Tensor multi_margin_loss_mps(
+    const Tensor& self,
+    const Tensor& target,
+    const Scalar& p,
+    const Scalar& margin,
+    const std::optional<Tensor>& weight,
+    int64_t reduction) {
+  auto output = at::empty({0}, self.options());
+  multi_margin_loss_mps_out(self, target, p, margin, weight, reduction, output);
+  return output;
+}
+
+Tensor& multi_margin_loss_backward_mps_out(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& target,
+    const Scalar& p,
+    const Scalar& margin,
+    const std::optional<Tensor>& weight_opt,
+    int64_t reduction,
+    Tensor& grad_input) {
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  int64_t nframe = 0, dim = 0;
+  const auto ndims = self.dim();
+  const int p_val = p.toInt();
+
+  TORCH_CHECK(p_val == 1 || p_val == 2, "multi_margin_loss_backward: only p == 1 and p == 2 supported");
+  multi_margin_loss_shape_check(nframe, dim, ndims, self, target, weight);
+
+  grad_input.resize_as_(self);
+  grad_input.zero_();
+
+  if (self.numel() == 0) {
+    return grad_input;
+  }
+
+  auto self_contiguous = self.contiguous();
+  auto target_contiguous = target.contiguous();
+  auto grad_output_contiguous = grad_output.contiguous();
+  Tensor weight_contiguous;
+  if (weight.defined()) {
+    weight_contiguous = weight.contiguous();
+  }
+
+  auto input_2d = self_contiguous.dim() <= 1 ? self_contiguous.view({1, dim}) : self_contiguous;
+  auto target_1d = target_contiguous.view({nframe});
+  auto grad_input_2d = grad_input.dim() <= 1 ? grad_input.view({1, dim}) : grad_input;
+
+  struct CachedGraph : public mps::MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor = nil;
+    MPSGraphTensor* targetTensor = nil;
+    MPSGraphTensor* weightTensor = nil;
+    MPSGraphTensor* gradOutputTensor = nil;
+    MPSGraphTensor* gradInputTensor = nil;
+  };
+
+  @autoreleasepool {
+    bool has_weight = weight.defined();
+    std::string key = "multi_margin_loss_backward_mps:" + std::to_string(p_val) + ":" +
+                      std::to_string(reduction) + ":" + std::to_string(has_weight) + ":" +
+                      mps::getTensorsStringKey({input_2d, target_1d, grad_output_contiguous});
+
+    auto cachedGraph = mps::LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSDataType inputType = mps::getMPSDataType(input_2d);
+      newCachedGraph->inputTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, input_2d);
+      newCachedGraph->targetTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, target_1d);
+      newCachedGraph->gradOutputTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, grad_output_contiguous);
+      if (has_weight) {
+        newCachedGraph->weightTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, weight_contiguous);
+      }
+
+      // Compute gradient scaling factor based on reduction type
+      MPSGraphTensor* gradScalar;
+      if (reduction == Reduction::Mean) {
+        gradScalar = [mpsGraph constantWithScalar:1.0 / (dim * nframe) dataType:inputType];
+      } else {
+        gradScalar = [mpsGraph constantWithScalar:1.0 / dim dataType:inputType];
+      }
+
+      // Get x[y] using gather
+      MPSGraphTensor* targetExpanded = [mpsGraph expandDimsOfTensor:newCachedGraph->targetTensor
+                                                               axis:-1
+                                                               name:@"targetExpanded"];
+      MPSGraphTensor* inputTarget = [mpsGraph gatherWithUpdatesTensor:newCachedGraph->inputTensor
+                                                        indicesTensor:targetExpanded
+                                                                 axis:1
+                                                      batchDimensions:1
+                                                                 name:@"inputTarget"];
+
+      // Compute z = margin - x[y] + x[i]
+      MPSGraphTensor* marginTensor = [mpsGraph constantWithScalar:margin.toDouble() dataType:inputType];
+      MPSGraphTensor* marginMinusTarget = [mpsGraph subtractionWithPrimaryTensor:marginTensor
+                                                                 secondaryTensor:inputTarget
+                                                                            name:nil];
+      MPSGraphTensor* z = [mpsGraph additionWithPrimaryTensor:marginMinusTarget
+                                              secondaryTensor:newCachedGraph->inputTensor
+                                                         name:@"z"];
+
+      // Indicator: 1 where z > 0, 0 otherwise (and i != y)
+      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputType];
+      MPSGraphTensor* indicator = [mpsGraph greaterThanWithPrimaryTensor:z
+                                                         secondaryTensor:zeroTensor
+                                                                    name:@"indicator"];
+      indicator = [mpsGraph castTensor:indicator toType:inputType name:@"indicatorFloat"];
+
+      // Create mask for i != y
+      MPSGraphTensor* indices = [mpsGraph coordinateAlongAxis:1
+                                        withShapeTensor:[mpsGraph shapeOfTensor:newCachedGraph->inputTensor name:nil]
+                                                   name:@"indices"];
+      MPSGraphTensor* notTargetMask = [mpsGraph notEqualWithPrimaryTensor:indices
+                                                          secondaryTensor:targetExpanded
+                                                                     name:@"notTargetMask"];
+      MPSGraphTensor* notTargetMaskFloat = [mpsGraph castTensor:notTargetMask toType:inputType name:@"notTargetMaskFloat"];
+
+      // Combined mask: z > 0 and i != y
+      indicator = [mpsGraph multiplicationWithPrimaryTensor:indicator
+                                            secondaryTensor:notTargetMaskFloat
+                                                       name:@"combinedIndicator"];
+
+      // Compute gradient for non-target classes: g * p * z^(p-1) * indicator
+      MPSGraphTensor* gradNonTarget;
+      if (p_val == 2) {
+        // 2 * z * indicator
+        MPSGraphTensor* twoTensor = [mpsGraph constantWithScalar:2.0 dataType:inputType];
+        gradNonTarget = [mpsGraph multiplicationWithPrimaryTensor:twoTensor secondaryTensor:z name:nil];
+        gradNonTarget = [mpsGraph multiplicationWithPrimaryTensor:gradNonTarget secondaryTensor:indicator name:@"gradNonTarget"];
+      } else {
+        // p == 1: indicator
+        gradNonTarget = indicator;
+      }
+
+      // Apply weight if provided
+      if (has_weight) {
+        MPSGraphTensor* sampleWeight = [mpsGraph gatherWithUpdatesTensor:newCachedGraph->weightTensor
+                                                           indicesTensor:newCachedGraph->targetTensor
+                                                                    axis:0
+                                                         batchDimensions:0
+                                                                    name:@"sampleWeight"];
+        sampleWeight = [mpsGraph expandDimsOfTensor:sampleWeight axis:-1 name:@"weightExpanded"];
+        gradNonTarget = [mpsGraph multiplicationWithPrimaryTensor:gradNonTarget
+                                                  secondaryTensor:sampleWeight
+                                                             name:@"weightedGradNonTarget"];
+      }
+
+      // Compute gradient for target class: -sum of gradients for non-target classes
+      MPSGraphTensor* gradTargetSum = [mpsGraph reductionSumWithTensor:gradNonTarget axis:1 name:@"gradTargetSum"];
+      MPSGraphTensor* gradTarget = [mpsGraph negativeWithTensor:gradTargetSum name:@"gradTarget"];
+
+      // Scatter gradTarget back to target positions
+      // Create one-hot encoding for target
+      MPSGraphTensor* dimTensor = [mpsGraph constantWithScalar:(double)dim dataType:MPSDataTypeInt64];
+      MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:inputType];
+      
+      // Create range tensor [0, 1, ..., dim-1]
+      MPSGraphTensor* rangeIndices = [mpsGraph coordinateAlongAxis:1
+                                             withShapeTensor:[mpsGraph shapeOfTensor:newCachedGraph->inputTensor name:nil]
+                                                        name:@"rangeIndices"];
+      // One-hot: 1 where index == target, 0 otherwise
+      MPSGraphTensor* isTarget = [mpsGraph equalWithPrimaryTensor:rangeIndices
+                                                  secondaryTensor:targetExpanded
+                                                             name:@"isTarget"];
+      MPSGraphTensor* isTargetFloat = [mpsGraph castTensor:isTarget toType:inputType name:@"isTargetFloat"];
+
+      // Expand gradTarget from [nframe, 1] to [nframe, dim] via broadcast multiply
+      MPSGraphTensor* gradTargetExpanded = [mpsGraph multiplicationWithPrimaryTensor:gradTarget
+                                                                     secondaryTensor:isTargetFloat
+                                                                                name:@"gradTargetExpanded"];
+
+      // Combine gradients
+      MPSGraphTensor* totalGrad = [mpsGraph additionWithPrimaryTensor:gradNonTarget
+                                                      secondaryTensor:gradTargetExpanded
+                                                                 name:@"totalGrad"];
+
+      // Apply scaling and grad_output
+      totalGrad = [mpsGraph multiplicationWithPrimaryTensor:totalGrad secondaryTensor:gradScalar name:nil];
+
+      // Apply grad_output
+      if (reduction == Reduction::None) {
+        // grad_output has shape [nframe], expand to [nframe, 1]
+        MPSGraphTensor* gradOutExpanded = [mpsGraph expandDimsOfTensor:newCachedGraph->gradOutputTensor
+                                                                  axis:-1
+                                                                  name:@"gradOutExpanded"];
+        totalGrad = [mpsGraph multiplicationWithPrimaryTensor:totalGrad secondaryTensor:gradOutExpanded name:nil];
+      } else {
+        // grad_output is scalar, just multiply
+        totalGrad = [mpsGraph multiplicationWithPrimaryTensor:totalGrad
+                                              secondaryTensor:newCachedGraph->gradOutputTensor
+                                                         name:nil];
+      }
+
+      newCachedGraph->gradInputTensor = totalGrad;
+    });
+
+    mps::Placeholder inputPlaceholder = mps::Placeholder(cachedGraph->inputTensor, input_2d);
+    mps::Placeholder targetPlaceholder = mps::Placeholder(cachedGraph->targetTensor, target_1d);
+    mps::Placeholder gradOutputPlaceholder = mps::Placeholder(cachedGraph->gradOutputTensor, grad_output_contiguous);
+    mps::Placeholder gradInputPlaceholder = mps::Placeholder(cachedGraph->gradInputTensor, grad_input_2d);
+
+    NSMutableDictionary* feeds = [[NSMutableDictionary alloc] init];
+    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
+    feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
+    feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
+    if (weight.defined()) {
+      mps::Placeholder weightPlaceholder = mps::Placeholder(cachedGraph->weightTensor, weight_contiguous);
+      feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
+    }
+
+    mps::runMPSGraph(mps::getCurrentMPSStream(), cachedGraph->graph(), feeds, gradInputPlaceholder);
+  }
+
+  return grad_input;
+}
+
+Tensor multi_margin_loss_backward_mps(
+    const Tensor& grad_output,
+    const Tensor& self,
+    const Tensor& target,
+    const Scalar& p,
+    const Scalar& margin,
+    const std::optional<Tensor>& weight,
+    int64_t reduction) {
+  auto grad_input = at::empty_like(self);
+  multi_margin_loss_backward_mps_out(grad_output, self, target, p, margin, weight, reduction, grad_input);
   return grad_input;
 }
 

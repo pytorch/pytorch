@@ -11903,24 +11903,28 @@
   dispatch:
     CPU: multi_margin_loss_cpu_out
     CUDA: multi_margin_loss_cuda_out
+    MPS: multi_margin_loss_mps_out
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu
     CUDA: multi_margin_loss_cuda
+    MPS: multi_margin_loss_mps
 
 - func: multi_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu_backward_out
     CUDA: multi_margin_loss_cuda_backward_out
+    MPS: multi_margin_loss_backward_mps_out
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
     CPU: multi_margin_loss_cpu_backward
     CUDA: multi_margin_loss_cuda_backward
+    MPS: multi_margin_loss_backward_mps
 
 - func: multilabel_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
