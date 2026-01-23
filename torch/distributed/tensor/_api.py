@@ -420,7 +420,7 @@ class DTensor(torch.Tensor):
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
 
         .. note:: During backward, if the target placement is :class:`Partial`, we always
-            redistribute to :class:`Replicate` instead. This means:
+            redistribute the gradient to :class:`Replicate` instead. This means:
 
             - For backward ``Replicate`` -> ``Partial``, we do ``Replicate`` -> ``Replicate``
             - For backward ``Partial`` -> ``Partial``, we do ``Partial`` -> ``Replicate``
