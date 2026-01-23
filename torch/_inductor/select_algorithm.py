@@ -4341,12 +4341,7 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device().type,
             str(node.get_dtype()),
             *sizevars.optimization_hints(node.get_size()),
-            *tuple(
-                V.graph.sizevars.optimization_hint(
-                    stride,
-                )
-                for stride in node.get_stride()
-            ),
+            *V.graph.sizevars.optimization_hints(node.get_stride()),
             sizevars.optimization_hint(node.get_layout().offset),
         )
 

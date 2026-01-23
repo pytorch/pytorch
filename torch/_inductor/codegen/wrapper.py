@@ -1683,10 +1683,8 @@ class PythonWrapperCodegen(CodeGen):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = tuple(V.graph.sizevars.optimization_hint(d) for d in dims)
-            block_dims = tuple(
-                V.graph.sizevars.optimization_hint(d) for d in block_dims
-            )
+            dims = V.graph.sizevars.optimization_hint(dims)
+            block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
@@ -1704,9 +1702,7 @@ class PythonWrapperCodegen(CodeGen):
     def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
         block_shape = desc.block_shape
         if apply_size_hints:
-            block_shape = tuple(
-                V.graph.sizevars.optimization_hint(d) for d in block_shape
-            )
+            block_shape = V.graph.sizevars.optimization_hints(block_shape)
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
         fn = f"{prefix}.from_tensor"
