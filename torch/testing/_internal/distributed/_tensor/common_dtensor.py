@@ -1024,8 +1024,6 @@ def generate_shard_orders(mesh, tensor_rank):
 
 def enumerate_placements(
     ndim: int,
-    include_partial: bool = True,
-    include_strided_shard: bool = False,
     strided_shard_split_factor: int = 2,
 ) -> list[Placement]:
     """
@@ -1033,32 +1031,25 @@ def enumerate_placements(
 
     Args:
         ndim: Number of tensor dimensions
-        include_partial: Whether to include Partial placement
-        include_strided_shard: Whether to include _StridedShard placements
         strided_shard_split_factor: The split_factor for _StridedShard (typically mesh_size)
 
-    Returns list of: Replicate, Shard(0), ..., Shard(ndim-1), [_StridedShard(0, sf), ...], [Partial]
+    Returns list of: Replicate, Shard(0..ndim-1), _StridedShard(0..ndim-1), Partial
     """
     from torch.distributed.tensor import Partial, Replicate, Shard
     from torch.distributed.tensor.placement_types import _StridedShard
 
     placements: list[Placement] = [Replicate()]
     placements.extend(Shard(d) for d in range(ndim))
-    if include_strided_shard:
-        placements.extend(
-            _StridedShard(d, strided_shard_split_factor) for d in range(ndim)
-        )
-    if include_partial:
-        placements.append(Partial())
+    placements.extend(
+        _StridedShard(d, split_factor=strided_shard_split_factor) for d in range(ndim)
+    )
+    placements.append(Partial())
     return placements
 
 
 def enumerate_all_placement_combos(
     input_ndims: list[int],
     output_ndims: list[int],
-    include_partial_inputs: bool = True,
-    include_partial_outputs: bool = True,
-    include_strided_shard: bool = False,
     strided_shard_split_factor: int = 2,
 ) -> Iterator[tuple[list[Placement], list[Placement]]]:
     """
@@ -1067,30 +1058,17 @@ def enumerate_all_placement_combos(
     Args:
         input_ndims: List of ndim for each input tensor
         output_ndims: List of ndim for each output tensor
-        include_partial_inputs: Whether to include Partial for inputs
-        include_partial_outputs: Whether to include Partial for outputs
-        include_strided_shard: Whether to include _StridedShard placements
         strided_shard_split_factor: The split_factor for _StridedShard
 
     Yields:
         (input_placements, output_placements) tuples
     """
     input_options = [
-        enumerate_placements(
-            ndim,
-            include_partial_inputs,
-            include_strided_shard,
-            strided_shard_split_factor,
-        )
+        enumerate_placements(ndim, strided_shard_split_factor)
         for ndim in input_ndims
     ]
     output_options = [
-        enumerate_placements(
-            ndim,
-            include_partial_outputs,
-            include_strided_shard,
-            strided_shard_split_factor,
-        )
+        enumerate_placements(ndim, strided_shard_split_factor)
         for ndim in output_ndims
     ]
 
