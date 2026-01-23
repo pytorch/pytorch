@@ -161,6 +161,11 @@ register_artifact(
     visible=True,
 )
 register_artifact(
+    "side_effects",
+    "Prints all side effects that Dynamo codegenerates, including mutations to variables, attributes, cells, and globals. Useful for debugging side effect handling",
+    visible=True,
+)
+register_artifact(
     "not_implemented",
     "Prints log messages whenever we return NotImplemented in a multi-dispatch, letting you trace through each object we attempted to dispatch to",
 )

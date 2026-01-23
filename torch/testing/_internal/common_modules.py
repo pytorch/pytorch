@@ -3237,6 +3237,28 @@ rnn_gru_lstm_module_info_decorators = (
 
 # Start of module error inputs functions.
 
+def module_error_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    """
+    Error inputs for NLLLoss that test weight dtype must match input dtype.
+    Regression test for device parity between CPU and CUDA with empty tensors.
+    """
+    input_t = torch.tensor([], device=device, dtype=dtype).reshape((0, 0))
+    weight_dtype = torch.float32 if dtype == torch.float16 else torch.float16
+    weight_t = torch.tensor([], device=device, dtype=weight_dtype)
+    target_t = torch.tensor([], device=device, dtype=torch.long)
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(weight=weight_t),
+                forward_input=FunctionInput(input_t, target_t),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=RuntimeError,
+            error_regex=r"expected scalar type \w+ but found \w+"
+        ),
+    ]
+
 def module_error_inputs_torch_nn_RNN_GRU_Cell(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     samples = [
@@ -3341,6 +3363,16 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
 
 
 def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
+    # use float64 for dtype mismatch test if current dtype is float32, otherwise use float32
+    # MPS doesn't support float64, so use float16 instead
+    # Extract device type from device string (e.g., 'mps:0' -> 'mps')
+    device_type = device.split(':')[0] if isinstance(device, str) else device.type
+    if dtype == torch.float32:
+        mismatched_dtype = torch.float16 if device_type == 'mps' else torch.float64
+    else:
+        mismatched_dtype = torch.float32
+    make_input = partial(make_tensor, device=device, dtype=mismatched_dtype, requires_grad=requires_grad)
+
     samples = [
         ErrorModuleInput(
             ModuleInput(constructor_input=FunctionInput(10, 0, 1)),
@@ -3353,6 +3385,17 @@ def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_gr
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=ValueError,
             error_regex="num_layers must be greater than zero"
+        ),
+        # Test dtype mismatch error message
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(3, 5, dtype=dtype, device=device),
+                forward_input=FunctionInput(make_input((2, 4, 3))),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex=(r"RNN input dtype .* does not match weight dtype .* "
+                         r"Convert input: input\.to\(.*\), or convert model: model\.to\(.*\)")
         ),
         # Test bias parameter type validation
         ErrorModuleInput(
@@ -3973,6 +4016,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_NLLLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -4189,6 +4233,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                decorators=[
                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
                                 'TestModule', 'test_non_contiguous_tensors',
