@@ -1745,4 +1745,18 @@ std::tuple<Tensor, Tensor> mode_mps(const Tensor& self, int64_t dim, bool keepdi
   return std::make_tuple(values, indices);
 }
 
+std::tuple<Tensor&, Tensor&> mode_out_mps(
+    const Tensor& self,
+    int64_t dim,
+    bool keepdim,
+    Tensor& values,
+    Tensor& indices) {
+  auto [values_tmp, indices_tmp] = mode_mps(self, dim, keepdim);
+  values.resize_(values_tmp.sizes());
+  indices.resize_(indices_tmp.sizes());
+  values.copy_(values_tmp);
+  indices.copy_(indices_tmp);
+  return std::forward_as_tuple(values, indices);
+}
+
 } // namespace at::native
