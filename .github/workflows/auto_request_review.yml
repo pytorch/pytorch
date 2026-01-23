@@ -14,39 +14,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Request review based on files changes and/or groups the author belongs to
+        id: auto-request-review
         # v0.7.0
         uses: necojackarc/auto-request-review@e08cdffa277d50854744de3f76230260e61c67f4 # v0.7.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Add triaged label if reviewers are present
+        if: ${{ steps.auto-request-review.outputs.reviewers != '' || steps.auto-request-review.outputs.team_reviewers != '' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
             try {
               const { owner, repo, number } = context.issue;
-              // Get PR details
-              const { data: pr } = await github.rest.pulls.get({
+              await github.rest.issues.addLabels({
                 owner,
                 repo,
-                pull_number: number,
+                issue_number: number,
+                labels: ['triaged'],
               });
-              // Check for requested reviewers (users) or teams
-              const hasUserReviewers = pr.requested_reviewers && pr.requested_reviewers.length > 0;
-              const hasTeamReviewers = pr.requested_teams && pr.requested_teams.length > 0;
-              if (hasUserReviewers || hasTeamReviewers) {
-                // Add label if either is non-empty
-                await github.rest.issues.addLabels({
-                  owner,
-                  repo,
-                  issue_number: number,
-                  labels: ['triaged'],
-                });
-                console.log('Label added: triaged');
-              } else {
-                console.log('No reviewers or team reviewers requested.');
-              }
+              console.log('Label added: triaged');
             } catch (error) {
-              console.error('Failed to add triage label:', error.message);
+              console.error('Failed to add triaged label:', error.message);
               core.setFailed(error.message);
             }
 
