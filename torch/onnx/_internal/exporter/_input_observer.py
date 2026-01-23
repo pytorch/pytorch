@@ -332,6 +332,8 @@ class InputObserver:
     >>>     kwargs=input_observer.infer_arguments(),
     >>>     dynamic_shapes.input_observer.infer_dynamic_shapes(),
     >>> )
+
+    .. versionadded:: 2.11.0
     """
 
     def __init__(self):
