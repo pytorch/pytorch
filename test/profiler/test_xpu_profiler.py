@@ -1,21 +1,20 @@
 # Owner(s): ["oncall: profiler"]
 
 
+import unittest
 from collections import defaultdict
 
 import torch
 from torch.profiler import DeviceType
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 
 
 Verbose = False
 
 
 class XpuProfilerTest(TestCase):
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_profiler(self):
-        if not torch.xpu.is_available():
-            self.skipTest("XPU not available")
-
         t = torch.empty(1000, dtype=torch.int, device="xpu")
         with torch.profiler.profile(
             activities=[
