@@ -2469,14 +2469,29 @@ def calc_conv_nd_return_shape(
                 # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+    # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
+    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
+    # but other backends fail: CPU rejects it, ROCm/miopen returns
+    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
+    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
+    from torch._subclasses.fake_tensor import FakeTensor
     from torch.fx.experimental.symbolic_shapes import sym_or
 
-    torch._check(
-        sym_or(*[x > 0 for x in ret_shape[2:]]),
-        lambda: f"Given input size per channel: {list(dims)}. "
-        f"Calculated output size per channel: {ret_shape[2:]}. "
-        f"Output size is too small",
+    device = (
+        input_tensor.fake_device
+        if isinstance(input_tensor, FakeTensor)
+        else input_tensor.device
     )
+
+    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    is_cudnn = device.type == "cuda" and torch.version.hip is None
+    if not is_cudnn:
+        torch._check(
+            sym_or(*[x > 0 for x in ret_shape[2:]]),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape[2:]}. "
+            f"Output size is too small",
+        )
 
     return ret_shape
 
@@ -3608,10 +3623,36 @@ def meta_convolution_backward(
     backend_grad_weight = None
     backend_grad_bias = None
 
+    # Backend layout expectation: GPU backends (CUDA via cudnn_conv_suggest_memory_format,
+    # MPS via mps_conv_use_channels_last) return channels_last outputs when either input
+    # tensor is channels_last. This must be matched here to avoid stride assertion failures
+    # in inductor when the predicted strides don't match actual backend output strides.
+    # See: https://github.com/pytorch/pytorch/issues/171622
+    #
+    # Memory format inference rules (matching backend behavior):
+    #   - grad_input format: derived from grad_output and weight
+    #   - grad_weight format: derived from input and grad_output
+    def _conv_memory_format(t1, t2):
+        # Match the logic in cudnn_conv_suggest_memory_format and mps_conv_use_channels_last:
+        # Use channels_last if either tensor suggests it
+        fmt1 = suggest_memory_format(t1)
+        fmt2 = suggest_memory_format(t2)
+        if fmt1 == torch.channels_last or fmt2 == torch.channels_last:
+            return torch.channels_last
+        if fmt1 == torch.channels_last_3d or fmt2 == torch.channels_last_3d:
+            return torch.channels_last_3d
+        return torch.contiguous_format
+
     if output_mask[0]:
-        backend_grad_input = grad_output_.new_empty(input_.size())
+        memory_format = _conv_memory_format(grad_output_, weight_)
+        backend_grad_input = grad_output_.new_empty(input_.size()).to(
+            memory_format=memory_format
+        )
     if output_mask[1]:
-        backend_grad_weight = grad_output_.new_empty(weight_.size())
+        memory_format = _conv_memory_format(input_, grad_output_)
+        backend_grad_weight = grad_output_.new_empty(weight_.size()).to(
+            memory_format=memory_format
+        )
     if output_mask[2]:
         backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 
@@ -5741,7 +5782,7 @@ def meta_scatter_(self, dim, index, src_or_value, reduce=None):
     return self
 
 
-@register_meta([aten._scaled_dot_product_flash_attention])
+@register_meta([aten._scaled_dot_product_flash_attention.default])
 def meta__scaled_dot_product_flash_attention(
     query: Tensor,
     key: Tensor,
@@ -5802,6 +5843,33 @@ def meta__scaled_dot_product_flash_attention(
         seed,
         offset,
         debug_mask,
+    )
+
+
+@register_meta([aten._scaled_dot_product_flash_attention.quantized])
+def meta__scaled_dot_product_flash_attention_quantized(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    q_descale: Tensor | None,
+    k_descale: Tensor | None,
+    v_descale: Tensor | None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    scale: float | None = None,
+):
+    if query.dtype == torch.float8_e4m3fn:
+        query = query.to(torch.bfloat16)
+
+    return meta__scaled_dot_product_flash_attention(
+        query,
+        key,
+        value,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
     )
 
 
@@ -6205,7 +6273,7 @@ def meta__scaled_dot_product_cudnn_backward(
 
 @register_meta(
     [
-        aten._flash_attention_forward,
+        aten._flash_attention_forward.default,
     ]
 )
 def meta__flash_attention_forward(
@@ -6280,6 +6348,49 @@ def meta__flash_attention_forward(
         seed,
         offset,
         debug_mask,
+    )
+
+
+@register_meta([aten._flash_attention_forward.quantized])
+def meta__flash_attention_forward_quantized(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Tensor | None,
+    cum_seq_k: Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    q_descale: Tensor | None,
+    k_descale: Tensor | None,
+    v_descale: Tensor | None,
+    scale: float | None = None,
+    window_size_left: int | None = None,
+    window_size_right: int | None = None,
+    seqused_k: Tensor | None = None,
+    alibi_slopes: Tensor | None = None,
+):
+    if query.dtype == torch.float8_e4m3fn:
+        query = query.to(torch.bfloat16)
+
+    return meta__flash_attention_forward(
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
+        window_size_left,
+        window_size_right,
+        seqused_k,
+        alibi_slopes,
     )
 
 

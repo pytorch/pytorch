@@ -361,8 +361,15 @@ if torch._C._has_mkldnn:
         )
 
     def _silu_fusion(computation_call):
+        # Match: x / (exp(-x) + 1) pattern used by inductor's silu decomposition
         return CallFunction(
-            aten.mul, computation_call, CallFunction(aten.sigmoid, computation_call)
+            aten.div,
+            computation_call,
+            CallFunction(
+                aten.add,
+                CallFunction(aten.exp, CallFunction(aten.neg, computation_call)),
+                1,
+            ),
         )
 
     def _hardsigmoid_fusion(computation_call):

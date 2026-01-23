@@ -1,7 +1,7 @@
 import os
 import sys
 from collections.abc import Callable
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -91,7 +91,9 @@ worker_log_path = (
 )
 
 # precompilation timeout
-precompilation_timeout_seconds: int = 60 * 60
+precompilation_timeout_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_PRECOMPILATION_TIMEOUT_SECONDS", 60 * 5)
+)
 
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
@@ -903,6 +905,15 @@ optimize_scatter_upon_const_tensor = (
 add_pre_grad_passes: Optional[str] = None
 remove_pre_grad_passes: Optional[str] = None
 
+# Comma-separated list of pass names to disable. Passes disabled via this config
+# will be skipped when they go through GraphTransformObserver.
+# Can be set via TORCHINDUCTOR_DISABLED_PASSES env var.
+# Use uppercase pass names (e.g., "PASS1,PASS2").
+disabled_passes: str = Config(
+    env_name_force="TORCHINDUCTOR_DISABLED_PASSES",
+    default="",
+)
+
 
 # The multiprocessing start method to use for inductor workers in the codecache.
 def decide_worker_start_method() -> str:
@@ -961,6 +972,22 @@ _fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
 ]
 
 _micro_pipeline_tp: bool = False
+
+
+# Enable/disable partitioned scatter optimization for atomic add kernels
+# this will improve kernel performance at cost of memory usage.
+partitioned_scatter_enabled = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+)
+
+# Min partitions for scatter optimization
+partitioned_scatter_min_partitions: int = 2
+
+# Max partitions for scatter optimization
+partitioned_scatter_max_partitions: int = 128
+
+# Memory budget fraction for scatter buffers
+partitioned_scatter_memory_budget: float = 0.10
 
 
 class _collective:
@@ -1205,6 +1232,10 @@ debug_ir_traceback = False
 
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
+
+# Use fp64 for unbacked float scalars (from .item()) in Triton kernel signatures
+# to preserve precision. When False, uses fp32 (legacy behavior with precision loss).
+_use_fp64_for_unbacked_floats: bool = not is_fbcode()
 
 _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
@@ -1595,7 +1626,7 @@ class triton:
     # Note: Native matmul does not currently support block pointers or TMA matmul.
     # If both native_matmul and (use_block_ptr or enable_persistent_tma_matmul) are enabled,
     # an error will be thrown.
-    native_matmul: bool = False
+    native_matmul: bool = os.getenv("TORCHINDUCTOR_NATIVE_MATMUL", "0") == "1"
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -1747,6 +1778,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
     )
+    # If set to true, will skip some non-critical checks in the mix order reduction
+    # this could be helpful to avoid recompilations in some cases
+    mix_order_reduction_non_strict_mode = False
 
     enable_tlx_templates: bool = (
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
@@ -1760,6 +1794,27 @@ class triton:
     # When the maximum is reached the first values get overwritten
     # This ensures the last N runs are saved, where N is this value
     max_kernel_dump_occurrences = 3
+
+    proton_profiling: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PROFILING", "0") == "1"
+    )
+    # If not specified, proton traces will be saved to the debug directory
+    proton_output_dir: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_TRITON_PROTON_OUTPUT_DIR"
+    )
+    # Group CTAs by SM in proton trace files.
+    proton_group_by_sm: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_GROUP_BY_SM", "1") == "1"
+    )
+    # Split proton trace files by kernel invocation.
+    proton_split_invocations: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_SPLIT_INVOCATIONS", "1") == "1"
+    )
+    # Process warp tracks into CTA tracks (min warp start, max warp end) and
+    # assign CTAs to slots per SM such that CTAs do not overlap.
+    proton_per_cta_occupancy: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PER_CTA_OCCUPANCY", "1") == "1"
+    )
 
 
 class aot_inductor:
@@ -1998,6 +2053,26 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
+
+    cutlass_dynamic_cluster_shape: tuple[int, int, int] = cast(
+        tuple[int, int, int],
+        tuple(
+            int(x)
+            for x in os.environ.get(
+                "TORCHINDUCTOR_CUTLASS_DYNAMIC_CLUSTER_SHAPE", "2,1,1"
+            ).split(",")
+        ),
+    )
+    cutlass_dynamic_cluster_fallback: tuple[int, int, int] = cast(
+        tuple[int, int, int],
+        tuple(
+            int(x)
+            for x in os.environ.get(
+                "TORCHINDUCTOR_CUTLASS_DYNAMIC_CLUSTER_FALLBACK",
+                ",".join(str(v) for v in cutlass_dynamic_cluster_shape),
+            ).split(",")
+        ),
+    )
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = (
