@@ -89,6 +89,14 @@
       "Hints": []
     }
   ],
+  "GB0009": [
+    {
+      "Gb_type": "Attempted to inline function marked as skipped (SkipFunctionVariable)",
+      "Context": "Attempted to inline a SkipFunctionVariable {func}",
+      "Explanation": "Attempted to inline a function that was previously determined to be marked as intentionally skipped.",
+      "Hints": []
+    }
+  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
@@ -2268,6 +2276,14 @@
         "Check if the key exists in the dictionary before accessing it.",
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
+    }
+  ],
+  "GB1739": [
+    {
+      "Gb_type": "Unsupported member type on OpaqueObject",
+      "Context": "value={real_obj}, attr={name}, member_type={member_type}",
+      "Explanation": "Member type '{member_type}' is not supported for this operation.",
+      "Hints": []
     }
   ],
   "GB0197": [
