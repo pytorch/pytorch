@@ -610,42 +610,42 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
     T* db) {
   const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (j < N) {
-		if constexpr (!rms_norm) {
-			if (dg != nullptr) {
-				if (db != nullptr) {
-					T_ACC sum1 = 0;
-					T_ACC sum2 = 0;
-					for (int64_t i = 0; i < M; ++i) {
-						const int64_t index = i * N + j;
-						sum1 += static_cast<T_ACC>(dY[index]) * (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) * static_cast<T_ACC>(rstd[i]);
-						sum2 += static_cast<T_ACC>(dY[index]);
-					}
-					dg[j] = sum1;
-					db[j] = sum2;
-				} else {
-					T_ACC sum1 = 0;
-					for (int64_t i = 0; i < M; ++i) {
-						const int64_t index = i * N + j;
-						sum1 += static_cast<T_ACC>(dY[index]) * (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) * static_cast<T_ACC>(rstd[i]);
-					}
-					dg[j] = sum1;
-				}
-			} else if (db != nullptr) {
-				T_ACC sum2 = 0;
-				for (int64_t i = 0; i < M; ++i) {
-					sum2 += static_cast<T_ACC>(dY[i * N + j]);
-				}
-				db[j] = sum2;
-			}
-		} else if (dg != nullptr) {
-			T_ACC sum1 = 0;
-			for (int64_t i = 0; i < M; ++i) {
-				const int64_t index = i * N + j;		
-				sum1 += static_cast<T_ACC>(dY[index]) * (static_cast<T_ACC>(X[index])) * static_cast<T_ACC>(rstd[i]);
-			}
-			dg[j] = sum1;
-		}
-	}
+    if constexpr (!rms_norm) {
+      if (dg != nullptr) {
+        if (db != nullptr) {
+          T_ACC sum1 = 0;
+          T_ACC sum2 = 0;
+          for (int64_t i = 0; i < M; ++i) {
+            const int64_t index = i * N + j;
+            sum1 += static_cast<T_ACC>(dY[index]) * (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) * static_cast<T_ACC>(rstd[i]);
+            sum2 += static_cast<T_ACC>(dY[index]);
+            }
+          dg[j] = sum1;
+          db[j] = sum2;
+        } else {
+          T_ACC sum1 = 0;
+          for (int64_t i = 0; i < M; ++i) {
+            const int64_t index = i * N + j;
+            sum1 += static_cast<T_ACC>(dY[index]) * (static_cast<T_ACC>(X[index]) - static_cast<T_ACC>(mean[i])) * static_cast<T_ACC>(rstd[i]);
+          }
+          dg[j] = sum1;
+        }
+      } else if (db != nullptr) {
+        T_ACC sum2 = 0;
+        for (int64_t i = 0; i < M; ++i) {
+          sum2 += static_cast<T_ACC>(dY[i * N + j]);
+        }
+        db[j] = sum2;
+      }
+    } else if (dg != nullptr) {
+      T_ACC sum1 = 0;
+      for (int64_t i = 0; i < M; ++i) {
+        const int64_t index = i * N + j;
+        sum1 += static_cast<T_ACC>(dY[index]) * (static_cast<T_ACC>(X[index])) * static_cast<T_ACC>(rstd[i]);
+      }
+      dg[j] = sum1;
+    }
+  }
 }
 
 
