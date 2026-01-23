@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import unittest
 from collections import defaultdict
 
 import torch
@@ -43,10 +44,8 @@ class XpuProfilerTest(TestCase):
             self.assertTrue("xpu_driver" in count_cats)
             self.assertTrue("kernel" in count_cats)
 
+    @unittest.skipIf(not TEST_XPU, "test requires XPU")
     def test_profiler_xpu_driver(self):
-        if not TEST_XPU:
-            self.skipTest("XPU not available")
-
         a = torch.rand([100, 200]).to("xpu")
         b = torch.rand([200, 300]).to("xpu")
         with torch.profiler.profile(
