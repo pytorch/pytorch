@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 
 #include <ATen/core/functional.h>
@@ -131,9 +130,9 @@ std::string sanitizeName(const std::string& input_name) {
     } else {
       if (i == 0) {
         // Don't start names with underscore
-        sanitized_name << "v";
+        sanitized_name << 'v';
       }
-      sanitized_name << "_";
+      sanitized_name << '_';
     }
   }
   return sanitized_name.str();
@@ -1843,11 +1842,11 @@ bool LoopNest::hasLoopCarriedDependence(const ForPtr& loop) {
       auto bLoads = NodeFinder<Load>::find(*it2);
       // ReadAfterWrite
       for (auto& aStore : aStores) {
-        for (auto& bLoad : bLoads) { // codespell:ignore
+        for (auto& bLoad : bLoads) {
           if (aStore->buf() == bLoad->buf()) {
             if (!areIndicesLoopIndependent(
                     aStore->indices(), bLoad->indices(), outer_loop_vars)) {
-              if (isOverlapping(analyzer, aStore, bLoad)) { // codespell:ignore
+              if (isOverlapping(analyzer, aStore, bLoad)) {
                 return true;
               }
             }

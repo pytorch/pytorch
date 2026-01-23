@@ -505,6 +505,10 @@ The following set of APIs transform your model into a pipeline representation.
 ```
 
 ```{eval-rst}
+.. autoclass:: ScheduleDualPipeV
+```
+
+```{eval-rst}
 .. autoclass:: PipelineScheduleSingle
   :members:
 ```

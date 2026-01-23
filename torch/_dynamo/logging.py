@@ -11,7 +11,8 @@ logging output for debugging and monitoring.
 
 import itertools
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from torch.hub import _Faketqdm, tqdm
 

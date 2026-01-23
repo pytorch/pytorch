@@ -57,6 +57,8 @@ C10_DECLARE_bool(caffe2_keep_on_shrink);
 // respect caffe2_keep_on_shrink.
 C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
+
 namespace at {
 class Tensor;
 class TensorBase;
@@ -359,7 +361,7 @@ struct C10_API VariableVersion {
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-  VariableVersion(Disabled = DISABLED) {}
+  VariableVersion(Disabled /*unused*/ = DISABLED) {}
 
   bool enabled() const {
     return version_counter_;
@@ -522,21 +524,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type);
 
   // See Note [Enum ImplType]
   TensorImpl(
-      ImplType,
+      ImplType /*unused*/,
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
   TensorImpl(
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type,
       std::optional<c10::Device> device_opt);
 
@@ -563,9 +565,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // from under us.
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type,
-      std::optional<c10::Device>);
+      std::optional<c10::Device> /*device_opt*/);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -643,47 +645,43 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
   }
 
-  // From https://stackoverflow.com/a/3057522/23845
-  // TODO: does C++14 have a stdlib template for this?
-  template <typename T>
-  struct identity {
-    typedef T type;
-  };
-
   template <typename T>
   ArrayRef<T> generic_sizes() {
-    return _generic_sizes(identity<T>());
-  }
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
 
-  ArrayRef<int64_t> _generic_sizes(identity<int64_t>) {
-    return sizes();
-  }
-  ArrayRef<c10::SymInt> _generic_sizes(identity<c10::SymInt>) {
-    return sym_sizes();
+    if constexpr (std::is_same_v<T, int64_t>) {
+      return sizes();
+    } else {
+      return sym_sizes();
+    }
   }
 
   template <typename T>
   ArrayRef<T> generic_strides() {
-    return _generic_strides(identity<T>());
-  }
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
 
-  ArrayRef<int64_t> _generic_strides(identity<int64_t>) {
-    return strides();
-  }
-  ArrayRef<c10::SymInt> _generic_strides(identity<c10::SymInt>) {
-    return sym_strides();
+    if constexpr (std::is_same_v<T, int64_t>) {
+      return strides();
+    } else {
+      return sym_strides();
+    }
   }
 
   template <typename T>
   T generic_storage_offset() {
-    return _generic_storage_offset(identity<T>());
-  }
+    static_assert(
+        std::is_same_v<T, int64_t> || std::is_same_v<T, c10::SymInt>,
+        "Only supports int64_t and c10::SymInt.");
 
-  int64_t _generic_storage_offset(identity<int64_t>) {
-    return storage_offset();
-  }
-  c10::SymInt _generic_storage_offset(identity<c10::SymInt>) {
-    return sym_storage_offset();
+    if constexpr (std::is_same_v<T, int64_t>) {
+      return storage_offset();
+    } else {
+      return sym_storage_offset();
+    }
   }
 
   /**
@@ -2090,6 +2088,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto sparse_backends = DispatchKeySet(
           {BackendComponent::CPUBit,
            BackendComponent::CUDABit,
+           BackendComponent::MPSBit,
            BackendComponent::HIPBit,
            BackendComponent::XPUBit});
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
@@ -2178,6 +2177,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   const impl::PyObjectSlot* pyobj_slot() const {
     return &pyobj_slot_;
   }
+
+  void incref_pyobject() const noexcept final;
+
+  void decref_pyobject() const noexcept final;
+
+  bool try_incref_pyobject() const noexcept final;
 
  private:
   // See NOTE [std::optional operator usage in CUDA]
@@ -3080,6 +3085,19 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   friend class C10_TensorImpl_Size_Check_Dummy_Class;
 };
 
+namespace detail {
+
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<std::is_base_of_v<c10::TensorImpl, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+
+} // namespace detail
+
 // Note [TensorImpl size constraints]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Changed the size of TensorImpl?  If the size went down, good for
@@ -3306,3 +3324,5 @@ static_assert(
 #undef C10_GCC_VERSION_MINOR
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

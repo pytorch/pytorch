@@ -58,6 +58,9 @@
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
+#   USE_MSLK=0
+#     disables the MSLK build
+#
 #   USE_KINETO=0
 #     disables usage of libkineto library for profiling
 #
@@ -153,6 +156,16 @@
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
+#   USE_LAYERNORM_FAST_RECIPROCAL
+#     If set, enables the use of builtin functions for fast reciprocals (1/x) w.r.t.
+#     layer normalization. Default: enabled.
+#
+#   USE_ROCM_CK_GEMM=1
+#     Enable building CK GEMM backend in ROCm platform
+#
+#   USE_ROCM_CK_SDPA=1
+#     Enable building CK SDPA backend in ROCm platform
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -216,16 +229,18 @@
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
-#      By default, It is only enabled on Windows.
-#
-#   USE_PRIORITIZED_TEXT_FOR_LD
-#      Uses prioritized text form cmake/prioritized_text.txt for LD
+#      By default, It is only enabled on Windows and AArch64.
 #
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
 #
 #   BUILD_PYTHON_ONLY
 #      Builds pytorch as a wheel using libtorch.so from a separate wheel
+#
+#   USE_NIGHTLY=VERSION
+#      Skip cmake build and instead download and extract nightly PyTorch wheel
+#      matching the specified version (e.g., USE_NIGHTLY="2.8.0.dev20250608+cpu")
+#      into the local directory for development use
 
 from __future__ import annotations
 
@@ -245,7 +260,7 @@ import platform
 
 
 # Also update `project.requires-python` in pyproject.toml when changing this
-python_min_version = (3, 9, 0)
+python_min_version = (3, 10, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
@@ -263,11 +278,15 @@ import json
 import shutil
 import subprocess
 import sysconfig
+import tempfile
+import textwrap
 import time
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, ClassVar, IO
 
+import setuptools.command.bdist_wheel
 import setuptools.command.build_ext
 import setuptools.command.sdist
 import setuptools.errors
@@ -305,7 +324,6 @@ from tools.setup_helpers.env import (
     IS_LINUX,
     IS_WINDOWS,
 )
-from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 
 def str2bool(value: str | None) -> bool:
@@ -368,12 +386,6 @@ def _get_package_path(package_name: str) -> Path:
 BUILD_LIBTORCH_WHL = str2bool(os.getenv("BUILD_LIBTORCH_WHL"))
 BUILD_PYTHON_ONLY = str2bool(os.getenv("BUILD_PYTHON_ONLY"))
 
-# set up appropriate env variables
-if BUILD_LIBTORCH_WHL:
-    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
-    # functorch is not supported without python
-    os.environ["BUILD_FUNCTORCH"] = "OFF"
-
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
     os.environ["LIBTORCH_LIB_PATH"] = (_get_package_path("torch") / "lib").as_posix()
@@ -402,6 +414,41 @@ for i, arg in enumerate(sys.argv):
     if arg == "rebuild" or arg == "build":
         arg = "build"  # rebuild is gone, make it build
         EMIT_BUILD_WARNING = True
+    if arg == "develop":
+        print(
+            (
+                "WARNING: Redirecting 'python setup.py develop' to 'pip install -e . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                ".",
+                "-v",
+                "--no-build-isolation",
+            ],
+            env={**os.environ},
+        )
+        sys.exit(result.returncode)
+    if arg == "install":
+        print(
+            (
+                "WARNING: Redirecting 'python setup.py install' to 'pip install . -v --no-build-isolation',"
+                " for more info see https://github.com/pytorch/pytorch/issues/152276"
+            ),
+            file=sys.stderr,
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", ".", "-v", "--no-build-isolation"],
+            env={**os.environ},
+        )
+        sys.exit(result.returncode)
     if arg == "--":
         filtered_args += sys.argv[i:]
         break
@@ -583,9 +630,413 @@ def mirror_files_into_torchgen() -> None:
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
 
 
+def mirror_inductor_external_kernels() -> None:
+    """
+    Copy external kernels into Inductor so they are importable.
+    """
+    cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
+    paths = [
+        (
+            CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
+            CWD
+            / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
+            True,
+        ),
+    ]
+    for new_path, orig_path, allow_missing_if_cuda_is_disabled in paths:
+        # Create the dirs involved in new_path if they don't exist
+        if not new_path.exists():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            # Add `__init__.py` for find_packages to see `new_path.parent` as a submodule
+            (new_path.parent / "__init__.py").touch(exist_ok=True)
+
+        # Copy the files from the orig location to the new location
+        if orig_path.is_file():
+            shutil.copyfile(orig_path, new_path)
+            continue
+        if orig_path.is_dir():
+            if new_path.exists():
+                # copytree fails if the tree exists already, so remove it.
+                shutil.rmtree(new_path)
+            shutil.copytree(orig_path, new_path)
+            continue
+        if (
+            not orig_path.exists()
+            and allow_missing_if_cuda_is_disabled
+            and cuda_is_disabled
+        ):
+            continue
+        raise RuntimeError(
+            "Check the file paths in `mirror_inductor_external_kernels()`"
+        )
+
+
+# ATTENTION: THIS IS AI SLOP
+def extract_variant_from_version(version: str) -> str:
+    """Extract variant from version string, defaulting to 'cpu'."""
+    import re
+
+    variant_match = re.search(r"\+([^-\s,)]+)", version)
+    return variant_match.group(1) if variant_match else "cpu"
+
+
+# ATTENTION: THIS IS AI SLOP
+def get_nightly_git_hash(version: str) -> str:
+    """Download a nightly wheel and extract the git hash from its version.py file."""
+    # Extract variant from version to construct correct URL
+    variant = extract_variant_from_version(version)
+    nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
+
+    torch_version_spec = f"torch=={version}"
+
+    # Create a temporary directory for downloading
+    with tempfile.TemporaryDirectory(prefix="pytorch-hash-extract-") as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Download the wheel
+        report(f"-- Downloading {version} wheel to extract git hash...")
+        download_cmd = [
+            "uvx",
+            "pip",
+            "download",
+            "--index-url",
+            nightly_index_url,
+            "--pre",
+            "--no-deps",
+            "--dest",
+            str(temp_path),
+            torch_version_spec,
+        ]
+
+        result = subprocess.run(download_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to download {version} wheel for git hash extraction: {result.stderr}"
+            )
+
+        # Find the downloaded wheel file
+        wheel_files = list(temp_path.glob("torch-*.whl"))
+        if not wheel_files:
+            raise RuntimeError(f"No torch wheel found after downloading {version}")
+
+        wheel_file = wheel_files[0]
+
+        # Extract the wheel and look for version.py
+        with tempfile.TemporaryDirectory(
+            prefix="pytorch-wheel-extract-"
+        ) as extract_dir:
+            extract_path = Path(extract_dir)
+
+            with zipfile.ZipFile(wheel_file, "r") as zip_ref:
+                zip_ref.extractall(extract_path)
+
+            # Find torch directory and version.py
+            torch_dirs = list(extract_path.glob("torch"))
+            if not torch_dirs:
+                torch_dirs = list(extract_path.glob("*/torch"))
+
+            if not torch_dirs:
+                raise RuntimeError(f"Could not find torch directory in {version} wheel")
+
+            version_file = torch_dirs[0] / "version.py"
+            if not version_file.exists():
+                raise RuntimeError(f"Could not find version.py in {version} wheel")
+
+            # Read and parse version.py to extract git_version (nightly branch commit)
+            from ast import literal_eval
+
+            nightly_commit = None
+            with version_file.open(encoding="utf-8") as f:
+                for line in f:
+                    if line.strip().startswith("git_version"):
+                        try:
+                            # Parse the git_version assignment, e.g., git_version = "abc123def456"
+                            nightly_commit = literal_eval(
+                                line.partition("=")[2].strip()
+                            )
+                            break
+                        except (ValueError, SyntaxError):
+                            continue
+
+            if not nightly_commit:
+                raise RuntimeError(
+                    f"Could not parse git_version from {version} wheel's version.py"
+                )
+
+            # Now fetch the nightly branch and extract the real source commit from the message
+            report("-- Fetching nightly branch to extract source commit...")
+
+            # Fetch only the nightly branch
+            subprocess.check_call(["git", "fetch", "origin", "nightly"], cwd=str(CWD))
+
+            # Get the commit message from the nightly commit
+            commit_message = subprocess.check_output(
+                ["git", "show", "--no-patch", "--format=%s", nightly_commit],
+                cwd=str(CWD),
+                text=True,
+            ).strip()
+
+            # Parse the commit message to extract the real hash
+            # Format: "2025-08-06 nightly release (74a754aae98aabc2aca67e5edb41cc684fae9a82)"
+            import re
+
+            hash_match = re.search(r"\(([0-9a-fA-F]{40})\)", commit_message)
+            if hash_match:
+                real_commit = hash_match.group(1)
+                report(f"-- Extracted source commit: {real_commit[:12]}...")
+                return real_commit
+            else:
+                raise RuntimeError(
+                    f"Could not parse commit hash from nightly commit message: {commit_message}"
+                )
+
+
+# ATTENTION: THIS IS AI SLOP
+def get_latest_nightly_version(variant: str = "cpu") -> str:
+    """Get the latest available nightly version using pip to query the PyTorch nightly index."""
+    # Get the latest available nightly version for the specified variant
+    nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
+
+    # Run pip index to get available versions
+    output = subprocess.check_output(
+        [
+            "uvx",
+            "pip",
+            "index",
+            "versions",
+            "--index-url",
+            nightly_index_url,
+            "--pre",
+            "torch",
+        ],
+        text=True,
+        timeout=30,
+    )
+
+    # Parse the first line to get the latest version
+    # Format: "torch (2.9.0.dev20250806)" or "torch (2.9.0.dev20250806+cpu)"
+    first_line = output.strip().split("\n")[0]
+    if "(" in first_line and ")" in first_line:
+        # Extract version from parentheses exactly as reported
+        version = first_line.split("(")[1].split(")")[0]
+        return version
+
+    raise RuntimeError(f"Could not parse version from pip index output: {first_line}")
+
+
+# ATTENTION: THIS IS AI SLOP
+def download_and_extract_nightly_wheel(version: str) -> None:
+    """Download and extract nightly PyTorch wheel for USE_NIGHTLY=VERSION builds."""
+
+    # Extract variant from version (e.g., cpu, cu121, cu118, rocm6.2)
+    variant = extract_variant_from_version(version)
+    nightly_index_url = f"https://download.pytorch.org/whl/nightly/{variant}/"
+
+    # Construct the full torch version spec
+    torch_version_spec = f"torch=={version}"
+
+    # Create a temporary directory for downloading
+    with tempfile.TemporaryDirectory(prefix="pytorch-nightly-") as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Use pip to download the specific nightly wheel
+        download_cmd = [
+            "uvx",
+            "pip",
+            "download",
+            "--index-url",
+            nightly_index_url,
+            "--pre",
+            "--no-deps",
+            "--dest",
+            str(temp_path),
+            torch_version_spec,
+        ]
+
+        report("-- Downloading nightly PyTorch wheel...")
+        result = subprocess.run(download_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            # Try to get the latest nightly version for the same variant to help the user
+            variant = extract_variant_from_version(version)
+            try:
+                report(f"-- Detecting latest {variant} nightly version...")
+                latest_version = get_latest_nightly_version(variant)
+                error_msg = f"Failed to download nightly wheel for version {version}: {result.stderr.strip()}"
+                error_msg += (
+                    f"\n\nLatest available {variant} nightly version: {latest_version}"
+                )
+                error_msg += f'\nTry: USE_NIGHTLY="{latest_version}"'
+
+                # Also get the git hash for the latest version
+                git_hash = get_nightly_git_hash(latest_version)
+                error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit:\ngit checkout {git_hash}"
+            except Exception:
+                # If we can't get latest for this variant, try CPU as fallback
+                try:
+                    report("-- Detecting latest CPU nightly version...")
+                    latest_version = get_latest_nightly_version("cpu")
+                    error_msg = f"Failed to download nightly wheel for version {version}: {result.stderr.strip()}"
+                    error_msg += f"\n\nCould not find {variant} nightlies. Latest available CPU nightly version: {latest_version}"
+                    error_msg += f'\nTry: USE_NIGHTLY="{latest_version}"'
+                except Exception:
+                    error_msg = f"Failed to download nightly wheel for version {version}: {result.stderr.strip()}"
+                    error_msg += "\n\nCould not determine latest nightly version. "
+                    error_msg += "Check https://download.pytorch.org/whl/nightly/ for available versions."
+
+            raise RuntimeError(error_msg)
+
+        # Find the downloaded wheel file
+        wheel_files = list(temp_path.glob("torch-*.whl"))
+        if not wheel_files:
+            raise RuntimeError("No torch wheel found after download")
+        elif len(wheel_files) > 1:
+            raise RuntimeError(f"Multiple torch wheels found: {wheel_files}")
+
+        wheel_file = wheel_files[0]
+        report(f"-- Downloaded wheel: {wheel_file.name}")
+
+        # Extract the wheel
+        with tempfile.TemporaryDirectory(
+            prefix="pytorch-wheel-extract-"
+        ) as extract_dir:
+            extract_path = Path(extract_dir)
+
+            # Use Python's zipfile to extract the wheel
+            with zipfile.ZipFile(wheel_file, "r") as zip_ref:
+                zip_ref.extractall(extract_path)
+
+            # Find the torch directory in the extracted wheel
+            torch_dirs = list(extract_path.glob("torch"))
+            if not torch_dirs:
+                # Sometimes the torch directory might be nested
+                torch_dirs = list(extract_path.glob("*/torch"))
+
+            if not torch_dirs:
+                raise RuntimeError("Could not find torch directory in extracted wheel")
+
+            source_torch_dir = torch_dirs[0]
+            target_torch_dir = TORCH_DIR
+
+            report(
+                f"-- Extracting wheel contents from {source_torch_dir} to {target_torch_dir}"
+            )
+
+            # Copy the essential files from the wheel to our local directory
+            # Based on the file listing logic from tools/nightly.py
+            files_to_copy: list[Path] = []
+
+            # Get platform-specific binary files
+            if IS_LINUX:
+                files_to_copy.extend(source_torch_dir.glob("*.so"))
+                files_to_copy.extend(
+                    (source_torch_dir / "lib").glob("*.so*")
+                    if (source_torch_dir / "lib").exists()
+                    else []
+                )
+            elif IS_DARWIN:
+                files_to_copy.extend(source_torch_dir.glob("*.so"))
+                files_to_copy.extend(
+                    (source_torch_dir / "lib").glob("*.dylib")
+                    if (source_torch_dir / "lib").exists()
+                    else []
+                )
+            elif IS_WINDOWS:
+                files_to_copy.extend(source_torch_dir.glob("*.pyd"))
+                files_to_copy.extend(
+                    (source_torch_dir / "lib").glob("*.lib")
+                    if (source_torch_dir / "lib").exists()
+                    else []
+                )
+                files_to_copy.extend(
+                    (source_torch_dir / "lib").glob("*.dll")
+                    if (source_torch_dir / "lib").exists()
+                    else []
+                )
+
+            # Add essential directories and files
+            essential_items = ["version.py", "bin", "include", "lib"]
+            for item_name in essential_items:
+                item_path = source_torch_dir / item_name
+                if item_path.exists():
+                    files_to_copy.append(item_path)
+
+            # Add testing internal generated files
+            testing_generated = source_torch_dir / "testing" / "_internal" / "generated"
+            if testing_generated.exists():
+                files_to_copy.append(testing_generated)
+
+            # Copy all the files and directories
+            for src_path in files_to_copy:
+                rel_path = src_path.relative_to(source_torch_dir)
+                dst_path = target_torch_dir / rel_path
+
+                # Copy files and directories, preserving existing subdirectories
+                if src_path.is_dir():
+                    # Create destination directory if it doesn't exist
+                    dst_path.mkdir(parents=True, exist_ok=True)
+                    # Copy individual entries from source directory
+                    for src_item in src_path.iterdir():
+                        dst_item = dst_path / src_item.name
+                        if src_item.is_dir():
+                            # Recursively copy subdirectories (this will preserve existing ones)
+                            shutil.copytree(src_item, dst_item, dirs_exist_ok=True)
+                        else:
+                            # Copy individual files, overwriting existing ones
+                            shutil.copy2(src_item, dst_item)
+                else:
+                    # For files, remove existing and copy new
+                    if dst_path.exists():
+                        dst_path.unlink()
+                    dst_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_path, dst_path)
+
+                report(f"   Copied {rel_path}")
+
+    report("-- Nightly wheel extraction completed")
+
+
 # all the work we need to do _before_ setup runs
 def build_deps() -> None:
     report(f"-- Building version {TORCH_VERSION}")
+
+    # ATTENTION: THIS IS AI SLOP
+    # Check for USE_NIGHTLY=VERSION to bypass normal build and download nightly wheel
+    nightly_version = os.getenv("USE_NIGHTLY")
+    if nightly_version is not None:
+        import re
+
+        if (
+            nightly_version == ""
+            or nightly_version == "cpu"
+            or re.match(r"^cu\d+$", nightly_version)
+            or re.match(r"^rocm\d+\.\d+$", nightly_version)
+        ):
+            # Empty string or variant-only specification, show error with latest version
+            variant = "cpu" if nightly_version == "" else nightly_version
+            report(f"-- Detecting latest {variant} nightly version...")
+            latest_version = get_latest_nightly_version(variant)
+            # Also get the git hash to tell user which commit to checkout
+            git_hash = get_nightly_git_hash(latest_version)
+
+            if nightly_version == "":
+                error_msg = f"USE_NIGHTLY cannot be empty. Latest available version: {latest_version}\n"
+            else:
+                error_msg = (
+                    "USE_NIGHTLY requires a specific version, not just a variant. "
+                    "Latest available {nightly_version} version: {latest_version}\n"
+                )
+
+            error_msg += f'Try: USE_NIGHTLY="{latest_version}"'
+            error_msg += f"\n\nIMPORTANT: You must checkout the matching source commit for this binary:\ngit checkout {git_hash}"
+            raise RuntimeError(error_msg)
+        else:
+            # Full version specification
+            report(
+                f"-- USE_NIGHTLY={nightly_version} detected, downloading nightly wheel"
+            )
+            download_and_extract_nightly_wheel(nightly_version)
+            return
+
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_pytorch(
@@ -601,7 +1052,7 @@ def build_deps() -> None:
         report(
             'Finished running cmake. Run "ccmake build" or '
             '"cmake-gui build" to adjust build options and '
-            '"python setup.py install" to build.'
+            '"python -m pip install --no-build-isolation -v ." to build.'
         )
         sys.exit()
 
@@ -648,6 +1099,60 @@ def check_pydep(importname: str, module: str) -> None:
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+    def _wrap_headers_with_macro(self, include_dir: Path) -> None:
+        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
+
+        Excludes:
+        - torch/headeronly/*
+        - torch/csrc/stable/*
+        - torch/csrc/inductor/aoti_torch/c/ (only shim headers)
+        - torch/csrc/inductor/aoti_torch/generated/
+
+        This method is idempotent - it will not wrap headers that are already wrapped.
+        """
+        header_extensions = (".h", ".hpp", ".cuh")
+        header_files = [
+            f for ext in header_extensions for f in include_dir.rglob(f"*{ext}")
+        ]
+
+        # Paths to exclude from wrapping (relative to include_dir)
+        exclude_dir_patterns = [
+            "torch/headeronly/",
+            "torch/csrc/stable/",
+            "torch/csrc/inductor/aoti_torch/c/",
+            "torch/csrc/inductor/aoti_torch/generated/",
+        ]
+
+        # Marker to detect if a header is already wrapped
+        wrap_start_marker = (
+            "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
+        )
+
+        for header_file in header_files:
+            rel_path = header_file.relative_to(include_dir).as_posix()
+
+            if any(rel_path.startswith(pattern) for pattern in exclude_dir_patterns):
+                report(f"Skipping header: {rel_path}")
+                continue
+
+            original_content = header_file.read_text(encoding="utf-8")
+
+            # Check if already wrapped (idempotency check)
+            if original_content.startswith(wrap_start_marker):
+                report(f"Already wrapped, skipping: {rel_path}")
+                continue
+
+            wrapped_content = (
+                wrap_start_marker
+                + f"{original_content}"
+                + "\n#else\n"
+                + '#error "This file should not be included when either TORCH_STABLE_ONLY or TORCH_TARGET_VERSION is defined."\n'
+                + "#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
+            )
+
+            header_file.write_text(wrapped_content, encoding="utf-8")
+            report(f"Wrapped header: {rel_path}")
+
     def _embed_libomp(self) -> None:
         # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
         build_lib = Path(self.build_lib)
@@ -667,12 +1172,18 @@ class build_ext(setuptools.command.build_ext.build_ext):
         for idx, line in enumerate(otool_cmds):
             if line.strip() == "cmd LC_LOAD_DYLIB":
                 lib_name = otool_cmds[idx + 2].strip()
-                assert lib_name.startswith("name ")
+                if not lib_name.startswith("name "):
+                    raise AssertionError(
+                        f"Expected lib_name to start with 'name ', got: {lib_name}"
+                    )
                 libs.append(lib_name.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
             if line.strip() == "cmd LC_RPATH":
                 rpath = otool_cmds[idx + 2].strip()
-                assert rpath.startswith("path ")
+                if not rpath.startswith("path "):
+                    raise AssertionError(
+                        f"Expected rpath to start with 'path ', got: {rpath}"
+                    )
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
         omplib_path: str = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]  # type: ignore[assignment]
@@ -696,7 +1207,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
-            # This should prevent delocate from attempting to package another instance
+            # This should prevent deallocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
             install_name_tool_args = [
@@ -745,7 +1256,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
     def run(self) -> None:
         # Report build options. This is run after the build completes so # `CMakeCache.txt` exists
         # and we can get an accurate report on what is used and what is not.
-        cmake_cache_vars = defaultdict(lambda: False, cmake.get_cmake_cache_variables())
+        cmake_cache_vars = get_cmake_cache_vars()
         if cmake_cache_vars["USE_NUMPY"]:
             report("-- Building with NumPy bindings")
         else:
@@ -813,17 +1324,16 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report("-- Not using ITT")
 
-        # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
-        # in system CFLAGS
-        c_flags = os.getenv("CFLAGS", "")
-        if (
-            IS_LINUX
-            and "-fstack-clash-protection" in c_flags
-            and "clang" in os.getenv("CC", "")
-        ):
-            os.environ["CC"] = str(os.environ["CC"])
-
         super().run()
+
+        # Wrap headers with TORCH_STABLE_ONLY and TORCH_TARGET_VERSION guards
+        build_lib = Path(self.build_lib)
+        build_torch_include_dir = build_lib / "torch" / "include"
+        if build_torch_include_dir.exists():
+            report(
+                "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
+            )
+            self._wrap_headers_with_macro(build_torch_include_dir)
 
         if IS_DARWIN:
             self._embed_libomp()
@@ -845,40 +1355,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             target_dir.mkdir(parents=True, exist_ok=True)
             self.copy_file(export_lib, target_lib)
 
-            # In ROCm on Windows case copy rocblas and hipblaslt files into
-            # torch/lib/rocblas/library and torch/lib/hipblaslt/library
-            if str2bool(os.getenv("USE_ROCM")):
-                rocm_dir_path = Path(os.environ["ROCM_DIR"])
-                rocm_bin_path = rocm_dir_path / "bin"
-                rocblas_dir = rocm_bin_path / "rocblas"
-                target_rocblas_dir = target_dir / "rocblas"
-                target_rocblas_dir.mkdir(parents=True, exist_ok=True)
-                self.copy_tree(rocblas_dir, str(target_rocblas_dir))
-
-                hipblaslt_dir = rocm_bin_path / "hipblaslt"
-                target_hipblaslt_dir = target_dir / "hipblaslt"
-                target_hipblaslt_dir.mkdir(parents=True, exist_ok=True)
-                self.copy_tree(hipblaslt_dir, str(target_hipblaslt_dir))
-            else:
-                report("The specified environment variable does not exist.")
-
     def build_extensions(self) -> None:
         self.create_compile_commands()
-
-        build_lib = Path(self.build_lib).resolve()
-
-        # Copy functorch extension
-        for ext in self.extensions:
-            if ext.name != "functorch._C":
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = Path(self.get_ext_filename(fullname))
-            src = filename.with_stem("functorch")
-            dst = build_lib / filename
-            if src.exists():
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                self.copy_file(src, dst)
 
         super().build_extensions()
 
@@ -957,38 +1435,30 @@ class concat_license_files:
         self.f1.write_text(self.bsd_text, encoding="utf-8")
 
 
-try:
-    from wheel.bdist_wheel import bdist_wheel  # type: ignore[import-untyped]
-except ImportError:
-    # This is useful when wheel is not installed and bdist_wheel is not
-    # specified on the command line. If it _is_ specified, parsing the command
-    # line will fail before wheel_concatenate is needed
-    wheel_concatenate: type[Command] | None = None
-else:
-    # Need to create the proper LICENSE.txt for the wheel
-    class wheel_concatenate(bdist_wheel):  # type: ignore[no-redef]
-        """check submodules on sdist to prevent incomplete tarballs"""
+# Need to create the proper LICENSE.txt for the wheel
+class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
+    def run(self) -> None:
+        with concat_license_files(include_files=True):
+            super().run()
 
-        def run(self) -> None:
-            with concat_license_files(include_files=True):
-                super().run()
+    def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
+        super().write_wheelfile(*args, **kwargs)
 
-        def write_wheelfile(self, *args: Any, **kwargs: Any) -> None:
-            super().write_wheelfile(*args, **kwargs)
-
-            if BUILD_LIBTORCH_WHL:
-                bdist_dir = Path(self.bdist_dir)
-                # Remove extraneneous files in the libtorch wheel
-                for file in itertools.chain(
-                    bdist_dir.rglob("*.a"),
-                    bdist_dir.rglob("*.so"),
-                ):
-                    if (bdist_dir / file.name).is_file():
-                        file.unlink()
-                for file in bdist_dir.rglob("*.py"):
+        if BUILD_LIBTORCH_WHL:
+            if self.bdist_dir is None:
+                raise AssertionError("self.bdist_dir must not be None")
+            bdist_dir = Path(self.bdist_dir)
+            # Remove extraneneous files in the libtorch wheel
+            for file in itertools.chain(
+                bdist_dir.rglob("*.a"),
+                bdist_dir.rglob("*.so"),
+            ):
+                if (bdist_dir / file.name).is_file():
                     file.unlink()
-                # need an __init__.py file otherwise we wouldn't have a package
-                (bdist_dir / "torch" / "__init__.py").touch()
+            for file in bdist_dir.rglob("*.py"):
+                file.unlink()
+            # need an __init__.py file otherwise we wouldn't have a package
+            (bdist_dir / "torch" / "__init__.py").touch()
 
 
 class clean(Command):
@@ -1018,6 +1488,7 @@ class clean(Command):
                         shutil.rmtree(filename, ignore_errors=True)
 
 
+# Need to dump submodule hashes and create the proper LICENSE.txt for the sdist
 class sdist(setuptools.command.sdist.sdist):
     def run(self) -> None:
         with concat_license_files():
@@ -1175,18 +1646,12 @@ def configure_extension_build() -> tuple[
     )
     ext_modules.append(C)
 
-    # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementation
-    if cmake_cache_vars["BUILD_FUNCTORCH"]:
-        ext_modules.append(Extension(name="functorch._C", sources=[]))
-
     cmdclass = {
+        "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
         "clean": clean,
         "sdist": sdist,
     }
-    if wheel_concatenate is not None:
-        cmdclass["bdist_wheel"] = wheel_concatenate
 
     entry_points = {
         "console_scripts": [
@@ -1200,31 +1665,32 @@ def configure_extension_build() -> tuple[
     if cmake_cache_vars["USE_DISTRIBUTED"]:
         # Only enable fr_trace command if distributed is enabled
         entry_points["console_scripts"].append(
-            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+            "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
         )
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
 
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
-    It is no longer necessary to use the 'build' or 'rebuild' targets
+It is no longer necessary to use the 'build' or 'rebuild' targets
 
-    To install:
-      $ python setup.py install
-    To develop locally:
-      $ python setup.py develop
-    To force cmake to re-generate native build files (off by default):
-      $ CMAKE_FRESH=1 python setup.py develop
-"""
+To install:
+  $ python -m pip install --no-build-isolation -v .
+To develop locally:
+  $ python -m pip install --no-build-isolation -v -e .
+To force cmake to re-generate native build files (off by default):
+  $ CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
+""".strip()
 
 
 def print_box(msg: str) -> None:
-    lines = msg.split("\n")
-    size = max(len(l) + 1 for l in lines)
-    print("-" * (size + 2))
-    for l in lines:
-        print("|{}{}|".format(l, " " * (size - len(l))))
-    print("-" * (size + 2))
+    msg = textwrap.dedent(msg).strip()
+    lines = ["", *msg.split("\n"), ""]
+    max_width = max(len(l) for l in lines)
+    print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
+    for line in lines:
+        print(f"|  {line:<{max_width}s}  |", file=sys.stderr, flush=True)
+    print("+" + "-" * (max_width + 4) + "+", file=sys.stderr, flush=True)
 
 
 def main() -> None:
@@ -1239,32 +1705,12 @@ def main() -> None:
         "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
         "sympy>=1.13.3",
-        "networkx",
+        "networkx>=2.5.1",
         "jinja2",
-        "fsspec",
+        "fsspec>=0.8.5",
     ]
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
-
-    if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
-        gen_linker_script(
-            filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
-        )
-        linker_script_path = os.path.abspath("cmake/linker_script.ld")
-        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
-        os.environ["CFLAGS"] = (
-            os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-        os.environ["CXXFLAGS"] = (
-            os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-    elif platform.system() == "Linux" and platform.processor() == "aarch64":
-        print_box(
-            """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-            """
-        )
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1280,6 +1726,7 @@ def main() -> None:
     mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
+        mirror_inductor_external_kernels()
 
     (
         ext_modules,
@@ -1308,9 +1755,13 @@ def main() -> None:
         "include/**/*.hpp",
         "include/*.cuh",
         "include/**/*.cuh",
+        "csrc/inductor/aoti_runtime/model.h",
         "_inductor/codegen/*.h",
+        "_inductor/codegen/aoti_runtime/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
+        "_inductor/kernel/flex/templates/*.jinja",
+        "_inductor/kernel/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
@@ -1329,6 +1780,7 @@ def main() -> None:
         "utils/model_dump/code.js",
         "utils/model_dump/*.mjs",
         "_dynamo/graph_break_registry.json",
+        "tools/dynamo/gb_id_mapping.py",
     ]
 
     if not BUILD_LIBTORCH_WHL:
@@ -1369,7 +1821,18 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
-    exclude_package_data = {}
+    # some win libraries are excluded
+    # these are statically linked
+    exclude_windows_libs = [
+        "lib/dnnl.lib",
+        "lib/kineto.lib",
+        "lib/libprotobuf-lite.lib",
+        "lib/libprotobuf.lib",
+        "lib/libprotoc.lib",
+    ]
+    exclude_package_data = {
+        "torch": exclude_windows_libs,
+    }
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data

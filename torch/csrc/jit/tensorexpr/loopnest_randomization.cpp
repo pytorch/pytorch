@@ -369,7 +369,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
           // Find a random number of loops to fuse
           int num_loops_to_fuse =
-              std::max(2, (int)(std::rand() % (int)loops.size()));
+              std::max(2, (std::rand() % (int)loops.size()));
 
           auto [loops_to_fuse, chosen_indices] =
               randomization_helper::select_n_randomly<ForPtr>(
@@ -733,7 +733,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
     }
   } catch (...) {
     std::cout << "EXCEPTION THROWN!\n";
-    std::cout << "SEED: " << seed << "\n";
+    std::cout << "SEED: " << seed << '\n';
     throw std::runtime_error("Random test failed");
   }
   message = "End of transformations;\n";

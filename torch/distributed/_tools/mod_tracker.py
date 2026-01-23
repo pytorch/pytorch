@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 import weakref
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
@@ -97,10 +97,10 @@ class ModTracker:
 
     def register_user_hooks(
         self,
-        pre_fw_hook: Optional[Callable] = None,
-        post_fw_hook: Optional[Callable] = None,
-        pre_bw_hook: Optional[Callable] = None,
-        post_bw_hook: Optional[Callable] = None,
+        pre_fw_hook: Callable | None = None,
+        post_fw_hook: Callable | None = None,
+        pre_bw_hook: Callable | None = None,
+        post_bw_hook: Callable | None = None,
     ):
         """
         Registers user-specified hooks to be called before/after the forward/backward pass for each
@@ -177,10 +177,12 @@ class ModTracker:
                 def custom_formatwarning(msg, category, filename, lineno, line=None):
                     return f"{filename}:{lineno}: {category.__name__}: {msg} \n"
 
+                # pyrefly: ignore [bad-assignment]
                 warnings.formatwarning = custom_formatwarning
                 warnings.warn(
                     "The module hierarchy tracking maybe be messed up."
-                    " Please file a bug to PyTorch, if it is the case."
+                    " Please file a bug to PyTorch, if it is the case.",
+                    stacklevel=2,
                 )
             if name not in self.parents:
                 self._active_module_cnt[name] = 1
@@ -211,6 +213,9 @@ class ModTracker:
         return fn
 
     def _fw_pre_hook(self, mod, input):
+        if torch._dynamo.eval_frame._is_in_optimized_module():
+            return
+
         name = self._get_mod_name(mod)
         w_mod = weakref.ref(mod)
         self._get_append_fn(w_mod, name, False)()
@@ -227,6 +232,9 @@ class ModTracker:
                 )
 
     def _fw_post_hook(self, mod, input, output):
+        if torch._dynamo.eval_frame._is_in_optimized_module():
+            return
+
         name = self._get_mod_name(mod)
         w_mod = weakref.ref(mod)
         if self._user_post_fw_hook is not None:

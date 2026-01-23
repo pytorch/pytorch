@@ -22,7 +22,7 @@ using MakeProxyExecutorFn =
 // This is the extension point for delegation backends.
 class DelegateExecutor {
  public:
-  virtual ~DelegateExecutor() {}
+  virtual ~DelegateExecutor() = default;
 
   // Runtime calls processWeights() to pass the weights to the delegate backend.
   // Typically, a backend would perform some form of validation and processing,
@@ -45,6 +45,8 @@ class DelegateExecutor {
 
   // This call activate the processed weights.
   virtual void commitWeights() = 0;
+
+  virtual void initWeights(std::shared_ptr<Weights> weights) = 0;
 
   virtual std::vector<at::Tensor> run(std::vector<at::Tensor>& inputs) = 0;
 };

@@ -1,12 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
 from fnmatch import fnmatch
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
-from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
@@ -15,10 +13,10 @@ __all__ = ["parallelize_module"]
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
-    device_mesh: Optional[DeviceMesh] = None,
-    parallelize_plan: Optional[Union[ParallelStyle, dict[str, ParallelStyle]]] = None,
+    device_mesh: DeviceMesh | None = None,
+    parallelize_plan: ParallelStyle | dict[str, ParallelStyle] | None = None,
     *,
-    src_data_rank: Optional[int] = 0,
+    src_data_rank: int | None = 0,
 ) -> nn.Module:
     """
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.
@@ -71,12 +69,12 @@ def parallelize_module(  # type: ignore[return]
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
-    _validate_tp_mesh_dim(device_mesh)
 
     if parallelize_plan is None:
         warnings.warn(
             "No parallelize_plan is provided and auto-parallel is not supported "
-            "at the moment, so this parallelize_module call will do nothing."
+            "at the moment, so this parallelize_module call will do nothing.",
+            stacklevel=2,
         )
         return module
 
@@ -110,7 +108,8 @@ def parallelize_module(  # type: ignore[return]
                 warnings.warn(
                     f"Parallelize plan key '{module_path}' could not be resolved: "
                     f"no submodule matching token '{token}' in module {module}, "
-                    f"skipping this plan entry."
+                    f"skipping this plan entry.",
+                    stacklevel=2,
                 )
                 continue
 

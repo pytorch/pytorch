@@ -1,23 +1,21 @@
 #include <ATen/record_function.h>
 
 #include <ATen/CPUFunctions.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/runtime/static/ops.h>
 
 #include <c10/util/Enumerate.h>
 #include <torch/nativert/kernels/PrimKernelRegistry.h>
 
 namespace torch::nativert {
 
-C10_DEFINE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*);
+C10_DEFINE_REGISTRY(PrimKernelRegistry, OpKernel, const Node*)
 
 namespace {
 
 class OpKernel_prim_listpack : public OpKernel {
  public:
   explicit OpKernel_prim_listpack(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
     auto listType = node->outputs()[0]->type();
     switch (listType.kind()) {
       case Type::Kind::TensorList:
@@ -34,7 +32,7 @@ class OpKernel_prim_listpack : public OpKernel {
     }
   }
 
-  void computeInternal(ExecutionFrame& executionFrame) const override final {
+  void computeInternal(ExecutionFrame& executionFrame) const final {
     RECORD_USER_SCOPE("nativert::OpKernel_prim_listpack");
     c10::List<c10::IValue> list(type_);
     list.reserve(numInputs());
@@ -57,31 +55,31 @@ class OpKernel_prim_listpack : public OpKernel {
 C10_REGISTER_TYPED_CLASS(
     PrimKernelRegistry,
     "prim.ListPack",
-    OpKernel_prim_listpack);
+    OpKernel_prim_listpack)
 
 REGISTER_PRIM_KERNEL("prim.ListUnpack", prim_listunpack, {
   RECORD_USER_SCOPE("nativert::OpKernel_prim_listunpack");
   auto inputListRef = KernelInput(0).toListRef();
-  for (const auto& [i, ivalue] : c10::enumerate(inputListRef)) {
-    KernelOutput(i) = ivalue;
+  for (size_t i = 0; i < inputListRef.size(); ++i) {
+    KernelOutput(i) = inputListRef[i];
   }
-});
+})
 
 // Noop for input and output
-REGISTER_PRIM_KERNEL("prim.Input", prim_input, {});
-REGISTER_PRIM_KERNEL("prim.Output", prim_output, {});
+REGISTER_PRIM_KERNEL("prim.Input", prim_input, {})
+REGISTER_PRIM_KERNEL("prim.Output", prim_output, {})
 
 namespace {
 
 class OpKernel_variadic_concat : public OpKernel {
  public:
   explicit OpKernel_variadic_concat(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
-    dim_ = node_->attributes().size() > 0
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
+    dim_ = !node_->attributes().empty()
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
   }
-  void computeInternal(ExecutionFrame& executionFrame) const override final {
+  void computeInternal(ExecutionFrame& executionFrame) const final {
     {
       const size_t numNodeInps = numInputs();
       auto numCatInps = numNodeInps;
@@ -100,7 +98,6 @@ class OpKernel_variadic_concat : public OpKernel {
         return;
       }
       auto& out_t = KernelOutput(0).toTensor();
-      fastResizeToZero(out_t);
       at::cpu::cat_outf(inputs, dim, out_t);
     }
   }
@@ -114,19 +111,19 @@ class OpKernel_variadic_concat : public OpKernel {
 C10_REGISTER_TYPED_CLASS(
     PrimKernelRegistry,
     "prim.VarConcat",
-    OpKernel_variadic_concat);
+    OpKernel_variadic_concat)
 
 namespace {
 
 class OpKernel_variadic_stack : public OpKernel {
  public:
   explicit OpKernel_variadic_stack(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
-    dim_ = node_->attributes().size() > 0
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
+    dim_ = !node_->attributes().empty()
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
   }
-  void computeInternal(ExecutionFrame& executionFrame) const override final {
+  void computeInternal(ExecutionFrame& executionFrame) const final {
     {
       const size_t numNodeInps = numInputs();
       auto numStackInps = numNodeInps;
@@ -145,7 +142,6 @@ class OpKernel_variadic_stack : public OpKernel {
         return;
       }
       auto& out_t = out.toTensor();
-      fastResizeToZero(out_t);
       at::native::_stack_out_cpu(inputs, dim, out_t);
     }
   }
@@ -158,6 +154,6 @@ class OpKernel_variadic_stack : public OpKernel {
 C10_REGISTER_TYPED_CLASS(
     PrimKernelRegistry,
     "prim.VarStack",
-    OpKernel_variadic_stack);
+    OpKernel_variadic_stack)
 
 } // namespace torch::nativert

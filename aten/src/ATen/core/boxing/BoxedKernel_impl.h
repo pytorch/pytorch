@@ -2,7 +2,7 @@
 
 namespace c10 {
 
-inline BoxedKernel::BoxedKernel() : functor_(), boxed_kernel_func_(nullptr) {}
+inline BoxedKernel::BoxedKernel() : boxed_kernel_func_(nullptr) {}
 
 inline BoxedKernel::BoxedKernel(
     std::unique_ptr<OperatorKernel> functor,
@@ -11,9 +11,9 @@ inline BoxedKernel::BoxedKernel(
 
 template <BoxedKernel::BoxedKernelFunction* func>
 inline void BoxedKernel::make_boxed_function(
-    OperatorKernel*,
+    OperatorKernel* /*unused*/,
     const OperatorHandle& opHandle,
-    DispatchKeySet,
+    DispatchKeySet /*unused*/,
     Stack* stack) {
   // Note that we're dropping the DispatchKeySet argument.
   // See Note [Plumbing Keys Through The Dispatcher 2] for details.
@@ -22,7 +22,7 @@ inline void BoxedKernel::make_boxed_function(
 
 template <BoxedKernel::BoxedKernelFunction_withDispatchKeys* func>
 inline void BoxedKernel::make_boxed_function(
-    OperatorKernel*,
+    OperatorKernel* /*unused*/,
     const OperatorHandle& opHandle,
     DispatchKeySet ks,
     Stack* stack) {

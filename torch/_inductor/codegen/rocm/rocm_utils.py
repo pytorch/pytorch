@@ -11,5 +11,7 @@ DTYPE_TO_ROCM_TYPE = {
     torch.float16: "uint16_t",
     torch.float8_e4m3fnuz: "uint8_t",
     torch.float8_e5m2fnuz: "uint8_t",
+    torch.float8_e4m3fn: "uint8_t",
+    torch.float8_e5m2: "uint8_t",
     torch.bfloat16: "uint16_t",
 }

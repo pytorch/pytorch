@@ -5,7 +5,8 @@ import os
 import sys
 import tempfile
 import typing_extensions
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -29,20 +30,14 @@ if os.environ.get("TORCH_COMPILE_STROBELIGHT", False):
         StrobelightCompileTimeProfiler.enable()
 
 # this arbitrary-looking assortment of functionality is provided here
-# to have a central place for overrideable behavior. The motivating
+# to have a central place for overridable behavior. The motivating
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
-if torch._running_with_deploy():
-    # __file__ is meaningless in the context of frozen torch used in torch deploy.
-    # setting empty torch_parent should allow below functions to operate without crashing,
-    # but it's unclear if there is a valid use case for them in the context of deploy.
-    torch_parent = ""
+if os.path.basename(os.path.dirname(__file__)) == "shared":
+    torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 else:
-    if os.path.basename(os.path.dirname(__file__)) == "shared":
-        torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    else:
-        torch_parent = os.path.dirname(os.path.dirname(__file__))
+    torch_parent = os.path.dirname(os.path.dirname(__file__))
 
 
 def get_file_path(*path_components: str) -> str:
@@ -89,7 +84,10 @@ def compile_time_strobelight_meta(
     ) -> Callable[_P, _T]:
         @functools.wraps(function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-            if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
+            if "skip" in kwargs and isinstance(
+                skip := kwargs["skip"],
+                int,
+            ):
                 kwargs["skip"] = skip + 1
 
             # This is not needed but we have it here to avoid having profile_compile_time
@@ -123,6 +121,10 @@ def signpost_event(category: str, name: str, parameters: dict[str, Any]):
     log.info("%s %s: %r", category, name, parameters)
 
 
+def add_mlhub_insight(category: str, insight: str, insight_description: str):
+    pass
+
+
 def log_compilation_event(metrics):
     log.info("%s", metrics)
 
@@ -136,6 +138,10 @@ def set_pytorch_distributed_envs_from_justknobs():
 
 
 def log_export_usage(**kwargs):
+    pass
+
+
+def log_draft_export_usage(**kwargs):
     pass
 
 
@@ -172,6 +178,9 @@ def log_torch_jit_trace_exportability(
 ):
     _, _, _, _ = api, type_of_export, export_outcome, result
     return
+
+
+DISABLE_JUSTKNOBS = True
 
 
 def justknobs_check(name: str, default: bool = True) -> bool:
@@ -245,7 +254,7 @@ def max_clock_rate():
             return 1100
 
 
-def get_mast_job_name_version() -> Optional[tuple[str, int]]:
+def get_mast_job_name_version() -> tuple[str, int] | None:
     return None
 
 
@@ -264,7 +273,7 @@ USE_RTLD_GLOBAL_WITH_LIBTORCH = False
 REQUIRES_SET_PYTHON_MODULE = False
 
 
-def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
+def maybe_upload_prof_stats_to_manifold(profile_path: str) -> str | None:
     print("Uploading profile stats (fb-only otherwise no-op)")
     return None
 
@@ -300,7 +309,7 @@ def deprecated():
     """
 
     def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
-        # Validate naming convention – single leading underscore, not dunder
+        # Validate naming convention - single leading underscore, not dunder
         if not (func.__name__.startswith("_")):
             raise ValueError(
                 "@deprecate must decorate a function whose name "
@@ -321,7 +330,10 @@ def deprecated():
 
         # public deprecated alias
         alias = typing_extensions.deprecated(
-            warning_msg, category=UserWarning, stacklevel=1
+            # pyrefly: ignore [bad-argument-type]
+            warning_msg,
+            category=UserWarning,
+            stacklevel=1,
         )(func)
 
         alias.__name__ = public_name
@@ -337,3 +349,29 @@ def deprecated():
         return func
 
     return decorator
+
+
+def get_default_numa_options():
+    """
+    When using elastic agent, if no numa options are provided, we will use these
+    as the default.
+
+    For external use cases, we return None, i.e. no numa binding. If you would like
+    to use torch's automatic numa binding capabilities, you should provide
+    NumaOptions to your launch config directly or use the numa binding option
+    available in torchrun.
+
+    Must return None or NumaOptions, but not specifying to avoid circular import.
+    """
+    return None
+
+
+def log_triton_builds(fail: str | None):
+    pass
+
+
+def find_compile_subproc_binary() -> str | None:
+    """
+    Allows overriding the binary used for subprocesses
+    """
+    return None

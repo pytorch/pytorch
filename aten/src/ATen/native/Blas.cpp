@@ -9,6 +9,7 @@
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/GroupedMMUtils.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -57,7 +58,7 @@ scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y,
 template<typename scalar_t>
 scalar_t vdot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
-static constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
+static constexpr bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda >= std::max<int64_t>(1L, m);
 }
 
@@ -122,7 +123,7 @@ Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
   //it's not a hard error, because we allow resizing result, but it becomes a hard error
   //in addmv, because addmv expects self to satisfy proper conditions
   //to avoid this, supply correctly sized self, its contents doesn't matter because beta is 0
-  if (result.dim() > 1 || (result.numel() != self.size(0) || result.numel() !=1)) {
+  if (result.dim() > 1 || (result.numel() != self.size(0) && result.numel() != 1)) {
     Tensor self_addmv = at::empty({self.size(0)}, vec.options());
     return at::addmv_out(result, self_addmv, self, vec, 0, 1);
   }
@@ -266,7 +267,7 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
-  float output_scale = float(1.0);
+  float output_scale = 1.0f;
   if (scale_result.has_value() &&
       (*out_dtype == ScalarType::Float8_e4m3fn ||
        *out_dtype == ScalarType::Float8_e5m2)) {
@@ -330,6 +331,25 @@ _scaled_mm_cpu(const Tensor& mat_a, const Tensor& mat_b,
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   return _scaled_mm_out_cpu(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
+}
+
+// TODO(vasiliy, future PR): figure out why we need to declare this function, when
+// other functions that live in ATen/native/*.cpp without declarations
+// or headers work just fine.
+Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype);
+
+Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  return out;
 }
 
 }  // namespace at::native

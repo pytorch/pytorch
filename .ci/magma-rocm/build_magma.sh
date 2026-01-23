@@ -6,8 +6,8 @@ set -eou pipefail
 # The script expects DESIRED_CUDA and PACKAGE_NAME to be set
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Version 2.7.2 + ROCm related updates
-MAGMA_VERSION=a1625ff4d9bc362906bd01f805dbbe12612953f6
+# https://github.com/icl-utk-edu/magma/pull/77
+MAGMA_VERSION=a68b9257ac435afa1ebdfb8f50d67668950aef61
 
 # Folders for the build
 PACKAGE_FILES=${ROOT_DIR}/magma-rocm/package_files # metadata
@@ -20,7 +20,7 @@ mkdir -p ${PACKAGE_DIR} ${PACKAGE_OUTPUT}/linux-64 ${PACKAGE_BUILD} ${PACKAGE_RE
 
 # Fetch magma sources and verify checksum
 pushd ${PACKAGE_DIR}
-git clone https://bitbucket.org/icl/magma.git
+git clone https://github.com/k-artem/magma.git
 pushd magma
 git checkout ${MAGMA_VERSION}
 popd

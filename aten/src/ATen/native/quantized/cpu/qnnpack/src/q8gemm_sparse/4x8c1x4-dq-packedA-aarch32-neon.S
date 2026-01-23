@@ -46,7 +46,7 @@
 #  |b               | 12
 #  |c               | 16
 #  |c_stride        | 20
-#  |out ch indx     | 24
+#  |out ch index    | 24
 #  |params          | 28
 #  |----------------|
 #
@@ -61,7 +61,7 @@
 #  |b               | 108
 #  |c               | 112
 #  |c_stride        | 116
-#  |out ch indx     | 120
+#  |out ch index    | 120
 #  |params          | 124
 #  |----------------|
 #
@@ -101,7 +101,7 @@
         /* Add output_channel_index to the b_zero_point pointer */            ;\
         ADD r4, r4, r5                                                        ;\
                                                                               ;\
-        /* We enter the loop if r1 is atleast 1. */                           ;\
+        /* We enter the loop if r1 is at least 1. */                           ;\
         /* r1 = r1 - 1 will happen in the epilogue */                         ;\
         /* of the loop */                                                     ;\
         CMP r1, 1                                                             ;\
@@ -222,7 +222,7 @@
         /* Thus we will load accumulators back in q0, q1, q2, q3, q4, q5, q6, q7 */ ;\
         /* When nr < 4, extra q values will be fetched from stack which may overlap */ ;\
         /* with other parts of stack storing local variables. To avoid that we just */ ;\
-        /* create a buffer of 128 bytes inbetween to make sure pointer increment */ ;\
+        /* create a buffer of 128 bytes in between to make sure pointer increment */ ;\
         /* never produces address that is beyond the stack frame of this function. */ ;\
         SUB r9, sp, 140                                                       ;\
         /* Each iteration produce 4 values each of 4 bytes */                 ;\

@@ -90,7 +90,8 @@ class CubicSL(BaseScheduler):
         if not self._get_sl_called_within_step:
             warnings.warn(
                 "To get the last sparsity level computed by the scheduler, "
-                "please use `get_last_sl()`."
+                "please use `get_last_sl()`.",
+                stacklevel=2,
             )
         return [
             self.sparsity_compute_fn(

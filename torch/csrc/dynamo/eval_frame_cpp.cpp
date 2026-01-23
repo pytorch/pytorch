@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
@@ -23,10 +24,8 @@ static py::object dynamo_call_callback(
     CacheEntry* cache_entry,
     FrameState* frame_state) {
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
-  if (frame == nullptr) {
-    throw std::runtime_error(
-        "Dynamo failed to initialize CPython interpreter frame wrapper");
-  }
+  TORCH_CHECK(
+      frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
   frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
 
   py::object cache_entry_obj = py::none();
@@ -50,6 +49,56 @@ static py::handle _callback_from_action(
   }
   return callback;
 }
+
+// c_recursion_remaining only defined in 3.12 and 3.13
+
+static int32_t c_recursion_limit = -1;
+
+void dynamo_set_c_recursion_limit(int32_t limit) {
+  if (limit < 1 && limit != -1) {
+    throw std::range_error("recursion limit must be >= 1, or -1 to reset");
+  }
+  c_recursion_limit = limit;
+}
+
+int32_t dynamo_get_c_recursion_limit() {
+  return c_recursion_limit;
+}
+
+#if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_14_PLUS
+
+struct CRecursionLimitRAII {
+  PyThreadState* tstate;
+  int32_t old_recursion_remaining;
+  CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
+    auto limit = dynamo_get_c_recursion_limit();
+    auto& remaining = tstate->c_recursion_remaining;
+    this->old_recursion_remaining = remaining;
+    if (limit < 0) {
+      // no change to limit
+      return;
+    }
+    if (limit < remaining) {
+      std::stringstream ss;
+      ss << "new c_recursion limit (" << limit
+         << ") is lower than thread's current c_recursion_remaining ("
+         << remaining << ").";
+      PyErr_WarnEx(PyExc_RuntimeWarning, ss.str().c_str(), 1);
+    }
+    remaining = limit;
+  }
+  ~CRecursionLimitRAII() {
+    this->tstate->c_recursion_remaining = this->old_recursion_remaining;
+  }
+};
+
+#else
+
+struct CRecursionLimitRAII {
+  CRecursionLimitRAII(PyThreadState* tstate) {}
+};
+
+#endif
 
 // frame and callback are borrowed references.
 // Returns new reference.
@@ -138,6 +187,15 @@ PyObject* dynamo__custom_eval_frame(
   };
 
   auto fail = [&]() { clear_old_frame_if_python_312_plus(tstate, frame); };
+
+#if IS_PYTHON_3_12_PLUS
+  // skip tracing the frame if CPython is in a tracing state (e.g.
+  // sys.monitoring call)
+  if (tstate->tracing > 0) {
+    eval_default();
+    return eval_result;
+  }
+#endif
 
   ExtraState* extra = get_extra_state(F_CODE(frame));
 
@@ -250,6 +308,13 @@ PyObject* dynamo__custom_eval_frame(
   bool apply_to_code = false;
   PyObject* guarded_code = nullptr;
   try {
+    CRecursionLimitRAII tmp(tstate); // increase C recursion limit to the given
+                                     // value during compilation
+    // C recursion limit failure
+    if (PyErr_Occurred()) {
+      fail();
+      return eval_result;
+    }
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =
@@ -312,7 +377,7 @@ PyObject* dynamo__custom_eval_frame(
   return eval_result;
 }
 
-PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
@@ -334,4 +399,15 @@ PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
 
   extra_state_set_exec_strategy(extra, strategy);
   Py_RETURN_NONE;
+}
+
+void dynamo_skip_code_recursive(PyCodeObject* code) {
+  ExtraState* extra = get_extra_state(code);
+  if (extra == nullptr) {
+    extra = init_and_set_extra_state(code);
+  }
+
+  FrameExecStrategy strategy =
+      FrameExecStrategy{FrameAction::SKIP, FrameAction::SKIP};
+  extra_state_set_exec_strategy(extra, strategy);
 }

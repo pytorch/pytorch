@@ -37,6 +37,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._fft_r2c.default": {},
     "aten._flash_attention_backward.default": {},
     "aten._flash_attention_forward.default": {},
+    "aten._flash_attention_forward.quantized": {},
     "aten._fused_moving_avg_obs_fq_helper_functional.default": {},
     "aten._fused_moving_avg_obs_fq_helper.default": {},
     "aten._fused_rms_norm.default": {},
@@ -53,9 +54,11 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._scaled_dot_product_flash_attention_for_cpu_backward.default": {},
     "aten._scaled_dot_product_flash_attention_for_cpu.default": {},
     "aten._scaled_dot_product_flash_attention.default": {},
+    "aten._scaled_dot_product_flash_attention.quantized": {},
     "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {},
     "aten._scaled_dot_product_fused_attention_overrideable.default": {},
     "aten._scaled_mm.default": {},
+    "aten._scaled_grouped_mm.default": {},
     "aten._scaled_mm.out": {},
     "aten._segment_reduce_backward.default": {},
     "aten._thnn_fused_lstm_cell.default": {},
@@ -174,4 +177,20 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.view_as_real.default": {},
     "aten.view.dtype": {},
     "aten._weight_int4pack_mm_with_scales_and_zeros.default": {},
+}
+
+# `python torchgen/gen.py --update-aoti-c-shim` will automatically generate
+# c_shim_aten.{h/cpp} based on the list below.
+# Operators in this list are intended to be used in torch/csrc/stable/ops.h
+# Unlike other c_shims, operators in this file do not bypass the dispatcher.
+# The same BC rules apply as inductor_fallback_ops.
+aten_shimified_ops: dict[str, dict[str, list[str]]] = {
+    "aten.fill_.Scalar": {},
+    "aten.pad.default": {},
+    "aten.narrow.default": {},
+    "aten.amax.default": {},
+    "aten.new_empty.default": {},
+    "aten.new_zeros.default": {},
+    "aten.full.default": {},
+    "aten.subtract.Tensor": {},
 }

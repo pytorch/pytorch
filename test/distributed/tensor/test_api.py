@@ -1,20 +1,26 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import tempfile
+
 import torch
+import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
+    Partial,
     Replicate,
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_tensor_for_rank,
     with_comms,
 )
 
@@ -48,7 +54,7 @@ class DTensorAPITest(DTensorTestBase):
     def test_distribute_tensor_rank(self):
         comm_mode = CommDebugMode()
 
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
 
         for requires_grad in [True, False]:
@@ -73,18 +79,28 @@ class DTensorAPITest(DTensorTestBase):
         dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_minus_spec)
         self.assertEqual(dist_tensor.placements[0].dim, 1)
 
-        placement_combs = [[Shard(0)], [Shard(1)], [Replicate()]]
-        # test src_data_rank == 1
-        # set seed differently for each rank
-        torch.manual_seed(self.rank)
-        for placement in placement_combs:
-            tensor_to_distribute = torch.randn(3 * self.world_size, 3 * self.world_size)
-            dtensor = distribute_tensor(
-                tensor_to_distribute, device_mesh, placement, src_data_rank=1
-            )
-            full_dtensor = dtensor.full_tensor()
-            if self.rank == 1:
-                self.assertEqual(full_dtensor, tensor_to_distribute)
+        placement_combs = [
+            [Shard(0)],
+            [Shard(1)],
+            [Replicate()],
+            [Partial(reduce_op="sum")],
+            [Partial(reduce_op="avg")],
+        ]
+
+        if not self.is_local_tensor_enabled:
+            # test src_data_rank == 1
+            # set seed differently for each rank
+            self.init_manual_seed_for_rank()
+            for placement in placement_combs:
+                tensor_to_distribute = torch.randn(
+                    3 * self.world_size, 3 * self.world_size
+                )
+                dtensor = distribute_tensor(
+                    tensor_to_distribute, device_mesh, placement, src_data_rank=1
+                )
+                full_dtensor = dtensor.full_tensor()
+                if self.rank == 1:
+                    self.assertEqual(full_dtensor, tensor_to_distribute)
 
         # test src_data_rank = None, make sure it does not have communication
         with comm_mode:
@@ -115,6 +131,10 @@ class DTensorAPITest(DTensorTestBase):
             shard_spec = [Shard(0)]
             distribute_tensor(tensor_to_distribute, device_mesh, shard_spec)
 
+        with self.assertRaisesRegex(ValueError, "conversion is not supported"):
+            new_spec = [Replicate(), Partial(reduce_op="prod")]
+            distribute_tensor(tensor_to_distribute, device_mesh, new_spec)
+
         with self.assertRaisesRegex(RuntimeError, "distribute leaf tensor"):
             shard_spec = [Shard(0)]
             global_tensor = torch.randn(*tensor_shape, requires_grad=True)
@@ -134,7 +154,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_tensor_uneven_sharding(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         input_sizes_and_shard_dims = [
             ((self.world_size * 3 + 1, 3, 3), 0),
             ((self.world_size * 3 + 2, 3, 3), 0),
@@ -152,11 +172,16 @@ class DTensorAPITest(DTensorTestBase):
             dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
             self.assertEqual(dist_tensor.size(), torch.Size(input_size))
             local_tensor = dist_tensor.to_local()
-            self.assertEqual(local_tensor, splitted_tensor_list[self.rank])
+            self.assertEqual(
+                local_tensor,
+                map_local_tensor_for_rank(
+                    splitted_tensor_list, self.rank, lambda tl, r: tl[r]
+                ),
+            )
 
     @with_comms
     def test_distribute_module(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
         # fully shard all linear modules on dim 0
         module_to_shard = MyModel(5 * self.world_size, 20, device=self.device_type)
         shard_spec = [Shard(0)]
@@ -219,7 +244,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_module_input_fn_output_fn(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully replicate all linear modules
         module_to_replicate = MyModel(20, 1, device=self.device_type)
@@ -264,7 +289,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_module_input_fn_output_fn_warning(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully replicate all linear modules
         module_to_replicate = MyModel(20, 1, device=self.device_type)
@@ -292,7 +317,7 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_module_casting(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # check DTensor casting
         dt = DTensor.from_local(torch.rand(10), device_mesh, [Replicate()])
@@ -335,7 +360,7 @@ class DTensorAPITest(DTensorTestBase):
     def test_distribute_module_meta(self):
         # If  the model is too big, the user may first the create entire model on the meta device and then initialize
         # it on the device in the partition function.
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_mesh = self.build_device_mesh()
 
         # fully shard all parameters on dim 0
         module_to_shard = MyModel(5 * self.world_size, 20, device="meta")
@@ -356,6 +381,37 @@ class DTensorAPITest(DTensorTestBase):
             self.assertFalse(param.is_meta)
             self.assertTrue(param.device.type == device_mesh.device_type)
 
+    @with_comms
+    def test_checkpoint_apis_check_partial_placement(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(5, 5, device=self.device_type)
+        dtensor = DTensor.from_local(tensor, device_mesh, [Partial()])
+        with self.assertRaisesRegex(
+            ValueError, "Any checkpointing related operations are not supported for"
+        ):
+            dtensor.__create_write_items__("fqn", None)
+
+        with self.assertRaisesRegex(
+            ValueError, "Any checkpointing related operations are not supported for"
+        ):
+            dtensor.__create_chunk_list__()
+
+        with self.assertRaisesRegex(
+            ValueError, "Any checkpointing related operations are not supported for"
+        ):
+            dtensor.__get_tensor_shard__(0)
+
+        # Ideally we should not allow checkpointing related operations for DTensor
+        with self.assertRaisesRegex(
+            dcp.api.CheckpointException,
+            "Any checkpointing related operations are not supported for",
+        ):
+            dcp.save({"fqn": dtensor}, checkpoint_id=tempfile.mkdtemp())
+
+
+DTensorAPITestWithLocalTensor = create_local_tensor_test_class(
+    DTensorAPITest, skipped_tests=["test_checkpoint_apis_check_partial_placement"]
+)
 
 if __name__ == "__main__":
     run_tests()

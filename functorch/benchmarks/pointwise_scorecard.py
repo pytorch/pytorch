@@ -233,7 +233,7 @@ for shape, operator in itertools.product(shapes, operators):
     args = shape()[:nargs]
 
     try:
-        if shape == medium_transpose:
+        if shape is medium_transpose:
             raise RuntimeError("pointwise_operator hangs on medium_transpose")
         pw_op = pointwise_operator(operator)
         torch.testing.assert_close(operator(*args), pw_op(*args))
@@ -264,7 +264,7 @@ for shape, operator in itertools.product(shapes, operators):
         )
     )
     try:
-        if shape == medium_transpose:
+        if shape is medium_transpose:
             raise RuntimeError("pointwise_operator hangs on medium_transpose")
         if (operator, shape) in nope:
             raise RuntimeError("pointwise_operator fails on medium_transpose")

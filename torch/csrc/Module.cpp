@@ -20,13 +20,13 @@
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
-#include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -56,6 +56,7 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
+#include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
@@ -70,8 +71,10 @@
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/cpu/Module.h>
+#include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -111,6 +114,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
+#include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
@@ -119,6 +123,10 @@
 #else
 #include <ATen/native/cudnn/BatchNorm.h>
 #endif
+#endif
+
+#ifdef USE_XPU
+#include <ATen/native/transformers/xpu/sdp_utils.h>
 #endif
 
 #ifdef USE_DISTRIBUTED
@@ -137,6 +145,8 @@
 #ifdef USE_ITT
 #include <torch/csrc/itt.h>
 #endif
+
+#include <torch/nativert/python/Bindings.h>
 
 namespace py = pybind11;
 
@@ -161,7 +171,7 @@ static PyObject* THPModule_initNames(PyObject* self, PyObject* arg) {
   for (Py_ssize_t i = 0; i < num_classes; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     TORCH_CHECK(PyType_Check(obj), "expected a PyTypeObject");
-    PyTypeObject* type = (PyTypeObject*)obj;
+    PyTypeObject* type = reinterpret_cast<PyTypeObject*>(obj);
 
     THPObjectPtr module_name(PyObject_GetAttrString(obj, "__module__"));
     if (!module_name)
@@ -206,8 +216,8 @@ static PyObject* THPModule_initExtension(
         }
         auto frame_id = s_tb[idx];
         const auto& frame = s_tbs.all_frames.at(frame_id);
-        oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-            << ":" << frame.lineno << '\n';
+        oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
+            << ':' << frame.lineno << '\n';
       }
       return oss.str();
     });
@@ -236,7 +246,7 @@ static PyObject* THPModule_initExtension(
   END_HANDLE_TH_ERRORS
 }
 
-// The idea behind these two functions is to make it easy to test if we are
+// The idea behind these functions is to make it easy to test if we are
 // built with ASAN: they're designed not to crash if ASAN is not enabled, but
 // to trigger ASAN if it is enabled.  This lets us run a "canary" tests which
 // checks if our build environment is misconfigured.
@@ -263,7 +273,7 @@ static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
       THPUtils_typename(arg));
   int32_t x = THPUtils_unpackInt(arg);
   double y = 1.0 / x;
-  return THPUtils_packInt32((int)y);
+  return THPUtils_packInt32(static_cast<int>(y));
   END_HANDLE_TH_ERRORS
 }
 
@@ -329,7 +339,7 @@ static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
       THPUtils_checkLong(arg),
       "set_num_threads expects an int, but got ",
       THPUtils_typename(arg));
-  int nthreads = (int)THPUtils_unpackLong(arg);
+  int nthreads = THPUtils_unpackInt(arg);
   TORCH_CHECK(nthreads > 0, "set_num_threads expects a positive integer");
   at::set_num_threads(nthreads);
   Py_RETURN_NONE;
@@ -351,7 +361,7 @@ static PyObject* THPModule_setNumInteropThreads(
       "set_num_interop_threads expects an int, "
       "but got ",
       THPUtils_typename(arg));
-  int nthreads = (int)THPUtils_unpackLong(arg);
+  int nthreads = THPUtils_unpackInt(arg);
   TORCH_CHECK(
       nthreads > 0, "set_num_interop_threads expects a positive integer");
   at::set_num_interop_threads(nthreads);
@@ -392,38 +402,27 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
-      a->cdata->weak_use_count() == 1,
+      a->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t1's Tensor object but got  ",
-      a->cdata->weak_use_count() - 1);
+      a->cdata.weak_use_count() - 1);
   TORCH_CHECK(
-      b->cdata->weak_use_count() == 1,
+      b->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t2's Tensor object but got  ",
-      b->cdata->weak_use_count() - 1);
+      b->cdata.weak_use_count() - 1);
+
+  // NB: Creating local copies of *both* Tensors here ensures that they each
+  // hold a strong reference to their PyObject. This avoids having to fix up
+  // reference counts when we swap the PyObject slots below.
+  at::Tensor tmp_a = a->cdata;
+  at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
-  c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+  a->cdata = tmp_b;
+  b->cdata = tmp_a;
 
-  // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
-  // associated with the TensorImpl. Swap this field as well.
-  std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  TORCH_INTERNAL_ASSERT(
-      mb_obj_a.has_value() && mb_obj_b.has_value(),
-      "Both tensors should have PyObjects tagged by the current python interpreter");
-  TORCH_CHECK(mb_obj_a.value() == a_);
-  TORCH_CHECK(mb_obj_b.value() == b_);
-
-  a->cdata = b->cdata;
-  b->cdata = tmp;
-
-  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), a_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
-  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
-      getPyInterpreter(), b_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  // Fix up the PyObjects associated with each TensorImpl
+  a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
+  b->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(b_);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -445,7 +444,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
   }
 
   if (Py_TYPE(obj) == &PyCFunction_Type) {
-    PyCFunctionObject* f = (PyCFunctionObject*)obj;
+    PyCFunctionObject* f = reinterpret_cast<PyCFunctionObject*>(obj);
     if (f->m_ml->ml_doc) {
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -454,7 +453,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     f->m_ml->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "method_descriptor") == 0) {
-    PyMethodDescrObject* m = (PyMethodDescrObject*)obj;
+    PyMethodDescrObject* m = reinterpret_cast<PyMethodDescrObject*>(obj);
     if (m->d_method->ml_doc) {
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -463,8 +462,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     m->d_method->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "getset_descriptor") == 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
-    PyGetSetDescrObject* m = (PyGetSetDescrObject*)obj;
+    PyGetSetDescrObject* m = reinterpret_cast<PyGetSetDescrObject*>(obj);
     if (m->d_getset->doc) {
       return PyErr_Format(
           PyExc_RuntimeError,
@@ -473,7 +471,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
     }
     m->d_getset->doc = doc_str;
   } else if (Py_TYPE(obj) == &PyType_Type) {
-    PyTypeObject* t = (PyTypeObject*)obj;
+    PyTypeObject* t = reinterpret_cast<PyTypeObject*>(obj);
     if (t->tp_doc) {
       return PyErr_Format(
           PyExc_RuntimeError, "Type '%s' already has a docstring", t->tp_name);
@@ -492,7 +490,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
 
 static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? (Py_ssize_t)PyTuple_Size(args) : 0;
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
   TORCH_CHECK(num_args == 2, "expected exactly 2 arguments");
   PyObject* arg1 = PyTuple_GET_ITEM(args, 0);
   TORCH_CHECK(THPSize_Check(arg1), "expected a torch.Size as argument 1");
@@ -609,25 +607,56 @@ void DLPack_Capsule_Destructor(PyObject* data) {
 }
 
 template <class T>
-PyObject* THPModule_toDLPackImpl(PyObject* _unused, PyObject* data) {
+PyObject* THPModule_toDLPackImpl(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK(THPVariable_Check(data), "data must be a Tensor");
-  auto tensor = at::DLPackTraits<T>::toDLPack(THPVariable_Unpack(data));
+  static torch::PythonArgParser parser(
+      {"_to_dlpack(Tensor data, *, IntArrayRef? dl_device=None, bool? copy=None)"});
+  torch::ParsedArgs<3> parsed_args{};
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  TORCH_INTERNAL_ASSERT(r.idx == 0);
+
+  auto data = r.tensor(0);
+  auto dl_device = r.intlist(1);
+  auto copy = r.toBoolOptional(2);
+
+  // Parse the int list into a tuple.
+  std::optional<DLDevice> optional_dl_device;
+
+  if (!dl_device.empty()) {
+    TORCH_CHECK(
+        dl_device.size() == 2,
+        "dl_device must be either None or a tuple of ints");
+    optional_dl_device = DLDevice{
+        static_cast<DLDeviceType>(dl_device[0]),
+        static_cast<int32_t>(dl_device[1])};
+  }
+
+  auto tensor = at::DLPackTraits<T>::toDLPack(
+      at::maybeCopyTensor(data, optional_dl_device, copy));
   return PyCapsule_New(
       tensor, at::DLPackTraits<T>::capsule, DLPack_Capsule_Destructor<T>);
+
   END_HANDLE_TH_ERRORS
 }
 
 } // namespace
 
-static PyObject* THPModule_toDLPack(PyObject* _unused, PyObject* data) {
-  return THPModule_toDLPackImpl<DLManagedTensor>(_unused, data);
+static PyObject* THPModule_toDLPack(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  return THPModule_toDLPackImpl<DLManagedTensor>(self, args, kwargs);
 }
 
 static PyObject* THPModule_toDLPackVersioned(
-    PyObject* _unused,
-    PyObject* data) {
-  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(_unused, data);
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  return THPModule_toDLPackImpl<DLManagedTensorVersioned>(self, args, kwargs);
 }
 
 static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
@@ -635,6 +664,146 @@ static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   HANDLE_TH_ERRORS
   auto tensor = torch::utils::tensor_fromDLPack(data);
   return THPVariable_Wrap(tensor);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_torchDeviceToDLDevice(
+    PyObject* _unused,
+    PyObject* data) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPDevice_Check(data),
+      "torchDeviceToDLDevice: expected torch.device argument.");
+  auto device = reinterpret_cast<THPDevice*>(data)->device;
+  auto dl_device = at::torchDeviceToDLDevice(device);
+
+  auto tuple = PyTuple_New(2);
+  if (!tuple) {
+    throw python_error();
+  }
+
+  PyTuple_SET_ITEM(tuple, 0, THPUtils_packInt64(dl_device.device_type));
+  PyTuple_SET_ITEM(tuple, 1, THPUtils_packInt64(dl_device.device_id));
+
+  return tuple;
+  END_HANDLE_TH_ERRORS
+}
+
+struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
+  TorchDLPackExchangeAPI() {
+    header.version.major = DLPACK_MAJOR_VERSION;
+    header.version.minor = DLPACK_MINOR_VERSION;
+    header.prev_api = nullptr;
+    managed_tensor_allocator = ManagedTensorAllocator;
+    managed_tensor_from_py_object_no_sync = ManagedTensorFromPyObjectNoSync;
+    managed_tensor_to_py_object_no_sync = ManagedTensorToPyObjectNoSync;
+    dltensor_from_py_object_no_sync = DLTensorFromPyObjectNoSync;
+    current_work_stream = CurrentWorkStream;
+  }
+
+  static const DLPackExchangeAPI* Global() {
+    static TorchDLPackExchangeAPI inst;
+    return &inst;
+  }
+
+ private:
+  // Fast non-owning PyObject→DLTensor conversion
+  static int DLTensorFromPyObjectNoSync(void* py_obj, DLTensor* out) {
+    try {
+      // Use handle (non-owning) to avoid unnecessary refcount operations
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      at::toDLPackNonOwning(tensor, out);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // PyObject→DLManagedTensorVersioned conversion
+  static int ManagedTensorFromPyObjectNoSync(
+      void* py_obj,
+      DLManagedTensorVersioned** out) {
+    try {
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      *out = at::toDLPackVersioned(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // DLManagedTensorVersioned→PyObject conversion
+  static int ManagedTensorToPyObjectNoSync(
+      DLManagedTensorVersioned* src,
+      void** py_obj_out) {
+    try {
+      at::Tensor tensor = at::fromDLPackVersioned(src, nullptr);
+      *py_obj_out = THPVariable_Wrap(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  // Allocate new tensor from prototype
+  static int ManagedTensorAllocator(
+      DLTensor* prototype,
+      DLManagedTensorVersioned** out,
+      void* error_ctx,
+      void (
+          *SetError)(void* error_ctx, const char* kind, const char* message)) {
+    try {
+      at::IntArrayRef shape(
+          prototype->shape, prototype->shape + prototype->ndim);
+      at::TensorOptions options =
+          at::TensorOptions()
+              .dtype(at::toScalarType(prototype->dtype))
+              .device(at::dlDeviceToTorchDevice(
+                  prototype->device.device_type, prototype->device.device_id));
+      at::Tensor tensor = at::empty(shape, options);
+      *out = at::toDLPackVersioned(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      SetError(error_ctx, "MemoryError", e.what());
+      return -1;
+    }
+  }
+
+  // Get current CUDA/ROCm work stream
+  static int CurrentWorkStream(
+      DLDeviceType device_type,
+      int32_t device_id,
+      void** out_stream) {
+    try {
+#ifdef USE_CUDA
+      if (device_type == kDLCUDA || device_type == kDLROCM) {
+        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+        return 0;
+      }
+#endif
+      // For CPU and other devices, return NULL (no stream concept)
+      *out_stream = nullptr;
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+};
+
+static PyObject* THPModule_DLPackExchangeAPI(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyCapsule_New(
+      const_cast<DLPackExchangeAPI*>(TorchDLPackExchangeAPI::Global()),
+      "dlpack_exchange_api",
+      nullptr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -761,6 +930,25 @@ static PyObject* THPModule_userEnabledFlashSDP(
     PyObject* _unused,
     PyObject* noargs) {
   if (at::globalContext().userEnabledFlashSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+static PyObject* THPModule_setSDPUseFA3(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_fa3 expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFA3(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+static PyObject* THPModule_userEnabledFA3SDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().userEnabledFA3SDP())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -1119,6 +1307,29 @@ static PyObject* THPModule_benchmarkCuDNN(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_FALSE;
 }
 
+static PyObject* THPModule_setImmediateMiopen(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_immediate_miopen expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setImmediateMiopen(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_immediateMiopen(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().immediateMiopen()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 static PyObject* THPModule_setAllowTF32CuBLAS(
     PyObject* _unused,
     PyObject* arg) {
@@ -1146,14 +1357,30 @@ static PyObject* THPModule_allowTF32CuBLAS(
 
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
     PyObject* _unused,
-    PyObject* arg) {
+    PyObject* args) {
   HANDLE_TH_ERRORS
+  PyObject* allow_reduction_obj = nullptr;
+  PyObject* allow_splitk_obj = Py_None;
+  if (!PyArg_ParseTuple(args, "O|O", &allow_reduction_obj, &allow_splitk_obj)) {
+    return nullptr;
+  }
   TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_allow_fp16_reduction_cublas expects a bool, "
+      PyBool_Check(allow_reduction_obj),
+      "set_allow_fp16_reduction_cublas expects a bool for allow_reduced_precision, "
       "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setAllowFP16ReductionCuBLAS(arg == Py_True);
+      THPUtils_typename(allow_reduction_obj));
+  bool allow_reduction = allow_reduction_obj == Py_True;
+  bool allow_splitk = true;
+  if (allow_splitk_obj != Py_None) {
+    TORCH_CHECK(
+        PyBool_Check(allow_splitk_obj),
+        "set_allow_fp16_reduction_cublas expects a bool for allow_splitk, "
+        "but got ",
+        THPUtils_typename(allow_splitk_obj));
+    allow_splitk = allow_splitk_obj == Py_True;
+  }
+  at::globalContext().setAllowFP16ReductionCuBLAS(
+      allow_reduction, allow_splitk);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1161,22 +1388,43 @@ static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
 static PyObject* THPModule_allowFP16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().allowFP16ReductionCuBLAS()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  auto option = at::globalContext().allowFP16ReductionCuBLAS();
+  bool allow_reduced_precision =
+      option == at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  bool allow_splitk = option !=
+      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  return PyTuple_Pack(
+      2,
+      allow_reduced_precision ? Py_True : Py_False,
+      allow_splitk ? Py_True : Py_False);
 }
 
 static PyObject* THPModule_setAllowBF16ReductionCuBLAS(
     PyObject* _unused,
-    PyObject* arg) {
+    PyObject* args) {
   HANDLE_TH_ERRORS
+  PyObject* allow_reduction_obj = nullptr;
+  PyObject* allow_splitk_obj = Py_None;
+  if (!PyArg_ParseTuple(args, "O|O", &allow_reduction_obj, &allow_splitk_obj)) {
+    return nullptr;
+  }
   TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_allow_bf16_reduction_cublas expects a bool, "
+      PyBool_Check(allow_reduction_obj),
+      "set_allow_bf16_reduction_cublas expects a bool for allow_reduced_precision, "
       "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setAllowBF16ReductionCuBLAS(arg == Py_True);
+      THPUtils_typename(allow_reduction_obj));
+  bool allow_reduction = allow_reduction_obj == Py_True;
+  bool allow_splitk = true;
+  if (allow_splitk_obj != Py_None) {
+    TORCH_CHECK(
+        PyBool_Check(allow_splitk_obj),
+        "set_allow_bf16_reduction_cublas expects a bool for allow_splitk, "
+        "but got ",
+        THPUtils_typename(allow_splitk_obj));
+    allow_splitk = allow_splitk_obj == Py_True;
+  }
+  at::globalContext().setAllowBF16ReductionCuBLAS(
+      allow_reduction, allow_splitk);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1184,10 +1432,15 @@ static PyObject* THPModule_setAllowBF16ReductionCuBLAS(
 static PyObject* THPModule_allowBF16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().allowBF16ReductionCuBLAS()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  auto option = at::globalContext().allowBF16ReductionCuBLAS();
+  bool allow_reduced_precision =
+      option == at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  bool allow_splitk = option !=
+      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  return PyTuple_Pack(
+      2,
+      allow_reduced_precision ? Py_True : Py_False,
+      allow_splitk ? Py_True : Py_False);
 }
 
 static PyObject* THPModule_setAllowFP16AccumulationCuBLAS(
@@ -1287,7 +1540,7 @@ static PyObject* THPModule_qEngine(PyObject* _unused, PyObject* noargs) {
 static PyObject* THPModule_supportedQEngines(
     PyObject* _unused,
     PyObject* noargs) {
-  auto qengines = at::globalContext().supportedQEngines();
+  const auto& qengines = at::globalContext().supportedQEngines();
   auto list =
       THPObjectPtr(PyList_New(static_cast<Py_ssize_t>(qengines.size())));
   if (!list)
@@ -1351,10 +1604,11 @@ static PyObject* THPModule_willEngineExecuteNode(
   torch::autograd::Node* node = nullptr;
   std::shared_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
-    node_sp = ((THPFunction*)arg)->cdata.lock();
+    node_sp = (reinterpret_cast<THPFunction*>(arg))->cdata.lock();
     node = node_sp.get();
   } else {
-    node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
+    node =
+        (reinterpret_cast<torch::autograd::THPCppFunction*>(arg))->cdata.get();
   }
   const auto nodes_in_graph =
       torch::autograd::get_current_graph_task_nodes_in_graph();
@@ -1483,6 +1737,41 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_set_warn_on_accumulate_grad_stream_mismatch(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "enabled must be a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setWarnOnAccumulateGradStreamMismatch(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_warn_on_accumulate_grad_stream_mismatch(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().warnOnAccumulateGradStreamMismatch()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THCPModule_ensureCUDADeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureCUDADeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
@@ -1545,6 +1834,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
+    {"_get_fa3_sdp_enabled", THPModule_userEnabledFA3SDP, METH_NOARGS, nullptr},
+    {"_set_sdp_use_fa3", THPModule_setSDPUseFA3, METH_O, nullptr},
     {"_get_mem_efficient_sdp_enabled",
      userEnabledMemEfficientSDP,
      METH_NOARGS,
@@ -1589,6 +1880,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_onednn_allow_tf32", THPModule_setAllowTF32OneDNN, METH_O, nullptr},
     {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O, nullptr},
+    {"_get_miopen_immediate", THPModule_immediateMiopen, METH_NOARGS, nullptr},
+    {"_set_miopen_immediate", THPModule_setImmediateMiopen, METH_O, nullptr},
     {"_get_cudnn_deterministic",
      THPModule_deterministicCuDNN,
      METH_NOARGS,
@@ -1647,7 +1940,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_cublas_allow_fp16_reduced_precision_reduction",
      THPModule_setAllowFP16ReductionCuBLAS,
-     METH_O,
+     METH_VARARGS,
      nullptr},
     {"_get_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_allowBF16ReductionCuBLAS,
@@ -1655,7 +1948,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_setAllowBF16ReductionCuBLAS,
-     METH_O,
+     METH_VARARGS,
      nullptr},
     {"_get_cublas_allow_fp16_accumulation",
      THPModule_allowFP16AccumulationCuBLAS,
@@ -1689,9 +1982,28 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_are_vmap_fallback_warnings_enabled,
      METH_NOARGS,
      nullptr},
-    {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
-    {"_to_dlpack_versioned", THPModule_toDLPackVersioned, METH_O, nullptr},
+    {"_set_warn_on_accumulate_grad_stream_mismatch",
+     THPModule_set_warn_on_accumulate_grad_stream_mismatch,
+     METH_O,
+     nullptr},
+    {"_warn_on_accumulate_grad_stream_mismatch",
+     THPModule_warn_on_accumulate_grad_stream_mismatch,
+     METH_NOARGS,
+     nullptr},
+    {"_to_dlpack",
+     castPyCFunctionWithKeywords(THPModule_toDLPack),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_to_dlpack_versioned",
+     castPyCFunctionWithKeywords(THPModule_toDLPackVersioned),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
+    {"_torchDeviceToDLDevice",
+     THPModule_torchDeviceToDLDevice,
+     METH_O,
+     nullptr},
+    {"_dlpack_exchange_api", THPModule_DLPackExchangeAPI, METH_NOARGS, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"_rename_privateuse1_backend",
      THModule_rename_privateuse1_backend,
@@ -1763,10 +2075,17 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_O,
      nullptr},
     {"_has_torch_function_variadic",
-     (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
+     reinterpret_cast<PyCFunction>(
+         reinterpret_cast<void (*)()>(THPModule_has_torch_function_variadic)),
      METH_FASTCALL,
      nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+    {"_ensureCUDADeviceGuardSet",
+     THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {nullptr, nullptr, 0, nullptr}
+
+};
 
 #ifdef USE_CUDA
 // NOLINTBEGIN(misc-use-internal-linkage)
@@ -1774,6 +2093,7 @@ void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
 void THCPMemPool_init(PyObject* module);
+void THCPGreenContext_init(PyObject* module);
 PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
 void initModule(PyObject* module);
@@ -1834,7 +2154,7 @@ SigHandler* _getOldHandler(int signum) {
   SIG_CHECK(SIGSEGV);
   SIG_CHECK(SIGILL);
 
-  throw std::runtime_error("unexpected signal number");
+  TORCH_CHECK(false, "unexpected signal number");
 #undef SIG_CHECK
 }
 
@@ -1987,8 +2307,10 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
+  torch::acc::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
+  torch::functionalization::initModule(module);
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -1999,12 +2321,15 @@ PyObject* initModule() {
   THCPEvent_init(module);
   THCPGraph_init(module);
   THCPMemPool_init(module);
+  THCPGreenContext_init(module);
 #endif
 
 #ifdef USE_XPU
   THXPStream_init(module);
   THXPEvent_init(module);
 #endif
+
+  torch::distributed::initPlacementBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
@@ -2105,7 +2430,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-    return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
+    return c10::raw::intrusive_ptr::use_count(storage_impl);
   });
 
   ASSERT_TRUE(
@@ -2115,6 +2440,8 @@ Call this whenever a new thread is created in order to propagate values from
       set_module_attr("_has_kleidiai", at::hasKleidiAI() ? Py_True : Py_False));
   ASSERT_TRUE(
       set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
+  ASSERT_TRUE(set_module_attr(
+      "_has_eigen_sparse", at::hasEigenSparse() ? Py_True : Py_False));
 
   py_module.def("_valgrind_supported_platform", []() {
 #if defined(USE_VALGRIND)
@@ -2294,7 +2621,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
   py_module.def("_is_flash_attention_available", []() {
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
     return sdp::is_flash_attention_available();
 #else
     return false;
@@ -2303,7 +2630,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
         return sdp::can_use_flash_attention(params, debug);
 #else
         return false;
@@ -2353,6 +2680,39 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().blasPreferredBackend();
   });
 
+  py::enum_<at::blas::ScalingType>(
+      py_module, "_ScalingType", "Supported Tensor scaling types")
+      .value(
+          "TensorWise",
+          at::blas::ScalingType::TensorWise,
+          "Single scale per-tensor")
+      .value(
+          "RowWise", at::blas::ScalingType::RowWise, "Scale per-row of tensor")
+      .value(
+          "BlockWise1x16",
+          at::blas::ScalingType::BlockWise1x16,
+          "Scale per 16 contiguous values")
+      .value(
+          "BlockWise1x32",
+          at::blas::ScalingType::BlockWise1x32,
+          "Scale per 32 contiguous values")
+      .value(
+          "BlockWise1x128",
+          at::blas::ScalingType::BlockWise1x128,
+          "Scale per 128 contiguous values")
+      .value(
+          "BlockWise128x128",
+          at::blas::ScalingType::BlockWise128x128,
+          "Scale per 128x128 tile");
+
+  py::enum_<at::blas::SwizzleType>(
+      py_module, "_SwizzleType", "Supported scale swizzle types")
+      .value("NO_SWIZZLE", at::blas::SwizzleType::NO_SWIZZLE, "No swizzling")
+      .value(
+          "SWIZZLE_32_4_4",
+          at::blas::SwizzleType::SWIZZLE_32_4_4,
+          "Blackwell-stype 32x4x4 swizzle");
+
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
       .value("AOTriton", at::ROCmFABackend::AOTriton)
@@ -2384,14 +2744,21 @@ Call this whenever a new thread is created in order to propagate values from
       });
 
   py_module.def(
-      "_get_fp32_precision_getter", [](std::string backend, std::string op) {
-        return at::globalContext().float32Precision(backend, op);
+      "_get_fp32_precision_getter",
+      [](const std::string& backend, const std::string& op) {
+        return at::precision2str(at::globalContext().float32Precision(
+            at::str2backend(backend), at::str2op(op)));
       });
 
   py_module.def(
       "_set_fp32_precision_setter",
-      [](std::string backend, std::string op, std::string precision) {
-        at::globalContext().setFloat32Precision(backend, op, precision);
+      [](const std::string& backend,
+         const std::string& op,
+         const std::string& precision) {
+        at::globalContext().setFloat32Precision(
+            at::str2backend(backend),
+            at::str2op(op),
+            at::str2precision(precision));
         return precision;
       });
 
@@ -2420,7 +2787,7 @@ Call this whenever a new thread is created in order to propagate values from
           .getAcceleratorHooksInterface(device_type)
           .deviceCount();
     }
-    return c10::DeviceIndex(-1);
+    return static_cast<c10::DeviceIndex>(-1);
   });
 
   py_module.def(
@@ -2441,7 +2808,7 @@ Call this whenever a new thread is created in order to propagate values from
           .getAcceleratorHooksInterface(device_type)
           .getCurrentDevice();
     }
-    return c10::DeviceIndex(-1);
+    return static_cast<c10::DeviceIndex>(-1);
   });
 
   py_module.def(
@@ -2452,7 +2819,7 @@ Call this whenever a new thread is created in order to propagate values from
               .getAcceleratorHooksInterface(device_type)
               .exchangeDevice(device_index);
         }
-        return c10::DeviceIndex(-1);
+        return static_cast<c10::DeviceIndex>(-1);
       });
 
   py_module.def(
@@ -2464,7 +2831,7 @@ Call this whenever a new thread is created in order to propagate values from
               .getAcceleratorHooksInterface(device_type)
               .maybeExchangeDevice(device_index);
         }
-        return c10::DeviceIndex(-1);
+        return static_cast<c10::DeviceIndex>(-1);
       });
 
   py_module.def(
@@ -2509,32 +2876,10 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("_has_xpu", has_xpu));
   ASSERT_TRUE(
       set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
+  ASSERT_TRUE(set_module_attr(
+      "_has_mkldnn_acl", AT_MKLDNN_ACL_ENABLED() ? Py_True : Py_False));
 
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_True));
-
-// See note [Pybind11 ABI constants]
-#define SET_STR_DEFINE(name) \
-  ASSERT_TRUE(set_module_attr("_" #name, THPUtils_packString(name)))
-
-#ifdef PYBIND11_COMPILER_TYPE
-  SET_STR_DEFINE(PYBIND11_COMPILER_TYPE);
-#else
-  ASSERT_TRUE(
-      set_module_attr("_" C10_STRINGIZE(PYBIND11_COMPILER_TYPE), Py_None));
-#endif
-
-#ifdef PYBIND11_STDLIB
-  SET_STR_DEFINE(PYBIND11_STDLIB);
-#else
-  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_STDLIB), Py_None));
-#endif
-
-#ifdef PYBIND11_BUILD_ABI
-  SET_STR_DEFINE(PYBIND11_BUILD_ABI);
-#else
-  ASSERT_TRUE(set_module_attr("_" C10_STRINGIZE(PYBIND11_BUILD_ABI), Py_None));
-#endif
-#undef SET_STR_DEFINE
 
   py_module.def(
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
@@ -2571,8 +2916,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_dump_local_tls_set", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
-    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+    std::cout << "Included: " << toString(local_keyset.included_) << '\n';
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << '\n';
   });
 
   py_module.def(
@@ -2650,8 +2995,8 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("eps"));
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
-  THPDefaultCPUGenerator =
-      (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
+  THPDefaultCPUGenerator = reinterpret_cast<THPGenerator*>(
+      THPGenerator_initDefaultGenerator(defaultGenerator));
   // This reference is meant to be given away, so no need to incref here.
   ASSERT_TRUE(set_module_attr(
       "default_generator",
@@ -2692,6 +3037,8 @@ Call this whenever a new thread is created in order to propagate values from
 #ifdef USE_KINETO
   torch::global_kineto_init();
 #endif
+  auto nativert_module = py_module.def_submodule("_nativert");
+  torch::nativert::initModelRunnerPybind(nativert_module);
   return module;
   END_HANDLE_TH_ERRORS
 }
@@ -2706,7 +3053,6 @@ static void pytorch_duplicate_guard() {
     abort();
   }
   initialized = 1;
-  ;
 }
 
 struct call_duplicate_guard {

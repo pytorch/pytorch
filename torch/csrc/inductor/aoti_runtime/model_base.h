@@ -1,9 +1,272 @@
 #pragma once
-
-#include <dlfcn.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <functional> // std::function
+#ifdef USE_MMAP_SELF
+#include <errno.h>
 #include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+
+#define PROT_READ 0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC 0x4
+
+#define MAP_SHARED 0x01
+#define MAP_PRIVATE 0x02
+#define MAP_FAILED ((void*)-1)
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+struct Dl_info {
+  char dli_fname[MAX_PATH]; /**< Filename of defining object */
+  void* dli_fbase; /**< Load address of that object */
+  const char* dli_sname; /**< Name of nearest lower symbol */
+  void* dli_saddr; /**< Exact value of nearest symbol */
+};
+typedef struct Dl_info Dl_info;
+
+int dladdr(const void* addr, Dl_info* info) {
+  // only returns filename, FWIW.
+  CHAR tpath[MAX_PATH];
+  MEMORY_BASIC_INFORMATION mbi;
+  char* path;
+  char* tmp;
+  size_t length;
+  int ret = 0;
+
+  if (!info)
+    return 0;
+
+  HMODULE hModule;
+  if (!GetModuleHandleExA(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          (LPCSTR)addr,
+          &hModule) ||
+      hModule == NULL)
+    return 0;
+
+  ret = GetModuleFileNameA(hModule, (LPSTR)&tpath, MAX_PATH);
+  if (!ret)
+    return 0;
+
+  path = tpath;
+
+  length = strlen(path);
+  if (length >= MAX_PATH) {
+    length = MAX_PATH - 1;
+    path[MAX_PATH - 1] = '\0';
+  }
+
+  tmp = path;
+  while (*tmp) {
+    if (*tmp == '\\')
+      *tmp = '/';
+    tmp++;
+  }
+
+  memcpy(info->dli_fname, path, length + 1);
+  info->dli_fbase = hModule;
+  info->dli_sname = NULL;
+  info->dli_saddr = NULL;
+  return 1;
+}
+
+static DWORD get_creation_disposition(int flags) {
+  if (flags & O_CREAT) {
+    if (flags & O_EXCL)
+      return CREATE_NEW;
+    if (flags & O_TRUNC)
+      return CREATE_ALWAYS;
+    return OPEN_ALWAYS;
+  }
+  if (flags & O_TRUNC)
+    return TRUNCATE_EXISTING;
+  return OPEN_EXISTING;
+}
+
+#define O_ACCMODE 03
+#define O_RDONLY 00
+#define O_WRONLY 01
+#define O_RDWR 02
+
+static DWORD get_access_mode(int flags) {
+  switch (flags & O_ACCMODE) {
+    case O_RDONLY:
+      return GENERIC_READ;
+    case O_WRONLY:
+      return GENERIC_WRITE;
+    case O_RDWR:
+      return GENERIC_READ | GENERIC_WRITE;
+    default:
+      return GENERIC_READ;
+  }
+}
+#ifndef O_DSYNC
+#define O_DSYNC 00010000 /* used to be O_SYNC, see below */
+#endif
+
+#ifndef O_SYNC
+#define __O_SYNC 04000000
+#define O_SYNC (__O_SYNC | O_DSYNC)
+#endif
+
+int open(char* pathname, int flags) {
+  DWORD dwDesiredAccess = get_access_mode(flags);
+  DWORD dwCreationDisposition = get_creation_disposition(flags);
+  DWORD dwShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+  DWORD dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
+
+  if (flags & O_SYNC) {
+    dwFlagsAndAttributes |= FILE_FLAG_WRITE_THROUGH;
+  }
+
+  if (flags & O_SEQUENTIAL) {
+    dwFlagsAndAttributes |= FILE_FLAG_SEQUENTIAL_SCAN;
+  }
+
+  if (flags & O_RANDOM) {
+    dwFlagsAndAttributes |= FILE_FLAG_RANDOM_ACCESS;
+  }
+
+  HANDLE hFile = CreateFileA(
+      pathname,
+      dwDesiredAccess,
+      dwShareMode,
+      NULL,
+      dwCreationDisposition,
+      dwFlagsAndAttributes,
+      NULL);
+
+  if (hFile == INVALID_HANDLE_VALUE) {
+    switch (GetLastError()) {
+      case ERROR_FILE_NOT_FOUND:
+        errno = ENOENT;
+        break;
+      case ERROR_PATH_NOT_FOUND:
+        errno = ENOTDIR;
+        break;
+      case ERROR_ACCESS_DENIED:
+        errno = EACCES;
+        break;
+      case ERROR_FILE_EXISTS:
+        errno = EEXIST;
+        break;
+      case ERROR_TOO_MANY_OPEN_FILES:
+        errno = EMFILE;
+        break;
+      default:
+        errno = EIO;
+    }
+    return -1;
+  }
+
+  int fd = _open_osfhandle((intptr_t)hFile, flags);
+  if (fd == -1) {
+    CloseHandle(hFile);
+    errno = EMFILE;
+    return -1;
+  }
+
+  if (flags & O_APPEND) {
+    lseek(fd, 0, SEEK_END);
+  }
+
+  return fd;
+}
+
+int close(int fd) {
+  return _close(fd);
+}
+
+void* mmap(
+    void* addr,
+    size_t length,
+    int prot,
+    int flags,
+    int fd,
+    off_t offset) {
+  HANDLE hFile = (HANDLE)_get_osfhandle(fd);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    errno = EBADF;
+    return MAP_FAILED;
+  }
+
+  DWORD flProtect;
+  if (prot & PROT_WRITE) {
+    flProtect = PAGE_READWRITE;
+  } else if (prot & PROT_READ) {
+    flProtect = PAGE_READONLY;
+  } else {
+    flProtect = PAGE_NOACCESS;
+  }
+
+  flProtect = PAGE_READONLY;
+
+  DWORD dwDesiredAccess = 0;
+  if (prot & PROT_READ)
+    dwDesiredAccess |= FILE_MAP_READ;
+  if (prot & PROT_WRITE)
+    dwDesiredAccess |= FILE_MAP_WRITE;
+  if (prot & PROT_EXEC)
+    dwDesiredAccess |= FILE_MAP_EXECUTE;
+
+  dwDesiredAccess = FILE_MAP_READ;
+
+  SYSTEM_INFO SysInfo;
+  GetSystemInfo(&SysInfo);
+  DWORD dwSysGran = SysInfo.dwAllocationGranularity;
+
+  DWORD dwFileMapStart = (offset / dwSysGran) * dwSysGran;
+  DWORD dwMapViewSize = (offset % dwSysGran) + length;
+  DWORD dwFileMapSize = offset + length;
+  int iViewDelta = offset - dwFileMapStart;
+
+  HANDLE hMapping =
+      CreateFileMapping(hFile, NULL, flProtect, 0, dwFileMapSize, NULL);
+
+  if (!hMapping) {
+    DWORD dwErrCode = GetLastError();
+    errno = EACCES;
+    return MAP_FAILED;
+  }
+
+  void* lpMapAddress = MapViewOfFileEx(
+      hMapping, dwDesiredAccess, 0, dwFileMapStart, dwMapViewSize, addr);
+  if (!lpMapAddress) {
+    DWORD dwErrCode = GetLastError();
+    errno = EINVAL;
+  }
+
+  void* pData = (char*)lpMapAddress + iViewDelta;
+
+  CloseHandle(hMapping);
+
+  if (!lpMapAddress) {
+    return MAP_FAILED;
+  }
+
+  return pData;
+}
+
+int munmap(void* addr, size_t length) {
+  if (!UnmapViewOfFile(addr)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+#endif // USE_MMAP_SELF
+#else // !_WIN32
+#include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#endif // _WIN32
+
+#include <fcntl.h>
 #include <optional>
 #include <regex>
 #include <stdexcept>
@@ -62,10 +325,23 @@ using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+  // Use caching allocator for allocating GPU memory
   void* data_ptr = nullptr;
-  AOTI_RUNTIME_DEVICE_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
-  auto deleter = [](void* ptr) { AOTI_RUNTIME_DEVICE_CHECK(cudaFree(ptr)); };
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_cuda_caching_allocator_raw_alloc(num_bytes, &data_ptr));
+  auto deleter = [](void* ptr) {
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_cuda_caching_allocator_raw_delete(ptr));
+  };
   return RAIIDataPtr(data_ptr, deleter);
+#else
+  // Use cudaMalloc directly for allocating GPU memory
+  void* data_ptr = nullptr;
+  AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
+  return RAIIDataPtr(data_ptr, deleter);
+#endif
 }
 
 #elif defined(USE_XPU)
@@ -87,8 +363,9 @@ RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
   return RAIIDataPtr(data_ptr, deleter);
 }
 
-#else
+#endif // USE_CUDA
 
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
   void* data_ptr = std::malloc(num_bytes);
   if (!data_ptr) {
@@ -97,9 +374,6 @@ RAIIDataPtr RAII_cpuMalloc(size_t num_bytes) {
   auto deleter = [](void* ptr) { std::free(ptr); };
   return RAIIDataPtr(data_ptr, deleter);
 }
-
-#endif // USE_CUDA
-
 } // anonymous namespace
 
 namespace torch::aot_inductor {
@@ -165,10 +439,10 @@ class AOTInductorModelBase {
 
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
-      AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
+      AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx_));
     } else {
       // If device_idx_ is passed in, we need to set the current device to it
-      AOTI_RUNTIME_DEVICE_CHECK(cudaSetDevice(device_idx_));
+      AOTI_RUNTIME_CUDA_CHECK(cudaSetDevice(device_idx_));
     }
 #endif // USE_CUDA
 #ifdef USE_XPU
@@ -192,7 +466,7 @@ class AOTInductorModelBase {
       auto code = cudaEventDestroy(*run_finished_);
       if (code != cudaSuccess) {
         std::cerr << "Failed to destroy CUDA event in AOTInductor model: "
-                  << cudaGetErrorString(code) << "\n";
+                  << cudaGetErrorString(code) << '\n';
       }
     }
 #endif // USE_CUDA
@@ -222,7 +496,7 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
     if (!run_finished_) {
       cudaEvent_t run_finished = nullptr;
-      AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
 #elif defined(USE_XPU)
@@ -239,7 +513,7 @@ class AOTInductorModelBase {
     model->run_impl(input_handles, output_handles, stream, proxy_executor);
 
 #ifdef USE_CUDA
-    AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
 #elif defined(USE_XPU)
     run_finished_ = std::make_optional<sycl::event*>(new sycl::event(
         static_cast<sycl::queue*>(stream)->ext_oneapi_submit_barrier()));
@@ -273,7 +547,7 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
     if (!run_finished_) {
       cudaEvent_t run_finished = nullptr;
-      AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
+      AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
 #elif defined(USE_XPU)
@@ -291,7 +565,7 @@ class AOTInductorModelBase {
         model->const_run_impl(stream, proxy_executor, initialization);
 
 #ifdef USE_CUDA
-    AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(*run_finished_, stream));
 #elif defined(USE_XPU)
     // sycl::queue* queue_ptr = nullptr;
     // aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
@@ -305,25 +579,54 @@ class AOTInductorModelBase {
     return folded_constants;
   }
 
-  void load_constants() {
+  void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
+#if defined(USE_MMAP_EXTERNAL)
+    user_managed_mmap = const_cast<uint8_t*>(weight_blob_ptr);
+    load_constants(true);
+#endif
+  }
+
+  void load_constants(bool force = false) {
     size_t num_constants = this->num_constants();
     size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
 
+    // A CUDA model can still have constants on CPU,
+    // so we need a separate secondary blob for them.
     std::vector<size_t> constants_internal_offset(
         num_constants - num_folded_constants);
+    std::vector<size_t> secondary_cpu_constants_internal_offset(
+        num_constants - num_folded_constants);
     size_t blob_size = 0;
-    compute_constant_blob(blob_size, constants_internal_offset);
-    if (!include_weights) {
+    size_t secondary_cpu_blob_size = 0;
+    compute_constant_blob(
+        blob_size,
+        constants_internal_offset,
+        secondary_cpu_blob_size,
+        secondary_cpu_constants_internal_offset);
+
+    if (!force && !include_weights) {
       return;
     }
+
+    // Allocate main blob
+    if (blob_size > 0) {
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
-    constant_blob_ = RAII_gpuMalloc(blob_size);
+      constant_blob_ = RAII_gpuMalloc(blob_size);
 #else
-    constant_blob_ = RAII_cpuMalloc(blob_size);
+      constant_blob_ = RAII_cpuMalloc(blob_size);
 #endif
+    }
+
+    // Allocate secondary blob on CPU
+    if (secondary_cpu_blob_size > 0) {
+      secondary_cpu_constant_blob_ = RAII_cpuMalloc(secondary_cpu_blob_size);
+    }
 
     size_t bytes_read = 0;
+    size_t main_blob_idx = 0;
+    size_t secondary_cpu_blob_idx = 0;
+
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
       if (from_folded) {
@@ -331,13 +634,33 @@ class AOTInductorModelBase {
       }
       std::string name = this->constant_name(i);
       size_t data_size = this->constant_data_size(i);
-      uint8_t* internal_ptr = (data_size != 0)
-          ? constant_ptr(
-                constants_internal_offset[i],
-                bytes_read,
-                data_size,
-                /* skip_copy = */ false)
-          : nullptr;
+      int32_t const_device_type = this->constant_device_type(i);
+      bool device_type_matches = const_device_type == device_type_;
+      uint8_t* internal_ptr = nullptr;
+      if (data_size != 0) {
+        if (device_type_matches) {
+          internal_ptr = constant_ptr(
+              constants_internal_offset[main_blob_idx],
+              bytes_read,
+              data_size,
+              /* skip_copy = */ false);
+        } else {
+          auto* secondary_cpu_constants_ptr =
+              static_cast<uint8_t*>(secondary_cpu_constant_blob_.get());
+          internal_ptr = secondary_cpu_constants_ptr +
+              secondary_cpu_constants_internal_offset[secondary_cpu_blob_idx];
+          memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
+        }
+      }
+
+      // Always increment blob indices to stay in sync with
+      // compute_constant_blob(), even for zero-size constants.
+      if (device_type_matches) {
+        main_blob_idx++;
+      } else {
+        secondary_cpu_blob_idx++;
+      }
+
       bytes_read += data_size;
 
       // Create at::Tensor from copied memory.
@@ -363,8 +686,8 @@ class AOTInductorModelBase {
           stride,
           offset,
           dtype,
-          device_type_,
-          device_idx_,
+          const_device_type,
+          device_type_matches ? device_idx_ : 0,
           &tensor_handle,
           layout,
           opaque_metadata_ptr,
@@ -408,7 +731,7 @@ class AOTInductorModelBase {
           ->memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size)
           .wait();
 #elif USE_CUDA
-      AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
+      AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
           internal_ptr,
           _get_constants_start() + bytes_read,
           data_size,
@@ -430,21 +753,35 @@ class AOTInductorModelBase {
 
   void compute_constant_blob(
       size_t& blob_size,
-      std::vector<size_t>& constants_internal_offset) {
+      std::vector<size_t>& constants_internal_offset,
+      size_t& secondary_cpu_blob_size,
+      std::vector<size_t>& secondary_cpu_constants_internal_offset) {
     size_t num_constants = this->num_constants();
     blob_size = 0;
-    size_t curr_idx = 0;
+    secondary_cpu_blob_size = 0;
+    size_t main_idx = 0;
+    size_t secondary_idx = 0;
+
     for (size_t i = 0; i < num_constants; i++) {
       if (this->constant_from_folded(i)) {
         continue;
       }
+
       size_t data_size = this->constant_data_size(i);
+      // ok to use same AOTI_CONST_ALIGNMENT for both main and secondary blobs
       if (data_size % AOTI_CONST_ALIGNMENT) {
         data_size = AOTI_CONST_ALIGNMENT +
             (data_size / AOTI_CONST_ALIGNMENT) * AOTI_CONST_ALIGNMENT;
       }
-      constants_internal_offset[curr_idx++] = blob_size;
-      blob_size += data_size;
+
+      if (this->constant_device_type(i) == device_type_) {
+        constants_internal_offset[main_idx++] = blob_size;
+        blob_size += data_size;
+      } else {
+        secondary_cpu_constants_internal_offset[secondary_idx++] =
+            secondary_cpu_blob_size;
+        secondary_cpu_blob_size += data_size;
+      }
     }
   }
 
@@ -531,12 +868,27 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).type;
   }
 
+  int32_t constant_device_type(int64_t idx) const {
+    return constants_info_.at(idx).device_type;
+  }
+
   const char* get_in_spec() const {
     return in_spec_.c_str();
   }
 
   const char* get_out_spec() const {
     return out_spec_.c_str();
+  }
+
+  uint64_t constant_blob_size() const {
+#if defined(USE_MMAP_SELF) || defined(USE_MMAP_EXTERNAL)
+    const uint64_t weights_size =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
+    return weights_size;
+#else
+    throw std::runtime_error{
+        "constant blob size is only available for mmap'd weights"};
+#endif
   }
 
   void update_constants_array_from_map() {
@@ -613,7 +965,7 @@ class AOTInductorModelBase {
       throw std::runtime_error{"Model event was not initialized"};
     }
 
-    AOTI_RUNTIME_DEVICE_CHECK(cudaEventSynchronize(*run_finished_));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(*run_finished_));
 #endif // USE_CUDA
 #ifdef USE_XPU
     if (!run_finished_) {
@@ -625,6 +977,15 @@ class AOTInductorModelBase {
 
  protected:
   uint8_t* _get_constants_start() {
+#if defined(USE_MMAP_EXTERNAL)
+    if (!user_managed_mmap) {
+      throw std::runtime_error{
+          "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first."};
+    }
+    // Mapped memory for weights
+    return user_managed_mmap;
+#endif
+
 #ifndef USE_MMAP_SELF
     // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
@@ -664,6 +1025,7 @@ class AOTInductorModelBase {
     return self_mmap;
 #endif
   }
+
   struct ParamInfo {
     const char* name = nullptr;
   };
@@ -673,6 +1035,7 @@ class AOTInductorModelBase {
     std::vector<int64_t> shape;
     std::vector<int64_t> stride;
     int32_t dtype{};
+    int32_t device_type{};
     int64_t offset{};
     size_t data_size{};
     int32_t layout{};
@@ -694,9 +1057,17 @@ class AOTInductorModelBase {
 
   // Holds the blob storage for constants' at::Tensor.
   RAIIDataPtr constant_blob_;
+  // For mixed-device models, secondary_cpu_constant_blob_ holds CPU constants
+  RAIIDataPtr secondary_cpu_constant_blob_;
 
-#ifdef USE_MMAP_SELF
+#if defined(USE_MMAP_SELF)
+  // Mapped memory for weights
   uint8_t* self_mmap = NULL;
+#endif
+
+#if defined(USE_MMAP_EXTERNAL)
+  // Mapped memory for weights
+  uint8_t* user_managed_mmap = NULL;
 #endif
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.

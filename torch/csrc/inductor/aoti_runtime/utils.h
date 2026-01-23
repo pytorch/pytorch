@@ -12,6 +12,7 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/util/shim_utils.h>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define AOTI_NOINLINE __attribute__((noinline))
@@ -21,39 +22,104 @@
 #define AOTI_NOINLINE
 #endif
 
-AOTI_NOINLINE static void throw_exception(
-    const char* call,
-    const char* file,
-    int64_t line) {
-  std::stringstream ss;
-  ss << call << " API call failed at " << file << ", line " << line;
-  throw std::runtime_error(ss.str());
-}
-
-#define AOTI_TORCH_ERROR_CODE_CHECK(call)       \
-  if ((call) != AOTI_TORCH_SUCCESS) {           \
-    throw_exception(#call, __FILE__, __LINE__); \
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                  \
+  if ((call) != AOTI_TORCH_SUCCESS) {                                      \
+    torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
 
 using AOTIRuntimeError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0
 #define AOTI_RUNTIME_FAILURE 1
 
-#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)     \
-  if ((call) != AOTI_RUNTIME_SUCCESS) {         \
-    throw_exception(#call, __FILE__, __LINE__); \
+#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)                                \
+  if ((call) != AOTI_RUNTIME_SUCCESS) {                                    \
+    torch::headeronly::detail::throw_exception(#call, __FILE__, __LINE__); \
   }
 
 namespace torch::aot_inductor {
 
 using DeleterFnPtr = void (*)(void*);
 
-inline void noop_deleter(void*) {}
+inline void noop_deleter(void* /*unused*/) {}
+
+inline void delete_record_function_object(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_record_function_end(
+      reinterpret_cast<AtenRecordFunctionHandle>(ptr)));
+}
 
 inline void delete_tensor_object(void* ptr) {
   AOTI_TORCH_ERROR_CODE_CHECK(
       aoti_torch_delete_tensor_object(reinterpret_cast<AtenTensorHandle>(ptr)));
 }
+
+inline void delete_c10_value_object(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_c10_value_object(
+      reinterpret_cast<C10IValueHandle>(ptr)));
+}
+
+class RAIIAtenRecordFunctionHandle {
+ public:
+  RAIIAtenRecordFunctionHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIAtenRecordFunctionHandle(const RAIIAtenRecordFunctionHandle& other) =
+      delete;
+  RAIIAtenRecordFunctionHandle& operator=(
+      const RAIIAtenRecordFunctionHandle& other) = delete;
+
+  // Initiate an RAII RecordFunction without Inputs
+  RAIIAtenRecordFunctionHandle(const char* name, IValueMapHandle kwargs)
+      : handle_(nullptr, delete_record_function_object) {
+    AtenRecordFunctionHandle tmp_handle = nullptr;
+    aoti_record_function_start(name, kwargs, nullptr, 0, &tmp_handle);
+    handle_.reset(tmp_handle);
+  }
+
+  // Initiate an RAII RecordFunction with Inputs
+  RAIIAtenRecordFunctionHandle(
+      const char* name,
+      IValueMapHandle kwargs,
+      std::vector<C10IValueHandle> inputs)
+      : handle_(nullptr, delete_record_function_object) {
+    AtenRecordFunctionHandle tmp_handle = nullptr;
+    aoti_record_function_start(
+        name, kwargs, inputs.data(), inputs.size(), &tmp_handle);
+    handle_.reset(tmp_handle);
+  }
+
+  // Steal the ownership from another RAIIAtenRecordFunctionHandle using
+  // std::move
+  RAIIAtenRecordFunctionHandle(RAIIAtenRecordFunctionHandle&& other) = default;
+  RAIIAtenRecordFunctionHandle& operator=(
+      RAIIAtenRecordFunctionHandle&& other) = default;
+
+  // Steal the ownership from raw AtenRecordFunctionHandle
+  RAIIAtenRecordFunctionHandle(AtenRecordFunctionHandle handle)
+      : handle_(handle, delete_record_function_object) {}
+
+  ~RAIIAtenRecordFunctionHandle() {
+    handle_.reset();
+  }
+
+  // Return a raw AtenRecordFunctionHandle to be used by aoti_torch functions
+  // Note: this function does NOT transfer the ownership of the handle
+  operator AtenRecordFunctionHandle() const {
+    return handle_.get();
+  }
+
+  AtenRecordFunctionHandle release() {
+    return handle_.release();
+  }
+
+  AtenRecordFunctionHandle get() const {
+    return handle_.get();
+  }
+
+  void reset() {
+    handle_.reset();
+  }
+
+ private:
+  std::unique_ptr<AtenRecordFunctionOpaque, DeleterFnPtr> handle_;
+};
 
 // RAIIAtenTensorHandle steals the tensor objects created by the libtorch C ABI
 class RAIIAtenTensorHandle {
@@ -135,9 +201,50 @@ class RAIIAtenTensorHandle {
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
 
+// RAIIC10IValueHandle steals the IValue objects created by the libtorch C ABI
+class RAIIC10IValueHandle {
+ public:
+  RAIIC10IValueHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIC10IValueHandle(const RAIIC10IValueHandle& other) = delete;
+  RAIIC10IValueHandle& operator=(const RAIIC10IValueHandle& other) = delete;
+
+  // Steal the ownership from another RAIIC10IValueHandle using std::move
+  RAIIC10IValueHandle(RAIIC10IValueHandle&& other) = default;
+  RAIIC10IValueHandle& operator=(RAIIC10IValueHandle&& other) = default;
+
+  // Steal the ownership from raw C10IValueHandle
+  RAIIC10IValueHandle(C10IValueHandle handle)
+      : handle_(handle, delete_c10_value_object) {}
+
+  ~RAIIC10IValueHandle() {
+    handle_.reset();
+  }
+
+  // Return a raw C10IValueHandle to be used by aoti_torch functions
+  // Note: this function does NOT transfer the ownership of the handle
+  operator C10IValueHandle() const {
+    return handle_.get();
+  }
+
+  C10IValueHandle release() {
+    return handle_.release();
+  }
+
+  C10IValueHandle get() const {
+    return handle_.get();
+  }
+
+  void reset() {
+    handle_.reset();
+  }
+
+ private:
+  std::unique_ptr<C10IValueOpaque, DeleterFnPtr> handle_;
+};
+
 class MaybeOwningAtenTensorHandle {
  public:
-  MaybeOwningAtenTensorHandle() : handle_(nullptr), raii_handle_() {}
+  MaybeOwningAtenTensorHandle() : handle_(nullptr) {}
   // We skip copy constructor as MaybeOwningAtenTensorHandle might be RAII which
   // makes it undefined.
   MaybeOwningAtenTensorHandle(const MaybeOwningAtenTensorHandle& other) =

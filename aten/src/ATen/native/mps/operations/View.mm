@@ -4,8 +4,6 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Resize.h>
-// For MTLLanguageVersion_3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
@@ -17,30 +15,11 @@
 #include <ATen/ops/view_as_real.h>
 #endif
 
-namespace at::native {
-namespace mps {
-
-static IntArrayRef updateTensorBaseShape(const Tensor& self) {
-  IntArrayRef base_shape = getIMPSAllocator()->getBufferShape(self.storage().data());
-  // if there's no base_shape stored in MPSAllocator, then infer it from tensor's size and store it
-  if (base_shape.size() == 0) {
-    // IntArrayRef wouldn't own the data, so we use a static storage
-    static const int64_t shape_1d = 1;
-    // self.sizes().size() could be zero
-    base_shape = self.sizes().size()
-        ? self.sizes()
-        : ((self.is_view() && self._base().sizes().size()) ? self._base().sizes() : IntArrayRef(&shape_1d, 1));
-
-    // base_shape will be retained in MPSAllocator until buffer gets recycled
-    if (self.storage().data())
-      getIMPSAllocator()->setBufferShape(self.storage().data(), base_shape);
-  }
-  return base_shape;
-}
+namespace at::native::mps {
 
 // For both scatter and gather kernels, there are 4 specized ones (for 1D to 4D tensor)
 // and one generic, for 5+D ones. Assumption (to be tested) about specialized kernels
-// is that reduction of n-dimentional vector, where n is 2, should be slower
+// is that reduction of n-dimensional vector, where n is 2, should be slower
 // than reduction of 2D one, as n is not known at compiler time, therefore compiler
 // could not do loop unrolls, that is
 // float sum(float* v, int n) {
@@ -198,26 +177,4 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output) {
   return output;
 }
 
-} // namespace mps
-
-// implementation of as_strided() op
-Tensor as_strided_tensorimpl_mps(const Tensor& self,
-                                 IntArrayRef size,
-                                 IntArrayRef stride,
-                                 std::optional<int64_t> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result =
-      detail::make_tensor<TensorImpl>(c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-  setStrided(result, size, stride, storage_offset);
-
-  // creating the view graph will be deferred until gatherViewTensor() or scatterViewTensor() are called.
-  // In as_strided, we just update the base shape of the buffer in order to retrieve it later
-  // when we create/run the view graph.
-  IntArrayRef base_shape = mps::updateTensorBaseShape(self);
-  TORCH_INTERNAL_ASSERT(
-      !base_shape.empty(), "Failed to update the base shape of tensor's buffer at ", self.storage().data());
-
-  return result;
-}
-
-} // namespace at::native
+} // namespace at::native::mps

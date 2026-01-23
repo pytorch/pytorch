@@ -29,6 +29,7 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
+#include <fmt/format.h>
 
 using namespace at;
 using namespace torch::autograd::utils;
@@ -60,6 +61,33 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 // and tuples of those types. We also handle bools as if they were a
 // Variable[ByteTensor].
 
+// We only go one deep, because that's all torchdim needs (it supports
+// a tuple/list of FCDs which triggers a split behavior, but you can
+// only do it at the top level) and it's all the dispatcher will do
+// as well.
+static bool sequence_has_torch_function(PyObject* seq) {
+  auto length = PySequence_Length(seq);
+  if (length < 0) {
+    PyErr_Clear();
+    return false;
+  }
+
+  for (Py_ssize_t i = 0; i < length; i++) {
+    THPObjectPtr item(PySequence_GetItem(seq, i));
+    if (!item.get()) {
+      PyErr_Clear();
+      continue;
+    }
+
+    // Only check direct torch function on item (no recursion)
+    if (check_has_torch_function(item.get(), /*ignore_mode*/ true)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 static int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
@@ -67,8 +95,10 @@ static int64_t count_specified_dimensions(PyObject* index) {
   auto size = PyTuple_GET_SIZE(index);
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i);
-    if (check_has_torch_function(obj))
+    if (check_has_torch_function(obj)) {
       return -1;
+    }
+
     if (THPVariable_Check(obj)) {
       const auto& var = THPVariable_Unpack(obj);
       const auto& var_scalar_type = var.scalar_type();
@@ -77,10 +107,19 @@ static int64_t count_specified_dimensions(PyObject* index) {
       } else {
         count++;
       }
-    } else if (
-        obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
-        obj != Py_False) {
-      count++;
+    } else {
+      // Check sequences for __torch_function__ (top-level only)
+      // NB: do NOT use PySequence_Check, that will grab things like Numpy
+      // arrays
+      if (PyTuple_Check(obj) || PyList_Check(obj)) {
+        if (sequence_has_torch_function(obj)) {
+          return -1; // Signal torch function handling needed
+        }
+      }
+      if (obj != Py_None && obj != Py_Ellipsis && obj != Py_True &&
+          obj != Py_False) {
+        count++;
+      }
     }
   }
   return count;
@@ -123,10 +162,12 @@ inline Variable valueToTensor(
   } else if (torch::is_symbool(value)) {
     scalar = Scalar(py::cast<c10::SymBool>(py::handle(value)));
   } else {
-    throw TypeError(
-        "can't assign a %s to a %s",
+    TORCH_CHECK_TYPE(
+        false,
+        "can't assign a ",
         Py_TYPE(value)->tp_name,
-        torch::utils::options_to_string(options).c_str());
+        " to a ",
+        torch::utils::options_to_string(options));
   }
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
@@ -395,7 +436,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   int64_t specified_dims = count_specified_dimensions(holder.get());
   if (specified_dims == -1) {
-    return handle_torch_function_indexing(self, holder.get());
+    return handle_torch_function_indexing(self, index);
   }
   Variable sliced = applySlicing(
       self_,
@@ -443,7 +484,7 @@ static void dispatch_set_item(
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
   if (py_value == nullptr) {
-    throw TypeError("Tensor does not support deleting items");
+    TORCH_CHECK_TYPE(false, "Tensor does not support deleting items");
   }
   if ((check_has_torch_function(self)) ||
       (check_has_torch_function(py_value))) {
@@ -456,7 +497,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
       self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
       self_.layout() == kSparseBsc) {
-    throw TypeError("Cannot assign to a sparse tensor");
+    TORCH_CHECK_TYPE(false, "Cannot assign to a sparse tensor");
   }
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();

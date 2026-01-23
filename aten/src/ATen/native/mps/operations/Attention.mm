@@ -92,13 +92,8 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
           }
 
           // upcasting to float32 if needed to improve precision when multiplying by the scale factor
-          if ([maskedMM dataType] != MPSDataTypeFloat32) {
-            maskedMM = [mpsGraph castTensor:maskedMM toType:MPSDataTypeFloat32 name:nil];
-          }
+          maskedMM = castMPSTensor(mpsGraph, maskedMM, MPSDataTypeFloat32);
           maskedMM = [mpsGraph multiplicationWithPrimaryTensor:maskedMM secondaryTensor:scaleTensor name:nil];
-          if ([maskedMM dataType] != qTensor.dataType) {
-            maskedMM = [mpsGraph castTensor:maskedMM toType:qTensor.dataType name:nil];
-          }
 
           if (is_causal) {
             auto causalMask = [mpsGraph constantWithScalar:1.0f
@@ -112,15 +107,31 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
                                                       name:nil];
           } else if (attn_mask) {
             graph->maskTensor = mpsGraphRankedPlaceHolder(mpsGraph, *attn_mask);
-            maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM secondaryTensor:graph->maskTensor name:nil];
+            maskedMM = [mpsGraph additionWithPrimaryTensor:maskedMM
+                                           secondaryTensor:castMPSTensor(mpsGraph, graph->maskTensor, maskedMM.dataType)
+                                                      name:nil];
           }
+
+          // Account for case where all values were masked causing division by 0 in softmax (issue:#156707)
+          // Overwrites expected NANs in sm with zeros.
+          auto negInfTensor = [mpsGraph constantWithScalar:-INFINITY shape:maskedMM.shape dataType:maskedMM.dataType];
+          auto elem_neg_inf = [mpsGraph equalWithPrimaryTensor:maskedMM secondaryTensor:negInfTensor name:nil];
+          auto all_neg_infs_along_axis = [mpsGraph reductionAndWithTensor:elem_neg_inf axis:3 name:nil];
+          auto zero_mask = [mpsGraph broadcastTensor:all_neg_infs_along_axis toShape:maskedMM.shape name:nil];
+          auto zeroTensor = [mpsGraph constantWithScalar:0.0 shape:maskedMM.shape dataType:maskedMM.dataType];
+
           auto sm = [mpsGraph softMaxWithTensor:maskedMM axis:3 name:nil];
-          auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:sm secondaryTensor:vTensor name:nil];
+          MPSGraphTensor* correctedSM = [mpsGraph selectWithPredicateTensor:zero_mask
+                                                        truePredicateTensor:zeroTensor
+                                                       falsePredicateTensor:sm
+                                                                       name:nil];
+
+          auto output = [mpsGraph matrixMultiplicationWithPrimaryTensor:correctedSM secondaryTensor:vTensor name:nil];
           graph->qTensor = qTensor;
           graph->kTensor = kTensor;
           graph->vTensor = vTensor;
-          graph->outputTensor = output;
-          graph->attnTensor = sm;
+          graph->outputTensor = castMPSTensor(mpsGraph, output, qTensor.dataType);
+          graph->attnTensor = castMPSTensor(mpsGraph, sm, qTensor.dataType);
         });
     auto qPlaceholder = Placeholder(cachedGraph->qTensor, query);
     auto kPlaceholder = Placeholder(cachedGraph->kTensor, key);
@@ -168,6 +179,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   uint maxSeqLength = k_.size(2);
   uint N = k_.size(2);
   uint B = q_.size(0) * q_.size(1);
+  uint q_head_stride = q_.stride(1);
+  uint q_seq_stride = q_.stride(2);
   uint k_head_stride = k_.stride(1);
   uint k_seq_stride = k_.stride(2);
   uint v_head_stride = v_.stride(1);
@@ -195,8 +208,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                   out,
                   1,
                   N,
-                  std::array<uint32_t, 2>{k_head_stride, k_seq_stride},
-                  std::array<uint32_t, 2>{v_head_stride, v_seq_stride},
+                  std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
+                  std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {
@@ -243,6 +256,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   uint B = batchSize * num_heads;
   uint gqa_factor = q_.size(1) / k_.size(1);
 
+  uint q_head_stride = q_.stride(1);
+  uint q_seq_stride = q_.stride(2);
   uint k_head_stride = k_.stride(1);
   uint k_seq_stride = k_.stride(2);
   uint v_head_stride = v_.stride(1);
@@ -280,8 +295,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   maxs,
                   gqa_factor,
                   N,
-                  std::array<uint32_t, 2>{k_head_stride, k_seq_stride},
-                  std::array<uint32_t, 2>{v_head_stride, v_seq_stride},
+                  std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
+                  std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {

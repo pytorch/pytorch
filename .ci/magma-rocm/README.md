@@ -30,7 +30,6 @@ into a tarball, with the following structure:
 More specifically, `build_magma.sh` copies over the relevant files from the `package_files` directory depending on the ROCm version.
 Outputted binaries should be in the `output` folder.
 
-
 ## Pushing
 
 Packages can be uploaded to an S3 bucket using:

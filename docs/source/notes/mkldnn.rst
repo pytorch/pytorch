@@ -26,7 +26,7 @@ Users can disable MKLDNN backend by:
 Bfloat16 (BF16) on MKLDNN backend
 ---------------------------------------------------
 
-Starting in PyTorch 2.4, there is a set of APIs to control the internal computation precision
+Starting in PyTorch 2.9, there is a set of APIs to control the internal computation precision
 for `float32` operators.
 
 .. code:: python
@@ -63,6 +63,13 @@ To get an idea of the precision and speed, see the example code and benchmark da
   ab_bf16 = a @ b  # expected speedup with BF16 dot-product acceleration
   error = (ab_bf16 - ab_full).abs().max()  # 1.3704
   relative_error = error / mean  # 0.0170
+  print(error, relative_error)
+
+  # Do matmul at TF32 mode.
+  torch.backends.mkldnn.matmul.fp32_precision = 'tf32'
+  ab_tf32 = a @ b  # expected speedup with TF32 dot-product acceleration
+  error = (ab_tf32 - ab_full).abs().max()  # 0.0004
+  relative_error = error / mean  # 0.00000552
   print(error, relative_error)
 
   # Do matmul FP32 mode.

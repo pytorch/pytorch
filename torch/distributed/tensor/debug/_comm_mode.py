@@ -172,7 +172,7 @@ class _CommModeModuleTracker(ModTracker):
                 self._fw_set_module_hook
             )
 
-    def _fw_post_hook(self, mod, input, output):
+    def _fw_post_hook(self, mod, input, output):  # pylint: disable=useless-parent-delegation
         """
         This function is called when the forward pass of a module is called.
         It updates the module tracker and removes the module from parent data
@@ -240,6 +240,7 @@ class CommDebugMode(TorchDispatchMode):
     """
 
     def __init__(self):
+        super().__init__()
         self.comm_counts: dict[Any, int] = defaultdict(int)
         self.comm_module_counts = {}
         self.comm_module_operation_counts = {}
@@ -395,7 +396,7 @@ class CommDebugMode(TorchDispatchMode):
         json_dict: dict[str, Any] = {}
         add_json_information(json_dict, "Global")
 
-        # converts dictonary into json file
+        # converts dictionary into json file
         with open(file_name, "w") as json_file:
             json.dump(json_dict, json_file, indent=4)
 
@@ -594,6 +595,7 @@ class CommDebugMode(TorchDispatchMode):
         self.advanced_module_tracker.__enter__()
         return self
 
+    # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
@@ -733,3 +735,6 @@ class CommDebugMode(TorchDispatchMode):
         ].append(operation_dict)
 
         return out
+
+    def __repr__(self):
+        return f"CommDebugMode(get_total_counts()={self.get_total_counts()})"

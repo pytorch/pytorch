@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._export.utils import (
@@ -21,6 +21,10 @@ backends are ready, this list allows opt-in one at a time.
 PRESERVED_ATEN_CIA_OPS = {
     torch.ops.aten.upsample_bilinear2d.vec,
     torch.ops.aten.upsample_nearest2d.vec,
+    # NB: don't use the C++ decomp, because it is not functional!
+    torch.ops.aten.silu_backward.default,
+    torch.ops.aten.mish_backward.default,
+    torch.ops.aten._fused_rms_norm.default,
 }
 
 
@@ -49,7 +53,7 @@ class CustomDecompTable(dict[torch._ops.OperatorBase, Callable]):
         self.decomp_table = _core_aten_decompositions_post_autograd()
 
         for op in _collect_all_valid_cia_ops_for_aten_namespace():
-            if op not in PRESERVED_ATEN_CIA_OPS:
+            if op not in PRESERVED_ATEN_CIA_OPS and op not in self.decomp_table:
                 self.decomp_table[op] = _get_decomp_for_cia(op)
 
         # This is to track the *pending* deleted custom ops that haven't been materialized yet

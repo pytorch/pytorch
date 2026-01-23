@@ -30,18 +30,20 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-
-_DISTRIBUTED_STATE_DICT_IMPLS = {
+# NB: this iterable needs to be ordered as otherwise different ranks may run with
+# conflicting settings when e.g., @parametrize(_DISTRIBUTED_STATE_DICT_IMPLS) is
+# used to decorate tests
+_DISTRIBUTED_STATE_DICT_IMPLS = (
     StateDictType.LOCAL_STATE_DICT,
     StateDictType.SHARDED_STATE_DICT,
-}
+)
 
 
 class TestDistributedCheckpoint(FSDPTest):
     @property
     def world_size(self):
-        if torch.cuda.is_available():
-            gpu_cnt = torch.cuda.device_count()
+        if torch.accelerator.is_available():
+            gpu_cnt = torch.accelerator.device_count()
             if gpu_cnt < 2:
                 return gpu_cnt
         return 2
@@ -93,7 +95,9 @@ class TestDistributedCheckpoint(FSDPTest):
         # TODO: add resharding test case.
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestDistributedCheckpoint, globals(), only_for=devices)
+devices = ("cuda", "hpu", "xpu")
+instantiate_device_type_tests(
+    TestDistributedCheckpoint, globals(), only_for=devices, allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()

@@ -3,6 +3,7 @@
 """
 Test the scalar constructors, which also do type-coercion
 """
+
 import fractions
 import functools
 import types
@@ -234,7 +235,7 @@ class TestBitCount(TestCase):
     def test_small(self, itype):
         for a in range(max(np.iinfo(itype).min, 0), 128):
             msg = f"Smoke test for {itype}({a}).bit_count()"
-            assert itype(a).bit_count() == bin(a).count("1"), msg
+            assert itype(a).bit_count() == a.bit_count(), msg
 
     def test_bit_count(self):
         for exp in [10, 17, 63]:

@@ -53,7 +53,9 @@ class Vectorized<int64_t> : public Vectorizedi {
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() {
+    values = _mm512_setzero_si512();
+  }
   Vectorized(int64_t v) {
     values = _mm512_set1_epi64(v);
   }
@@ -128,7 +130,8 @@ class Vectorized<int64_t> : public Vectorizedi {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
       __mmask8 mask = (1ULL << count) - 1;
-      return _mm512_maskz_loadu_epi64(mask, ptr);
+      auto ones = _mm512_set1_epi64(1);
+      return _mm512_mask_loadu_epi64(ones, mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -330,7 +333,8 @@ class Vectorized<int32_t> : public Vectorizedi {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
       __mmask16 mask = (1ULL << count) - 1;
-      return _mm512_maskz_loadu_epi32(mask, ptr);
+      auto ones = _mm512_set1_epi32(1);
+      return _mm512_mask_loadu_epi32(ones, mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -658,7 +662,8 @@ class Vectorized<int16_t> : public Vectorizedi {
       return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
     } else {
       __mmask32 mask = (1ULL << count) - 1;
-      return _mm512_maskz_loadu_epi16(mask, ptr);
+      auto ones = _mm512_set1_epi16(1);
+      return _mm512_mask_loadu_epi16(ones, mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -1086,7 +1091,7 @@ class Vectorized8 : public Vectorizedi {
     // Because loadu(const void* ptr, T count) requires zero initialization for
     // upper 384 bits. However, by using _mm512_castsi128_si512, the upper 384
     // bits of the result are undefined.
-    // TODO<leslie> We can use _mm512_zextsi128_si512 in the furture,
+    // TODO<leslie> We can use _mm512_zextsi128_si512 in the future,
     // since gcc 9.3 doesn't support it now.
     __m128i input_128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr));
     return _mm512_castsi128_si512(input_128);
@@ -1099,7 +1104,8 @@ class Vectorized8 : public Vectorizedi {
       return loadu_one_fourth(ptr);
     } else {
       __mmask64 mask = (1ULL << count) - 1;
-      return _mm512_maskz_loadu_epi8(mask, ptr);
+      auto ones = _mm512_set1_epi8(1);
+      return _mm512_mask_loadu_epi8(ones, mask, ptr);
     }
   }
   void store(void* ptr, int count = size()) const {
@@ -1850,7 +1856,7 @@ Vectorized<T> inline shift_512_8(
 
   // Control masks for shuffle operation, treating 512 bits as an
   // array of 8-bit elements, and considering pairs of neighboring
-  // elements.  Specifially, a mask named "ctl_M_N" (M,N in [0,1], and
+  // elements.  Specifically, a mask named "ctl_M_N" (M,N in [0,1], and
   // M!=N) is set so that shuffle will move element with index M from
   // input pair into element with index N in output pair, and element
   // with index M in output pair will be set to all 0s.
@@ -2020,7 +2026,7 @@ Vectorized<T> inline shift_512_8(
     c0 = _mm512_srlv_epi16(a0, b0);
   c0 = _mm512_shuffle_epi8(c0, ctl_1_0);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%2==1.
   __m512i a1 = _mm512_and_si512(a, keep_1);
   __m512i b1 = _mm512_shuffle_epi8(b, ctl_1_0);

@@ -125,10 +125,6 @@ deterministic implementation will be used::
             [[ 0.1509,  1.8027],
              [ 0.0333, -1.1444]]], device='cuda:0')
 
-Furthermore, if you are using CUDA tensors, and your CUDA version is 10.2 or greater, you
-should set the environment variable `CUBLAS_WORKSPACE_CONFIG` according to CUDA documentation:
-`<https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility>`_
-
 CUDA convolution determinism
 ----------------------------
 While disabling CUDA convolution benchmarking (discussed above) ensures that

@@ -116,7 +116,7 @@ def temporarily_restore_interpreter_stack(stack):
             pushed.append(s)
         yield
     finally:
-        for s in reversed(pushed):
+        for _ in reversed(pushed):
             # TODO: would be nice to assert that the layers are the same, but
             # Python object identity is not preserved
             pop_dynamic_layer_stack()
@@ -131,6 +131,7 @@ class VmapInterpreter(FuncTorchInterpreter):
         self._cdata = cdata
 
     @cached_property
+    # pyrefly: ignore [bad-override]
     def _cptr(self):
         return CVmapInterpreterPtr(self._cdata)
 
@@ -170,6 +171,7 @@ class GradInterpreter(FuncTorchInterpreter):
         self._cdata = cdata
 
     @cached_property
+    # pyrefly: ignore [bad-override]
     def _cptr(self):
         return CGradInterpreterPtr(self._cdata)
 
@@ -207,6 +209,7 @@ class JvpInterpreter(FuncTorchInterpreter):
         self._cdata = cdata
 
     @cached_property
+    # pyrefly: ignore [bad-override]
     def _cptr(self):
         return CJvpInterpreterPtr(self._cdata)
 
@@ -243,6 +246,7 @@ class FunctionalizeInterpreter(FuncTorchInterpreter):
         self._cdata = cdata
 
     @cached_property
+    # pyrefly: ignore [bad-override]
     def _cptr(self):
         return CFunctionalizeInterpreterPtr(self._cdata)
 

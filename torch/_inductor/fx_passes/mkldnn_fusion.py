@@ -2,14 +2,14 @@
 import functools
 import operator
 from functools import reduce
-from typing import Any, Callable
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
 
-from .. import ir
+from .. import ir, mkldnn_ir
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -33,6 +33,10 @@ from .quantization import (
     _register_quantization_weight_pack_pass,
     _register_woq_lowerings,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 if torch._C._has_mkldnn:
@@ -73,7 +77,7 @@ if torch._C._has_mkldnn:
             packed_weight_node = weight_node
             assert packed_weight_node.target == mkldnn._reorder_linear_weight
             transpose_weight_node = packed_weight_node.args[0]
-            assert transpose_weight_node.target == aten.permute.default
+            assert transpose_weight_node.target is aten.permute.default
             return transpose_weight_node
 
         def pack_conv_weight(
@@ -109,13 +113,15 @@ if torch._C._has_mkldnn:
             # depends on the alignment of internally-stored metadata.
             # In aot mode, we need to firstly save the packed weight, when loading it,
             # it will be in a different address which doesn't work.
-            # Disable MKL prepack linear in AOT mode
+            # Disable MKL prepack linear in AOT mode.
+            # Disable MKL prepack linear when batch_size has free symbols.
             packed_weight_op = (
                 mkldnn._reorder_linear_weight
                 if (
                     is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
                     or V.aot_compilation
+                    or has_free_symbols(batch_size)
                 )
                 else torch.ops.mkl._mkl_reorder_linear_weight
             )
@@ -128,7 +134,12 @@ if torch._C._has_mkldnn:
         ):
             packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
             transpose_weight_node = packed_weight_node.args[0]
-            if is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
+            if (
+                is_lp_weight
+                or mkldnn._is_mkldnn_acl_supported()
+                or V.aot_compilation
+                or has_free_symbols(batch_size)
+            ):
                 packed_linear_inputs += (bias, "none", [], "")
                 packed_linear_op: Callable[..., Any] = mkldnn._linear_pointwise.default
             else:
@@ -350,8 +361,15 @@ if torch._C._has_mkldnn:
         )
 
     def _silu_fusion(computation_call):
+        # Match: x / (exp(-x) + 1) pattern used by inductor's silu decomposition
         return CallFunction(
-            aten.mul, computation_call, CallFunction(aten.sigmoid, computation_call)
+            aten.div,
+            computation_call,
+            CallFunction(
+                aten.add,
+                CallFunction(aten.exp, CallFunction(aten.neg, computation_call)),
+                1,
+            ),
         )
 
     def _hardsigmoid_fusion(computation_call):
@@ -753,6 +771,39 @@ if torch._C._has_mkldnn:
             or len(_other.get_inputs_that_alias_output()) > 0
         )
 
+    def _qlinear_binary_can_be_inplace(_other):
+        if isinstance(_other.data, ir.BaseView):
+
+            def unwrap_buffer(data):
+                if isinstance(data, ir.StorageBox):
+                    return data.data
+                return data
+
+            data = _other.data.unwrap_view()
+            if isinstance(unwrap_buffer(data), ir.CppTemplateBuffer):
+                # It can be inplaced when _other is the 2D to 3D view of
+                # a CppTemplateBuffer because if there is a view of CppTemplateBuffer,
+                # CppTemplateBuffer will not be used directly but the view.
+                return True
+            else:
+                # The case of QLinearPointwiseBinaryPT2E(sum) -> QLinearPointwiseBinaryPT2E(sum)
+                # is similar to CppTemplateBuffer above.
+                # The output of previous QLinearPointwiseBinaryPT2E is
+                # the input x2 of current QLinearPointwiseBinaryPT2E.
+                # Use V.graph.operations to check if _other is a view of the output
+                # of previous QLinearPointwiseBinaryPT2E (the inputs[6]).
+                for op in V.graph.operations:
+                    if (
+                        isinstance(op, mkldnn_ir.QLinearPointwiseBinaryPT2E)
+                        and unwrap_buffer(data) == op.inputs[6]  # type: ignore[attr-defined]
+                    ):
+                        return True
+            return False
+        elif len(_other.get_inputs_that_alias_output()) > 0:
+            return False
+        else:
+            return True
+
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
         computation_op,
@@ -983,7 +1034,7 @@ if torch._C._has_mkldnn:
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
-        # concat_linear (pass_number=0) -> mkldnn_linear_pack (pass_numer=1) -> _recover_linear(pass_number=2)
+        # concat_linear (pass_number=0) -> mkldnn_linear_pack (pass_number=1) -> _recover_linear(pass_number=2)
         @register_freezing_graph_pattern(
             CallFunction(
                 aten.reshape.default,
@@ -1205,20 +1256,19 @@ if torch._C._has_mkldnn:
 
         linear_node = match.output_node()
         # mkldnn linear only supports beta=1or0 and alpha=1
-        if linear_node.target == aten.addmm.default:
+        if linear_node.target is aten.addmm.default:
             alpha = linear_node.kwargs.get("alpha", 1.0)
             beta = linear_node.kwargs.get("beta", 1.0)
             if (beta != 0.0 and beta != 1.0) or alpha != 1.0:
                 return False
         # weight_idx is 1 for aten.mm and is 2 for aten.addmm
-        weight_idx = 2 if linear_node.target == aten.addmm.default else 1
+        weight_idx = 2 if linear_node.target is aten.addmm.default else 1
         if not is_const_or_cat_by_const(linear_node.args[weight_idx]):
             return False
         input_meta_value = linear_node.args[weight_idx - 1].meta.get("val")
         weight_meta_value = linear_node.args[weight_idx].meta.get("val")
         if input_meta_value is None or weight_meta_value is None:
             return False
-        batch_size = input_meta_value.shape[0]
         if (
             input_meta_value.dtype == torch.float64
             or weight_meta_value.dtype == torch.float64
@@ -1228,17 +1278,20 @@ if torch._C._has_mkldnn:
             torch.bfloat16,
             torch.float16,
         )
-        bf32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
-        use_bf16_for_fp32_weight = (
-            bf32_matmul_enabled and weight_meta_value.dtype == torch.float32
+        reduced_f32_matmul_enabled = torch.backends.mkldnn.matmul.fp32_precision in [  # type: ignore[attr-defined]
+            "bf16",
+            "tf32",
+        ]
+        use_reduced_f32_for_fp32_weight = (
+            reduced_f32_matmul_enabled and weight_meta_value.dtype == torch.float32
         )
-        compute_with_lp = is_lp_weight or use_bf16_for_fp32_weight
-        # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
+        compute_with_lp = is_lp_weight or use_reduced_f32_for_fp32_weight
+        # on x86, for fp32, mkl should be enabled.
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
             not compute_with_lp
             and not mkldnn._is_mkldnn_acl_supported()
-            and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
+            and not torch._C.has_mkl
         ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
@@ -1427,17 +1480,17 @@ if torch._C._has_mkldnn:
         def linear(match, *args, **kwargs):
             graph = match.graph
             linear_node = match.output_node()
-            input = args[0] if linear_node.target == aten.mm.default else args[1]
+            input = args[0] if linear_node.target is aten.mm.default else args[1]
             bias = (
                 None
-                if linear_node.target == aten.mm.default
+                if linear_node.target is aten.mm.default
                 or (
-                    linear_node.target == aten.addmm.default
+                    linear_node.target is aten.addmm.default
                     and linear_node.kwargs.get("beta", 1.0) == 0.0
                 )
                 else args[0]
             )
-            weight = args[1] if linear_node.target == aten.mm.default else args[2]
+            weight = args[1] if linear_node.target is aten.mm.default else args[2]
             device_type = input.meta.get("val").device.type
             mkldnn_device_op = _get_mkldnn_device_op(device_type)
             with graph.inserting_before(linear_node):
@@ -1449,18 +1502,14 @@ if torch._C._has_mkldnn:
                     torch.bfloat16,
                     torch.float16,
                 )
-                bf32_matmul_enabled = (
-                    torch.backends.mkldnn.matmul.fp32_precision == "bf16"  # type: ignore[attr-defined]
+                reduced_f32_matmul_enabled = (
+                    torch.backends.mkldnn.matmul.fp32_precision in ["bf16", "tf32"]  # type: ignore[attr-defined]
                 )
-                use_bf16_for_fp32_weight = (
-                    bf32_matmul_enabled and weight_dtype == torch.float32
+                use_reduced_f32_for_fp32_weight = (
+                    reduced_f32_matmul_enabled and weight_dtype == torch.float32
                 )
-                compute_with_lp = is_lp_weight or use_bf16_for_fp32_weight
+                compute_with_lp = is_lp_weight or use_reduced_f32_for_fp32_weight
                 batch_size = input.meta.get("val").shape[0]
-                if has_free_symbols(batch_size):
-                    assert compute_with_lp or mkldnn._is_mkldnn_acl_supported(), (
-                        f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
-                    )
                 packed_weight_node = mkldnn_device_op.pack_linear_weight(
                     graph, compute_with_lp, transpose_weight_node, batch_size
                 )
@@ -1519,16 +1568,19 @@ if torch._C._has_mkldnn:
         # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
         # Otherwise even the matmul or innerproduct can not be accelerated with acl
         if (
-            torch.backends.mkldnn.enabled
-            and torch.backends.mkldnn.is_available()
-            and not torch.ops.mkldnn._is_mkldnn_acl_supported()
+            not torch.backends.mkldnn.enabled
+            or not torch.backends.mkldnn.is_available()
         ):
+            return
+
+        if not torch.ops.mkldnn._is_mkldnn_acl_supported():
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()
             _register_binary_fusion()
             _register_quantization_lowerings()
-            _register_woq_lowerings()
+
+        _register_woq_lowerings()
 
     @functools.cache
     def _mkldnn_weight_pack_init():

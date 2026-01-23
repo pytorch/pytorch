@@ -5,7 +5,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=4 comm_mode_features_example.p
 
 import argparse
 import os
-from typing import Callable, Union
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -26,12 +26,15 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.utils.checkpoint import checkpoint
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
 def get_device_type() -> str:
-    return (
-        "cuda"
-        if torch.cuda.is_available() and torch.cuda.device_count() >= 4
-        else "cpu"
-    )
+    device_type = "cpu"
+    if torch.accelerator.device_count() >= 4:
+        device_type = getattr(torch.accelerator.current_accelerator(), "type", "cpu")
+    return device_type
 
 
 c10d_functional = torch.ops.c10d_functional
@@ -52,7 +55,7 @@ class CommDebugModeExample:
         self.device_type = get_device_type()
 
     def _MLP_model_setup(
-        self, model_type: type, parallelize_plan: Union[None, dict] = None
+        self, model_type: type, parallelize_plan: dict | None = None
     ) -> tuple[nn.Module, torch.Tensor]:
         """
         Creates MLP or MLPStacked model for examples
@@ -711,7 +714,7 @@ class CommDebugModeExample:
 
 def run_example(world_size: int, rank: int, example_name: str) -> None:
     # set manual seed
-    # intializing class with all of the functions
+    # initializing class with all of the functions
     instantiated_example = CommDebugModeExample(world_size, rank)
     # dict that stores example code function names
     name_to_example_code: dict[str, Callable[[], None]] = {

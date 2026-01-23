@@ -8,12 +8,12 @@ import math
 import operator
 import unittest
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 
 import torch
 from torch.testing import make_tensor
@@ -162,13 +162,11 @@ class SampleInput:
         # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
         # SampleInput(input, *args, **kwargs) but not to mix the two forms
         if args is not None or kwargs is not None:
-            assert (
-                not var_args and not var_kwargs
-            ), """
+            assert not var_args and not var_kwargs, """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
 explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
-        elif len(var_args) or len(var_kwargs):
+        elif var_args or var_kwargs:
             assert (
                 output_process_fn_grad is None
                 and broadcasts_input is None
@@ -226,7 +224,7 @@ cannot specify additional metadata in keyword arguments"""
             f"name={repr(self.name)}",
         ]
 
-        return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
+        return f"SampleInput({', '.join(a for a in arguments if a is not None)})"
 
     def __repr__(self):
         return self._repr_helper(lambda x: x)
@@ -757,6 +755,9 @@ class OpInfo:
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
+    # dtypes this function is expected to work with on MPS
+    dtypesIfMPS: _dispatch_dtypes = None
+
     dtypesIfHpu: _dispatch_dtypes = None
 
     # dtypes this function is expected to work with on XPU
@@ -770,6 +771,9 @@ class OpInfo:
 
     # backward dtypes this function is expected to work with on ROCM
     backward_dtypesIfROCM: _dispatch_dtypes = None
+
+    # backward dtypes this function is expected to work with on MPS
+    backward_dtypesIfMPS: _dispatch_dtypes = None
 
     backward_dtypesIfHpu: _dispatch_dtypes = None
 
@@ -956,6 +960,12 @@ class OpInfo:
                 "This is to ensure that CUDA dtypes are acquired correctly as they"
                 "differ from CPU dtypes occasionally"
             )
+            assert isinstance(self.dtypesIfMPS, utils._dynamic_dispatch_dtypes), (
+                f"To use dynamic dtypes for operator {self.name}, "
+                "acquire the dtypes dynamically for argument `dtypesIfMPS`."
+                "This is to ensure that MPS dtypes are acquired correctly as they"
+                "differ from CPU dtypes occasionally"
+            )
 
         self.dtypes = set(self.dtypes)
 
@@ -988,6 +998,17 @@ class OpInfo:
                 else self.dtypes
             )
         )
+        self.backward_dtypesIfMPS = (
+            set(self.backward_dtypesIfMPS) - {torch.float64, torch.cdouble}
+            if self.backward_dtypesIfMPS is not None
+            else (
+                set(self.backward_dtypes) - {torch.float64, torch.cdouble}
+                if self.backward_dtypes is not None
+                else set(self.dtypesIfMPS) - {torch.float64, torch.cdouble}
+                if self.dtypesIfMPS is not None
+                else set(self.dtypes) - {torch.float64, torch.cdouble}
+            )
+        )
         self.backward_dtypesIfHpu = (
             set(self.backward_dtypesIfHpu)
             if self.backward_dtypesIfHpu is not None
@@ -1013,6 +1034,17 @@ class OpInfo:
         for dev_type in ["rocm", "xpu"]:
             if self.dtypesIf.get(dev_type) is None:
                 self.dtypesIf[dev_type] = self.dtypesIf["cuda"]
+
+        # Inherit from cpu
+        for dev_type in ["mps"]:
+            if self.dtypesIf.get(dev_type) is None:
+                # Double floats are not supported on MPS
+                self.dtypesIf[dev_type] = self.dtypes - {torch.float64, torch.cdouble}
+            else:
+                self.dtypesIf[dev_type] = self.dtypesIf[dev_type] - {
+                    torch.float64,
+                    torch.cdouble,
+                }
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if not self.op:
@@ -1536,7 +1568,8 @@ def test_foo(self, device, dtype, op):
         device_type = torch.device(device_type).type
         if device_type == "cuda" and TEST_WITH_ROCM:
             device_type = "rocm"
-        return self.dtypesIf.get(device_type, self.dtypes)
+        result = self.dtypesIf.get(device_type, self.dtypes)
+        return result
 
     def supported_backward_dtypes(self, device_type):
         if not self.supports_autograd:
@@ -1554,6 +1587,8 @@ def test_foo(self, device, dtype, op):
             )
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
+        elif device_type == "mps":
+            backward_dtypes = self.backward_dtypesIfMPS
         else:
             backward_dtypes = self.backward_dtypes
 
@@ -1601,13 +1636,11 @@ class SampleRule(ABC):
 
     # returns a string identifier of the rule type
     @abstractmethod
-    def type(self) -> str:
-        ...
+    def type(self) -> str: ...
 
     # returns an appropriate context that handles the xfail, skips, etc.
     @abstractmethod
-    def get_context(self, test_case):
-        ...
+    def get_context(self, test_case): ...
 
 
 # useful for specifying xfails
@@ -1791,8 +1824,10 @@ class ReductionOpInfo(OpInfo):
         # kwargs to use when calling the op. This is required for operators that
         # have other required parameters besides the input tensor.
         generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (
-            yield (),
-            {},
+            yield (
+                (),
+                {},
+            )
         ),
         # Options from the OpInfo base class
         **kwargs,
@@ -2476,9 +2511,9 @@ class BinaryUfuncInfo(OpInfo):
             self.supports_one_python_scalar = True
 
         if self.supports_one_python_scalar:
-            assert (
-                supports_rhs_python_scalar
-            ), "Can't support lhs and rhs Python scalars but not rhs scalars!"
+            assert supports_rhs_python_scalar, (
+                "Can't support lhs and rhs Python scalars but not rhs scalars!"
+            )
 
 
 # The following functions and classes are for testing elementwise unary operators.
@@ -2961,6 +2996,7 @@ class ShapeFuncInfo(OpInfo):
         ref,  # a reference function
         dtypes=floating_types(),
         dtypesIfCUDA=None,
+        dtypesIfMPS=None,
         dtypesIfROCM=None,
         dtypesIfXPU=None,
         sample_inputs_func=None,
@@ -2970,6 +3006,7 @@ class ShapeFuncInfo(OpInfo):
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
+            dtypesIfMPS=dtypesIfMPS,
             dtypesIfROCM=dtypesIfROCM,
             dtypesIfXPU=dtypesIfXPU,
             sample_inputs_func=sample_inputs_func,

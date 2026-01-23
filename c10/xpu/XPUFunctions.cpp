@@ -1,4 +1,3 @@
-#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
@@ -33,7 +32,6 @@ namespace {
  *    one iGPU and enumerate all iGPUs on that platform.
  * 3. If neither dGPUs nor iGPUs are found, conclude that no GPUs are available.
  */
-c10::once_flag init_flag;
 thread_local DeviceIndex curDeviceIndex = 0;
 
 struct DevicePool {
@@ -120,17 +118,23 @@ inline void initGlobalDevicePoolState() {
   TORCH_CHECK(
       gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
       "Too many XPU devices, DeviceIndex overflowed!");
-
-#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
-  // The default context feature is disabled by default on Windows for SYCL
-  // compiler versions earlier than 2025.0.0.
-  std::vector<sycl::device> deviceList;
-  for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
-       ++it) {
-    deviceList.push_back(*(*it));
+  // Check each device's architecture and issue a warning if it is older than
+  // the officially supported range (Intel GPUs starting from Arc (Alchemist)
+  // series).
+  namespace syclex = sycl::ext::oneapi::experimental;
+  for (const auto& device : gDevicePool.devices) {
+    auto architecture = device->get_info<syclex::info::device::architecture>();
+    if (architecture < syclex::architecture::intel_gpu_acm_g10) {
+      TORCH_WARN(
+          "The detected GPU (",
+          device->get_info<sycl::info::device::name>(),
+          ") is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.\n",
+          "For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.\n",
+          "Refer to the hardware prerequisites for more information: ",
+          "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite");
+    }
   }
-  gDevicePool.context = std::make_unique<sycl::context>(deviceList);
-#else
+
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
   const auto& platform = gDevicePool.devices[0]->get_platform();
@@ -140,11 +144,13 @@ inline void initGlobalDevicePoolState() {
 #else
       platform.ext_oneapi_get_default_context());
 #endif
-#endif
 }
 
 inline void initDevicePoolCallOnce() {
-  c10::call_once(init_flag, initGlobalDevicePoolState);
+  auto static init_flag [[maybe_unused]] = [] {
+    initGlobalDevicePoolState();
+    return true;
+  }();
 }
 
 void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
@@ -157,17 +163,17 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 #define ASSIGN_DEVICE_PROP(property) \
   device_prop->property = raw_device.get_info<device::property>();
 
-#define ASSIGN_EXT_DEVICE_PROP(property, default_value)                      \
-  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##property) \
-      ? raw_device.get_info<intel::info::device::property>()                 \
+#define ASSIGN_EXT_DEVICE_PROP(property, aspect_tag, default_value)            \
+  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##aspect_tag) \
+      ? raw_device.get_info<intel::info::device::property>()                   \
       : default_value;
 
 #define ASSIGN_DEVICE_ASPECT(member) \
   device_prop->has_##member = raw_device.has(sycl::aspect::member);
 
-#define ASSIGN_EXP_CL_ASPECT(member)                                       \
-  device_prop->has_##member = raw_device.ext_oneapi_supports_cl_extension( \
-      "cl_intel_" #member, &cl_version);
+#define ASSIGN_EXP_CL_ASPECT(member) \
+  device_prop->has_##member =        \
+      raw_device.ext_oneapi_supports_cl_extension("cl_intel_" #member);
 
 #define ASSIGN_EXP_DEVICE_PROP(property) \
   device_prop->property =                \
@@ -182,8 +188,6 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 
   AT_FORALL_XPU_DEVICE_ASPECT(ASSIGN_DEVICE_ASPECT);
 
-  // TODO: Remove cl_version since it is unnecessary.
-  sycl::ext::oneapi::experimental::cl_version cl_version;
   AT_FORALL_XPU_EXP_CL_ASPECT(ASSIGN_EXP_CL_ASPECT);
 
 #if SYCL_COMPILER_VERSION >= 20250000

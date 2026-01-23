@@ -3,8 +3,9 @@
 
 import os
 import unittest
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
@@ -150,7 +151,7 @@ class DTensorXLAIntegrationTest(TestCase):
 
         def shard_params(mod_name, mod, mesh):
             shard_spec = [Shard(0)]
-            # annoate fc1 and fc2
+            # annotate fc1 and fc2
             if isinstance(mod, nn.Linear):
                 for _, param in mod.named_parameters():
                     # annotate the parameter tensors directly

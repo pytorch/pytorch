@@ -91,25 +91,30 @@ static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/Repeat_metallib.h>
 #endif
 
-template <typename index_t>
-void computeRepeatIndices(const index_t* repeat_ptr,
-                          const int64_t* cumsum_ptr,
-                          index_t* result_ptr,
-                          int64_t size,
-                          int64_t result_size) {
-  id<MTLBuffer> repeatBuffer = reinterpret_cast<id<MTLBuffer>>(repeat_ptr);
-  id<MTLBuffer> cumsumBuffer = reinterpret_cast<id<MTLBuffer>>(cumsum_ptr);
-  id<MTLBuffer> resultBuffer = reinterpret_cast<id<MTLBuffer>>(result_ptr);
-  TORCH_CHECK(repeatBuffer && cumsumBuffer && resultBuffer);
-
+Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output_size) {
+  TORCH_CHECK(repeat.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
   std::string scalar_type;
-  if constexpr (std::is_same_v<index_t, int32_t>) {
+  if (repeat.scalar_type() == kInt) {
     scalar_type = "int32_t";
-  } else if constexpr (std::is_same_v<index_t, int64_t>) {
+  } else if (repeat.scalar_type() == kLong) {
     scalar_type = "int64_t";
   } else {
-    TORCH_CHECK(false, "repeat_interleave: unsupported indexing data type");
+    TORCH_CHECK(false, "repeats has to be Long or Int tensor");
   }
+  if (repeat.size(0) == 0) {
+    return at::empty_like(repeat, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  Tensor repeat_ = repeat.contiguous();
+  Tensor cumsum = repeat.cumsum(0);
+  int64_t total = 0;
+  if (output_size.has_value()) {
+    total = output_size.value();
+  } else {
+    total = cumsum[-1].item<int64_t>();
+    TORCH_CHECK((repeat >= 0).all().item<uint8_t>(), "repeats can not be negative");
+  }
+
+  auto result = at::empty({total}, repeat.options());
 
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
@@ -121,28 +126,13 @@ void computeRepeatIndices(const index_t* repeat_ptr,
       getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);
 
       [computeEncoder setComputePipelineState:pipelineState];
-      mps::mtl_setArgs(computeEncoder, repeatBuffer, cumsumBuffer, resultBuffer, size);
-      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, size);
+      mps::mtl_setArgs(computeEncoder, repeat_, cumsum, result, repeat.size(0));
+      mps::mtl_dispatch1DJob(computeEncoder, pipelineState, repeat.size(0));
 
       getMPSProfiler().endProfileKernel(pipelineState);
     }
   });
-}
-
-Tensor repeat_interleave_mps(const Tensor& repeat_, std::optional<int64_t> output_size) {
-  Tensor output;
-  Tensor repeat = repeat_;
-  if (repeat.scalar_type() == kLong && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS)) {
-    // #103810551: `repeat_interleave_common` uses cumsum to calculate the final shape of output,
-    // which currently doesn't support int64_t as input. Casting internally the indices to int32_t.
-    TORCH_WARN_ONCE(
-        "MPS: no support for int64 repeats mask, casting it to int32. Support has been added in macOS 13.3");
-    repeat = repeat.to(kInt);
-  }
-  AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_mps", [&]() {
-    output = repeat_interleave_common<index_t, computeRepeatIndices<index_t>>(repeat, output_size);
-  });
-  return output;
+  return result;
 }
 
 } // namespace at::native

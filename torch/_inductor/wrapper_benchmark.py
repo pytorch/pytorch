@@ -93,6 +93,7 @@ def benchmark_all_kernels(
             continue
 
         triton_kernel = get_triton_kernel(kernel_mod)
+        device_type = triton_kernel.device_props.type
         kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
         num_in_out_ptrs = len(
@@ -137,7 +138,11 @@ def benchmark_all_kernels(
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = benchmarker.benchmark_gpu(lambda: kernel_mod.call(args), rep=40)
+            ms = benchmarker.benchmark(
+                lambda: kernel_mod.call(args),
+                device=device_type,
+                rep=40,
+            )
             assert len(triton_kernel.launchers) == 1, (
                 "Autotuner should have selected the best config"
             )
@@ -468,13 +473,26 @@ def compiled_module_main(
             "If None, NCU will use '--set full'."
         ),
     )
+    parser.add_argument(
+        "--times",
+        type=int,
+        default=10,
+        help="Number of times to run each benchmark iteration",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=10,
+        help="Number of repetitions of each benchmark run",
+    )
+
     args = parser.parse_args()
 
     if args.benchmark_kernels:
         benchmark_all_kernels(benchmark_name, args.benchmark_all_configs)
     else:
-        times = 10
-        repeat = 10
+        times = args.times
+        repeat = args.repeat
 
         if torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats()

@@ -40,7 +40,7 @@ struct TORCH_API EmbeddingOptions {
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings,
   /// embedding_dim)
-  TORCH_ARG(torch::Tensor, _weight) = Tensor();
+  TORCH_ARG(torch::Tensor, _weight);
 };
 
 // ============================================================================
@@ -136,7 +136,7 @@ struct TORCH_API EmbeddingBagOptions {
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings,
   /// embedding_dim)
-  TORCH_ARG(torch::Tensor, _weight) = Tensor();
+  TORCH_ARG(torch::Tensor, _weight);
   /// If ``true``, `offsets` has one additional element, where the last element
   /// is equivalent to the size of `indices`. This matches the CSR format.
   TORCH_ARG(bool, include_last_offset) = false;
@@ -201,7 +201,7 @@ namespace functional {
 struct TORCH_API EmbeddingBagFuncOptions {
   /// Only used when `input` is 1D. `offsets` determines
   /// the starting index position of each bag (sequence) in `input`.
-  TORCH_ARG(torch::Tensor, offsets) = Tensor();
+  TORCH_ARG(torch::Tensor, offsets);
   /// If given, each embedding vector with norm larger than `max_norm` is
   /// renormalized to have norm `max_norm`.
   TORCH_ARG(std::optional<double>, max_norm) = std::nullopt;
@@ -223,7 +223,7 @@ struct TORCH_API EmbeddingBagFuncOptions {
   /// be taken to be 1. If specified, `per_sample_weights` must have exactly the
   /// same shape as input and is treated as having the same `offsets`, if those
   /// are not None.
-  TORCH_ARG(torch::Tensor, per_sample_weights) = Tensor();
+  TORCH_ARG(torch::Tensor, per_sample_weights);
   /// If ``true``, `offsets` has one additional element, where the last element
   /// is equivalent to the size of `indices`. This matches the CSR format. Note:
   /// this option is currently only supported when ``mode="sum"``.

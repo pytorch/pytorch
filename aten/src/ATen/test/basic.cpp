@@ -246,7 +246,7 @@ void TestToCFloat() {
 void TestToString() {
   Tensor b = ones({3, 7}) * .0000001f;
   std::stringstream s;
-  s << b << "\n";
+  s << b << '\n';
   std::string expect = "1e-07 *";
   ASSERT_EQ_RESOLVED(s.str().substr(0, expect.size()), expect);
 }
@@ -516,4 +516,22 @@ TEST(BasicTest, BasicStdTestCPU) {
   t2.join();
   t3.join();
   t4.join();
+}
+
+TEST(BasicTest, TestForBlobResizeCPU) {
+  // Checks that for_blob can correctly create tensors with non-empty offset and resize them
+  std::array<int32_t, 6> storage;
+  std::iota(storage.begin(), storage.end(), 1);
+  auto t = at::for_blob(storage.data(), {3,}).storage_offset(3).options(c10::TensorOptions(kInt)).make_tensor();
+  auto te = *at::expand_size(t, {3, 3});
+  ASSERT_EQ(te[1][1].item<int32_t>(), 5);
+}
+
+TEST(BasicTest, TestForBlobStridesResizeCPU) {
+  // Checks that for_blob can correctly create tensors with non-empty offset and resize them
+  std::array<int32_t, 6> storage;
+  std::iota(storage.begin(), storage.end(), 1);
+  auto t = at::for_blob(storage.data(), {3,}).strides({1,}).storage_offset(3).options(c10::TensorOptions(kInt)).make_tensor();
+  auto te = *at::expand_size(t, {3, 3});
+  ASSERT_EQ(te[1][1].item<int32_t>(), 5);
 }

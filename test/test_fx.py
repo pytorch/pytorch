@@ -6,6 +6,7 @@ import builtins
 import collections
 import contextlib
 import copy
+import gc
 import functools
 import inspect
 import io
@@ -19,6 +20,7 @@ import traceback
 import types
 import typing
 import unittest
+import weakref
 import warnings
 from math import sqrt
 from torch.multiprocessing import Process
@@ -35,7 +37,8 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
 from collections import namedtuple
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
+from collections.abc import Callable
 
 import torch
 
@@ -55,6 +58,7 @@ from fx.test_gradual_type import (  # noqa: F401  # noqa: F401
     TypeCheckerTest,
 )
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
+from fx.test_opaque_infrastructure import TestOpaqueInfrastructure  # noqa: F401
 from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
@@ -69,8 +73,15 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
+    skipIfRocm,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+
+import json
+import tempfile
+from torch.profiler import profile, ProfilerActivity
+from torch.profiler._utils import map_recorded_events_to_aten_ops_with_stack_trace
+from torch.autograd.profiler_util import _canonicalize_profiler_events
 
 try:
     from torchvision import models as torchvision_models
@@ -198,10 +209,40 @@ def side_effect_func(x: torch.Tensor):
     print(x)
 
 
+def _enrich_profiler_traces(prof):
+    """
+    Helper function to extract and augment profiler events with stack traces.
+
+    Args:
+        prof: A torch.profiler.profile object
+
+    Returns:
+        A string representing enriched events
+    """
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as f:
+        trace_file = f.name
+        prof.export_chrome_trace(trace_file)
+
+        with open(trace_file) as f:
+            trace_data = json.load(f)
+
+        map_recorded_events_to_aten_ops_with_stack_trace(
+            trace_data
+        )
+
+        events = []
+        for event in trace_data["traceEvents"]:
+            if "args" in event and "stack_trace" in event["args"]:
+                events.append(event)
+
+        actual_traces = _canonicalize_profiler_events(events)
+        return actual_traces
+
+
 class TestFX(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -756,6 +797,21 @@ class TestFX(JitTestCase):
             self.assertTrue(node.stack_trace is not None)
             assert "test_fx.py" in node.stack_trace
 
+    def test_node_pickle_type_preservation(self):
+        g = Graph()
+        n = g.placeholder("x")
+        n.type = torch.Tensor
+
+        dumped_node = pickle.dumps(n)
+        restored_node = pickle.loads(dumped_node)
+        self.assertEqual(restored_node.type, torch.Tensor)
+        self.assertNotEqual(restored_node.type, restored_node.target)
+
+        dumped_graph = pickle.dumps(g)
+        restored_graph = pickle.loads(dumped_graph)
+        restored_n = next(iter(restored_graph.nodes))
+        self.assertEqual(restored_n.type, torch.Tensor)
+
     def test_lineno_map(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -768,6 +824,7 @@ class TestFX(JitTestCase):
         gm = GraphModule(tracer.root, graph)
         expected = {1: 2, 2: 3, 3: 4, 4: 5}
         self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+        self.assertEqual(gm._prologue_start, 4)
 
         # test custom codegen
         def transform_code(code):
@@ -777,6 +834,7 @@ class TestFX(JitTestCase):
         gm.recompile()
         expected = {2: 2, 3: 3, 4: 4, 5: 5}
         self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+        self.assertEqual(gm._prologue_start, 4)
 
     def test_graph_unique_names_manual(self):
         graph: torch.fx.Graph = torch.fx.Graph()
@@ -908,7 +966,7 @@ class TestFX(JitTestCase):
             wrapper = WrapperModule(interpreter)
 
             # Create a graph that: 1) Takes function arguments 2) Invokes the interpreter
-            # 3) Returns the speficied return value
+            # 3) Returns the specified return value
 
             # FIXME: The following code could be greatly simplified by symbolic_trace'ing
             # the wrapper with a Tracer that considers the Wrapper instance a root
@@ -954,7 +1012,7 @@ class TestFX(JitTestCase):
         script_out = scripted_lowered(x)
         torch.testing.assert_close(script_out, ref_out)
 
-        # Test TorchScript ser/de
+        # Test TorchScript Ser/De
         import_copy = self.getExportImportCopy(scripted_lowered)
         imported_out = import_copy(x)
         torch.testing.assert_close(imported_out, ref_out)
@@ -1296,6 +1354,52 @@ class TestFX(JitTestCase):
         text = gm.print_readable(False)
         assert 2 == text.count("_torch__ops_aten_aten_relu_")
 
+    def test_print_readable_no_trailing_whitespace_with_inner_graph(self):
+        # When a GraphModule has a child GraphModule (e.g., from invoke_subgraph),
+        # print_readable() should not produce lines with trailing whitespace.
+
+        # Create an inner GraphModule
+        class InnerModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        inner_gm = torch.fx.symbolic_trace(InnerModule())
+
+        # Create an outer module that has the inner GraphModule as a submodule
+        class OuterModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.subgraph_0 = inner_gm
+
+            def forward(self, x):
+                return x * 2
+
+        outer = OuterModule()
+
+        # Create a graph that references the submodule
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        subgraph_result = graph.call_module("subgraph_0", (x,))
+        mul_result = graph.call_function(torch.mul, (subgraph_result, 2))
+        graph.output(mul_result)
+
+        # Create the outer GraphModule with this graph
+        outer_gm = torch.fx.GraphModule(outer, graph)
+
+        # Verify that subgraph_0 is a GraphModule with a graph attribute
+        self.assertTrue(hasattr(outer_gm.subgraph_0, "graph"))
+
+        # Get the print_readable output
+        output = outer_gm.print_readable(print_output=False)
+
+        # Check for trailing whitespace on any line
+        for i, line in enumerate(output.split("\n")):
+            self.assertEqual(
+                line,
+                line.rstrip(),
+                f"Line {i + 1} has trailing whitespace: {repr(line)}",
+            )
+
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
         # We used to call anonymous Tensor values `__tensor_constant*`, but
@@ -1623,6 +1727,25 @@ class TestFX(JitTestCase):
 
         self.assertTrue(neg not in relu.users)
 
+    @skipIfTorchDynamo("Dynamo does not free right away")
+    def test_prepend_does_not_leak(self):
+        g = Graph()
+        x = g.placeholder("x")
+        relu = g.call_function(torch.relu, (x,))
+        neg = g.call_function(torch.neg, (x,))
+
+        relu.prepend(neg)
+
+        ref = weakref.ref(neg)
+        g.erase_node(neg)
+        del g
+        del x
+        del relu
+        del neg
+        gc.collect()
+
+        self.assertIsNone(ref())
+
     def test_remove_uses_with_custom_filter(self):
         g: torch.fx.Graph = Graph()
         x: torch.fx.Node = g.placeholder("x")
@@ -1853,7 +1976,7 @@ class TestFX(JitTestCase):
             # NB: the implementation of conv may not preserve the memory format,
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
-            if node.op in {"placeholder"}:
+            if node.op == "placeholder":
                 self.assertEqual(
                     node.meta["tensor_meta"].memory_format, torch.channels_last
                 )
@@ -1914,7 +2037,7 @@ class TestFX(JitTestCase):
             # NB: the implementation of conv may not preserve the memory format,
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
-            if node.op in {"placeholder"}:
+            if node.op == "placeholder":
                 self.assertEqual(
                     node.meta["tensor_meta"].memory_format, torch.channels_last_3d
                 )
@@ -2009,6 +2132,31 @@ class TestFX(JitTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(interpreter.run(input), gm(input))
         self.assertEqual(interpreter.run(input), m(input))
+
+    def test_interpreter_boxed_run_argument_validation(self):
+        class AddModule(torch.nn.Module):
+            def forward(self, lhs, rhs):
+                return lhs + rhs
+
+        gm = torch.fx.symbolic_trace(AddModule())
+        interpreter = Interpreter(gm)
+
+        lhs = torch.tensor(1.0)
+        rhs = torch.tensor(2.0)
+        good_args = [lhs.clone(), rhs.clone()]
+        result = interpreter.boxed_run(good_args)
+        torch.testing.assert_close(result, lhs + rhs)
+        self.assertEqual(good_args, [])
+
+        extra_args = [lhs.clone(), rhs.clone(), torch.tensor(3.0)]
+        with self.assertRaisesRegex(RuntimeError, "extra arguments"):
+            interpreter.boxed_run(extra_args)
+        self.assertEqual(len(extra_args), 3)
+
+        missing_args = [lhs.clone()]
+        with self.assertRaisesRegex(RuntimeError, "missing arguments"):
+            interpreter.boxed_run(missing_args)
+        self.assertEqual(len(missing_args), 1)
 
     def test_interpreter_other_graph(self):
         class MyModule(torch.nn.Module):
@@ -2123,7 +2271,7 @@ class TestFX(JitTestCase):
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
-        env_key_names = {n.name for n in interp.env.keys()}
+        env_key_names = {n.name for n in interp.env}
         self.assertEqual(env_key_names, {"output"})
 
     def test_interpreter_default_args(self):
@@ -2225,8 +2373,8 @@ class TestFX(JitTestCase):
         foo_scripted = torch.jit.script(Foo())
         foo_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
-        fxed = symbolic_trace(Foo())
-        fxed_scripted = torch.jit.script(fxed)
+        fixed = symbolic_trace(Foo())
+        fxed_scripted = torch.jit.script(fixed)
         fxed_scripted(Pair(torch.rand(5), torch.rand(5)), torch.rand(5), 3)
 
     def test_fn_type_annotation_empty(self):
@@ -2295,6 +2443,16 @@ class TestFX(JitTestCase):
 
         self.assertTrue("typing.List[float]" in str(graph))
 
+    def test_typename_print_union(self):
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node(
+            "call_function", target=torch.relu, args=(x,), type_expr=float|torch.Tensor|None
+        )
+        output: torch.fx.Node = graph.output(b)
+
+        self.assertTrue('float | torch.Tensor | None' in str(graph))
+
     def test_layout(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -2343,7 +2501,7 @@ class TestFX(JitTestCase):
 
         g = torch.fx.Graph()
         x = g.placeholder("x")
-        for i in range(depth):
+        for _ in range(depth):
             x = g.call_function(torch.relu, (x,))
         g.output(x)
 
@@ -2915,7 +3073,7 @@ class TestFX(JitTestCase):
         for node in traced.graph.nodes:
             if node.op == "placeholder":
                 ph = node
-            elif node.op == "call_function" and node.target == wrapped_named_tup:
+            elif node.op == "call_function" and node.target is wrapped_named_tup:
                 node.update_arg(0, Pair(ph, 1.2))
                 node.update_kwarg("p2", Pair(3.4, ph))
                 call_func = node
@@ -3078,7 +3236,7 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={"y": False})
         self.assertEqual(mod_true(3, True), 6)
         print(mod_true.code)
-        assert any(i.target == torch._assert for i in mod_true.graph.nodes)
+        assert any(i.target is torch._assert for i in mod_true.graph.nodes)
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
@@ -3385,12 +3543,12 @@ class TestFX(JitTestCase):
 
         def parameter_exists(gm: GraphModule, path: str) -> bool:
             return any(path == name for name, _ in gm.named_parameters()) and any(
-                path == name for name in gm.state_dict().keys()
+                path == name for name in gm.state_dict()
             )
 
         def buffer_exists(gm: GraphModule, path: str) -> bool:
             return any(path == name for name, _ in gm.named_buffers()) and any(
-                path == name for name in gm.state_dict().keys()
+                path == name for name in gm.state_dict()
             )
 
         # Test that we added the "dropout" submodule
@@ -3583,7 +3741,7 @@ class TestFX(JitTestCase):
 
         class LeafTracerNotB(Tracer):
             def is_leaf_module(self, module, name):
-                return False if "b" in name else True
+                return "b" not in name
 
         # Recompile calls added "for fun", since they
         # chain __call__ wrappers.
@@ -3784,25 +3942,6 @@ class TestFX(JitTestCase):
         scripted(x, y)
 
         FileCheck().check("Tuple[()]").check("Tuple[str, Tuple[()]]").run(scripted.code)
-
-    @unittest.skipIf(
-        IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108"
-    )
-    @unittest.skipIf(sys.version_info >= (3, 10), "Does not work on Python-3.10")
-    def test_assert(self):
-        def f(x):
-            assert x > 1
-            return x + 1
-
-        try:
-            torch.fx.proxy.TracerBase.trace_asserts = True
-            traced = symbolic_trace(f)
-        finally:
-            torch.fx.proxy.TracerBase.trace_asserts = False
-
-        self.assertEqual(f(2), traced(2))
-        with self.assertRaises(AssertionError):
-            traced(0)
 
     def test_pytree(self):
         # Used to test that you can use your own placeholder class
@@ -4182,6 +4321,153 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         # recorver mutable checking flag
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @skipIfRocm
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_profiler_stack_trace_augmentation(self):
+        """
+        Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
+        augments profiler events with stack traces from FX metadata registry.
+        """
+
+        # Simple test model
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(10, 16)
+                self.relu = torch.nn.ReLU()
+                self.linear2 = torch.nn.Linear(16, 10)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.relu(x)
+                x = self.linear2(x)
+                return x
+
+        model = TestModel().cuda()
+
+        # Compile the model
+        compiled_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+
+        # Warmup
+        for _ in range(3):
+            _ = compiled_model(torch.randn(10, 10, device="cuda"))
+
+        # Profile with the compiled model
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            result = compiled_model(torch.randn(10, 10, device="cuda"))
+
+        actual_traces = _enrich_profiler_traces(prof)
+
+        self.assertExpectedInline(actual_traces, """\
+event=aten::t node=t stack_trace=x = self.linear1(x)
+event=aten::transpose node=t stack_trace=x = self.linear1(x)
+event=aten::as_strided node=t stack_trace=x = self.linear1(x)
+event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
+event=cudaLaunchKernel node=addmm stack_trace=x = self.linear1(x)
+event=aten::relu node=relu stack_trace=x = self.relu(x)
+event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
+event=cudaLaunchKernel node=relu stack_trace=x = self.relu(x)
+event=aten::t node=t_1 stack_trace=x = self.linear2(x)
+event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
+event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
+event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
+event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_profiler_multiple_modules(self):
+        """
+        Test that multiple compiled modules under the same profiler session
+        have their events correctly augmented with stack traces.
+        """
+
+        class ModelA(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class ModelB(torch.nn.Module):
+            def forward(self, x):
+                return x - 1
+
+        model_a = ModelA().cuda()
+        model_b = ModelB().cuda()
+
+        # Compile both models
+        compiled_a = torch.compile(model_a, backend="aot_eager", fullgraph=True)
+        compiled_b = torch.compile(model_b, backend="aot_eager", fullgraph=True)
+
+        # Warmup
+        for _ in range(3):
+            _ = compiled_a(torch.randn(10, 10, device="cuda"))
+            _ = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
+
+        # Profile both models in the same session
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            result_a = compiled_a(torch.randn(10, 10, device="cuda"))
+            result_b = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
+
+        actual_traces = _enrich_profiler_traces(prof)
+        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+        self.assertExpectedInline(actual_traces, f"""\
+event=aten::add node=add stack_trace=return x + 1
+event={kernel_event} node=add stack_trace=return x + 1
+event=aten::sub node=sub stack_trace=return x - 1
+event={kernel_event} node=sub stack_trace=return x - 1"""
+            )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_profiler_nested_graph_modules(self):
+        """
+        Test that nested graph modules (e.g., graph modules calling subgraphs)
+        have their events correctly augmented with stack traces.
+        """
+
+        # Model with nested structure
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+
+            @torch.compiler.nested_compile_region
+            def forward(self, x, y):
+                m = torch.mul(x, y)
+                s = m.sin()
+                a = s + self.c
+                return a
+
+        model = Mod().cuda()
+
+        # Compile the model (this may create nested graph modules)
+        compiled_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+
+        # Warmup
+        for _ in range(3):
+            _ = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+
+        # Profile
+        with profile(
+            activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        ) as prof:
+            result = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
+
+        actual_traces = _enrich_profiler_traces(prof)
+        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+        self.assertExpectedInline(actual_traces, f"""\
+event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
+event={kernel_event} node=mul stack_trace=m = torch.mul(x, y)
+event=aten::sin node=sin stack_trace=s = m.sin()
+event={kernel_event} node=sin stack_trace=s = m.sin()
+event=aten::add node=add stack_trace=a = s + self.c
+event={kernel_event} node=add stack_trace=a = s + self.c"""
+            )
+
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
@@ -4195,7 +4481,7 @@ def run_getitem_target():
 
 class TestOperatorSignatures(JitTestCase):
     def setUp(self):
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4238,7 +4524,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         super().setUp()
         self.maxDiff = None
 
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4402,7 +4688,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         if origin in {tuple, tuple}:
             return f"Tuple{contained_type_str}"
-        if origin in {typing.Union}:
+        if origin == typing.Union:
             # Annoying hack to detect Optional
             if len(contained) == 2 and (contained[0] is type(None)) ^ (
                 contained[1] is type(None)
@@ -4532,7 +4818,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         check_symbols_have_bc_designation(torch.fx.passes, set())
 
         non_back_compat_strs = [
-            torch.typename(obj) for obj in non_back_compat_objects.keys()
+            torch.typename(obj) for obj in non_back_compat_objects
         ]
         # Only want objects in torch.fx
         non_back_compat_strs = [
@@ -4569,7 +4855,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         self.assertEqual(len(gm.graph.nodes), 3)
         found = False
         for node in gm.graph.nodes:
-            if node.op == "call_function" and node.target == side_effect_func:
+            if node.op == "call_function" and node.target is side_effect_func:
                 found = True
         self.assertTrue(found)
 
@@ -4594,7 +4880,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
-        # Checking for mutable operations whil tracing is feature flagged
+        # Checking for mutable operations while tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = (
             torch.fx.proxy.TracerBase.check_mutable_operations
@@ -4660,7 +4946,6 @@ class TestFunctionalTracing(JitTestCase):
         "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
-        "pad": ARG_TYPE_MISMATCH,
         "pairwise_distance": BUILT_IN_FUNC,
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
@@ -4693,12 +4978,6 @@ class TestFunctionalTracing(JitTestCase):
         "max_unpool3d": PROXY_ITERATED,
         "fold": PROXY_ITERATED,
         "unfold": PROXY_ITERATED,
-        "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
-        "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
-        "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
-        "layer_norm": ARG_TYPE_MISMATCH,
-        "rms_norm": ARG_TYPE_MISMATCH,
-        "lp_pool1d": ARG_TYPE_MISMATCH,
         "affine_grid": CONTROL_FLOW,
         "alpha_dropout": CONTROL_FLOW,
         "batch_norm": CONTROL_FLOW,
@@ -4732,9 +5011,6 @@ class TestFunctionalTracing(JitTestCase):
         "leaky_relu": CONTROL_FLOW,
         "local_response_norm": CONTROL_FLOW,
         "margin_ranking_loss": CONTROL_FLOW,
-        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
         "mse_loss": CONTROL_FLOW,
         "multi_head_attention_forward": CONTROL_FLOW,
         "multi_margin_loss": CONTROL_FLOW,
@@ -4829,7 +5105,6 @@ class TestFunctionalTracing(JitTestCase):
         def functional_test(self):
             if (
                 func_name in self.UNTRACEABLE_FUNCTIONALS_PY38
-                and sys.version_info >= (3, 8)
                 and sys.version_info < (3, 12)
             ):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]
@@ -4857,13 +5132,13 @@ class TestFunctionalTracing(JitTestCase):
         def no(*args, **kwargs):
             return False
 
-        for name in cls.TO_PATCH.keys():
+        for name in cls.TO_PATCH:
             cls.TO_PATCH[name] = getattr(torch.nn.functional, name)
             setattr(torch.nn.functional, name, no)
 
     @classmethod
     def tearDownClass(cls):
-        for name in cls.TO_PATCH.keys():
+        for name in cls.TO_PATCH:
             setattr(torch.nn.functional, name, cls.TO_PATCH[name])
 
 
@@ -4962,7 +5237,7 @@ class TestVisionTracing(JitTestCase):
             test_name = "test_torchvision_models_" + k
             x = (
                 torch.rand(1, 3, 299, 299)
-                if k in ["inception_v3"]
+                if k == "inception_v3"
                 else torch.rand(1, 3, 224, 224)
             )
             kwargs = dict(num_classes=50)

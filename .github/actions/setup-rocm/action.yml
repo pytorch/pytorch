@@ -59,11 +59,6 @@ runs:
             echo "$msg"
             exit 1
         fi
-        if [[ $ngpu -eq 1 ]]; then
-            echo "Error: only 1 GPU detected, at least 2 GPUs are needed for distributed jobs"
-            echo "$msg"
-            exit 1
-        fi
 
     - name: Runner diskspace health check
       uses: pytorch/pytorch/.github/actions/diskspace-cleanup@main
@@ -116,3 +111,13 @@ runs:
         # This video group ID maps to subgid 1 inside the docker image due to the /etc/subgid entries.
         # The group name corresponding to group ID 1 can change depending on the OS, so both are necessary.
         echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd $DEVICE_FLAG --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"
+
+    - name: Login to ECR
+      uses: pytorch/pytorch/.github/actions/ecr-login@main
+
+    - name: Preserve github env variables for use in docker
+      shell: bash
+      run: |
+        env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+        env | grep '^RUNNER' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from torch._higher_order_ops.base_hop import BaseHOP, FunctionWithNoFreeVars
 

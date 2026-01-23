@@ -7,7 +7,7 @@ import dataclasses
 import difflib
 import io
 import sys
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -15,6 +15,8 @@ from torch._subclasses.fake_tensor import unset_fake_temporarily
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._subclasses import fake_tensor
 
 
@@ -64,7 +66,7 @@ def _patch_difflib_sequence_matcher_init():
     """
     original_init = difflib.SequenceMatcher.__init__
 
-    def patched_init(self, isjunk=None, a="", b="", autojunk=True):
+    def patched_init(self, isjunk=None, a="", b="", autojunk=True) -> None:
         original_init(self, isjunk, a, b, autojunk=False)
 
     difflib.SequenceMatcher.__init__ = patched_init  # type: ignore[assignment]
@@ -190,7 +192,7 @@ class Transform(abc.ABC):
     def __init__(
         self,
         module: torch.fx.GraphModule,
-    ):
+    ) -> None:
         """Initialize the transform.
 
         Args:

@@ -45,6 +45,8 @@ class TORCH_API FileStore : public Store {
     return path_;
   }
 
+  std::vector<std::string> listKeys() override;
+
  protected:
   int64_t addHelper(const std::string& key, int64_t i);
 

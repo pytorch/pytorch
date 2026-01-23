@@ -50,7 +50,7 @@ enum class C10_API_ENUM RecordScope : uint8_t {
 namespace std {
 template <>
 struct hash<at::RecordScope> {
-  size_t operator()(const at::RecordScope& sc) const {
+  size_t operator()(const at::RecordScope& sc) const noexcept {
     return static_cast<std::size_t>(sc);
   }
 };
@@ -666,7 +666,7 @@ void record_function_with_scope_and_debug_handle(
         guard, fn, debug_handle, inputs, ##__VA_ARGS__);       \
   }
 
-// Helper macros to record LITE INTERPETER scope events with debug handles
+// Helper macros to record LITE INTERPRETER scope events with debug handles
 #define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS( \
     fn, debug_handle, inputs)                           \
   RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(            \

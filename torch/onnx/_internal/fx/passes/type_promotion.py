@@ -6,7 +6,7 @@ import abc
 import dataclasses
 import inspect
 import logging
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._dispatch.python
@@ -26,7 +26,7 @@ from torch.utils import _python_dispatch, _pytree
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from types import ModuleType
 
     from torch._subclasses import fake_tensor
@@ -63,7 +63,7 @@ class TypePromotionSnapshot:
 class TypePromotionRule(abc.ABC):
     """Base class for type promotion rule per 'torch.ops.{namespace}.{op_name}'."""
 
-    def __init__(self, namespace: str, op_name: str):
+    def __init__(self, namespace: str, op_name: str) -> None:
         self.namespace = namespace
         self.op_name = op_name
 
@@ -74,7 +74,7 @@ class TypePromotionRule(abc.ABC):
     def __hash__(self) -> int: ...
 
     @abc.abstractmethod
-    def __repr__(self): ...
+    def __repr__(self) -> str: ...
 
     @abc.abstractmethod
     def __eq__(self, other: object) -> bool: ...
@@ -128,7 +128,7 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         promote_args_positions: Sequence[int],
         promote_kwargs_names: Sequence[str],
         promotion_kind: _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND,
-    ):
+    ) -> None:
         """Constructs a TypePromotionRule for elementwise operators.
 
         Args:
@@ -143,12 +143,13 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         self.promote_kwargs_names = promote_kwargs_names
         self.promotion_kind = promotion_kind
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"ElementwiseTypePromotionRule('{self.namespace}', '{self.op_name}', "
             f"{self.promote_args_positions}, {self.promote_kwargs_names}, {self.promotion_kind})"
         )
 
+    # pyrefly: ignore [bad-override]
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, ElementwiseTypePromotionRule):
             return False
@@ -215,7 +216,7 @@ class DivElementwiseTypePromotionRule(ElementwiseTypePromotionRule):
     Rule depends on the value of the `rounding_mode` argument.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             "aten",
             "div",
@@ -227,7 +228,7 @@ class DivElementwiseTypePromotionRule(ElementwiseTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        rounding_mode = kwargs.get("rounding_mode", None)
+        rounding_mode = kwargs.get("rounding_mode")
         if rounding_mode is None:
             # true_divide
             self.promotion_kind = (
@@ -251,7 +252,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
         namespace: str,
         op_name: str,
         promotion_kind: _prims_common.REDUCTION_OUTPUT_TYPE_KIND,
-    ):
+    ) -> None:
         """Constructs a TypePromotionRule for reduction operators.
 
         Args:
@@ -262,9 +263,10 @@ class ReductionTypePromotionRule(TypePromotionRule):
         super().__init__(namespace, op_name)
         self.promotion_kind = promotion_kind
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"ReductionTypePromotionRule('{self.namespace}', '{self.op_name}', {self.promotion_kind})"
 
+    # pyrefly: ignore [bad-override]
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, ElementwiseTypePromotionRule):
             return False
@@ -285,7 +287,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
         )
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: torch.dtype | None = kwargs.get("dtype", None)
+        dtype: torch.dtype | None = kwargs.get("dtype")
 
         computation_dtype, result_dtype = _prims_common.reduction_dtypes(
             arg, self.promotion_kind, dtype
@@ -309,7 +311,7 @@ class AllOrAnyReductionTypePromotionRule(ReductionTypePromotionRule):
     The result dtype is always uint8 if `dtype` kwarg is uint8, otherwise torch.bool.
     """
 
-    def __init__(self, op_name: str):
+    def __init__(self, op_name: str) -> None:
         super().__init__(
             "aten",
             op_name,
@@ -349,7 +351,7 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
         )
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: torch.dtype | None = kwargs.get("dtype", None)
+        dtype: torch.dtype | None = kwargs.get("dtype")
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
         if dtype is None:
             if _prims_common.is_boolean_dtype(
@@ -1203,7 +1205,7 @@ class ElementwiseTypePromotionRuleSetGenerator:
 class TypePromotionTable:
     """Type promotion table for torch.ops."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._rule_table = {}
         for rule in _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET:
             self.add_rule(rule)
@@ -1260,7 +1262,7 @@ class _OpTraceDispatchMode(_python_dispatch.TorchDispatchMode):
     op overload for a given op overload packet for different set of args and kwargs.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.traced_ops = []
 
@@ -1329,7 +1331,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         self,
         module: torch.fx.GraphModule,
         type_promotion_table: TypePromotionTable,
-    ):
+    ) -> None:
         super().__init__(module)
         self.type_promotion_table = type_promotion_table
 
@@ -1529,6 +1531,7 @@ class _TypePromotionInterpreter(torch.fx.Interpreter):
         elif isinstance(fx_arg, (tuple, list)):
             logger.info("Argument %s is a tuple/list. Promoting each element.", fx_arg)
             return type(fx_arg)(
+                # pyrefly: ignore [bad-argument-type]
                 self._maybe_promote_arg(node, fx_arg_elem, dtype)
                 for fx_arg_elem in fx_arg
             )
@@ -1601,7 +1604,7 @@ class InsertTypePromotion(_pass.Transform):
         self,
         module: torch.fx.GraphModule,
         type_promotion_table: TypePromotionTable | None = None,
-    ):
+    ) -> None:
         super().__init__(module)
         self.interpreter = _TypePromotionInterpreter(
             module, type_promotion_table or TypePromotionTable()

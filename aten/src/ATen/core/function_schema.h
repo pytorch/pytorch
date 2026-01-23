@@ -571,7 +571,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
     if (arg.N()) {
         N = std::to_string(*arg.N());
     }
-    out << "[" << N << "]";
+    out << '[' << N << ']';
   } else {
     out << unopt_type->str();
   }
@@ -582,15 +582,15 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   }
 
   if (is_opt) {
-    out << "?";
+    out << '?';
   }
 
   if (!arg.name().empty()) {
-    out << " " << arg.name();
+    out << ' ' << arg.name();
   }
 
   if (arg.default_value()) {
-    out << "=";
+    out << '=';
     if ((type->kind() == c10::TypeKind::StringType ||
         unopt_type->kind() == c10::TypeKind::StringType) &&
         arg.default_value().value().isString()) {

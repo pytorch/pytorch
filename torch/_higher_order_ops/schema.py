@@ -4,6 +4,8 @@ from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch.fx.node import Target
 
 
@@ -11,14 +13,14 @@ from torch.fx.node import Target
 # This is helpful for generating FunctionSchema for HigherOrderOperator, where
 # we don't have a function to inspect and each call of the higher order operator
 # would have different schema.
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class HopArgumentInfo:
     # Could give a name to the operand by default it's empty string.
     name: str
     example_value: Any
     # Provide an default_value
     default_value: Any
-    # Whether this arugment gets mutated in the hop subgraph.
+    # Whether this argument gets mutated in the hop subgraph.
     # For output, this should always be False
     is_mutated: bool
     kw_only: bool
@@ -35,7 +37,7 @@ class HopArgumentInfoGen:
         kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
-            assert type(example_value) == type(default_value), (
+            assert type(example_value) is type(default_value), (
                 f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
             )
 
@@ -65,6 +67,10 @@ class CTypeGen:
             return torch._C.AnyType.get()
         elif isinstance(obj, torch.SymInt):
             return torch._C.SymIntType.get()
+        elif isinstance(obj, torch.SymBool):
+            return torch._C.SymBoolType.get()
+        elif isinstance(obj, FakeScriptObject) or is_opaque_type(type(obj)):
+            return torch._C.PyObjectType.get()  # pyrefly: ignore[missing-attribute]
         return torch._C._jit_try_infer_type(obj).type()
 
 

@@ -66,6 +66,7 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     size_t num_models,
     const char* device_str,
     const char* cubin_dir) {
+
   if (num_models == 0) {
     std::cerr << "Error: num_models must be positive, but got 0\n";
     return AOTI_RUNTIME_FAILURE;
@@ -81,6 +82,7 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
 }
+
 
 AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle) {
@@ -246,6 +248,26 @@ AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBuffer(
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     container->update_constant_buffer(
         *input_map, use_inactive, validate_full_update, /* user_managed = */ true);
+  })
+}
+
+AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(container_handle);
+  // Build a local unordered_map inside
+  std::unordered_map<std::string, AtenTensorHandle> input_map;
+  input_map.reserve(num_pairs);
+  for (size_t i = 0; i < num_pairs; ++i) {
+      input_map.emplace(pairs[i].name, pairs[i].handle);
+  }
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        input_map, use_inactive, validate_full_update, /*user_managed=*/true);
   })
 }
 
@@ -439,5 +461,28 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     model->update_constants_map(std::move(constant_map));
   })
 }
+
+AOTIRuntimeError AOTInductorModelContainerGetConstantsBlobSize(
+    AOTInductorModelContainerHandle container_handle,
+    uint64_t* ret_size) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_size = container->constant_blob_size(); })
+}
+
+
+// Load weights from a single blob in weight_blob_ptr
+AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
+    AOTInductorModelContainerHandle container_handle,
+    const uint8_t* weight_blob_ptr){
+    auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+      {container->update_constants_from_blob(weight_blob_ptr); })
+    }
+
 
 } // extern "C"

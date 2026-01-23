@@ -236,6 +236,32 @@ class TestBasics(TestCase):
             _compare_mt_t(sparse_mt, data)
             _compare_mt_t(mt.grad, data.grad)
 
+    def test_to_device(self, device):
+        for sample in _generate_sample_data(device=device):
+            data = sample.input
+            mask = sample.kwargs["mask"]
+            mt = masked_tensor(data, mask, requires_grad=True)
+
+            new_device = torch.device("cuda") if device != "cuda" and torch.cuda.is_available() else torch.device("cpu")
+            mt_device = mt.to(new_device)
+
+            self.assertEqual(mt_device.device.type, new_device.type)
+            self.assertEqual(mt_device.get_mask().device.type, new_device.type)
+            self.assertEqual(mt_device.get_data().device.type, new_device.type)
+
+    def test_to_dtype(self, device):
+        for sample in _generate_sample_data(device=device):
+            data = sample.input
+            mask = sample.kwargs["mask"]
+            mt = masked_tensor(data, mask, requires_grad=True)
+
+            new_dtype = torch.float64 if data.dtype == torch.float32 else torch.float32
+            mt_dtype = mt.to(new_dtype)
+
+            self.assertEqual(mt_dtype.dtype, new_dtype)
+            self.assertEqual(mt_dtype.get_mask().dtype, torch.bool)
+            self.assertEqual(mt_dtype.get_data().dtype, new_dtype)
+
     def test_to_dense(self, device):
         samples = _generate_sample_data(
             device=device,
@@ -398,7 +424,7 @@ class TestUnary(TestCase):
         fn_name = _fix_fn_name(fn_name)
         if fn_name in ["log", "log10", "log1p", "log2", "sqrt"]:
             data = data.mul(0.5).abs()
-        if fn_name in ["rsqrt"]:
+        if fn_name == "rsqrt":
             data = data.abs() + 1  # Void division by zero
         if fn_name in ["acos", "arccos", "asin", "arcsin", "logit"]:
             data = data.abs().mul(0.5).clamp(0, 1)
@@ -406,7 +432,7 @@ class TestUnary(TestCase):
             data = data.mul(0.5).clamp(-1, 1)
         if fn_name in ["acosh", "arccosh"]:
             data = data.abs() + 1
-        if fn_name in ["bitwise_not"]:
+        if fn_name == "bitwise_not":
             data = data.mul(128).to(torch.int8)
         return data, mask
 
@@ -423,7 +449,7 @@ class TestUnary(TestCase):
         mt = masked_tensor(data, mask)
         t_args = [data]
         mt_args = [mt]
-        if fn_name in ["pow"]:
+        if fn_name == "pow":
             t_args += [2.0]
             mt_args += [2.0]
         return t_args, mt_args

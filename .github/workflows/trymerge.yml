@@ -24,11 +24,11 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.9'
+          python-version: '3.10'
           check-latest: false
           cache: pip
           architecture: x64
-      - run: pip install pyyaml==6.0
+      - run: pip install pyyaml==6.0.2
 
       - name: Setup committer id
         run: |
@@ -45,6 +45,7 @@ jobs:
           IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
           DRCI_BOT_KEY: ${{ secrets.DRCI_BOT_KEY }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          HUD_API_TOKEN: ${{ secrets.HUD_API_TOKEN }}
         run: |
           set -x
           if [ -n "${REBASE}" ]; then
@@ -59,22 +60,19 @@ jobs:
             # on the PR appear in chronological order (timing issues can shuffle them around)
             sleep 60
           fi
+
+          # Require a comment id for merge operations
+          if [ -z "${COMMENT_ID}" ]; then
+            echo "Error: merge requires COMMENT_ID to be specified"
+            exit 1
+          fi
+
           if [ -n "${FORCE}" ]; then
-            if [ -n "${COMMENT_ID}" ]; then
-              python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"
-            else
-              python3 .github/scripts/trymerge.py --force "${PR_NUM}"
-            fi
+            python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"
           elif [ -n "${IGNORE_CURRENT}" ]; then
-            if [ -n "${COMMENT_ID}" ]; then
-              python3 .github/scripts/trymerge.py --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"
-            else
-              python3 .github/scripts/trymerge.py --ignore-current "${PR_NUM}"
-            fi
-          elif [ -n "${COMMENT_ID}" ]; then
-            python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
+            python3 .github/scripts/trymerge.py --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"
           else
-            python3 .github/scripts/trymerge.py "${PR_NUM}"
+            python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
           fi
       - name: Comment on Canceled
         if: ${{ cancelled() && steps.checkout.outcome == 'success' }}

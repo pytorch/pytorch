@@ -50,7 +50,7 @@ FROM cpu as cuda
 ADD ./common/install_cuda.sh install_cuda.sh
 ADD ./common/install_magma.sh install_magma.sh
 COPY ./common/install_nccl.sh install_nccl.sh
-COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 ENV CUDA_HOME /usr/local/cuda
 
@@ -68,6 +68,19 @@ FROM cuda as cuda12.9
 RUN bash ./install_cuda.sh 12.9
 RUN bash ./install_magma.sh 12.9
 RUN ln -sf /usr/local/cuda-12.9 /usr/local/cuda
+
+FROM cuda as cuda13.0
+RUN bash ./install_cuda.sh 13.0
+RUN bash ./install_magma.sh 13.0
+RUN ln -sf /usr/local/cuda-13.0 /usr/local/cuda
+
+# Install libibverbs for libtorch and copy to CUDA directory
+RUN apt-get update -y && \
+    apt-get install -y libibverbs-dev librdmacm-dev && \
+    cp /usr/lib/x86_64-linux-gnu/libmlx5.so* /usr/local/cuda/lib64/ && \
+    cp /usr/lib/x86_64-linux-gnu/librdmacm.so* /usr/local/cuda/lib64/ && \
+    cp /usr/lib/x86_64-linux-gnu/libibverbs.so* /usr/local/cuda/lib64/ && \
+    cp /usr/lib/x86_64-linux-gnu/libnl* /usr/local/cuda/lib64/
 
 FROM cpu as rocm
 ARG ROCM_VERSION

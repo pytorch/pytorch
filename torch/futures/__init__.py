@@ -1,9 +1,14 @@
 # mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
-from typing import Callable, cast, Generic, Optional, TypeVar, Union
+from typing import cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 __all__ = ["Future", "collect_all", "wait_all"]
@@ -13,11 +18,7 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 
-class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
-    pass
-
-
-class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
+class Future(torch._C.Future, Generic[T]):
     r"""
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
     execution of a callable, e.g. :meth:`~torch.distributed.rpc.rpc_async`. It
@@ -271,9 +272,10 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             ...
             ValueError: foo
         """
-        assert isinstance(result, Exception), (
-            f"{result} is of type {type(result)}, not an Exception."
-        )
+        if not isinstance(result, Exception):
+            raise AssertionError(
+                f"{result} is of type {type(result)}, not an Exception."
+            )
 
         def raise_error(fut_result):
             raise fut_result

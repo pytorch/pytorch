@@ -2,8 +2,9 @@
 import operator
 import traceback
 import typing
+from collections.abc import Callable
 from contextlib import nullcontext
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch import fx
@@ -187,6 +188,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
 
+        # pyrefly: ignore [bad-override]
         def placeholder(
             self,
             target: str,  # type: ignore[override]
@@ -212,7 +214,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         ) -> ProxyValue:
             meta = NodeMetadata(self.node.meta)
 
-            if target == operator.getitem:
+            if target is operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
             elif getattr(target, "__module__", None) in {
@@ -234,10 +236,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     kwargs,
                     meta,
                 )
-            elif target == torch.ops.higher_order.cond:
+            elif target is torch.ops.higher_order.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == torch.ops.higher_order.map_impl:
+            elif target is torch.ops.higher_order.map_impl:
                 f, mapped_args, operands = args  # type: ignore[assignment]
                 return self.callback.call_map(f, mapped_args, operands, meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
@@ -438,6 +440,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
         interpreter = self.ExportInterpreter(self, graph_module)
+        # pyrefly: ignore [bad-assignment]
         prev_interpreter, self.interpreter = (
             self.interpreter,
             torch.fx.Interpreter(  # type: ignore[assignment]

@@ -200,11 +200,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       const at::TensorOptions& options,
       c10::SymIntArrayRef shape,
       bool is_tensor_subclass,
-      bool is_nested) noexcept {
+      bool is_nested,
+      std::optional<at::ScalarType> grad_dtype) noexcept {
     uint32_t input_nr = input_metadata_.size();
     auto meta_shape = MetadataShape{std::in_place_type<SymIntSmallVec>, shape};
     input_metadata_.emplace_back(
-        options, meta_shape, is_tensor_subclass, is_nested);
+        options, meta_shape, is_tensor_subclass, is_nested, grad_dtype);
     return input_nr;
   }
 
