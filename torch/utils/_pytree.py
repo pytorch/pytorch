@@ -43,6 +43,7 @@ from typing import (
 )
 from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
+import torch
 from torch.torch_version import TorchVersion as _TorchVersion
 
 
@@ -164,11 +165,13 @@ SUPPORTED_NODES: dict[type[Any], NodeDef] = {}
 #   context, and the version number
 # - from_dumpable_context takes in a string representation of the context, and the
 #   version, and returns the deserialized context
+# - class_name: the fully qualified class name used for C++ schema type registration
 class _SerializeNodeDef(NamedTuple):
     typ: type[Any]
     serialized_type_name: str
     to_dumpable_context: ToDumpableContextFn | None
     from_dumpable_context: FromDumpableContextFn | None
+    class_name: str
 
 
 SUPPORTED_SERIALIZED_TYPES: dict[type[Any], _SerializeNodeDef] = {}
@@ -593,6 +596,9 @@ def _deregister_pytree_node(
         del SUPPORTED_SERIALIZED_TYPES[cls]
         CONSTANT_NODES.discard(cls)
 
+        if torch._C._is_python_type_registered(node_def.class_name):
+            torch._C._unregister_python_type(node_def.class_name)
+
 
 def _private_register_pytree_node(
     cls: type[Any],
@@ -618,11 +624,9 @@ def _private_register_pytree_node(
 
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
-            # TODO: change this warning to an error after OSS/internal stabilize
-            warnings.warn(
+            raise ValueError(
                 f"{cls} is already registered as pytree node. "
                 "Overwriting the previous registration.",
-                stacklevel=2,
             )
 
         node_def = NodeDef(cls, flatten_fn, unflatten_fn, flatten_with_keys_fn)
@@ -637,11 +641,17 @@ def _private_register_pytree_node(
         if serialized_type_name is None:
             serialized_type_name = NO_SERIALIZED_TYPE_NAME_FOUND
 
+        # Generate class_name. This is different from serialized_type_name, as
+        # serialized_type_name is meant have backwards compatibility guarantees
+        class_name = f"{cls.__module__}.{cls.__qualname__}"
+        torch._C._register_python_type(class_name)
+
         serialize_node_def = _SerializeNodeDef(
             cls,
             serialized_type_name,
             to_dumpable_context,
             from_dumpable_context,
+            class_name,
         )
         SUPPORTED_SERIALIZED_TYPES[cls] = serialize_node_def
         SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
