@@ -954,6 +954,33 @@ print(t.is_pinned())
             self.assertEqual(a, b)
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
+    def test_manual_seed_with_tensor(self):
+        with freeze_rng_state():
+            seed = 42
+            tensor_seed = torch.tensor(seed, device="cuda", dtype=torch.int64)
+            gen1 = torch.Generator(device="cuda").manual_seed(tensor_seed)
+            result = torch.rand([4, 4], generator=gen1, device="cuda")
+            gen2 = torch.Generator(device="cuda").manual_seed(seed)
+            expected = torch.rand([4, 4], generator=gen2, device="cuda")
+            self.assertEqual(result, expected)
+
+    def test_manual_tensor_seed_reproducibility(self):
+        with freeze_rng_state():
+            tensor_seed = torch.tensor(42, device="cuda", dtype=torch.int64)
+            gen1 = torch.Generator(device="cuda").manual_seed(tensor_seed)
+            result1 = torch.rand([4, 4], generator=gen1, device="cuda")
+            gen2 = torch.Generator(device="cuda").manual_seed(tensor_seed)
+            result2 = torch.rand([4, 4], generator=gen2, device="cuda")
+            self.assertEqual(result1, result2)
+
+    def test_manual_tensor_seed_sequential_calls(self):
+        with freeze_rng_state():
+            seed_tensor = torch.tensor(42, device="cuda", dtype=torch.int64)
+            gen = torch.Generator(device="cuda").manual_seed(seed_tensor)
+            result1 = torch.rand([4, 4], generator=gen, device="cuda")
+            result2 = torch.rand([4, 4], generator=gen, device="cuda")
+            self.assertNotEqual(result1, result2)
+
     def test_specify_improper_device_name(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fname = os.path.join(tmpdir, "tempfile.pt")

@@ -102,6 +102,10 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   at::TensorBase seed_extragraph_;
   at::TensorBase offset_extragraph_;
 
+  at::TensorBase tensor_seed_;
+  at::TensorBase tensor_offset_;
+  bool is_seed_tensor_ = false;
+
   CUDAGeneratorState(
       uint64_t seed = default_rng_seed_val,
       uint64_t philox_offset_per_thread = 0,
@@ -133,6 +137,7 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // CUDAGeneratorImpl methods
   std::shared_ptr<CUDAGeneratorImpl> clone() const;
   void set_current_seed(uint64_t seed) override;
+  void set_current_tensor_seed(c10::intrusive_ptr<c10::TensorImpl> seed) override;
   void set_offset(uint64_t offset) override;
   uint64_t get_offset() const override;
   uint64_t current_seed() const override;

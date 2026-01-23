@@ -281,6 +281,13 @@ void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
   }
 }
 
+void CUDAGeneratorImpl::set_current_tensor_seed(c10::intrusive_ptr<c10::TensorImpl> seed) {
+  state_->tensor_seed_ = at::TensorBase::wrap_tensor_impl(std::move(seed));
+  auto options = state_->tensor_seed_.options().dtype(at::kLong);
+  state_->tensor_offset_ = at::zeros({1}, options);
+  state_->is_seed_tensor_ = true;
+}
+
 /**
  * Sets the offset to be used by curandStatePhilox4_32_10
  *
@@ -472,6 +479,13 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
         state_->seed_extragraph_.data_ptr<int64_t>(),
         state_->offset_extragraph_.data_ptr<int64_t>(),
         offset);
+  } else if (state_->is_seed_tensor_) {
+    return PhiloxCudaState(
+        state_->tensor_seed_.data_ptr<int64_t>(),
+        state_->tensor_offset_.data_ptr<int64_t>(),
+        increment,
+        true
+      );
   } else {
     uint64_t offset = state_->philox_offset_per_thread_;
     state_->increase(increment);
