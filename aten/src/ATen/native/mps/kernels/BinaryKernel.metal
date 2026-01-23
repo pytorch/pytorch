@@ -100,6 +100,34 @@ struct zeta_functor {
   }
 };
 
+// GCD implementation using Euclidean algorithm
+struct gcd_functor {
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline T operator()(const T a_in, const T b_in) {
+    T a = a_in < 0 ? -a_in : a_in;
+    T b = b_in < 0 ? -b_in : b_in;
+    while (a != 0) {
+      T c = a;
+      a = b % a;
+      b = c;
+    }
+    return b;
+  }
+};
+
+// LCM = |a * b| / gcd(a, b)
+struct lcm_functor {
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    gcd_functor gcd_fn;
+    T g = gcd_fn(a, b);
+    if (g == 0) return 0;
+    T abs_a = a < 0 ? -a : a;
+    T abs_b = b < 0 ? -b : b;
+    return (abs_a / g) * abs_b;
+  }
+};
+
 struct logaddexp_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
@@ -443,6 +471,8 @@ REGISTER_FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_he);
+REGISTER_INTEGER_BINARY_OP(gcd);
+REGISTER_INTEGER_BINARY_OP(lcm);
 REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);

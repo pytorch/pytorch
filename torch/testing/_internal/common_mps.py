@@ -311,10 +311,7 @@ if torch.backends.mps.is_available():
             "logspacetensor_overload": None,
             "linalg.eig": None,
             "linalg.eigvals": None,
-            "put": None,
             "cholesky_solve": None,
-            "frexp": None,
-            "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
@@ -324,7 +321,6 @@ if torch.backends.mps.is_available():
             "index_reduceamax": None,
             "index_reduceamin": None,
             # "kthvalue": None,
-            "lcm": None,
             "linalg.cond": None,
             "linalg.eigh": None,
             "linalg.eigvalsh": None,
