@@ -31,7 +31,7 @@ import sys
 import traceback
 import types
 from collections import namedtuple
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
 from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
@@ -524,7 +524,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         self,
         parent: "InstructionTranslator",
         args: Sequence[VariableTracker],
-        kwargs: Mapping[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> dict[str, VariableTracker]:
         """
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
@@ -1751,7 +1751,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self,
         parent: "InstructionTranslator",
         args: Sequence[VariableTracker],
-        kwargs: Mapping[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> dict[str, VariableTracker]:
         code = self.get_code()
         func = types.FunctionType(

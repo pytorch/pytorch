@@ -187,7 +187,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Mapping, Sequence
+    from collections.abc import Callable, Generator, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -4849,7 +4849,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent: Any,
         func: BaseUserFunctionVariable,
         args: Sequence[VariableTracker],
-        kwargs: Mapping[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         tracer = cls.build_inline_tracer(parent, func, args, kwargs)
         return tracer.inline_call_()
@@ -4890,8 +4890,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if (
-                hasattr(func, "fn")  # check explicitly to make pyrefly happy
-                and hasattr(getattr(func, "fn", None), "_origin")
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4925,7 +4925,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         parent: Any,
         func: BaseUserFunctionVariable,
         args: Sequence[VariableTracker],
-        kwargs: Mapping[str, VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         assert isinstance(
             func,
