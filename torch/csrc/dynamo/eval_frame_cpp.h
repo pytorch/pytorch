@@ -34,6 +34,5 @@ enum class EvalFrameOverride {
 };
 
 EvalFrameOverride set_eval_frame_override(EvalFrameOverride override);
-EvalFrameOverride get_eval_frame_override();
 
 #endif

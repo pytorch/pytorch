@@ -270,7 +270,6 @@ void initDynamoBindings(PyObject* torch) {
       .value("ERROR", EvalFrameOverride::ERROR);
 
   m.def("set_eval_frame_override", &set_eval_frame_override);
-  m.def("get_eval_frame_override", &get_eval_frame_override);
 }
 
 } // namespace torch::dynamo

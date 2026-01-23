@@ -45,6 +45,7 @@ import time
 import traceback
 import types
 import typing
+import unittest.mock as mock
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,7 +56,6 @@ from weakref import ReferenceType
 
 import torch
 import torch._logging
-from torch._C._dynamo.eval_frame import _EvalFrameOverride, get_eval_frame_override
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.callback import CallbackTrigger
 from torch._dynamo.distributed import get_compile_pg
@@ -1292,6 +1292,27 @@ def _fullgraph_capture_frame(
     )
 
 
+# Called by eval_frame_cpp.cpp in order to raise an error if Dynamo attempts to compile_frame
+def get_fail_callback(callback):
+    fail_callback = getattr(callback, "_dynamo_fail_callback", None)
+    if fail_callback is not None:
+        return fail_callback
+
+    def compile_frame_error(*args, **kwargs):
+        raise RuntimeError(
+            "Dynamo: expected not to compile nested code - this happens because "
+            "a Dynamo callback was triggered and succeeded in compiling "
+            "when running fullgraph=True compiled code."
+        )
+
+    def fail_callback(*args, **kwargs) -> ConvertFrameReturn:
+        with mock.patch(__name__ + ".compile_frame", compile_frame_error):
+            return callback(*args, **kwargs)
+
+    callback._dynamo_fail_callback = fail_callback
+    return fail_callback
+
+
 def compile_frame(  # type: ignore[return]
     code: types.CodeType,
     globals: dict[str, object],
@@ -1314,12 +1335,6 @@ def compile_frame(  # type: ignore[return]
     This is a shared interface for multiple compiler frontends (e.g. torch.compile,
     torch.export) that needs to capture a graph out of python code.
     """
-    if get_eval_frame_override() == _EvalFrameOverride.ERROR:
-        raise RuntimeError(
-            "Dynamo: expected not to compile nested code - this happens because "
-            "a Dynamo callback was triggered and succeeded in compiling "
-            "when running fullgraph=True compiled code."
-        )
     # This is shared across restarts
     speculation_log = SpeculationLog()
 

@@ -183,6 +183,9 @@ PyObject* dynamo__custom_eval_frame(
     }
   };
 
+  static std::optional<py::object> convert_frame_get_fail_callback =
+      std::nullopt;
+
   // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for
   // clearing/popping the frame, meaning that unless we default evaluate the
   // original frame, we are responsible for clearing it - via
@@ -190,13 +193,28 @@ PyObject* dynamo__custom_eval_frame(
   auto eval_custom = [&]() {
     // If we're attempting to run dynamo-generated code and eval frame override
     // is set to SKIP, then we should set the callback to None to skip.
-    // NB: we could potentially allow RUN_ONLY recursive_callback
-    if (eval_frame_override == EvalFrameOverride::SKIP) {
-      recursive_callback = py::none();
+    // If the override is set to ERROR, then we call
+    // torch._dynamo.convert_frame.get_fail_callback, which patches
+    // convert_frame.compile_frame with a function that errors unconditionally.
+    // This means Dynamo will error if it attempts to trace into the frame
+    // (Python-level skips pre-trace are permissible).
+    if (!recursive_callback.is_none() &&
+        !recursive_callback.is(py::bool_(false))) {
+      if (eval_frame_override == EvalFrameOverride::SKIP) {
+        recursive_callback = py::none();
+      } else if (eval_frame_override == EvalFrameOverride::ERROR) {
+        if (!convert_frame_get_fail_callback) {
+          convert_frame_get_fail_callback =
+              py::module_::import("torch._dynamo.convert_frame")
+                  .attr("get_fail_callback");
+          auto atexit = py::module_::import("atexit");
+          atexit.attr("register")(py::cpp_function(
+              []() { convert_frame_get_fail_callback = std::nullopt; }));
+        }
+        recursive_callback =
+            convert_frame_get_fail_callback.value()(recursive_callback);
+      }
     }
-    // NOTE: EvalFrameOverride::ERROR is handled in convert_frame.py.
-    // We check for the eval_frame_override right before running the
-    // InstructionTranslator, after all the Python-level skip checks.
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
     eval_result = dynamo_eval_custom_code(
