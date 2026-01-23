@@ -11,6 +11,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_cdist_backward_native.h>
 #include <ATen/ops/_cdist_forward_native.h>
 #include <ATen/ops/all_native.h>
 #include <ATen/ops/amax_native.h>
@@ -37,6 +38,8 @@
 #include <ATen/ops/trace_native.h>
 #include <ATen/ops/var_mean_native.h>
 #include <ATen/ops/var_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 namespace at::native {
@@ -1240,6 +1243,280 @@ Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, st
                      inputBroadcastSize,
                      norm_op_block);
   return result;
+}
+
+Tensor _cdist_backward_mps(const Tensor& grad, const Tensor& x1, const Tensor& x2, const double p, const Tensor& cdist) {
+  // Broadcasting might generate non-contiguous Tensors, so handle it before doing checks
+  int64_t c1 = x1.size(-1);
+  int64_t c2 = x2.size(-1);
+  int64_t r1 = x1.size(-2);
+  int64_t r2 = x2.size(-2);
+  auto dim1 = x1.dim();
+  auto dim2 = x2.dim();
+  IntArrayRef batch_tensor1(x1.sizes().data(), dim1 - 2);
+  IntArrayRef batch_tensor2(x2.sizes().data(), dim2 - 2);
+  std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
+  std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
+  tensor1_expand_size.insert(tensor1_expand_size.end(), {r1, c1});
+  std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
+  tensor2_expand_size.insert(tensor2_expand_size.end(), {r2, c2});
+
+  // Compute the linearized batch size
+  const int64_t batch_product = c10::multiply_integers(expand_batch_portion);
+
+  // Gracefully handle empty Tensors
+  if (r1 == 0 || r2 == 0 || c1 == 0 || batch_product == 0) {
+    return at::zeros_like(x1, x1.options());
+  }
+
+  Tensor x1_expanded = x1;
+  if (tensor1_expand_size != x1.sizes()) {
+    x1_expanded = x1.expand(tensor1_expand_size);
+  }
+  Tensor x2_expanded = x2;
+  if (tensor2_expand_size != x2.sizes()) {
+    x2_expanded = x2.expand(tensor2_expand_size);
+  }
+
+  x1_expanded = x1_expanded.contiguous();
+  x2_expanded = x2_expanded.contiguous();
+  auto cdist_contig = cdist.contiguous();
+  auto grad_contig = grad.contiguous();
+
+  // For p=0, gradient is always 0
+  if (p == 0.0) {
+    return at::zeros_like(x1, x1.options());
+  }
+
+  using namespace at::native::mps;
+
+  // Create output tensor
+  Tensor grad_x1 = at::zeros(x1_expanded.sizes(), x1.options());
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* gradTensor_ = nil;
+    MPSGraphTensor* x1Tensor_ = nil;
+    MPSGraphTensor* x2Tensor_ = nil;
+    MPSGraphTensor* cdistTensor_ = nil;
+    MPSGraphTensor* gradX1Tensor_ = nil;
+  };
+
+  auto stream = at::mps::getCurrentMPSStream();
+
+  @autoreleasepool {
+    std::string key = "cdist_backward_mps:" + std::to_string(p) + ":" +
+        getTensorsStringKey({grad_contig, x1_expanded, x2_expanded, cdist_contig});
+    
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* gradTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_contig);
+      MPSGraphTensor* x1Tensor = mpsGraphRankedPlaceHolder(mpsGraph, x1_expanded);
+      MPSGraphTensor* x2Tensor = mpsGraphRankedPlaceHolder(mpsGraph, x2_expanded);
+      MPSGraphTensor* cdistTensor = mpsGraphRankedPlaceHolder(mpsGraph, cdist_contig);
+
+      // grad has shape [..., r1, r2]
+      // x1 has shape [..., r1, c1]
+      // x2 has shape [..., r2, c2] where c1 == c2
+      // cdist has shape [..., r1, r2]
+      // We need to compute grad_x1 with shape [..., r1, c1]
+
+      // For each i in r1, j in r2:
+      //   diff = x1[..., i, :] - x2[..., j, :]  # shape [..., c1]
+      //   If p == 1: grad_x1[..., i, :] += grad[..., i, j] * sign(diff)
+      //   If p == 2: grad_x1[..., i, :] += grad[..., i, j] * diff / cdist[..., i, j]
+      //   General: grad_x1[..., i, :] += grad[..., i, j] * diff * |diff|^(p-2) / cdist[..., i, j]^(p-1)
+
+      // Expand x1 to [..., r1, 1, c1] and x2 to [..., 1, r2, c1]
+      // Then compute diff = x1 - x2 with shape [..., r1, r2, c1]
+      
+      NSMutableArray<NSNumber*>* x1ExpandShape = [NSMutableArray array];
+      NSMutableArray<NSNumber*>* x2ExpandShape = [NSMutableArray array];
+      
+      auto x1Sizes = x1_expanded.sizes();
+      auto x2Sizes = x2_expanded.sizes();
+      
+      for (int64_t i = 0; i < dim1 - 2; i++) {
+        [x1ExpandShape addObject:@(x1Sizes[i])];
+        [x2ExpandShape addObject:@(x2Sizes[i])];
+      }
+      [x1ExpandShape addObject:@(r1)];
+      [x1ExpandShape addObject:@1];
+      [x1ExpandShape addObject:@(c1)];
+      
+      [x2ExpandShape addObject:@1];
+      [x2ExpandShape addObject:@(r2)];
+      [x2ExpandShape addObject:@(c2)];
+
+      // Reshape x1 from [..., r1, c1] to [..., r1, 1, c1]
+      MPSGraphTensor* x1Reshaped = [mpsGraph reshapeTensor:x1Tensor withShape:x1ExpandShape name:nil];
+      // Reshape x2 from [..., r2, c2] to [..., 1, r2, c2]
+      MPSGraphTensor* x2Reshaped = [mpsGraph reshapeTensor:x2Tensor withShape:x2ExpandShape name:nil];
+
+      // Compute diff = x1 - x2, broadcasts to [..., r1, r2, c1]
+      MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:x1Reshaped
+                                                          secondaryTensor:x2Reshaped
+                                                                     name:nil];
+
+      // Expand grad and cdist to [..., r1, r2, 1] for broadcasting
+      NSMutableArray<NSNumber*>* gradExpandShape = [NSMutableArray array];
+      auto gradSizes = grad_contig.sizes();
+      for (int64_t i = 0; i < (int64_t)gradSizes.size(); i++) {
+        [gradExpandShape addObject:@(gradSizes[i])];
+      }
+      [gradExpandShape addObject:@1];
+
+      MPSGraphTensor* gradReshaped = [mpsGraph reshapeTensor:gradTensor withShape:gradExpandShape name:nil];
+      MPSGraphTensor* cdistReshaped = [mpsGraph reshapeTensor:cdistTensor withShape:gradExpandShape name:nil];
+
+      MPSGraphTensor* gradContribTensor = nil;
+      MPSDataType dtype = getMPSDataType(x1_expanded);
+
+      if (p == 1.0) {
+        // grad_contrib = grad * sign(diff)
+        MPSGraphTensor* signDiff = [mpsGraph signWithTensor:diffTensor name:nil];
+        gradContribTensor = [mpsGraph multiplicationWithPrimaryTensor:gradReshaped
+                                                      secondaryTensor:signDiff
+                                                                 name:nil];
+      } else if (p == 2.0) {
+        // grad_contrib = grad * diff / cdist (where cdist != 0)
+        MPSGraphTensor* eps = [mpsGraph constantWithScalar:1e-12 shape:@[@1] dataType:dtype];
+        MPSGraphTensor* cdistSafe = [mpsGraph maximumWithPrimaryTensor:cdistReshaped
+                                                       secondaryTensor:eps
+                                                                  name:nil];
+        MPSGraphTensor* gradDiff = [mpsGraph multiplicationWithPrimaryTensor:gradReshaped
+                                                             secondaryTensor:diffTensor
+                                                                        name:nil];
+        gradContribTensor = [mpsGraph divisionWithPrimaryTensor:gradDiff
+                                                secondaryTensor:cdistSafe
+                                                           name:nil];
+        // Zero out where cdist is 0
+        MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 shape:@[@1] dataType:dtype];
+        MPSGraphTensor* cdistIsZero = [mpsGraph equalWithPrimaryTensor:cdistReshaped
+                                                       secondaryTensor:zero
+                                                                  name:nil];
+        gradContribTensor = [mpsGraph selectWithPredicateTensor:cdistIsZero
+                                            truePredicateTensor:zero
+                                           falsePredicateTensor:gradContribTensor
+                                                           name:nil];
+      } else if (std::isinf(p)) {
+        // Infinity norm: gradient flows only to the max element
+        // grad_contrib = grad * sign(diff) * (|diff| == cdist)
+        MPSGraphTensor* absDiff = [mpsGraph absoluteWithTensor:diffTensor name:nil];
+        MPSGraphTensor* isMax = [mpsGraph equalWithPrimaryTensor:absDiff
+                                                 secondaryTensor:cdistReshaped
+                                                            name:nil];
+        MPSGraphTensor* signDiff = [mpsGraph signWithTensor:diffTensor name:nil];
+        MPSGraphTensor* gradSign = [mpsGraph multiplicationWithPrimaryTensor:gradReshaped
+                                                             secondaryTensor:signDiff
+                                                                        name:nil];
+        MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 shape:@[@1] dataType:dtype];
+        gradContribTensor = [mpsGraph selectWithPredicateTensor:isMax
+                                            truePredicateTensor:gradSign
+                                           falsePredicateTensor:zero
+                                                           name:nil];
+      } else {
+        // General p-norm: grad * diff * |diff|^(p-2) / cdist^(p-1)
+        MPSGraphTensor* eps = [mpsGraph constantWithScalar:1e-12 shape:@[@1] dataType:dtype];
+        MPSGraphTensor* pTensor = [mpsGraph constantWithScalar:p shape:@[@1] dataType:dtype];
+        MPSGraphTensor* pMinus1 = [mpsGraph constantWithScalar:(p - 1.0) shape:@[@1] dataType:dtype];
+        MPSGraphTensor* pMinus2 = [mpsGraph constantWithScalar:(p - 2.0) shape:@[@1] dataType:dtype];
+
+        MPSGraphTensor* absDiff = [mpsGraph absoluteWithTensor:diffTensor name:nil];
+        MPSGraphTensor* absDiffSafe = [mpsGraph maximumWithPrimaryTensor:absDiff
+                                                         secondaryTensor:eps
+                                                                    name:nil];
+        MPSGraphTensor* cdistSafe = [mpsGraph maximumWithPrimaryTensor:cdistReshaped
+                                                       secondaryTensor:eps
+                                                                  name:nil];
+
+        // |diff|^(p-2)
+        MPSGraphTensor* absDiffPowPm2 = [mpsGraph powerWithPrimaryTensor:absDiffSafe
+                                                         secondaryTensor:pMinus2
+                                                                    name:nil];
+        // cdist^(p-1)
+        MPSGraphTensor* cdistPowPm1 = [mpsGraph powerWithPrimaryTensor:cdistSafe
+                                                       secondaryTensor:pMinus1
+                                                                  name:nil];
+
+        // diff * |diff|^(p-2)
+        MPSGraphTensor* diffTimesAbsPow = [mpsGraph multiplicationWithPrimaryTensor:diffTensor
+                                                                    secondaryTensor:absDiffPowPm2
+                                                                               name:nil];
+        // grad * diff * |diff|^(p-2)
+        MPSGraphTensor* gradTimesNumer = [mpsGraph multiplicationWithPrimaryTensor:gradReshaped
+                                                                   secondaryTensor:diffTimesAbsPow
+                                                                              name:nil];
+        // grad * diff * |diff|^(p-2) / cdist^(p-1)
+        gradContribTensor = [mpsGraph divisionWithPrimaryTensor:gradTimesNumer
+                                                secondaryTensor:cdistPowPm1
+                                                           name:nil];
+
+        // Zero out where cdist is 0
+        MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 shape:@[@1] dataType:dtype];
+        MPSGraphTensor* cdistIsZero = [mpsGraph equalWithPrimaryTensor:cdistReshaped
+                                                       secondaryTensor:zero
+                                                                  name:nil];
+        gradContribTensor = [mpsGraph selectWithPredicateTensor:cdistIsZero
+                                            truePredicateTensor:zero
+                                           falsePredicateTensor:gradContribTensor
+                                                           name:nil];
+
+        // Special handling for p < 2 when diff is 0
+        if (p < 2.0) {
+          MPSGraphTensor* diffIsZero = [mpsGraph equalWithPrimaryTensor:diffTensor
+                                                        secondaryTensor:zero
+                                                                   name:nil];
+          gradContribTensor = [mpsGraph selectWithPredicateTensor:diffIsZero
+                                              truePredicateTensor:zero
+                                             falsePredicateTensor:gradContribTensor
+                                                             name:nil];
+        }
+      }
+
+      // Sum over the r2 dimension (axis -2 in the expanded tensor, which is dim1-1 after reshape)
+      // gradContribTensor has shape [..., r1, r2, c1]
+      // We need to sum over the r2 dimension to get [..., r1, c1]
+      int reductionAxis = (int)(dim1 - 1);  // The r2 dimension
+      MPSGraphTensor* gradX1Tensor = [mpsGraph reductionSumWithTensor:gradContribTensor
+                                                                 axis:reductionAxis
+                                                                 name:nil];
+
+      // Remove the singleton dimension
+      NSMutableArray<NSNumber*>* outputShape = [NSMutableArray array];
+      for (int64_t i = 0; i < dim1; i++) {
+        [outputShape addObject:@(x1_expanded.size(i))];
+      }
+      gradX1Tensor = [mpsGraph reshapeTensor:gradX1Tensor withShape:outputShape name:nil];
+
+      newCachedGraph->gradTensor_ = gradTensor;
+      newCachedGraph->x1Tensor_ = x1Tensor;
+      newCachedGraph->x2Tensor_ = x2Tensor;
+      newCachedGraph->cdistTensor_ = cdistTensor;
+      newCachedGraph->gradX1Tensor_ = gradX1Tensor;
+    });
+
+    auto gradPlaceholder = Placeholder(cachedGraph->gradTensor_, grad_contig);
+    auto x1Placeholder = Placeholder(cachedGraph->x1Tensor_, x1_expanded);
+    auto x2Placeholder = Placeholder(cachedGraph->x2Tensor_, x2_expanded);
+    auto cdistPlaceholder = Placeholder(cachedGraph->cdistTensor_, cdist_contig);
+    auto gradX1Placeholder = Placeholder(cachedGraph->gradX1Tensor_, grad_x1);
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      gradPlaceholder.getMPSGraphTensor() : gradPlaceholder.getMPSGraphTensorData(),
+      x1Placeholder.getMPSGraphTensor() : x1Placeholder.getMPSGraphTensorData(),
+      x2Placeholder.getMPSGraphTensor() : x2Placeholder.getMPSGraphTensorData(),
+      cdistPlaceholder.getMPSGraphTensor() : cdistPlaceholder.getMPSGraphTensorData(),
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      gradX1Placeholder.getMPSGraphTensor() : gradX1Placeholder.getMPSGraphTensorData(),
+    };
+
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+
+  // Use x1_expanded.sizes() and not the original size of x1.sizes() as this gradient 
+  // is not taking broadcasting into account. Broadcasting will be handled by autograd.
+  return grad_x1.view(x1_expanded.sizes());
 }
 
 Tensor var_mps(const Tensor& input_t,
