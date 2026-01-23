@@ -4093,7 +4093,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
     @unittest.skipIf(
         not HAS_CUDA_AND_TRITON, "Scheduler static analysis only tested on cuda"
     )
-    @skipIfRocm("Scheduler static analysis needs investigation on ROCm")
+    @skipIfRocm(msg="Scheduler static analysis needs investigation on ROCm")
     @parametrize("fuse_epilogue", (True, False))
     @parametrize("use_async_compile", (True, False))
     def test_template_epilogue_fusion_extra_reads(
