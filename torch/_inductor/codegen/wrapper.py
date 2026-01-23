@@ -3205,6 +3205,8 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
         elif isinstance(s, ir.GeneratorState):
             return s.codegen_reference()
+        elif isinstance(s, ir.TreeSpecConstant):
+            return s.codegen_reference()
         elif is_opaque_value_type(type(s)):
             obj_repr, opaque_types = get_opaque_obj_repr(s)
             for n, t in opaque_types.items():

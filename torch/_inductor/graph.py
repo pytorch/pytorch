@@ -48,6 +48,7 @@ from torch.fx.node import Node
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir, metrics
@@ -82,6 +83,7 @@ from .ir import (
     StorageBox,
     TensorBox,
     TorchBindObject,
+    TreeSpecConstant,
 )
 from .lowering import (
     constrain_to_fake_tensors,
@@ -422,6 +424,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.torchbind_constants: dict[
             str, Union[torch._C.ScriptObject, FakeScriptObject]
         ] = {}
+        self.tree_spec_constants: dict[str, TreeSpec] = {}
         self.opaque_value_type_classes: dict[str, type] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
@@ -1391,7 +1394,12 @@ class GraphLowering(torch.fx.Interpreter):
         args: tuple[()],  # type: ignore[override]
         kwargs: dict[str, object],
     ) -> Union[
-        Constant, TensorBox, ShapeAsConstantBuffer, ir.Subgraph, TorchBindObject
+        Constant,
+        TensorBox,
+        ShapeAsConstantBuffer,
+        ir.Subgraph,
+        TorchBindObject,
+        TreeSpecConstant,
     ]:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
@@ -1417,6 +1425,11 @@ class GraphLowering(torch.fx.Interpreter):
             self.torchbind_constants[target] = value  # type: ignore[arg-type]
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)  # type: ignore[arg-type]
+        elif isinstance(value, TreeSpec):
+            # Used in flat_apply operations for pytree inputs
+            self.tree_spec_constants[target] = value
+            self.constant_reprs[target] = ""
+            return TreeSpecConstant(name=target, value=value)
 
         assert isinstance(value, torch.Tensor)
         if (
@@ -2510,6 +2523,7 @@ class GraphLowering(torch.fx.Interpreter):
                 attrs={
                     **self.constants,
                     **self.torchbind_constants,
+                    **self.tree_spec_constants,
                     **self.opaque_value_type_classes,
                 },
             )
