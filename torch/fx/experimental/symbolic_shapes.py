@@ -2162,6 +2162,8 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
     view_base_context: Optional[SymbolicContext] = None
+    # Maps dimension index to shape_id.
+    shape_ids: Optional[dict[int, Optional[str]]] = None
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self) -> None:
@@ -3986,6 +3988,12 @@ class ShapeEnv:
             # not be valid.
             self.name_to_node: dict[str, torch.fx.Node] = {}
 
+        # Maps shape_id to the first unbacked symbol allocated for that id.
+        # When mark_unbacked is called with a shape_id, we allocate fresh
+        # symbols but add runtime equality checks via torch._check to ensure
+        # all dims with the same shape_id are treated as the same symbol.
+        self._shape_id_to_unbacked_symbol: dict[str, sympy.Expr] = {}
+
     @property
     def allow_scalar_outputs(self) -> bool:
         return self.settings.allow_scalar_outputs
@@ -5084,8 +5092,33 @@ class ShapeEnv:
             ]
 
         if dynamic_dim is DimDynamic.UNBACKED:
+            # Check if this unbacked dimension has a shape_id.
+            # If so, we allocate a fresh symbol but add a runtime equality check
+            # via torch._check against the existing symbols with the same shape_id.
+            shape_id = None
+            if (
+                isinstance(symbolic_context, StatelessSymbolicContext)
+                and symbolic_context.shape_ids is not None
+            ):
+                from torch._dynamo.source import TensorPropertySource
+
+                if isinstance(source, TensorPropertySource) and source.idx is not None:
+                    shape_id = symbolic_context.shape_ids.get(source.idx)
+
+            # Always allocate a fresh unbacked symbol
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
+
+            # Add runtime equality check for shape_id if applicable
+            if shape_id is not None:
+                if shape_id in self._shape_id_to_unbacked_symbol:
+                    # Add runtime equality check instead of reusing the same symbol
+                    existing_sym = self._shape_id_to_unbacked_symbol[shape_id]
+                    existing_symint = self.create_symintnode(existing_sym, hint=None)
+                    out_symint = self.create_symintnode(out, hint=None)
+                    torch._check(out_symint == existing_symint)
+                else:
+                    self._shape_id_to_unbacked_symbol[shape_id] = out
 
             self.unbacked_inputs.add(out)
 
