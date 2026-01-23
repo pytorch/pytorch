@@ -59,3 +59,27 @@ struct MaxUnpoolingParams {
   ::c10::metal::array<idx_type_t, N> output_strides;
   ::c10::metal::array<idx_type_t, N> indices_strides;
 };
+
+// Parameters for fractional max pooling
+// N is the maximum allowed number of dimensions (typically 4 for 2D pooling)
+template <unsigned N = 4, typename idx_type_t = int32_t>
+struct FractionalMaxPoolParams {
+  int32_t numBatch;
+  int32_t numPlanes;
+  int32_t inputH;
+  int32_t inputW;
+  int32_t outputH;
+  int32_t outputW;
+  int32_t poolSizeH;
+  int32_t poolSizeW;
+};
+
+template <unsigned N = 4, typename idx_type_t = int32_t>
+struct FractionalMaxPoolBackwardParams {
+  int32_t numBatch;
+  int32_t numPlanes;
+  int32_t inputH;
+  int32_t inputW;
+  int32_t outputH;
+  int32_t outputW;
+};

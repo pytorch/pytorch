@@ -814,3 +814,147 @@ REGISTER_POOL_OP(bool);
 REGISTER_POOL_BACKWARD_OP(float);
 REGISTER_POOL_BACKWARD_OP(half);
 REGISTER_POOL_BACKWARD_OP(bfloat);
+
+// Fractional Max Pooling 2D
+// Uses the stochastic pooling approach where the pooling regions are
+// determined by random samples.
+
+template <typename T, typename accT>
+inline int get_fractional_interval(
+    accT sample,
+    int index,
+    int inputSize,
+    int outputSize,
+    int poolSize) {
+  accT alpha = static_cast<accT>(inputSize - poolSize) /
+               static_cast<accT>(outputSize - 1);
+  if (index == outputSize - 1) {
+    return inputSize - poolSize;
+  } else {
+    return static_cast<int>((index + sample) * alpha) -
+           static_cast<int>(sample * alpha);
+  }
+}
+
+template <typename T>
+kernel void fractional_max_pool2d_forward(
+    constant T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    device int64_t* indices [[buffer(2)]],
+    constant T* randomSamples [[buffer(3)]],
+    constant FractionalMaxPoolParams<4>& params [[buffer(4)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  using accT = float;  // accumulation type for interpolation
+
+  int outputPoint = tid.x;
+  int plane = tid.y;
+  int batch = tid.z;
+
+  int outputH = params.outputH;
+  int outputW = params.outputW;
+
+  if (outputPoint >= outputH * outputW || plane >= params.numPlanes ||
+      batch >= params.numBatch) {
+    return;
+  }
+
+  int outputWIdx = outputPoint % outputW;
+  int outputHIdx = outputPoint / outputW;
+
+  // Get random samples for this batch/plane
+  int sampleIdx = batch * params.numPlanes * 2 + plane * 2;
+  accT sampleW = static_cast<accT>(randomSamples[sampleIdx]);
+  accT sampleH = static_cast<accT>(randomSamples[sampleIdx + 1]);
+
+  // Calculate pooling window start position
+  int poolW = get_fractional_interval<T, accT>(
+      sampleW, outputWIdx, params.inputW, outputW, params.poolSizeW);
+  int poolH = get_fractional_interval<T, accT>(
+      sampleH, outputHIdx, params.inputH, outputH, params.poolSizeH);
+
+  // Calculate input offset
+  int inputOffset =
+      batch * params.numPlanes * params.inputH * params.inputW +
+      plane * params.inputH * params.inputW;
+
+  // Find max value in the pooling window
+  T maxVal = input[inputOffset + poolH * params.inputW + poolW];
+  int64_t maxIndex = poolH * params.inputW + poolW;
+
+  for (int h = poolH; h < poolH + params.poolSizeH; ++h) {
+    for (int w = poolW; w < poolW + params.poolSizeW; ++w) {
+      T val = input[inputOffset + h * params.inputW + w];
+      if (val > maxVal || isnan(val)) {
+        maxVal = val;
+        maxIndex = h * params.inputW + w;
+      }
+    }
+  }
+
+  // Write output
+  int outputOffset =
+      batch * params.numPlanes * outputH * outputW + plane * outputH * outputW;
+  output[outputOffset + outputHIdx * outputW + outputWIdx] = maxVal;
+  indices[outputOffset + outputHIdx * outputW + outputWIdx] = maxIndex;
+}
+
+template <typename T>
+kernel void fractional_max_pool2d_backward(
+    device AtomicType_t<T>* grad_input [[buffer(0)]],
+    constant T* grad_output [[buffer(1)]],
+    constant int64_t* indices [[buffer(2)]],
+    constant FractionalMaxPoolBackwardParams<4>& params [[buffer(3)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  int outputPoint = tid.x;
+  int plane = tid.y;
+  int batch = tid.z;
+
+  int outputH = params.outputH;
+  int outputW = params.outputW;
+
+  if (outputPoint >= outputH * outputW || plane >= params.numPlanes ||
+      batch >= params.numBatch) {
+    return;
+  }
+
+  int outputWIdx = outputPoint % outputW;
+  int outputHIdx = outputPoint / outputW;
+
+  int outputOffset =
+      batch * params.numPlanes * outputH * outputW + plane * outputH * outputW;
+  int inputOffset =
+      batch * params.numPlanes * params.inputH * params.inputW +
+      plane * params.inputH * params.inputW;
+
+  int64_t index = indices[outputOffset + outputHIdx * outputW + outputWIdx];
+  T gradVal = grad_output[outputOffset + outputHIdx * outputW + outputWIdx];
+
+  atomic_add_float(&grad_input[inputOffset + index], gradVal);
+}
+
+#define REGISTER_FRACTIONAL_MAX_POOL_OP(DTYPE)                               \
+  template [[host_name("fractional_max_pool2d_forward_" #DTYPE)]]            \
+  kernel void fractional_max_pool2d_forward<DTYPE>(                          \
+      constant DTYPE* input [[buffer(0)]],                                   \
+      device DTYPE* output [[buffer(1)]],                                    \
+      device int64_t* indices [[buffer(2)]],                                 \
+      constant DTYPE* randomSamples [[buffer(3)]],                           \
+      constant FractionalMaxPoolParams<4>& params [[buffer(4)]],             \
+      uint3 tid [[thread_position_in_grid]]);
+
+#define REGISTER_FRACTIONAL_MAX_POOL_BACKWARD_OP(DTYPE)                      \
+  template [[host_name("fractional_max_pool2d_backward_" #DTYPE)]]           \
+  kernel void fractional_max_pool2d_backward<DTYPE>(                         \
+      device AtomicType_t<DTYPE>* grad_input [[buffer(0)]],                  \
+      constant DTYPE* grad_output [[buffer(1)]],                             \
+      constant int64_t* indices [[buffer(2)]],                               \
+      constant FractionalMaxPoolBackwardParams<4>& params [[buffer(3)]],     \
+      uint3 tid [[thread_position_in_grid]]);
+
+REGISTER_FRACTIONAL_MAX_POOL_OP(float);
+REGISTER_FRACTIONAL_MAX_POOL_OP(half);
+REGISTER_FRACTIONAL_MAX_POOL_OP(bfloat);
+
+REGISTER_FRACTIONAL_MAX_POOL_BACKWARD_OP(float);
+REGISTER_FRACTIONAL_MAX_POOL_BACKWARD_OP(half);
+REGISTER_FRACTIONAL_MAX_POOL_BACKWARD_OP(bfloat);

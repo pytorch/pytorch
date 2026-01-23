@@ -12611,6 +12611,7 @@
   dispatch:
     CPU: fractional_max_pool2d_out_cpu
     CUDA: fractional_max_pool2d_out_cuda
+    MPS: fractional_max_pool2d_out_mps
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples) -> (Tensor, Tensor)
@@ -12623,6 +12624,7 @@
   dispatch:
     CPU: fractional_max_pool2d_backward_cpu
     CUDA: fractional_max_pool2d_backward_cuda
+    MPS: fractional_max_pool2d_backward_mps
 
 - func: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices) -> Tensor
   python_module: nn
