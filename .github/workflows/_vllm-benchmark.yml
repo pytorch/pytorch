@@ -98,6 +98,7 @@ jobs:
           uv pip install pip==25.3
 
           uv pip install \
+            dist/torch-*.whl \
             dist/vision/torchvision-*.whl \
             dist/audio/torchaudio-*.whl \
             dist/ao/torchao-*.whl \
