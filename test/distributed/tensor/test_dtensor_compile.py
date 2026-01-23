@@ -63,54 +63,6 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
-class PytreeTuple:
-    """
-    Tuple-like values that are treated as leaves of a PyTree.
-    """
-
-    def __init__(self, *values):
-        self._values = tuple(values)
-
-    def __repr__(self):
-        pr = repr(self._values)[1:-1]
-        return f"{type(self).__name__}({pr})"
-
-    def __getitem__(self, i):
-        return self._values[i]
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __len__(self):
-        return len(self._values)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, self.__class__):
-            return self._values == other._values
-        elif isinstance(other, tuple):
-            return self._values == other
-        return False
-
-    def __hash__(self) -> int:
-        return hash(self._values)
-
-    def __add__(self, other):
-        if isinstance(other, (self.__class__, tuple)):
-            return self.__class__(*self, *other)
-        raise NotImplementedError(type(other))
-
-    def __radd__(self, other):
-        if isinstance(other, (self.__class__, tuple)):
-            return self.__class__(*other, *self)
-        raise NotImplementedError(type(other))
-
-    def index(self, value):
-        return self._values.index(value)
-
-    def count(self, value):
-        return self._values.count(value)
-
-
 class SimpleModel(nn.Module):
     def __init__(self, device):
         super().__init__()
@@ -903,7 +855,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_dt.to_local().sum().backward()
 
     def test_dynamo_to_local_grad_placements_sequence(self):
-        placements = PytreeTuple([Shard(0)])
+        placements = [Shard(0)]
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -922,7 +874,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
-            placements = PytreeTuple([Shard(0)])
+            placements = [Shard(0)]
             return dt.to_local(grad_placements=placements) + 2
 
         fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
@@ -936,7 +888,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = PytreeTuple(Shard(0))
+        placements = [Shard(0)]
 
         def fn(x):
             dt = DTensor.from_local(
@@ -957,7 +909,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = PytreeTuple(Shard(0))
+        placements = [Shard(0)]
 
         def fn(x):
             dt = DTensor.from_local(
@@ -1375,6 +1327,72 @@ class outer_fn(torch.nn.Module):
             all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
             wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
             return (wait_tensor,)""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_dtensor_requires_grad(self):
+        """Test AOTAutograd over Dynamo with DTensor inputs/outputs and requires_grad.
+
+        This tests the scenario where:
+        1. An outer aot_function traces a function with DTensor requires_grad inputs
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. Both inner and outer operate on DTensors
+        4. The inner Dynamo region should only be compiled once
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._functorch.aot_autograd import aot_function
+        from torch._functorch.compilers import nop
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        def inner_fn(dt):
+            # Simple operation on DTensor
+            return dt * 2 + 1
+
+        compiled_fn = torch.compile(inner_fn, backend=compile_counter)
+
+        def outer_fn(dt):
+            # Outer function also operates on DTensor
+            dt2 = dt + 1
+            dt3 = compiled_fn(dt2)
+            return dt3.sum()
+
+        # Create DTensor with requires_grad
+        local_tensor = torch.randn(4, 4, requires_grad=True)
+        dt_input = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        # Track forward graph to verify invoke_subgraph appears
+        fw_graph = None
+
+        def fw_compiler(gm, example_inputs):
+            nonlocal fw_graph
+            fw_graph = gm
+            return gm
+
+        aot_fn = aot_function(
+            outer_fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            _disable_torch_fn_metadata_mode=True,
+        )
+
+        # Run forward and backward
+        result = aot_fn(dt_input)
+        result.backward()
+
+        # Check that we got a forward graph
+        self.assertIsNotNone(fw_graph, "Expected a forward graph")
+
+        # Check compile count - should be exactly 1 compilation
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
 
 
