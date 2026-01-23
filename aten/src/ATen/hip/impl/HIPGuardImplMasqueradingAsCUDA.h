@@ -209,6 +209,11 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     hip_stream.synchronize();
   }
 
+  bool isStreamCapturing(const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    return hip_stream.is_capturing();
+  }
+
   void synchronizeEvent(void* event) const override {
     if (!event)
       return;

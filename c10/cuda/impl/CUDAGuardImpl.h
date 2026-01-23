@@ -209,6 +209,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     cuda_stream.synchronize();
   }
 
+  bool isStreamCapturing(const Stream& stream) const override {
+    CUDAStream cuda_stream{stream};
+    return cuda_stream.is_capturing();
+  }
+
   void synchronizeEvent(void* event) const override {
     if (!event)
       return;

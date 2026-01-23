@@ -218,6 +218,13 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Return true if this stream is currently recording work for graph capture.
+   */
+  virtual bool isStreamCapturing(const Stream& /*stream*/) const {
+    TORCH_CHECK(false, "Backend doesn't support stream capture query.");
+  }
+
+  /**
    * Wait (by blocking the calling thread) until all the work previously
    * recorded on the event has completed running on the device.
    */
