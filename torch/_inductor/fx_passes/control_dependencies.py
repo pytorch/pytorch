@@ -9,7 +9,7 @@ with control_deps to make dependencies explicit.
 """
 
 from typing import Any
-
+import torch
 import torch.fx as fx
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
@@ -127,11 +127,16 @@ def preserve_node_ordering(
             # Create get_attr node for the subgraph
             get_subgraph = graph.get_attr(subgraph_attr_name)
 
-            # add additional args
-            node_args = [a for a in original_args if isinstance(a, fx.Node)]
-            for value in original_kwargs.values():
-                if isinstance(value, fx.Node):
-                    node_args.append(value)
+            # add additional args - use pytree to find all fx.Node instances (including nested ones)
+            import torch.utils._pytree as pytree
+
+            flat_args_kwargs, _ = pytree.tree_flatten((original_args, original_kwargs))
+            node_args = []
+            seen_nodes: set[fx.Node] = set()
+            for item in flat_args_kwargs:
+                if isinstance(item, fx.Node) and item not in seen_nodes:
+                    node_args.append(item)
+                    seen_nodes.add(item)
 
             # Create with temporary name first
             ordered_node = graph.call_function(
@@ -177,37 +182,37 @@ def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
     Returns:
         A GraphModule containing the subgraph
     """
+    import torch.utils._pytree as pytree
+
     # Get the owning module
-    # torch.distributed.breakpoint(0)
     owning_module = graph.owning_module
 
     # Create a new graph for the subgraph
     subgraph = fx.Graph(owning_module)
 
-    new_args: list[Any] = []
+    # Flatten the entire args/kwargs structure to find all fx.Node instances
+    flat_args_kwargs, spec = pytree.tree_flatten((node.args, node.kwargs))
+
+    # Create a mapping from original fx.Node to placeholder
+    node_to_placeholder: dict[fx.Node, fx.Node] = {}
     placeholder_idx = 0
-    for _, arg in enumerate(node.args):
-        if not isinstance(arg, fx.Node):
-            new_args.append(arg)
-            continue
 
-        placeholder = subgraph.placeholder(f"arg_{placeholder_idx}")
-        placeholder_idx += 1
-        if "val" in arg.meta:
-            placeholder.meta.update(arg.meta)
-        new_args.append(placeholder)  # type: ignore[arg-type]
+    for item in flat_args_kwargs:
+        if isinstance(item, fx.Node) and item not in node_to_placeholder:
+            placeholder = subgraph.placeholder(f"arg_{placeholder_idx}")
+            placeholder_idx += 1
+            if "val" in item.meta:
+                placeholder.meta.update(item.meta)
+            node_to_placeholder[item] = placeholder
 
-    new_kwargs: dict[str, Any] = {}
-    for key, value in node.kwargs.items():
-        if not isinstance(value, fx.Node):
-            new_kwargs[key] = value
-            continue
+    # Replace fx.Node instances with their placeholders
+    def replace_nodes(item: Any) -> Any:
+        if isinstance(item, fx.Node):
+            return node_to_placeholder[item]
+        return item
 
-        placeholder = subgraph.placeholder(f"kwarg_{key}")
-        if "val" in value.meta:
-            placeholder.meta.update(value.meta)
-
-        new_kwargs[key] = placeholder  # type: ignore[assignment]
+    new_flat = [replace_nodes(item) for item in flat_args_kwargs]
+    new_args, new_kwargs = pytree.tree_unflatten(new_flat, spec)
 
     # Recreate the exact original operation in the subgraph
     assert callable(node.target)
