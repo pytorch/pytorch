@@ -57,7 +57,10 @@ def get_base(tensor):
     else:
         # Also use _inference_mode_base in training mode if it's set
         # This allows storage-based tracking to work for non-gradient tensors
-        if hasattr(tensor, '_inference_mode_base') and tensor._inference_mode_base is not None:
+        if (
+            hasattr(tensor, "_inference_mode_base")
+            and tensor._inference_mode_base is not None
+        ):
             return tensor._inference_mode_base
         return tensor._base
 
