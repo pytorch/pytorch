@@ -168,11 +168,19 @@ class FunctionalTensor(torch.Tensor):
                 # Otherwise this would be invalid.
                 mode._storage_to_base[out.elem.untyped_storage()] = out
             else:
-                out._inference_mode_base = mode._storage_to_base[
-                    out.elem.untyped_storage()
-                ]
-                if out._inference_mode_base is None:
-                    raise AssertionError("out._inference_mode_base must not be None")
+                # Try to find the base tensor via storage tracking
+                base_from_storage = mode._storage_to_base.get(
+                    out.elem.untyped_storage(), None
+                )
+                if torch.is_inference_mode_enabled():
+                    # In inference mode, all views must have a tracked base
+                    assert base_from_storage is not None
+                    out._inference_mode_base = base_from_storage
+                elif base_from_storage is not None:
+                    # In training mode with requires_grad=False, only set if we found a base
+                    # This handles dtype views while not breaking regular views
+                    out._inference_mode_base = base_from_storage
+                # else: Don't set _inference_mode_base at all for regular views in training
         return out
 
     def __torch_dispatch__(  # type: ignore[override]
