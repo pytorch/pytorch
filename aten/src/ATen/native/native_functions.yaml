@@ -11570,6 +11570,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_powsum_slow
+    CUDA: foreach_tensor_powsum_cuda
   autogen: _foreach_powsum.Scalar_out
 
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
