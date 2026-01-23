@@ -395,6 +395,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_code(self) -> types.CodeType:
         raise NotImplementedError
 
+    def has_self(self) -> bool:
+        raise NotImplementedError
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -1289,6 +1292,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
 
     def get_globals(self) -> dict[str, Any]:
         return self.vt.get_globals()
+
+    def has_self(self) -> bool:
+        return self.vt.has_self()
 
     def _build_inline_tracer(
         self,
