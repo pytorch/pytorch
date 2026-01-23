@@ -4,8 +4,6 @@ This module implements Paged Attention on top of flex_attention.
 This module is experimental and subject to change.
 """
 
-from typing import Optional, Union
-
 import torch
 from torch.nn.attention.flex_attention import (
     _identity,
@@ -19,9 +17,7 @@ from torch.nn.attention.flex_attention import (
 __all__ = ["PagedAttention"]
 
 
-def _cdiv(
-    x: Union[int, float, torch.Tensor], multiple: Union[int, float, torch.Tensor]
-):
+def _cdiv(x: int | float | torch.Tensor, multiple: int | float | torch.Tensor):
     return (x + multiple - 1) // multiple
 
 
@@ -40,7 +36,7 @@ class PagedAttention:
         page_size: int,
         max_batch_size: int,
         device: str = "cuda",
-    ):
+    ) -> None:
         # number of pages
         self.n_pages = n_pages
 
@@ -80,10 +76,11 @@ class PagedAttention:
             seq_len - self.capacity[batch_idx], self.page_size
         )
 
-        assert len(self.empty_pages) >= num_pages_to_allocate, (
-            f"requested {num_pages_to_allocate.item()} pages "
-            f"but there are only {len(self.empty_pages)} empty pages"
-        )
+        if len(self.empty_pages) < num_pages_to_allocate:
+            raise AssertionError(
+                f"requested {num_pages_to_allocate.item()} pages "
+                f"but there are only {len(self.empty_pages)} empty pages"
+            )
 
         start_page_idx = self.capacity[batch_idx] // self.page_size
         end_page_idx = start_page_idx + num_pages_to_allocate
@@ -197,8 +194,8 @@ class PagedAttention:
     def convert_logical_block_mask(
         self,
         block_mask: BlockMask,
-        batch_idx: Optional[torch.Tensor] = None,
-        kv_len: Optional[torch.Tensor] = None,
+        batch_idx: torch.Tensor | None = None,
+        kv_len: torch.Tensor | None = None,
     ) -> BlockMask:
         """
         Converts a logical block mask by mapping its logical kv indices to the corresponding
@@ -249,7 +246,10 @@ class PagedAttention:
 
         new_full_kv_indices, new_full_kv_num_blocks = None, None
         if block_mask.full_kv_num_blocks is not None:
-            assert block_mask.full_kv_indices is not None
+            if block_mask.full_kv_indices is None:
+                raise AssertionError(
+                    "block_mask.full_kv_indices must not be None when full_kv_num_blocks is not None"
+                )
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
             new_full_kv_indices = torch.zeros(
                 (B, H, ROWS, self.n_pages), dtype=torch.int32, device=device
@@ -279,8 +279,8 @@ class PagedAttention:
 
     def get_mask_mod(
         self,
-        mask_mod: Optional[_mask_mod_signature],
-        kv_len: Optional[torch.Tensor] = None,
+        mask_mod: _mask_mod_signature | None,
+        kv_len: torch.Tensor | None = None,
     ) -> _mask_mod_signature:
         """
         Converts a mask_mod based on mapping from the physical block index to the logical
@@ -316,8 +316,8 @@ class PagedAttention:
 
     def get_score_mod(
         self,
-        score_mod: Optional[_score_mod_signature],
-        kv_len: Optional[torch.Tensor] = None,
+        score_mod: _score_mod_signature | None,
+        kv_len: torch.Tensor | None = None,
     ) -> _score_mod_signature:
         """
         Converts a score_mod based on mapping from the physical block index to the logical

@@ -23,13 +23,13 @@ from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     CUDADeviceVariable,
-    DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
     FxTracebackAnnotateVariable,
+    GenericContextWrappingVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -37,7 +37,6 @@ from .ctx_manager import (
     JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
-    StreamContextVariable,
     TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithEnterFunctionVariable,
@@ -50,6 +49,7 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
@@ -65,7 +65,10 @@ from .functions import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
+    SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
     UserFunctionVariable,
@@ -89,7 +92,7 @@ from .iter import (
     RepeatIteratorVariable,
     ZipVariable,
 )
-from .lazy import LazyVariableTracker
+from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -111,13 +114,14 @@ from .misc import (
     MethodWrapperVariable,
     NewGlobalVariable,
     NumpyVariable,
+    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    RegexPatternVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
+    TracebackVariable,
     TypingVariable,
     UnknownVariable,
     WeakRefVariable,
@@ -130,7 +134,7 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamVariable
+from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,
@@ -173,7 +177,6 @@ __all__ = [
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
-    "DeterministicAlgorithmsVariable",
     "DictKeySetVariable",
     "DynamoConfigPatchVariable",
     "EnumVariable",
@@ -183,6 +186,7 @@ __all__ = [
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
+    "LazyConstantVariable",
     "LazyVariableTracker",
     "ListIteratorVariable",
     "ListVariable",
@@ -198,7 +202,6 @@ __all__ = [
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
-    "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",

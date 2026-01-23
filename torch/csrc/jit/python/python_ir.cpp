@@ -12,11 +12,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/python/pybind.h>
-#include <torch/csrc/jit/python/python_tracer.h>
-#include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/python_print.h>
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <iostream>
@@ -61,7 +57,7 @@ static std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
     // tuple.__str__; this doesn't work because Python doesn't allow
     // monkeypatching methods of built-in types.
     auto pytuple = pyobj.cast<py::tuple>();
-    out << "(";
+    out << '(';
     size_t i = 0;
     for (const auto& o : pytuple) {
       if (i > 0) {
@@ -72,9 +68,9 @@ static std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
       i++;
     }
     if (i == 1) {
-      out << ",";
+      out << ',';
     }
-    out << ")";
+    out << ')';
     return out;
   } else {
     return out << THPUtils_unpackString(py::str(pyobj).ptr());
@@ -154,14 +150,14 @@ std::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
 }
 
 void ConcretePythonOp::writeScalars(std::ostream& out) const {
-  out << "(";
+  out << '(';
   int i = 0;
   for (auto& scalar : scalar_args) {
     if (i++ > 0)
       out << ", ";
     printPyObject(out, scalar);
   }
-  out << ")";
+  out << ')';
 }
 
 void ConcretePythonOp::lint_python() const {
@@ -506,7 +502,7 @@ void initPythonIRBindings(PyObject* module_) {
           "__repr__",
           [](Value& n) {
             std::stringstream ss;
-            ss << n.debugName() << " defined in (" << *n.node() << ")";
+            ss << n.debugName() << " defined in (" << *n.node() << ')';
             return ss.str();
           })
       .VS(type)
@@ -906,7 +902,7 @@ void initPythonIRBindings(PyObject* module_) {
           "scalarType",
           [](Type& t) {
             auto scalar_type = t.expectRef<TensorType>().scalarType();
-            return (scalar_type) ? toString(*scalar_type) : nullptr;
+            return scalar_type ? toString(*scalar_type) : nullptr;
           })
       .def(
           "device",

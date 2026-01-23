@@ -24,17 +24,18 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, Callable, NewType, Optional, TYPE_CHECKING
+from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
 from torch._dynamo.exc import PackageError
 from torch._dynamo.graph_utils import _graph_device_type
+from torch.utils.weak import WeakIdKeyDictionary
 
 from .bytecode_transformation import get_code_keys
-from .utils import dynamo_timed, increment_frame
+from .utils import counters, dynamo_timed, increment_frame
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,22 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .guards import GuardManagerWrapper, GuardsState
+
+
+_CODE_CACHE = WeakIdKeyDictionary()
+
+
+def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def _(
+        cls: type[Any], code: Union["SerializedCode", types.CodeType]
+    ) -> Union["SerializedCode", types.CodeType]:
+        if code in _CODE_CACHE:
+            return _CODE_CACHE[code]
+        res = fn(cls, code)
+        _CODE_CACHE[code] = res
+        return res
+
+    return _
 
 
 @dataclasses.dataclass(frozen=True)
@@ -67,7 +84,7 @@ class SerializedCode:
     co_lnotab: Optional[str] = None
 
     @classmethod
-    @functools.cache
+    @_code_cache
     def from_code_object(cls, code: types.CodeType) -> "SerializedCode":
         kwargs = {key: getattr(code, key) for key in get_code_keys()}
         kwargs["co_consts"] = tuple(
@@ -77,7 +94,7 @@ class SerializedCode:
         return cls(**kwargs)
 
     @classmethod
-    @functools.cache
+    @_code_cache
     def to_code_object(cls, serialized_code: "SerializedCode") -> types.CodeType:
         kwargs = {key: getattr(serialized_code, key) for key in get_code_keys()}
         kwargs["co_consts"] = tuple(
@@ -125,7 +142,6 @@ def load_guard_manager(
         OutputGraphCommon(guards_state.output_graph),
         shape_code_parts=guards_state.shape_code_parts,
         runtime_global_scope=runtime_global_scope,
-        source_get_cache=guards_state.source_get_cache,
     ).guard_manager
 
 
@@ -319,7 +335,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return toplevel.__qualname__, code_source.strip(".")
 
 
@@ -431,6 +447,23 @@ class _DynamoCacheEntry:
             "device_type": self.device_type,
             "backend_ids": list(self.backend_ids),
         }
+
+
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
+
+
+@CacheArtifactFactory.register
+class PrecompileCacheArtifact(CacheArtifact):
+    def populate_cache(self) -> None:
+        DynamoCache._write_to_local_cache(self.content, self.key)
+
+    @staticmethod
+    def type() -> str:
+        return "precompile"
 
 
 @dataclasses.dataclass
@@ -594,11 +627,11 @@ class CompilePackage:
                             f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
                         )
 
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self._source_info = dynamo.source_info
 
             main, *codes = dynamo.codes
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
@@ -606,7 +639,7 @@ class CompilePackage:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
             )
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self._initialized = True
 
     def _add_function(
@@ -750,7 +783,7 @@ class CompilePackage:
             for name in names:
                 module.__dict__.pop(name)
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self._installed_globals = {}
 
         _reset_precompile_entries(self._innermost_fn.__code__)
@@ -996,13 +1029,13 @@ class InMemoryDynamoStore(DynamoStore):
 
     def write(
         self,
-        entry: PrecompileCacheEntry,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Store the dynamo cache entry and backends in memory instead of writing to disk.
         """
-        self.packages[path] = entry
+        self.packages[path] = cache_entry
 
     def read(self, path: str) -> PrecompileCacheEntry:
         """
@@ -1019,36 +1052,48 @@ class DiskDynamoStore(DynamoStore):
     A DynamoStore implementation that keeps state about CompilePackages on disk.
     """
 
-    def __init__(self, path_prefix: str = ""):
+    def __init__(self, path_prefix: str = "") -> None:
         """
         Initialize a DiskDynamoStore with a path prefix.
 
         Args:
             path_prefix: Prefix directory for where to put CompilePackages on disk
         """
-        self.path_prefix = path_prefix
+        self._path_prefix = path_prefix
+
+    def path_prefix(self) -> str:
+        return self._path_prefix
 
     def clear(self) -> None:
         """
         Clear all CompilePackages from disk.
         """
-        if self.path_prefix:
-            shutil.rmtree(self.path_prefix, ignore_errors=True)
+        if self.path_prefix():
+            shutil.rmtree(self.path_prefix(), ignore_errors=True)
 
     def write(
         self,
-        entry: PrecompileCacheEntry,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Write dynamo cache entry and backends to disk.
         """
+        try:
+            pickled_content: bytes = pickle.dumps(cache_entry)
+            CacheArtifactManager.record_artifact(
+                PrecompileCacheArtifact.type(), path, pickled_content
+            )
+            self._write_to_local_cache(pickled_content, path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to save package to {path}: {e}") from e
+
+    def _write_to_local_cache(self, pickled_content: bytes, path: str) -> None:
         from torch._inductor.codecache import write_atomic
 
-        path = os.path.join(self.path_prefix, path) if self.path_prefix else path
+        path = os.path.join(self.path_prefix(), path) if self.path_prefix() else path
         try:
             os.makedirs(path, exist_ok=True)
-            pickled_content: bytes = pickle.dumps(entry)
             write_atomic(os.path.join(path, "entry"), pickled_content)
         except Exception as e:
             raise RuntimeError(f"Failed to save package to {path}: {e}") from e
@@ -1057,7 +1102,7 @@ class DiskDynamoStore(DynamoStore):
         """
         Read dynamo cache entry and backends from disk.
         """
-        path = os.path.join(self.path_prefix, path) if self.path_prefix else path
+        path = os.path.join(self.path_prefix(), path) if self.path_prefix() else path
         try:
             with open(os.path.join(path, "entry"), "rb") as f:
                 pickled_content = f.read()
@@ -1087,15 +1132,18 @@ class DiskDynamoCache(DiskDynamoStore):
         """
         key = CompilePackage.source_id_from_fn(fn)
         logger.info("Loading CompilePackage for %s", key)
-        path = os.path.join(self.path_prefix, key)
+        path = os.path.join(self.path_prefix(), key)
         if os.path.exists(path):
             try:
                 result = super().load_cache_entry(key)
+                counters["dynamo_cache"]["dynamo_cache_hit"] += 1
                 return result
-            except Exception as e:
-                logger.warning("Failed to load package from path %s: %s", path, str(e))
+            except Exception:
+                counters["dynamo_cache"]["dynamo_cache_error"] += 1
+                logger.warning("Failed to load package from path %s", exc_info=True)
                 return None
         logger.info("No package found for %s", key)
+        counters["dynamo_cache"]["dynamo_cache_miss"] += 1
         return None
 
     def load_and_install_package(
@@ -1111,6 +1159,9 @@ class DiskDynamoCache(DiskDynamoStore):
             package = CompilePackage(fn, results.dynamo)
             package.install(results.backends)
             return package
+
+    def path_prefix(self) -> str:
+        return os.path.join(cache_dir(), "dynamo")
 
 
 def cache_dir() -> str:

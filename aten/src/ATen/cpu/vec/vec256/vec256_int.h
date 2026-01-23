@@ -116,10 +116,10 @@ class Vectorized<int64_t> : public Vectorizedi {
     __at_align__ int64_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See
     // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // not initialize arrays to one using "={1}" because gcc would compile it
     // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+      tmp_values[i] = 1;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
     return loadu(tmp_values);
@@ -266,10 +266,10 @@ class Vectorized<int32_t> : public Vectorizedi {
     __at_align__ int32_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See
     // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // not initialize arrays to one using "={1}" because gcc would compile it
     // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+      tmp_values[i] = 1;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
     return loadu(tmp_values);
@@ -566,10 +566,10 @@ class Vectorized<int16_t> : public Vectorizedi {
     __at_align__ int16_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See
     // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // not initialize arrays to one using "={1}" because gcc would compile it
     // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+      tmp_values[i] = 1;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
@@ -914,10 +914,10 @@ class Vectorized8 : public Vectorizedi {
     __at_align__ T tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See
     // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
-    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // not initialize arrays to one using "={1}" because gcc would compile it
     // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+      tmp_values[i] = 1;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(T));
     return loadu(tmp_values);
@@ -1740,7 +1740,7 @@ Vectorized<int16_t> inline shift_256_16(
 
   // Control masks for shuffle operation, treating 256 bits as an
   // array of 16-bit elements, and considering pairs of neighboring
-  // elements.  Specifially, a mask named "ctl_M_N" (M,N in [0,1], and
+  // elements.  Specifically, a mask named "ctl_M_N" (M,N in [0,1], and
   // M!=N) is set so that shuffle will move element with index M from
   // input pair into element with index N in output pair, and element
   // with index M in output pair will be set to all 0s.
@@ -1875,7 +1875,7 @@ Vectorized<T> inline shift_256_8(
 
   // Control masks for shuffle operation, treating 256 bits as an
   // array of 8-bit elements, and considering quadruples of
-  // neighboring elements.  Specifially, a mask named "ctl_M_N" (M,N
+  // neighboring elements.  Specifically, a mask named "ctl_M_N" (M,N
   // in [0,1,2,3], and M!=N) is set so that shuffle will move element
   // with index M from input quadruple into element with index N in
   // output quadruple, and other elements in output quadruple will be

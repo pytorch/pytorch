@@ -55,7 +55,7 @@ class _TestJITIRToONNX:
     ort_providers = ["CPUExecutionProvider"]
     check_shape = True
     check_dtype = True
-    ignore_none = True  # True for tracing, and Flase for scripting
+    ignore_none = True  # True for tracing, and False for scripting
 
     def run_test(self, graph_ir, example_inputs, parse_tensor_constants=False):
         graph = torch._C.parse_ir(graph_ir, parse_tensor_constants)

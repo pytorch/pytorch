@@ -14,7 +14,7 @@ if __name__ == "__main__":
     # use decorator with default profiler or optional profile arguments.
     @strobelight(sample_each=10000, stop_at_error=False)
     @torch.compile()
-    def work():
+    def work() -> None:
         for _ in range(10):
             torch._dynamo.reset()
             for j in range(5):
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     profiler = StrobelightCLIFunctionProfiler(stop_at_error=False)
 
     @strobelight(profiler, sample_tags=["something", "another"])
-    def work2():
+    def work2() -> None:
         sum = 0
         for _ in range(100000000):
             sum += 1  # noqa: SIM113

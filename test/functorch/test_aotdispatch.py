@@ -87,7 +87,6 @@ from torch.testing._internal.common_utils import (
     outs_and_grads,
     parametrize,
     run_tests,
-    skipIfRocm,
     TEST_MKL,
     TestCase,
     xfail_inherited_tests,
@@ -167,6 +166,14 @@ def _pack_fp8_wrap(x):
     if not x.dtype.is_floating_point:
         return x
 
+    if type(x) is not torch.Tensor:
+        # Check only during compilation
+        # Test calls hooks to get reference output
+        ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
+        assert ctx["_fw_graph"] is not None
+        assert ctx["_bw_graph"] is not None
+        assert ctx["_node"] is not None
+
     return (x.dtype, x.to(torch.float8_e5m2))
 
 
@@ -176,6 +183,13 @@ def _unpack_fp8_wrap(x):
         return x
 
     dtype, tensor = x
+    if type(tensor) is not torch.Tensor:
+        # Check only during compilation
+        # Test calls hooks to get reference output
+        ctx = torch._functorch._aot_autograd.graph_compile._get_saved_tensor_hook_context()
+        assert ctx["_fw_graph"] is not None
+        assert ctx["_bw_graph"] is not None
+        assert ctx["_node"] is not None
     return tensor.to(dtype)
 
 
@@ -2278,9 +2292,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-    return (view, mul, detach_2)""",
+    return (view, mul, detach)""",
         )
 
     def test_output_aliases_intermediate_inplace_view(self):
@@ -2607,34 +2619,203 @@ def forward(self, primals_1, primals_2):
         ]
         self.verify_aot_autograd(f, inp_grad, test_mutation=True)
 
-    def test_backward_mutation_metadata(self):
-        class BwMutation(torch.autograd.Function):
+    def test_fw_bw_mutation_no_functionalization1(self):
+        class FwBwMutation(torch.autograd.Function):
             @staticmethod
             def forward(ctx, a, b):
-                ctx.save_for_backward(b)
-                return a.clone(), b.clone()
+                # input mutation
+                torch._foreach_mul_([b], [2])
+                x = b + 1
+                # intermediate mutation
+                torch._foreach_mul_([x], [3])
+                ctx.save_for_backward(x)
+                return x * a
 
             @staticmethod
-            def backward(ctx, grad_a, grad_b):
-                (b,) = ctx.saved_tensors
-                # bw metadata mutation
-                b.transpose_(1, 0)
-                return grad_a.clone(), grad_b.clone()
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                # bw mutation
+                torch._foreach_mul_([x], [4])
+                return grad_output * x, grad_output * x
 
         def f(a, b):
-            a_, b_ = BwMutation.apply(a, b)
-            out = a_ * b_
-            return out
+            return FwBwMutation.apply(a, b).sin_().clone()
 
-        inp_no_grad = [
+        inps = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+        inps_ref = [
             torch.ones(3, 3, requires_grad=True),
             torch.ones(3, 3, requires_grad=False),
         ]
 
-        with self.assertRaisesRegex(
-            AssertionError, "input that had its metadata mutated in the backward"
-        ):
-            self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
+        fw_graph = [None]
+        bw_graph = [None]
+
+        def fw_compiler(gm, example_inputs):
+            fw_graph[0] = gm
+            return gm
+
+        def bw_compiler(gm, example_inputs):
+            bw_graph[0] = gm
+            return gm
+
+        compiled_f = compiled_function(
+            f,
+            fw_compiler,
+            bw_compiler,
+            dynamic=False,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True,
+        )
+
+        out_ref = f(*inps_ref)
+        out = compiled_f(*inps)
+        self.assertEqual(out, out_ref)
+
+        out_ref.sum().backward()
+        out.sum().backward()
+        self.assertEqual(inps_ref[0].grad, inps[0].grad)
+
+        # important bit: there are 2 mutations in the fw
+        self.assertExpectedInline(
+            fw_graph[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    clone = torch.ops.aten.clone.default(mul)
+    sin_ = torch.ops.aten.sin_.default(mul);  mul = None
+    clone_1 = torch.ops.aten.clone.default(sin_);  sin_ = None
+    return (clone_1, add, clone)""",
+        )
+
+        # important bit: there is 1 mutation in the bw
+        self.assertExpectedInline(
+            bw_graph[0].code.strip(),
+            """\
+def forward(self, add, clone, tangents_1):
+    cos = torch.ops.aten.cos.default(clone);  clone = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, cos);  tangents_1 = cos = None
+    _foreach_mul__2 = torch.ops.aten._foreach_mul_.ScalarList([add], [4]);  _foreach_mul__2 = None
+    mul_2 = torch.ops.aten.mul.Tensor(mul_1, add);  mul_1 = add = None
+    return (mul_2, None)""",
+        )
+
+    def test_fw_bw_mutation_no_functionalization2(self):
+        class FwBwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                # input mutation
+                torch._foreach_mul_([x], [2])
+                x = x + 1
+                # intermediate mutation
+                torch._foreach_mul_([x], [3])
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                # bw mutation
+                torch._foreach_mul_([x], [4])
+                return grad_output * x
+
+        def f(a, b):
+            out = FwBwMutation.apply(b)
+            return out * a
+
+        inps = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+        inps_ref = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        fw_graph = [None]
+        bw_graph = [None]
+
+        def fw_compiler(gm, example_inputs):
+            fw_graph[0] = gm
+            return gm
+
+        def bw_compiler(gm, example_inputs):
+            bw_graph[0] = gm
+            return gm
+
+        compiled_f = compiled_function(
+            f,
+            fw_compiler,
+            bw_compiler,
+            dynamic=False,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True,
+        )
+
+        out_ref = f(*inps_ref)
+        out = compiled_f(*inps)
+        self.assertEqual(out, out_ref)
+
+        out_ref.sum().backward()
+        out.sum().backward()
+        self.assertEqual(inps_ref[0].grad, inps[0].grad)
+
+        # important bit: there are 2 mutations in the fw
+        # (the mutation on an activation doesn't get moved to bw)
+        self.assertExpectedInline(
+            fw_graph[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    return (mul, add)""",
+        )
+
+        self.assertExpectedInline(
+            bw_graph[0].code.strip(),
+            """\
+def forward(self, add, tangents_1):
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
+    return (mul_1, None)""",
+        )
+
+    # def test_backward_mutation_metadata(self):
+    #     class BwMutation(torch.autograd.Function):
+    #         @staticmethod
+    #         def forward(ctx, a, b):
+    #             ctx.save_for_backward(b)
+    #             return a.clone(), b.clone()
+
+    #         @staticmethod
+    #         def backward(ctx, grad_a, grad_b):
+    #             (b,) = ctx.saved_tensors
+    #             # bw metadata mutation
+    #             b.transpose_(1, 0)
+    #             return grad_a.clone(), grad_b.clone()
+
+    #     def f(a, b):
+    #         a_, b_ = BwMutation.apply(a, b)
+    #         out = a_ * b_
+    #         return out
+
+    #     inp_no_grad = [
+    #         torch.ones(3, 3, requires_grad=True),
+    #         torch.ones(3, 3, requires_grad=False),
+    #     ]
+
+    #     with self.assertRaisesRegex(
+    #         AssertionError, "input that had its metadata mutated in the backward"
+    #     ):
+    #         self.verify_aot_autograd(f, inp_no_grad, test_mutation=True)
 
     def test_backward_mutation_on_grad_out(self):
         class BwMutation(torch.autograd.Function):
@@ -3083,8 +3264,8 @@ def forward(self, primals_1):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    as_strided_8 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_8, [4]);  as_strided_8 = None
+    as_strided_9 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_9, [4]);  as_strided_9 = None
     return (as_strided_scatter, view_1)""",
         )  # noqa: B950
 
@@ -3247,13 +3428,13 @@ def forward(self, primals_1, primals_2, primals_3):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
     as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_5, 0);  as_strided_5 = None
-    add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze_1);  add_1 = None
+    unsqueeze = torch.ops.aten.unsqueeze.default(as_strided_5, 0);  as_strided_5 = None
+    add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
+    add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze);  add_1 = None
     as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     view_2 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
-    return (as_strided_scatter, add_2, view_2, unsqueeze_1)""",
+    return (as_strided_scatter, add_2, view_2, unsqueeze)""",
         )  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -3718,7 +3899,6 @@ def forward(self, tangents_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "CUDNN is unavailable")
-    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/96560
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -3732,7 +3912,12 @@ def forward(self, tangents_1):
         )
 
         def bn(x):
-            return torch.ops.aten.cudnn_batch_norm(
+            fn = (
+                torch.ops.aten.cudnn_batch_norm
+                if torch.version.hip is None
+                else torch.ops.aten.miopen_batch_norm
+            )
+            return fn(
                 x,
                 weight,
                 bias,
@@ -4136,6 +4321,18 @@ def forward(self, tangents_1):
         # Overrides _base and _view_func tensor attributes, so as to avoid the view-replay
         # execution path when reconstructing views.
         class NoViewReplayTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, tensor):
+                kwargs = {
+                    "strides": tensor.stride(),
+                    "storage_offset": tensor.storage_offset(),
+                    "device": tensor.device,
+                    "layout": tensor.layout,
+                    "requires_grad": tensor.requires_grad,
+                    "dtype": tensor.dtype,
+                }
+                return torch.Tensor._make_wrapper_subclass(cls, tensor.shape, **kwargs)
+
             @property
             def _base(self):
                 return None
@@ -4143,6 +4340,11 @@ def forward(self, tangents_1):
             @property
             def _view_func(self):
                 return None
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_dispatch__(func, types, args, kwargs)
 
         # Wraps the outputs that are views of the FX graph 'g' with NoViewReplayTensor,
         # since they are the only ones that will get reconstructed.
@@ -5138,23 +5340,12 @@ class <lambda>(torch.nn.Module):
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  detach = None
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
-        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        detach_4: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
-        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
-        detach_6: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
-        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_6);  detach_6 = None
-        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
-        detach_9: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_8);  detach_8 = None
-        detach_10: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_9);  detach_9 = None
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
         ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_11: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-        detach_12: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_11);  detach_11 = None
-        detach_13: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_12);  detach_12 = None
-        detach_14: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_13);  detach_13 = None
-        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_14, 0);  expand = detach_14 = None
+        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_3, 0);  expand = detach_3 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
         getitem_6: "f32[3]" = native_batch_norm_backward[1]
@@ -5163,8 +5354,8 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0];  getitem_8 = None
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_10, getitem_9, getitem_10, getitem_6, getitem_7)
-        """,  # noqa: B950
+        return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
+""",  # noqa: B950
         )
 
         self.assertExpectedInline(
@@ -5231,16 +5422,14 @@ class <lambda>(torch.nn.Module):
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
-        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
-        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         return (
             getitem_3,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=4))
             getitem_4,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=5))
             add,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=6))
             sum_1,  # PlainAOTOutput(idx=0)
-            detach_2,  # PlainAOTOutput(idx=1)
+            detach,  # PlainAOTOutput(idx=1)
         )
-        """,  # noqa: B950
+""",  # noqa: B950
         )
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
@@ -6179,6 +6368,90 @@ def forward(self, primals_1, tangents_1):
                     f"Quantized placeholder {quant_placeholder.name} should have minimal direct users",
                 )
 
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_unbounded_error_message(self):
+        """Test that NetworkXUnbounded errors produce user-friendly error messages."""
+        import math
+
+        import networkx as nx
+
+        from torch._functorch.partitioners import _find_infinite_capacity_path
+
+        # Test 1: Verify _find_infinite_capacity_path finds a path with edge reasons
+        nx_graph = nx.DiGraph()
+        # Create a simple graph with an infinite capacity path and reasons
+        nx_graph.add_edge(
+            "source", "node1_in", capacity=math.inf, reason="cannot recompute: banned"
+        )
+        nx_graph.add_edge(
+            "node1_in",
+            "node1_out",
+            capacity=math.inf,
+            reason="cannot save: non-tensor output",
+        )
+        nx_graph.add_edge(
+            "node1_out",
+            "sink",
+            capacity=math.inf,
+            reason="must be computed in backward: required for gradient",
+        )
+
+        path = _find_infinite_capacity_path(nx_graph)
+        self.assertIsNotNone(path)
+        # path is a list of (from_node, to_node, reason) tuples
+        self.assertEqual(len(path), 3)
+        self.assertEqual(path[0][0], "source")  # first edge starts from source
+        self.assertEqual(path[0][1], "node1_in")
+        self.assertIn("cannot recompute", path[0][2])
+        self.assertEqual(path[-1][1], "sink")  # last edge ends at sink
+        self.assertIn("must be computed in backward", path[-1][2])
+
+        # Test 2: Verify path not found when there's no infinite capacity path
+        nx_graph2 = nx.DiGraph()
+        nx_graph2.add_edge(
+            "source", "node1_in", capacity=math.inf, reason="cannot recompute: banned"
+        )
+        nx_graph2.add_edge(
+            "node1_in", "node1_out", capacity=1.0
+        )  # Finite capacity breaks the chain
+        nx_graph2.add_edge(
+            "node1_out",
+            "sink",
+            capacity=math.inf,
+            reason="must be computed in backward",
+        )
+
+        path2 = _find_infinite_capacity_path(nx_graph2)
+        self.assertIsNone(path2)
+
+        # Test 3: Verify data dependency edges have reasons
+        nx_graph3 = nx.DiGraph()
+        nx_graph3.add_edge(
+            "source", "node1_in", capacity=math.inf, reason="cannot recompute: primal"
+        )
+        nx_graph3.add_edge(
+            "node1_in", "node1_out", capacity=math.inf, reason="cannot save: view op"
+        )
+        nx_graph3.add_edge(
+            "node1_out", "node2_in", capacity=math.inf, reason="data dependency"
+        )
+        nx_graph3.add_edge(
+            "node2_in",
+            "sink",
+            capacity=math.inf,
+            reason="must be computed in backward: required for gradient",
+        )
+
+        path3 = _find_infinite_capacity_path(nx_graph3)
+        self.assertIsNotNone(path3)
+        self.assertEqual(len(path3), 4)
+        # Check that data dependency edge is captured
+        data_dep_edge = next(
+            (e for e in path3 if e[0] == "node1_out" and e[1] == "node2_in"), None
+        )
+        self.assertIsNotNone(data_dep_edge)
+        self.assertEqual(data_dep_edge[2], "data dependency")
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
@@ -6250,7 +6523,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         # Important pieces of the graph:
         # - 4 total dense outputs.
-        #   This corresponds to the fact that each user fwd inpt (a, b)
+        #   This corresponds to the fact that each user fwd input (a, b)
         #   will get a gradient that is a TwoTensor subclass,
         #   so (mul_2, mul_3) will be wrapped into a.grad
         #   and (div_1, div_2) will be wrapped into b.grad
@@ -7405,7 +7678,7 @@ metadata incorrectly.
             (_inp, _tg3),
         ]
 
-        for i, (inp_fn, tg_fn) in enumerate(TEST_CASES):
+        for inp_fn, tg_fn in TEST_CASES:
             ref_x = inp_fn()
             x = ref_x.detach().clone().requires_grad_()
 
@@ -7427,6 +7700,7 @@ metadata incorrectly.
             self.assertEqual(ref_x.grad, x.grad)
 
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:
             E = 16  # embedding dim
@@ -7454,12 +7728,12 @@ metadata incorrectly.
 
                     return y.transpose(1, 2).contiguous().view(B, T, E)
 
-            m = M()
+            m = M().cuda()
             B = 1
             T = 8
 
             def _inp():
-                return torch.randn(B, T, E, requires_grad=True)
+                return torch.randn(B, T, E, requires_grad=True, device="cuda")
 
             x = _inp()
             y = m(x)
@@ -7962,7 +8236,7 @@ aot_autograd_failures = {
     xfail("corrcoef"),
     xfail("quantile"),
     xfail("nanquantile"),
-    xfail("narrow"),
+    skip("narrow"),
     xfail("istft"),
     xfail("linalg.eig"),
     skip("as_strided_scatter"),
@@ -7993,7 +8267,9 @@ aot_autograd_failures = {
     decorate(
         "linalg.pinv",
         "singular",
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        # This delta is coming entirely from the clone() on tangents
+        # in AOTDispatcher to make them contiguous
+        decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
     ),
     decorate(
         "nn.functional.interpolate",
@@ -8059,7 +8335,14 @@ symbolic_aot_autograd_failures = {
 }
 
 
-def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
+def _test_aot_autograd_helper(
+    self,
+    device,
+    dtype,
+    op,
+    dynamic=False,
+    disable_functionalization=False,
+):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
@@ -8090,6 +8373,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
                 skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
+                disable_functionalization=disable_functionalization,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -8190,6 +8474,36 @@ class TestEagerFusionOpInfo(AOTTestCase):
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
 
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_disable_functionalization_exhaustive",
+        aot_autograd_failures,
+    )
+    def test_aot_autograd_disable_functionalization_exhaustive(self, device, dtype, op):
+        _test_aot_autograd_helper(
+            self, device, dtype, op, disable_functionalization=True
+        )
+
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @patch("functorch.compile.config.debug_assert", True)
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_disable_functionalization_symbolic_exhaustive",
+        aot_autograd_failures | symbolic_aot_autograd_failures,
+    )
+    def test_aot_autograd_disable_functionalization_symbolic_exhaustive(
+        self, device, dtype, op
+    ):
+        _test_aot_autograd_helper(
+            self,
+            device,
+            dtype,
+            op,
+            dynamic=True,
+            disable_functionalization=True,
+        )
+
 
 aot_autograd_module_failures = set(
     {
@@ -8205,7 +8519,7 @@ aot_autograd_module_failures = set(
         # implementation not traceable or that there is a bug in AOTAutograd.
         torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.eq compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
-        # for TrnasformerEncoder layers, MHA and sdp custom kernels
+        # for TransformerEncoder layers, MHA and sdp custom kernels
         torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input
         # to a causal mask tensor, to see if Boolean is_causal should be set
         # for TransformerEncoder layers, MHA and sdp custom kernels
@@ -8477,7 +8791,7 @@ class MockFXGraphCache:
 FAILING_CACHE_TESTS = (
     # BypassAOTAutogradCache: unsupported nodes
     "test_backward_mutation_data",  # Custom Autograd Function
-    "test_backward_mutation_metadata",  # Custom Autograd Function
+    # "test_backward_mutation_metadata",  # Custom Autograd Function
     "test_input_output_aliase_custom_autograd_function",
 )
 

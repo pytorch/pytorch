@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch._logging._internal
@@ -71,7 +71,7 @@ def prettify_frame_locals(
     return res
 
 
-def get_loc(filename: str, lineno: int) -> Optional[str]:
+def get_loc(filename: str, lineno: int) -> str | None:
     try:
         with open(filename) as f:
             for i, line in enumerate(f):
@@ -295,7 +295,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
 
         self.logger.addHandler(self)
         self.prev_get_dtrace = torch._logging._internal.GET_DTRACE_STRUCTURED
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         torch._logging._internal.GET_DTRACE_STRUCTURED = True
         return self
 
@@ -303,7 +303,7 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
         self.log_record = LogRecord()
         self.expression_created_logs = {}
         self.logger.removeHandler(self)
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         torch._logging._internal.GET_DTRACE_STRUCTURED = self.prev_get_dtrace
         self.prev_get_dtrace = False
 
@@ -367,9 +367,9 @@ class CaptureStructuredTrace(torch._logging._internal.LazyTraceHandler):
 def draft_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[Mapping[str, Any]] = None,
+    kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = True,
@@ -476,7 +476,8 @@ def draft_export(
             else:
                 continue
 
-            assert failure_type is not None
+            if failure_type is None:
+                raise AssertionError("failure_type cannot be None at this point")
             failures.append(
                 FailureReport(
                     failure_type,

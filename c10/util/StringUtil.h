@@ -135,7 +135,7 @@ struct _str_wrapper<> final {
 
 // Convert a list of string-like arguments into a single string.
 template <typename... Args>
-inline decltype(auto) str(const Args&... args) {
+inline auto str(const Args&... args) {
   return detail::_str_wrapper<
       typename detail::CanonicalizeStrTypes<Args>::type...>::call(args...);
 }
@@ -160,6 +160,13 @@ struct C10_API SourceLocation {
   const char* function;
   const char* file;
   uint32_t line;
+
+  static constexpr SourceLocation current(
+      const char* file = __builtin_FILE(),
+      const char* function = __builtin_FUNCTION(),
+      const std::uint_least32_t line = __builtin_LINE()) noexcept {
+    return {function, file, line};
+  }
 };
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
@@ -170,7 +177,7 @@ inline bool isPrint(char s) {
 }
 
 inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
-  stmt << "\"";
+  stmt << '"';
   for (auto s : str) {
     switch (s) {
       case '\\':
@@ -224,7 +231,7 @@ inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
         break;
     }
   }
-  stmt << "\"";
+  stmt << '"';
 }
 
 template <typename T>

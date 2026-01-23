@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "ruff==0.14.4",
+# ]
+# ///
 """Adapter for https://github.com/charliermarsh/ruff."""
 
 from __future__ import annotations
@@ -112,7 +118,7 @@ def run_command(
             if remaining_retries == 0:
                 raise err
             remaining_retries -= 1
-            logging.warning(
+            logging.warning(  # noqa: G200
                 "(%s/%s) Retrying because command failed with: %r",
                 retries - remaining_retries,
                 retries,

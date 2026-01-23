@@ -380,6 +380,45 @@ class TestExplicitUnshard(FSDPTest):
             self.assertEqual(losses[0], losses[1])
             model.module.mlps._wait_unshard_streams_on_current_stream()
 
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_orig_params", [False, True])
+    @parametrize("async_op", [False, True])
+    def test_unshard_after_backward(
+        self, device, use_orig_params: bool, async_op: bool
+    ):
+        """
+        Tests that _unshard() works correctly after backward().
+        This is a regression test for issue #168947 where a Stream was
+        incorrectly passed instead of an Event to UnshardHandle.
+        """
+        model = nn.Sequential(
+            MLP(dim=8),
+            nn.Linear(8, 4, device=device_type.type),
+        )
+        model[0] = FSDP(
+            model[0],
+            device_id=device_type.type,
+            use_orig_params=use_orig_params,
+        )
+
+        inp = torch.randn(2, 8, device=device_type.type)
+        output = model(inp)
+        loss = output.sum()
+        loss.backward()
+
+        # This should not raise "AttributeError: 'Stream' object has no attribute 'wait'"
+        handle = model[0]._unshard(async_op=async_op)
+
+        if async_op:
+            self.assertIsNotNone(handle)
+            handle.wait()
+        else:
+            self.assertIsNone(handle)
+
+        for param in model[0].parameters():
+            self.assertIsNotNone(param)
+            self.assertTrue(param.numel() > 0)
+
 
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(

@@ -78,6 +78,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void multiGetHandler(int socket);
   void multiSetHandler(int socket);
   void cancelWaitHandler(int socket);
+  void listKeysHandler(int socket);
   void addMiscellaneousSocket(int socket);
   void removeMiscellaneousSocket(int socket);
   bool isMiscellaneousSocket(int socket);
@@ -295,6 +296,8 @@ void TCPStoreMasterDaemon::query(int socket) {
     multiSetHandler(socket);
   } else if (qt == QueryType::CANCEL_WAIT) {
     cancelWaitHandler(socket);
+  } else if (qt == QueryType::LIST_KEYS) {
+    listKeysHandler(socket);
   } else {
     TORCH_CHECK(false, "Unexpected query type");
   }
@@ -480,6 +483,13 @@ void TCPStoreMasterDaemon::cancelWaitHandler(int socket) {
   // Send update to TCPStoreWorkerDaemon on client
   tcputil::sendValue<WaitResponseType>(
       socket, detail::WaitResponseType::WAIT_CANCELED);
+}
+
+void TCPStoreMasterDaemon::listKeysHandler(int socket) {
+  tcputil::sendValue<size_t>(socket, tcpStore_.size());
+  for (const auto& kv : tcpStore_) {
+    tcputil::sendString(socket, kv.first);
+  }
 }
 
 bool TCPStoreMasterDaemon::checkKeys(

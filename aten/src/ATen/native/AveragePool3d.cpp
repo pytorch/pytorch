@@ -198,9 +198,9 @@ void avg_pool3d_out_frame(
             int64_t hend = std::min(hstart + kH, iheight + padH);
             int64_t wend = std::min(wstart + kW, iwidth + padW);
             int64_t pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
-            tstart = std::max(tstart, (int64_t) 0);
-            hstart = std::max(hstart, (int64_t) 0);
-            wstart = std::max(wstart, (int64_t) 0);
+            tstart = std::max(tstart, static_cast<int64_t>(0));
+            hstart = std::max(hstart, static_cast<int64_t>(0));
+            wstart = std::max(wstart, static_cast<int64_t>(0));
             tend = std::min(tend, itime);
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);
@@ -377,9 +377,9 @@ void avg_pool3d_backward_out_frame(
             int64_t hend = std::min(hstart + kH, iheight + padH);
             int64_t wend = std::min(wstart + kW, iwidth + padW);
             int64_t pool_size = (tend -tstart) * (hend - hstart) * (wend - wstart);
-            tstart = std::max(tstart, (int64_t) 0);
-            hstart = std::max(hstart, (int64_t) 0);
-            wstart = std::max(wstart, (int64_t) 0);
+            tstart = std::max(tstart, static_cast<int64_t>(0));
+            hstart = std::max(hstart, static_cast<int64_t>(0));
+            wstart = std::max(wstart, static_cast<int64_t>(0));
             tend = std::min(tend, itime);
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);
