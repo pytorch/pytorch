@@ -9257,6 +9257,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # RuntimeError: pin_memory=True requires a CUDA or other accelerator backend;
     # no pinned memory allocator is available on this system.
     @requires_gpu()
+    @unittest.skipIf(IS_MACOS, "fails on macos")
     def test_empty_pin_memory(self):
         if self.device != "cpu":
             raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
