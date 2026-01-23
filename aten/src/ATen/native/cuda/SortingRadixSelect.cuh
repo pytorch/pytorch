@@ -559,7 +559,7 @@ __device__ void radixSelect(
   // if data fits into shared memory, we can avoid reading data from global memory.
   // if not, we may still be able to put the filtered data, after a few iterations,
   // into shared memory. after every pass, relevant data is likely reduced by a factor of RADIX_SIZE.
-  // dataSmem is used to store the relavant data.
+  // dataSmem is used to store the relevant data.
   constexpr index_t DATA_SMEM_BYTES = 3 * 1024; // 3KB is a good compromise between memory usage and performance.
   constexpr index_t dataSmemCap = DATA_SMEM_BYTES / sizeof(scalar_t); // max number of elements that can be stored in dataSmem.
   __shared__ scalar_t dataSmem[dataSmemCap];
