@@ -193,9 +193,9 @@ with_effects.fallthrough(DispatchKey.AutogradCPU)
 with_effects.fallthrough(DispatchKey.AutogradCUDA)
 
 
-# Handle with_effects when FunctionalTensorMode is active.
-# This is needed when regional inductor compiles a graph that already contains
-# with_effects nodes (from a previous functionalization pass).
+# handle with_effects when FunctionalTensorMode is active.
+# this is needed when regional inductor compiles a graph that already contains
+# with_effects nodes (from a prev. functionalization pass).
 @with_effects.py_impl(FunctionalTensorMode)
 def with_effects_functional(
     mode,
@@ -204,8 +204,6 @@ def with_effects_functional(
     *args: tuple[Any, ...],
     **kwargs: dict[str, Any],
 ) -> tuple[torch.Tensor, ...]:
-    # Just call through with the mode active - the inner op will be handled
-    # by the mode's __torch_dispatch__ as needed
     with mode:
         result = with_effects_dense(token, op, *args, **kwargs)
         return result
