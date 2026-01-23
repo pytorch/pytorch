@@ -4927,8 +4927,6 @@ def view(a: TensorLikeType, *shape) -> TensorLikeType:
     )
 
     shape_tuple = utils.extract_shape_from_varargs(shape, validate=False)
-    # The helper functions expect FakeTensor but during tracing the tensor
-    # will be a FakeTensor at runtime, the type checker just doesn't know that.
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a,
         shape_tuple,

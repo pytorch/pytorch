@@ -774,9 +774,10 @@ def _view_meta_copy(
     out: FakeTensor | None = None,
 ) -> FakeTensor:
     result = _view_meta(fake_mode, func, a, *shape)
-    if not isinstance(result, FakeTensor):
-        raise TypeError(f"Expected FakeTensor, got {type(result)}")
+
     if out is not None:
+        if not isinstance(result, FakeTensor):
+            raise TypeError(f"Expected FakeTensor, got {type(result)}")
         return result
 
     return pytree.tree_map(
