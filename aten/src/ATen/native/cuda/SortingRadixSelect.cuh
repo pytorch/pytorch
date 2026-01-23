@@ -560,6 +560,7 @@ __device__ __forceinline__ void fillDataSmem(
 
     // prefetching from global memory.
     scalar_t v = threadIdx.x < sliceSize ? doLdg(&data[threadIdx.x * withinSliceStride]) : static_cast<scalar_t>(0);
+    // we pad sliceSize to round_up(sliceSize, warpSize) to make sure all threads in the warp participate in the ballot.
     for (index_t i = threadIdx.x; i < round_up(static_cast<index_t>(sliceSize), static_cast<index_t>(warpSize)); i += blockDim.x) {
       scalar_t v_next = (i + blockDim.x) < sliceSize ? doLdg(&data[(i + blockDim.x) * withinSliceStride]) : static_cast<scalar_t>(0);
 
