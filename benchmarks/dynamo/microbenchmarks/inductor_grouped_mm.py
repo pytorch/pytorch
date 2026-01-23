@@ -33,14 +33,10 @@ def _parse_tensor_spec(value, allowed_majors, expected_str, example):
             f"Expected {expected_str} (e.g., {example})."
         ) from exc
     if dim_str not in {"2d", "3d"}:
-        raise argparse.ArgumentTypeError(
-            f"Expected {expected_str} (e.g., {example})."
-        )
+        raise argparse.ArgumentTypeError(f"Expected {expected_str} (e.g., {example}).")
     major_norm = _normalize_major(layout_str)
     if major_norm not in allowed_majors:
-        raise argparse.ArgumentTypeError(
-            f"Expected {expected_str} (e.g., {example})."
-        )
+        raise argparse.ArgumentTypeError(f"Expected {expected_str} (e.g., {example}).")
     return (int(dim_str[0]), major_norm == "kmajor")
 
 
