@@ -197,12 +197,11 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
  public:
   // Returns true if ThreadBasedRNGTracker is being used (sharded kernel),
   // false for OffsetBasedRNGTracker (original kernel).
-  bool use_thread_based_rng() const {
+  bool use_thread_based_rng() const override {
     return use_thread_based_rng_;
   }
 
-  // Sets whether to use ThreadBasedRNGTracker (true) or OffsetBasedRNGTracker (false).
-  void set_use_thread_based_rng(bool value) {
+  void set_use_thread_based_rng(bool value) override {
     use_thread_based_rng_ = value;
   }
 };
