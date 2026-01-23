@@ -23,6 +23,7 @@
 #include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
+#include <ATen/ops/frexp_native.h>
 #include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/logical_not_native.h>
@@ -400,6 +401,110 @@ Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
     return [mpsGraph conjugateWithTensor:inputTensor name:nil];
   });
   return result;
+}
+
+std::tuple<Tensor&, Tensor&> frexp_out_mps(const Tensor& self,
+                                           Tensor& mantissa,
+                                           Tensor& exponent) {
+  // torch.frexp is implemented for floating-point dtypes only
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+              "torch.frexp() only supports floating-point dtypes");
+
+  TORCH_CHECK(mantissa.dtype() == self.dtype(),
+              "torch.frexp() expects mantissa to have dtype ", self.dtype(),
+              " but got ", mantissa.dtype());
+  TORCH_CHECK(exponent.dtype() == at::kInt,
+              "torch.frexp() expects exponent to have int dtype "
+              "but got ", exponent.dtype());
+
+  // Resize outputs to match input
+  at::native::resize_output(mantissa, self.sizes());
+  at::native::resize_output(exponent, self.sizes());
+
+  // Handle empty tensor
+  if (self.numel() == 0) {
+    return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
+  }
+
+  using namespace mps;
+  MPSStream* stream = getCurrentMPSStream();
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* mantissaTensor_ = nil;
+    MPSGraphTensor* exponentTensor_ = nil;
+  };
+
+  @autoreleasepool {
+    std::string key = "frexp_out_mps:" + getTensorsStringKey({self});
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+
+      // frexp(x) = (mantissa, exponent) where x = mantissa * 2^exponent
+      // mantissa is in range [0.5, 1) for positive numbers, (-1, -0.5] for negative
+      // Special cases: frexp(0) = (0, 0), frexp(inf) = (inf, 0), frexp(nan) = (nan, 0)
+
+      MPSGraphTensor* zero = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
+      MPSGraphTensor* zeroInt = [mpsGraph constantWithScalar:0 dataType:MPSDataTypeInt32];
+      MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:inputTensor.dataType];
+      MPSGraphTensor* oneInt = [mpsGraph constantWithScalar:1 dataType:MPSDataTypeInt32];
+      MPSGraphTensor* half = [mpsGraph constantWithScalar:0.5 dataType:inputTensor.dataType];
+
+      // Check for special cases
+      MPSGraphTensor* isZero = [mpsGraph equalWithPrimaryTensor:inputTensor
+                                                secondaryTensor:zero
+                                                           name:nil];
+      MPSGraphTensor* absInput = [mpsGraph absoluteWithTensor:inputTensor name:nil];
+      MPSGraphTensor* isInf = [mpsGraph isInfiniteWithTensor:inputTensor name:nil];
+      MPSGraphTensor* isNan = [mpsGraph isNaNWithTensor:inputTensor name:nil];
+      MPSGraphTensor* isSpecial = [mpsGraph logicalOrWithPrimaryTensor:isZero
+                                                       secondaryTensor:[mpsGraph logicalOrWithPrimaryTensor:isInf
+                                                                                             secondaryTensor:isNan
+                                                                                                        name:nil]
+                                                                  name:nil];
+
+      // Compute exponent: floor(log2(|x|)) + 1
+      MPSGraphTensor* log2Abs = [mpsGraph logarithmBase2WithTensor:absInput name:nil];
+      MPSGraphTensor* floorLog2 = [mpsGraph floorWithTensor:log2Abs name:nil];
+      MPSGraphTensor* expFloat = [mpsGraph additionWithPrimaryTensor:floorLog2
+                                                     secondaryTensor:one
+                                                                name:nil];
+      MPSGraphTensor* expInt = [mpsGraph castTensor:expFloat
+                                             toType:MPSDataTypeInt32
+                                               name:@"exponent"];
+
+      // Compute mantissa: x * 2^(-exponent) = x / 2^exponent
+      MPSGraphTensor* scale = [mpsGraph exponentBase2WithTensor:expFloat name:nil];
+      MPSGraphTensor* mantissaVal = [mpsGraph divisionWithPrimaryTensor:inputTensor
+                                                        secondaryTensor:scale
+                                                                   name:nil];
+
+      // Handle special cases: for 0, inf, nan, return original value as mantissa and 0 as exponent
+      MPSGraphTensor* finalMantissa = [mpsGraph selectWithPredicateTensor:isSpecial
+                                                      truePredicateTensor:inputTensor
+                                                     falsePredicateTensor:mantissaVal
+                                                                     name:nil];
+      MPSGraphTensor* finalExponent = [mpsGraph selectWithPredicateTensor:isSpecial
+                                                      truePredicateTensor:zeroInt
+                                                     falsePredicateTensor:expInt
+                                                                     name:nil];
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->mantissaTensor_ = finalMantissa;
+      newCachedGraph->exponentTensor_ = finalExponent;
+    });
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder mantissaPlaceholder = Placeholder(cachedGraph->mantissaTensor_, mantissa);
+    Placeholder exponentPlaceholder = Placeholder(cachedGraph->exponentTensor_, exponent);
+
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    auto results = dictionaryFromPlaceholders(mantissaPlaceholder, exponentPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+
+  return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
 }
 
 } // namespace at::native
