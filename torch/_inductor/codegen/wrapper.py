@@ -2853,14 +2853,12 @@ class PythonWrapperCodegen(CodeGen):
                 self.kernel_autotune_tmp_arg_idx += 1
 
             assert buf is not None, f"Failed to find a buffer for arg {arg}"
-            size = tuple(V.graph.sizevars.optimization_hint(e) for e in buf.get_size())
-            allocation_size = tuple(
-                V.graph.sizevars.optimization_hint(e)
-                for e in V.graph.get_allocation_size(buf)
+            size = V.graph.sizevars.optimization_hints(buf.get_size())
+            allocation_size = V.graph.sizevars.optimization_hints(
+                V.graph.get_allocation_size(buf)
             )
-            stride = tuple(
-                V.graph.sizevars.optimization_hint(e) for e in buf.get_stride()
-            )
+            stride = V.graph.sizevars.optimization_hints(buf.get_stride())
+
             device = buf.get_device()
             dtype = buf.get_dtype()
             offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)

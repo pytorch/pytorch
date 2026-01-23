@@ -565,7 +565,6 @@ class SizeVarAllocator:
     def symbolic_hint(
         self,
         expr: Union[Expr, int],
-        hint_override: Optional[int] = None,
         # Only flip this flag if you don't plan on guarding/adding runtime
         # asserts based on this value and promise to only use this value
         # in a heuristic nature.
@@ -585,9 +584,6 @@ class SizeVarAllocator:
             except TypeError:
                 return expr  # inf/nan/I
 
-        if hint_override:
-            return hint_override
-
         expr = self.remove_precomputed_replacements(expr)
 
         if use_user_provided_hint_override:
@@ -600,7 +596,6 @@ class SizeVarAllocator:
         expr: Union[Expr, int],
         *,
         fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
     ) -> int:
         if isinstance(expr, SymInt):
             raise TypeError(
@@ -609,7 +604,6 @@ class SizeVarAllocator:
 
         out = self.symbolic_hint(
             expr,
-            hint_override=hint_override,
             use_user_provided_hint_override=fallback is not None,
         )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
@@ -810,13 +804,11 @@ class SizeVarAllocator:
         exprs: Iterable[Union[Expr, int]],
         *,
         fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
     ) -> tuple[int, ...]:
         return tuple(
             self.size_hint(
                 x,
                 fallback=fallback,
-                hint_override=hint_override,
             )
             for x in exprs
         )

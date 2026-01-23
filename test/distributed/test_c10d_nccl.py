@@ -59,7 +59,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     requires_world_size,
     skip_if_lt_x_gpu,
-    skip_if_rocm_multiprocess,
     sm_is_or_higher_than,
     TEST_SKIPS,
     with_dist_debug_levels,
@@ -3814,7 +3813,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle("Test does not pass when run locally")
     def test_nccl_errors_nonblocking(self):
         self._reduce_timeout()
