@@ -2278,6 +2278,14 @@
       ]
     }
   ],
+  "GB1739": [
+    {
+      "Gb_type": "Unsupported member type on OpaqueObject",
+      "Context": "value={real_obj}, attr={name}, member_type={member_type}",
+      "Explanation": "Member type '{member_type}' is not supported for this operation.",
+      "Hints": []
+    }
+  ],
   "GB0197": [
     {
       "Gb_type": "list elements are pointing to the list itself",
@@ -2927,18 +2935,6 @@
       "Explanation": "Detected a call to `setattr` of a user-defined object with a non-constant name.",
       "Hints": [
         "Ensure that the name is a string."
-      ]
-    }
-  ],
-  "GB8445": [
-    {
-      "Gb_type": "DeviceMesh with torchcomms must be a graph input",
-      "Context": "Calling get_comm_object on DeviceMesh",
-      "Explanation": "When using torch.compile with torchcomms-backed DeviceMesh, the mesh must be passed as an argument to the compiled function. This allows dynamo to properly track the TorchComm objects.",
-      "Hints": [
-        "Pass the mesh as an argument to your compiled function: ",
-        "def fn(tensor, mesh): ... ; compiled_fn = torch.compile(fn); compiled_fn(t, mesh)",
-        "Do not capture the mesh from a closure or global variable."
       ]
     }
   ],
