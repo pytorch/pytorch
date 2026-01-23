@@ -10,9 +10,6 @@
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
 namespace c10d::symmetric_memory {
-// Maximum number of memory barriers for NCCL device communicator.
-// Each CTA will need a separate memory barrier.
-constexpr int NCCL_LSA_BARRIER_COUNT = 32;
 
 // Manage all the NCCL device communicator business. Singleton.
 class NCCLDevCommManager {
@@ -56,7 +53,11 @@ class NCCLDevCommManager {
   }
 
   // Create device communicator if it doesn't exist. Skip if it already exists.
-  void try_emplace_devcomm(const std::string& group_name, ncclComm_t comm) {
+  void try_emplace_devcomm(
+      const std::string& group_name,
+      ncclComm_t comm,
+      int lsa_barrier_count,
+      int gin_barrier_count) {
     auto it = group_to_comms_.find(group_name);
     if (it != group_to_comms_.end()) {
       return;
@@ -73,9 +74,11 @@ class NCCLDevCommManager {
     memset(&reqs, 0, sizeof(ncclDevCommRequirements));
 #endif
 
-    // Specifies the number of memory barriers to allocate.
-    reqs.lsaBarrierCount = NCCL_LSA_BARRIER_COUNT;
-    // TODO (kwen2501): Add network barrier count.
+    // Specifies the number of barriers to allocate, LSA for NVLink domain, GIN
+    // for network.
+    reqs.lsaBarrierCount = lsa_barrier_count;
+    reqs.railGinBarrierCount = gin_barrier_count;
+
     C10D_NCCL_CHECK(
         ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
     // Cache the device communicator for future reuse
