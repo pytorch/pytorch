@@ -6025,7 +6025,9 @@ class ExternKernel(InputsKernel):
         non_tensor_args: list[Any] = []
         for arg in args_flat:
             is_arg_tensor.append(
-                isinstance(arg, IRNode) and not isinstance(arg, GeneratorState)
+                isinstance(arg, IRNode)
+                and not isinstance(arg, GeneratorState)
+                and not isinstance(arg, TreeSpecConstant)
             )
             if is_arg_tensor[-1]:
                 tensor_args.append(arg)
@@ -6089,7 +6091,14 @@ class ExternKernel(InputsKernel):
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
-        new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
+        # Extract TreeSpec values from TreeSpecConstant IR nodes for kernel execution
+        def extract_non_tensor_arg(arg: Any) -> Any:
+            if isinstance(arg, TreeSpecConstant):
+                return arg.get_value()
+            return arg
+
+        extracted_non_tensor_args = [extract_non_tensor_arg(a) for a in non_tensor_args]
+        new_args, new_kwargs = unflatten_args(example_args, extracted_non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
@@ -9465,6 +9474,23 @@ class GeneratorState(NonTensorObj):
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.name
+
+
+@ir_dataclass
+class TreeSpecConstant(NonTensorObj):
+    """IR node for TreeSpec constants used in flat_apply operations."""
+
+    name: str
+    value: pytree.TreeSpec
+
+    def get_name(self) -> str:
+        return self.name
+
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        return self.name
+
+    def get_value(self) -> pytree.TreeSpec:
+        return self.value
 
 
 class _CollectiveKernel(FallbackKernel):
