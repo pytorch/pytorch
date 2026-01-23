@@ -721,39 +721,6 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             pass
         assert sys.exc_info()[0] is None
 
-    @make_dynamo_test
-    def test_cmp_exceptions(self):
-        a = ValueError("error")
-        b = ValueError("error")
-        assert (a is not b) and (b is not a)
-        assert (a is a) and (b is b)
-
-    @make_dynamo_test
-    def test_is_same_exception(self):
-        try:
-            try:
-                raise ValueError
-            except ValueError as e:
-                e1 = e
-                raise
-        except Exception as e:
-            e2 = e
-            assert e1 is e2
-
-    def test_is_same_exception_2(self):
-        x = ValueError("error")
-        y = x
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(a):
-            if x is y:
-                return a.sin()
-            else:
-                return a.cos()
-
-        a = torch.randn(2)
-        self.assertEqual(fn(a), a.sin())
-
     def test_reconstruct___context__(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
