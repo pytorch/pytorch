@@ -281,6 +281,7 @@
   variants: function
   dispatch:
     CUDA: masked_scale_cuda
+    MPS: masked_scale_mps
   autogen: _masked_scale.out
 
 - func: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)

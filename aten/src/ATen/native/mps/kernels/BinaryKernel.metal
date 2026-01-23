@@ -489,6 +489,10 @@ REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, float, float, float);
 REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, half, half, half);
+// For _masked_scale which uses uint8 mask
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, float, uchar, float);
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, bfloat, uchar, bfloat);
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, half, uchar, half);
 
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);

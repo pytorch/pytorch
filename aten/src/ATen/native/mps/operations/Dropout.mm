@@ -14,6 +14,7 @@
 #include <ATen/ops/native_dropout_backward_native.h>
 #include <ATen/ops/native_dropout_native.h>
 #include <ATen/ops/ones_like.h>
+#include <ATen/ops/_masked_scale_native.h>
 #endif
 
 namespace at::native {
@@ -40,6 +41,14 @@ std::tuple<Tensor, Tensor> native_dropout_mps(const Tensor& input, double p, std
 Tensor native_dropout_backward_mps(const Tensor& grad, const Tensor& mask, double scale) {
   auto grad_float = isFloatingType(grad.scalar_type()) ? grad : grad.to(c10::kFloat);
   return native_dropout_mask_and_scale(grad_float, mask, scale);
+}
+
+Tensor masked_scale_mps(const Tensor& self, const Tensor& mask, double scale) {
+  TORCH_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
+  // _masked_scale is essentially dropout backward with a uint8 mask
+  // The mask indicates which elements to keep (non-zero) and scale
+  auto self_float = isFloatingType(self.scalar_type()) ? self : self.to(c10::kFloat);
+  return native_dropout_mask_and_scale(self_float, mask, scale);
 }
 
 } // namespace at::native
