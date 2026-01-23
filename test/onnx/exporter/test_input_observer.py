@@ -4,14 +4,14 @@ import itertools
 
 import torch
 from torch.onnx import InputObserver
-from torch.onnx._internal.exporter._input_observer import infer_dynamic_dimensions
+from torch.onnx._internal.exporter._input_observer import _infer_dynamic_dimensions
 from torch.testing._internal import common_utils
 
 
 class TestInputObserver(common_utils.TestCase):
     def test_infer_dynamic_dimensions(self):
-        self.assertEqual([2], infer_dynamic_dimensions([(1, 2, 3), (1, 2, 4)]))
-        self.assertEqual([0, 2], infer_dynamic_dimensions([(1, 2, 3), (2, 2, 4)]))
+        self.assertEqual([2], _infer_dynamic_dimensions([(1, 2, 3), (1, 2, 4)]))
+        self.assertEqual([0, 2], _infer_dynamic_dimensions([(1, 2, 3), (2, 2, 4)]))
 
     def test_io_captured_args(self):
         class Model(torch.nn.Module):
@@ -41,6 +41,36 @@ class TestInputObserver(common_utils.TestCase):
         args = observer.infer_arguments()
         self.assertIsInstance(args, tuple)
         self.assertEqual(2, len(args))
+
+    def test_io_captured_not_forward(self):
+        class Model(torch.nn.Module):
+            def notforward(self, w):
+                return w.abs()
+
+            def forward(self, x, y):
+                return x + self.notforward(y)
+
+        inputs = [
+            (torch.randn((5, 6)), torch.randn((1, 6))),
+            (torch.randn((7, 7)), torch.randn((1, 7))),
+            (torch.randn((7, 8)), torch.randn((1, 8))),
+            (torch.randn((7, 9)), torch.randn((1, 9))),
+        ]
+
+        model = Model()
+        observer = InputObserver()
+        with observer(model, method_name="notforward"):
+            for args in inputs:
+                model(*args)
+        self.assertEqual(len(observer.info), 3)
+        for i in range(3):
+            self.assertEqual(len(observer.info.flat_outputs[i]), 1)
+
+        cst = torch.export.Dim.DYNAMIC
+        self.assertEqual(({1: cst},), observer.infer_dynamic_shapes())
+        args = observer.infer_arguments()
+        self.assertIsInstance(args, tuple)
+        self.assertEqual(1, len(args))
 
     def test_io_captured_kwargs(self):
         class Model(torch.nn.Module):

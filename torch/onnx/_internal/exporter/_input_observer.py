@@ -14,9 +14,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 
-def flatten_unflatten_for_dynamic_shapes(
+def _flatten_unflatten_for_dynamic_shapes(
     obj: Any,
-    use_dict: bool = True,
     change_function: Callable[[torch.Tensor], Any] | None = None,
 ) -> Any:
     """Returns the object in a different structure similar to what
@@ -24,12 +23,6 @@ def flatten_unflatten_for_dynamic_shapes(
 
     Args:
         obj: Object from a custom class.
-        use_dict:
-            closer to the original result but
-            :func:`torch.export.export` only considers the values,
-            the context gives the dictionary keys but it is not expressed
-            in the dynamic shapes, these specifications seems to be different
-            for the strict and non strict mode. It also preserves tuple.
         change_function: Function to modify the tensor in the structure itself,
             like replace them by a shape.
 
@@ -47,35 +40,32 @@ def flatten_unflatten_for_dynamic_shapes(
     ):
         end += subspec.num_leaves
         value = subspec.unflatten(flat[start:end])
-        value = flatten_unflatten_for_dynamic_shapes(
-            value, use_dict=use_dict, change_function=change_function
+        value = _flatten_unflatten_for_dynamic_shapes(
+            value, change_function=change_function
         )
         subtrees.append(value)
         start = end
-    if use_dict:
-        if spec.type is dict:
-            # This is a dictionary.
-            return dict(zip(spec.context, subtrees))
-        if spec.type is tuple:
-            return tuple(subtrees)
-        if spec.type is list:
-            return list(subtrees)
-        if spec.type is None and not subtrees:
-            return None
-        if spec.context:
-            # This is a custom class with attributes.
-            # It is returned as a list.
-            return list(subtrees)
-        raise ValueError(
-            f"Unable to interpret spec type {spec.type} "
-            f"(type is {type(spec.type)}, context is {spec.context}), "
-            f"spec={spec}, subtrees={subtrees}"
-        )
-    # This is a list.
-    return subtrees
+    if spec.type is dict:
+        # This is a dictionary.
+        return dict(zip(spec.context, subtrees))
+    if spec.type is tuple:
+        return tuple(subtrees)
+    if spec.type is list:
+        return list(subtrees)
+    if spec.type is None and not subtrees:
+        return None
+    if spec.context:
+        # This is a custom class with attributes.
+        # It is returned as a list.
+        return list(subtrees)
+    raise ValueError(
+        f"Unable to interpret spec type {spec.type} "
+        f"(type is {type(spec.type)}, context is {spec.context}), "
+        f"spec={spec}, subtrees={subtrees}"
+    )
 
 
-def infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]:
+def _infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]:
     """Returns the list of dynamic dimensions given a list of shapes
     corresponding to the same tensor.
 
@@ -101,20 +91,36 @@ def infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]
 
 
 class InputObserverInfo:
-    def __init__(self, signature: inspect.Signature):
+    """Contains all the necessary information to infer dynamic shapes
+    and the arguments to send to :func:`torch.export.export`.
+
+    Args:
+        signature_names: Names of the arguments of the method
+            the collector tensors come from. They are used if it becomes
+            necessary to move positional arguments to named ones.
+    """
+
+    def __init__(self, signature_names: list[str]):
         self.inputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
         self.flat_inputs: list[list[torch.Tensor | None]] = []
         self.outputs_specs: list[torch.utils._pytree.PyTreeSpec] = []
         self.flat_outputs: list[list[torch.Tensor]] = []
-        self.signature = signature
+        self.signature_names = signature_names
 
         self._max_args: tuple[Any, torch.Tensor] | None = None
         self._max_kwargs: dict[str, torch.Tensor] | None = None
 
     def __len__(self) -> int:
+        """Returns the number of collected set of inputs/outputs."""
         return len(self.flat_inputs)
 
     def add_inputs(self, args: tuple[Any, ...], kwargs: dict[str, Any]):
+        """Stores one set of inputs. They are deepcopied.
+
+        Args:
+            args: Positional arguments.
+            kwargs: Named arguments.
+        """
         kwargs = {
             k: v
             for k, v in kwargs.items()
@@ -135,11 +141,12 @@ class InputObserverInfo:
             self._max_kwargs = cloned_kwargs
 
     def add_outputs(self, res: torch.Tensor | tuple[torch.Tensor, ...]):
+        """Stores outputs. They are deepcopied."""
         flat_res, spec = torch.utils._pytree.tree_flatten(res)
         self.outputs_specs.append(spec)
         self.flat_outputs.append([t.clone().detach() for t in flat_res])
 
-    def build_inputs_completed_with_none_values(self) -> list[list[torch.Tensor]]:
+    def _build_inputs_completed_with_none_values(self) -> list[list[torch.Tensor]]:
         # Let's compute the sizes of each independently.
         if not self.flat_inputs or self._max_args is None or self._max_kwargs is None:
             raise RuntimeError("No inputs were captured.")
@@ -194,7 +201,8 @@ class InputObserverInfo:
     def infer_dynamic_shapes(
         self,
     ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
-        flat_inputs = self.build_inputs_completed_with_none_values()
+        """Infers dynamic shapes based on the collected tensors."""
+        flat_inputs = self._build_inputs_completed_with_none_values()
         # This is already checked by build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
         assert self._max_args is not None and self._max_kwargs is not None
@@ -209,7 +217,7 @@ class InputObserverInfo:
         ]
         n_tensors = len(shape_lists[0])
         dynamic_shapes = [
-            infer_dynamic_dimensions(
+            _infer_dynamic_dimensions(
                 [s for s in [shapes[index] for shapes in shape_lists] if s is not None]
             )
             for index in range(n_tensors)
@@ -226,7 +234,7 @@ class InputObserverInfo:
                 return dict(zip(list(self._max_kwargs), flat_dynamic_shapes))
             # positional arguments needs to be moved to the named arguments
             n_args = len(self._max_args)
-            pos_names = list(self.signature.parameters)[:n_args]
+            pos_names = self.signature_names[:n_args]
             return {
                 **dict(zip(pos_names, flat_dynamic_shapes[:n_args])),
                 **dict(zip(list(self._max_kwargs), flat_dynamic_shapes[n_args:])),
@@ -248,20 +256,21 @@ class InputObserverInfo:
             ),
         )
         mapping = {id(t): shape for t, shape in zip(flat_inputs, flat_dynamic_shapes)}
-        ds_args, ds_kwargs = flatten_unflatten_for_dynamic_shapes(
+        ds_args, ds_kwargs = _flatten_unflatten_for_dynamic_shapes(
             (self._max_args, self._max_kwargs), change_function=lambda t: mapping[id(t)]
         )
         if not ds_kwargs:
             return tuple(ds_args)
         if not ds_args:
             return tuple(ds_kwargs)
-        pos_names = list(self.signature.parameters)[: len(ds_args)]
+        pos_names = self.signature_names[: len(ds_args)]
         return {**dict(zip(pos_names, ds_args)), **ds_kwargs}
 
     def infer_arguments(
         self, index: int | None = None
     ) -> tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
-        # This is already checked by build_inputs_completed_with_none_values
+        """Infers arguments based on the collected tensors."""
+        # This is already checked by _build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
         assert self._max_args is not None and self._max_kwargs is not None
         candidate = None
@@ -286,12 +295,13 @@ class InputObserverInfo:
             if not args:
                 return kwargs
             # We need to move args to kwargs
-            pos_names = list(self.signature.parameters)[: len(args)]
+            pos_names = self.signature_names[: len(args)]
             return {**dict(zip(pos_names, args)), **kwargs}
 
         raise NotImplementedError(
             "We could not find a good set of inputs/outputs. "
-            "We need to replace none by empty tensors."
+            "We need to replace none by empty tensors. "
+            "This will be soon implemented."
         )
 
 
@@ -299,42 +309,90 @@ class InputObserver:
     """Steals forward method to collect inputs and outputs.
     This information is used to infer dynamic shapes and
     export arguments.
+
+    Examples
+    --------
+    >>> input_observer = InputObserver()
+    >>> with input_observer(model):
+    >>>     model(x1, y1)
+    >>>     model(x2, y2)
+    >>> ep = torch.export.export(  # or torch.onnx.export
+    >>>     model,
+    >>>     input_observer.infer_arguments(),
+    >>>     dynamic_shapes.input_observer.infer_dynamic_shapes(),
+    >>> )
+
+    With LLM:
+    >>> input_observer = InputObserver()
+    >>> with input_observer(model):
+    >>>     model.generate(input_ids)
+    >>> ep = torch.export.export(  # or torch.onnx.export
+    >>>     model,
+    >>>     ()
+    >>>     kwargs=input_observer.infer_arguments(),
+    >>>     dynamic_shapes.input_observer.infer_dynamic_shapes(),
+    >>> )
     """
 
-    def __init__(self, store_n_calls: int = 3):
-        self.store_n_calls = store_n_calls
+    def __init__(self):
         self.info: InputObserverInfo | None = None
 
-    def _forward_captured(self, *args, _captured_forward=None, **kwargs):
-        assert _captured_forward is not None, "_captured_forward cannot be None"
+    def _replaced_method(
+        self,
+        *args,
+        _captured_method: Callable | None = None,
+        _store_n_calls: int = 3,
+        **kwargs,
+    ):
+        assert _captured_method is not None, "_captured_forward cannot be None"
         assert self.info is not None, "info cannot be None"
         n_stored = len(self.info)
-        if n_stored < self.store_n_calls:
+        if n_stored < _store_n_calls:
             self.info.add_inputs(args, kwargs)
-        res = _captured_forward(*args, **kwargs)
-        if n_stored < self.store_n_calls:
+        res = _captured_method(*args, **kwargs)
+        if n_stored < _store_n_calls:
             self.info.add_outputs(res)
         return res
 
     @contextlib.contextmanager
-    def __call__(self, model: torch.nn.Module):
+    def __call__(
+        self, model: torch.nn.Module, store_n_calls: int = 3, method_name: str = "forward"
+    ):
+        """Starts collecting inputs and outputs of a specific method.
+        The model method is replaced by a new one collecting tensors
+        before and after the inner one is called.
+        The original method is restored after the collection.
+
+        Args:
+            model: Model
+            store_n_calls: The collection stops after this many calls
+                to avoid taking too much memory.
+            method_name: Method name to spy on.
+        """
         if self.info is not None:
             raise RuntimeError(
                 "This class was already used to capture a model. Please create a new one."
             )
-        self.info = InputObserverInfo(signature=inspect.signature(model.forward))
-        forward_method = model.forward
-        model.forward = (
-            lambda *args,
-            _captured_forward=forward_method,
-            **kwargs: self._forward_captured(
-                *args, _captured_forward=_captured_forward, **kwargs
-            )
+        if not hasattr(model, method_name):
+            raise ValueError(f"Model type {model} does not have a method {method_name!r}")
+        captured_method = getattr(model, method_name)
+        self.info = InputObserverInfo(
+            signature_names=list(inspect.signature(captured_method).parameters)
+        )
+        setattr(
+            model,
+            method_name,
+            lambda *args, _cm=captured_method, _snc=store_n_calls, **kwargs: self._replaced_method(  # noqa: E501
+                *args,
+                _captured_method=_cm,
+                _store_n_calls=_snc,
+                **kwargs,
+            ),
         )
         try:
             yield self
         finally:
-            model.forward = forward_method
+            setattr(model, method_name, captured_method)
 
     def _check_captured(self):
         if self.info is None:
@@ -343,6 +401,7 @@ class InputObserver:
     def infer_dynamic_shapes(
         self,
     ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
+        """Infers dynamic shapes based on the collected tensors."""
         self._check_captured()
         assert self.info is not None  # missed by type checking
         return self.info.infer_dynamic_shapes()
@@ -350,6 +409,7 @@ class InputObserver:
     def infer_arguments(
         self, index: int | None = None
     ) -> tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
+        """Infers arguments based on the collected tensors."""
         self._check_captured()
         assert self.info is not None  # missed by type checking
         return self.info.infer_arguments(index=index)
