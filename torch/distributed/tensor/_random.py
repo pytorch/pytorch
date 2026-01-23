@@ -46,6 +46,17 @@ def set_use_thread_based_rng(
                 generator.set_use_thread_based_rng(use_thread_based)
 
 
+def _get_rng_tracker(device_mesh: DeviceMesh) -> Optional["_RNGStateTracker"]:
+    """Get or create the RNG tracker based on the global config flag."""
+    global _rng_tracker
+    if _rng_tracker is None and is_rng_supported_mesh(device_mesh):
+        if _USE_THREAD_RNG_TRACKER:
+            _rng_tracker = ThreadBasedRNGTracker(device_mesh)
+        else:
+            _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
+    return _rng_tracker
+
+
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     """Checks if the current device of ``device_mesh`` supports DTensor's random APIs.
     Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest
