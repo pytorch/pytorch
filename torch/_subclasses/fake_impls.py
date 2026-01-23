@@ -736,16 +736,16 @@ def _reshape_copy(
         view = _view_meta(fake_mode, func, a, *shape)
         return view.clone(  # pyrefly: ignore[bad-return]
             memory_format=torch.contiguous_format
-        )
+        )  # clone return type is Tensor, but it will be FakeTensor here.
     else:
         result = _view_meta(
             fake_mode,
             func,
-            a.clone(memory_format=torch.contiguous_format),
+            a.clone(  # pyrefly: ignore[bad-argument-type]
+                memory_format=torch.contiguous_format
+            ),  # clone return type is Tensor, but it will be FakeTensor here.
             *shape,
         )
-        if not isinstance(result, FakeTensor):
-            raise TypeError(f"Expected FakeTensor, got {type(result)}")
         return result
 
 
@@ -754,15 +754,18 @@ def _reshape_copy(
 def _view_meta(
     fake_mode: FakeTensorMode,
     func: OpOverload,
-    a: FakeTensor | torch.Tensor,
+    a: FakeTensor,
     *shape: Any,
-) -> FakeTensor | torch.Tensor:
+) -> FakeTensor:
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
-        return _view_unbacked_meta(a, shape)
+        # return type in this case is always FakeTensor
+        return _view_unbacked_meta(a, shape)  # pyrefly: ignore[bad-return]
     else:
-        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+        return torch._refs._reshape_view_helper(  # pyrefly: ignore[bad-return]
+            a, *shape, allow_copy=False
+        )  # can handle FakeTensor although its return type is Tensor
 
 
 @register_op_impl(aten.view_copy.default)
