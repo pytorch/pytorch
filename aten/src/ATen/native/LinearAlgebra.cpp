@@ -2893,24 +2893,46 @@ Tensor linalg__powsum(
     std::optional<ScalarType> opt_dtype) {
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
+  auto size = self.sizes();
+  auto ndim = self.dim();
+
+  auto opt_dim_ = dim.vec();
+  maybe_wrap_dims(opt_dim_, ndim);
+
+  using Int = IntArrayRef::value_type;
+  std::vector<Int> all_dim(ndim);
+  std::iota(all_dim.begin(), all_dim.end(), 0);
+
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  auto reduce_dim = is_all_reduce ? all_dim : opt_dim_;
 
   // Compute output dtype (same logic as vector_norm)
   auto compute_dtype = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true);
 
-  // Handle dtype conversion
-  Tensor self_;
-  if (opt_dtype.has_value()) {
-    self_ = self.to(*opt_dtype);
-  } else {
-    self_ = self;
-  }
-
   // Create output tensor with the correct shape
-  auto result = create_reduction_result(self_, opt_dim, keepdim, toRealValueType(compute_dtype));
+  auto result = create_reduction_result(self, opt_dim, keepdim, toRealValueType(compute_dtype));
 
   if (result.numel() == 0) {
     result.zero_();
     return result;
+  }
+
+  // Check if reducing over dimensions that all have size 1
+  bool is_reduce_over_1D_vector = true;
+  for (auto i : reduce_dim) {
+    if (size[i] != 1) {
+      is_reduce_over_1D_vector = false;
+      break;
+    }
+  }
+
+  // Handle dtype conversion only when reducing over 1D
+  // (otherwise the kernel handles it via the result dtype)
+  Tensor self_;
+  if (is_reduce_over_1D_vector && opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = self;
   }
 
   auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());
