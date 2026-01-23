@@ -201,6 +201,7 @@ TEST_ON_CUDA = (
 TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
 device_configs = {}
+test_device = ("cpu",)
 if HAS_GPU:
     if TEST_ON_CUDA:
         test_device = (
@@ -210,8 +211,6 @@ if HAS_GPU:
     elif TEST_ON_XPU:
         torch._C._set_onednn_allow_tf32(True)
         test_device = ("xpu",)
-else:
-    test_device = ("cpu",)
 
 
 class SubstringSet:
