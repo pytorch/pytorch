@@ -177,6 +177,8 @@ def export_compat(
             dump_exported_program=dump_exported_program,
             artifacts_dir=artifacts_dir,
             verbose=verbose,
+            optimize=optimize,
+            opset_version=opset_version,
         )
 
     except Exception as e:
@@ -226,13 +228,6 @@ def export_compat(
 
     if need_axis_mapping and dynamic_shapes is not None:
         onnx_program._rename_dynamic_axes(dynamic_shapes)
-
-    # Converter opset version and optimize
-    onnx_program.model = onnxscript_apis.convert_version(
-        onnx_program.model, opset_version
-    )
-    if optimize:
-        onnx_program.optimize()
 
     if f is not None:
         if isinstance(f, io.BytesIO):
