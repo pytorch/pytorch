@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - release/*
-    tag: # TEMPORARY
+    tags: # TEMPORARY
       - ciflow/trunk/*
   workflow_dispatch:
   schedule:
