@@ -8703,25 +8703,23 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
         # Check for weakrefs
         t1 = linear.weight
-        self.assertEqual(len(weakref.getweakrefs(t1)), 2)
+        self.assertEqual(len(weakref.getweakrefs(t1)), 0)
 
-        # TODO @azahed98: Once the aforementioned issue is fixed, we can remove the self.assertRaises
-        with self.assertRaises(RuntimeError):
-            # Move to cpu. Should work with no weakrefs
-            linear.cpu()
+        # Move to cpu. Should work with no weakrefs
+        linear.cpu()
 
-            # Move back to cuda and check that there is no recompile
-            linear.to(device)
-            prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
-                "ok", 0
-            )
-            linear(torch.randn(1, 2, device=device))
-            new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
-                "ok", 0
-            )
-            assert new_frame_count == prev_frame_count, (
-                "linear() call caused a recompile"
-            )
+        # Move back to cuda and check that there is no recompile
+        linear.to(device)
+        prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
+            "ok", 0
+        )
+        linear(torch.randn(1, 2, device=device))
+        new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
+            "ok", 0
+        )
+        assert new_frame_count == prev_frame_count, (
+            "linear() call caused a recompile"
+        )
 
 
 instantiate_parametrized_tests(ReproTests)
