@@ -1798,20 +1798,6 @@ optim_db: list[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
             ),
-            # Note on tolerances:
-            # Tracking through #127000
-            DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float32: tol(
-                            atol=3e-5,
-                            rtol=1.3e-06,
-                        )
-                    }
-                ),
-                "TestCudaOptims",
-                "test_grad_scaling_autocast_fused_optimizers",
-            ),
         ),
         skips=(
             DecorateInfo(
