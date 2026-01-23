@@ -6,8 +6,6 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 PYTORCH_ROOT="${PYTORCH_ROOT:-$(cd "$SOURCE_DIR/../.." && pwd)}"
 
 source "${PYTORCH_ROOT}/.ci/pytorch/common_utils.sh"
-FLASH_ATTENTION_DIR="${PYTORCH_ROOT}/third_party/flash-attention"
-FLASH_ATTENTION_HOPPER_DIR="${FLASH_ATTENTION_DIR}/hopper"
 
 if [[ -z "$FA_FINAL_PACKAGE_DIR" ]]; then
     fatal "FA_FINAL_PACKAGE_DIR must be set"
@@ -17,8 +15,19 @@ if [[ -z "$WHEEL_PLAT" ]]; then
     fatal "WHEEL_PLAT must be set"
 fi
 
+FLASH_ATTENTION_DIR="/tmp/flash-attention-upstream"
+FLASH_ATTENTION_HOPPER_DIR="${FLASH_ATTENTION_DIR}/hopper"
+
+echo "Cloning upstream flash-attention repository"
+if [[ -d "$FLASH_ATTENTION_DIR" ]]; then
+    echo "Removing existing flash-attention directory"
+    rm -rf "$FLASH_ATTENTION_DIR"
+fi
+
+git clone --depth 1 https://github.com/Dao-AILab/flash-attention.git "$FLASH_ATTENTION_DIR"
+
 if [[ ! -d "$FLASH_ATTENTION_HOPPER_DIR" ]]; then
-    fatal "flash attn directory not found $FLASH_ATTENTION_HOPPER_DIR"
+    fatal "flash attn hopper directory not found $FLASH_ATTENTION_HOPPER_DIR"
 fi
 
 PYTHON="${PYTHON_EXECUTABLE:-python}"
