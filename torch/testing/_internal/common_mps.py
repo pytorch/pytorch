@@ -918,6 +918,7 @@ if torch.backends.mps.is_available():
             "scalar_tensor": [torch.float16, torch.float32],
             "cdist": None,
             "masked.scatter": [torch.float16, torch.float32],
+            "grid_sampler_2d": None,  # grid_sampler_2d_backward not implemented for MPS
             "grid_sampler_3d": None,
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
             "igamma": None,  # currently not supported for any device

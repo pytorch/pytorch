@@ -11255,7 +11255,9 @@ class TestConvolutionMPS(TestCaseMPS):
             test_shape(0, C, IH, IW, H, W, mode, padding_mode, align_corners)
 
         for mode in ('bilinear', 'nearest'):
-            for padding_mode in ('zeros', 'reflection'):
+            # border padding only supported for bilinear mode on MPS
+            padding_modes = ('zeros', 'reflection', 'border') if mode == 'bilinear' else ('zeros', 'reflection')
+            for padding_mode in padding_modes:
                 for align_corners in (True, False):
                     # test known input
                     input = torch.arange(1., 11, device="mps").view(1, 1, 2, 5)
