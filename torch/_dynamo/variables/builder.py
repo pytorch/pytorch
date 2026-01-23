@@ -297,6 +297,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedEnumClassVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
@@ -1511,6 +1512,12 @@ class VariableBuilder:
 
             if is_opaque_type(value):
                 return OpaqueObjectClassVariable(
+                    value,
+                    source=self.source,
+                )
+
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(
                     value,
                     source=self.source,
                 )
@@ -4105,6 +4112,8 @@ class SourcelessBuilder:
         ):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)

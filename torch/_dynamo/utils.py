@@ -2719,6 +2719,11 @@ list_getitem = list.__getitem__
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
+# EnumType is the metaclass for Enum classes
+enum_type_methods = {
+    method for method in type(enum.Enum).__dict__.values() if callable(method)
+}
+
 K = TypeVar("K")
 V = TypeVar("V")
 
