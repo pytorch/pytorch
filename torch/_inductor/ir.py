@@ -3974,14 +3974,14 @@ class FlexibleLayout(Layout):
 
     allow_indexing = False
 
-    # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
     def contiguous_strides(sizes: Sequence[int]) -> list[Expr]:
         if len(sizes) == 0:
             return []
         reversed_strides = [sympy.S.One]
         for size in reversed(sizes[1:]):
-            reversed_strides.append(size * reversed_strides[-1])
+            # Use Max(size, 1) to handle zero-size tensors correctly
+            reversed_strides.append(sympy.Max(size, 1) * reversed_strides[-1])
         return list(reversed(reversed_strides))
 
     @staticmethod
@@ -3998,7 +3998,8 @@ class FlexibleLayout(Layout):
 
         for i in order:
             strides[i] = next_stride
-            next_stride = next_stride * sizes[i]
+            # Use Max(sizes[i], 1) to handle zero-size tensors correctly
+            next_stride = next_stride * sympy.Max(sizes[i], 1)
         return strides
 
     @staticmethod
