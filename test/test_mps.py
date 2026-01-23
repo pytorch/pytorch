@@ -6509,9 +6509,9 @@ class TestMPS(TestCaseMPS):
             mps_x = cpu_x.clone().to('mps')
             mps_dx = cpu_dx.clone().to('mps')
 
-            # Compute glu
+            # Compute glu on CPU and copy to MPS to isolate glu_jvp behavior
             cpu_glu = torch.nn.functional.glu(cpu_x, dim=dim)
-            mps_glu = torch.nn.functional.glu(mps_x, dim=dim)
+            mps_glu = cpu_glu.clone().to('mps')
 
             # Compute glu_jvp
             cpu_result = torch.ops.aten.glu_jvp(cpu_glu, cpu_x, cpu_dx, dim)
@@ -6531,16 +6531,14 @@ class TestMPS(TestCaseMPS):
             mps_x = cpu_x.detach().clone().to('mps').requires_grad_()
             mps_dx = cpu_dx.clone().to('mps')
 
-            glu_size = shape[dim] // 2
-
-            # Compute glu and backward
+            # Compute glu and backward on CPU
             cpu_glu = torch.nn.functional.glu(cpu_x, dim=dim)
             cpu_grad_glu = torch.randn_like(cpu_glu)
-            mps_glu = torch.nn.functional.glu(mps_x, dim=dim)
             mps_grad_glu = cpu_grad_glu.clone().to('mps')
 
             cpu_grad_x = torch.autograd.grad(cpu_glu, cpu_x, cpu_grad_glu, create_graph=True)[0]
-            mps_grad_x = torch.autograd.grad(mps_glu, mps_x, mps_grad_glu, create_graph=True)[0]
+            # Use the exact same grad_x values on both devices to isolate glu_backward_jvp behavior
+            mps_grad_x = cpu_grad_x.detach().clone().to('mps')
 
             # Compute glu_backward_jvp
             cpu_dgrad_glu = torch.randn_like(cpu_grad_glu)
