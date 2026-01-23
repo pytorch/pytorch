@@ -6686,6 +6686,86 @@ class TestMPS(TestCaseMPS):
                 helper((2, 2, 16, 16), (2, 16), return_indices, dtype)
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
+    def test_fractional_max_pool2d_deterministic(self):
+        """Test fractional_max_pool2d with explicit random samples to validate MPS vs CPU."""
+        def helper(input_shape, output_size, kernel_size, dtype):
+            torch.manual_seed(42)
+            cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype, requires_grad=True)
+            mps_x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            # Create deterministic random samples (values in [0, 1))
+            batch_size = input_shape[0] if len(input_shape) == 4 else 1
+            channels = input_shape[-3]
+            random_samples = torch.rand(batch_size, channels, 2, dtype=dtype, device='cpu')
+            random_samples_mps = random_samples.to('mps')
+
+            # Forward pass
+            output_cpu, indices_cpu = torch.nn.functional.fractional_max_pool2d(
+                cpu_x, kernel_size, output_size=output_size, _random_samples=random_samples, return_indices=True
+            )
+            output_mps, indices_mps = torch.nn.functional.fractional_max_pool2d(
+                mps_x, kernel_size, output_size=output_size, _random_samples=random_samples_mps, return_indices=True
+            )
+
+            atol = 1e-5 if dtype == torch.float32 else 1e-2
+            rtol = 1e-3 if dtype == torch.float32 else 1e-2
+            self.assertEqual(output_mps, output_cpu, atol=atol, rtol=rtol)
+            self.assertEqual(indices_mps, indices_cpu)
+
+            # Backward pass
+            grad = torch.randn_like(output_cpu)
+            grad_mps = grad.to('mps')
+            output_cpu.backward(grad)
+            output_mps.backward(grad_mps)
+            self.assertEqual(mps_x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+
+        for dtype in [torch.float32, torch.float16]:
+            helper((2, 3, 8, 8), (4, 4), (2, 2), dtype)
+            helper((2, 3, 16, 16), (8, 8), (3, 3), dtype)
+            helper((1, 2, 10, 10), (5, 5), (2, 2), dtype)
+            # Test edge case: output_size = 1
+            helper((1, 1, 4, 4), (1, 1), (2, 2), dtype)
+
+    def test_fractional_max_pool3d_deterministic(self):
+        """Test fractional_max_pool3d with explicit random samples to validate MPS vs CPU."""
+        def helper(input_shape, output_size, kernel_size, dtype):
+            torch.manual_seed(42)
+            cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype, requires_grad=True)
+            mps_x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            # Create deterministic random samples (values in [0, 1))
+            batch_size = input_shape[0] if len(input_shape) == 5 else 1
+            channels = input_shape[-4]
+            random_samples = torch.rand(batch_size, channels, 3, dtype=dtype, device='cpu')
+            random_samples_mps = random_samples.to('mps')
+
+            # Forward pass
+            output_cpu, indices_cpu = torch.nn.functional.fractional_max_pool3d(
+                cpu_x, kernel_size, output_size=output_size, _random_samples=random_samples, return_indices=True
+            )
+            output_mps, indices_mps = torch.nn.functional.fractional_max_pool3d(
+                mps_x, kernel_size, output_size=output_size, _random_samples=random_samples_mps, return_indices=True
+            )
+
+            atol = 1e-5 if dtype == torch.float32 else 1e-2
+            rtol = 1e-3 if dtype == torch.float32 else 1e-2
+            self.assertEqual(output_mps, output_cpu, atol=atol, rtol=rtol)
+            self.assertEqual(indices_mps, indices_cpu)
+
+            # Backward pass
+            grad = torch.randn_like(output_cpu)
+            grad_mps = grad.to('mps')
+            output_cpu.backward(grad)
+            output_mps.backward(grad_mps)
+            self.assertEqual(mps_x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+
+        for dtype in [torch.float32, torch.float16]:
+            helper((2, 3, 8, 8, 8), (4, 4, 4), (2, 2, 2), dtype)
+            helper((2, 3, 12, 12, 12), (6, 6, 6), (3, 3, 3), dtype)
+            helper((1, 2, 6, 6, 6), (3, 3, 3), (2, 2, 2), dtype)
+            # Test edge case: output_size = 1
+            helper((1, 1, 4, 4, 4), (1, 1, 1), (2, 2, 2), dtype)
+
     def test_gelu_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype)

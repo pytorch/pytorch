@@ -828,14 +828,17 @@ inline int get_fractional_interval(
     int inputSize,
     int outputSize,
     int poolSize) {
+  // For outputSize <= 1, or for the last output index, the interval starts at
+  // inputSize - poolSize. This matches generate_intervals behavior and avoids
+  // dividing by (outputSize - 1) when outputSize == 1.
+  if (outputSize <= 1 || index == outputSize - 1) {
+    return inputSize - poolSize;
+  }
+
   accT alpha = static_cast<accT>(inputSize - poolSize) /
                static_cast<accT>(outputSize - 1);
-  if (index == outputSize - 1) {
-    return inputSize - poolSize;
-  } else {
-    return static_cast<int>((index + sample) * alpha) -
-           static_cast<int>(sample * alpha);
-  }
+  return static_cast<int>((index + sample) * alpha) -
+         static_cast<int>(sample * alpha);
 }
 
 // Fractional Max Pool 2D Forward
