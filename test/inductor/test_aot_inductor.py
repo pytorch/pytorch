@@ -42,6 +42,7 @@ from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     requires_triton_ptxas_compat,
     SM80OrLater,
@@ -1312,8 +1313,8 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM >= 8.9 and MI300+ devices",
+        not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
+        "scaled_grouped_mm is only supported on SM90 and MI300+ devices",
     )
     @skipIfXpu
     def test_scaled_grouped_mm(self):
