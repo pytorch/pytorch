@@ -8,6 +8,30 @@ namespace at::native {
 
 namespace {
 
+// Computes input + alpha * op(tensor1, tensor2).
+// Special-cases alpha=1 and uses explicit std::fma for multiplies
+// to ensure consistent FMA behavior across all code paths.
+template <typename opmath_t, typename Op>
+C10_DEVICE __forceinline__ opmath_t pointwise_op_impl(
+    opmath_t input,
+    opmath_t tensor1,
+    opmath_t tensor2,
+    opmath_t alpha,
+    Op op) {
+  if (alpha == opmath_t(1)) {
+    // Use explicit fma for std::multiplies on real floating-point types
+    // to guarantee FMA instruction (std::fma doesn't support complex)
+    if constexpr (
+        std::is_same_v<Op, std::multiplies<opmath_t>> &&
+        std::is_floating_point_v<opmath_t>) {
+      return std::fma(tensor1, tensor2, input);
+    } else {
+      return input + op(tensor1, tensor2);
+    }
+  }
+  return input + alpha * op(tensor1, tensor2);
+}
+
 // TODO(crcrpar): Handle version bump in codegen.
 // rel:
 // https://github.com/pytorch/pytorch/blob/9cf84347767c8abb8feba18a9a1baba321eeb8b9/tools/autograd/gen_inplace_or_view_type.py#L481-L482
@@ -172,11 +196,8 @@ __device__ __forceinline__ void pointwise_op_scalar(
       load_store(r_args[2], args[2], 0, i_start);
 #pragma unroll
       for (int ii = 0; ii < kILP; ii++) {
-        r_args[0][ii] = static_cast<T>(
-            static_cast<opmath_t>(r_args[0][ii]) +
-            scalar *
-                op(static_cast<opmath_t>(r_args[1][ii]),
-                   static_cast<opmath_t>(r_args[2][ii])));
+        r_args[0][ii] = pointwise_op_impl<opmath_t>(
+            r_args[0][ii], r_args[1][ii], r_args[2][ii], scalar, op);
       }
       // store
       load_store(args[res_arg_index], r_args[0], i_start, 0);
@@ -189,11 +210,8 @@ __device__ __forceinline__ void pointwise_op_scalar(
       load_args<3>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
       for (int ii = 0; ii < kILP; ii++) {
-        r_args[0][ii] = static_cast<T>(
-            static_cast<opmath_t>(r_args[0][ii]) +
-            scalar *
-                op(static_cast<opmath_t>(r_args[1][ii]),
-                   static_cast<opmath_t>(r_args[2][ii])));
+        r_args[0][ii] = pointwise_op_impl<opmath_t>(
+            r_args[0][ii], r_args[1][ii], r_args[2][ii], scalar, op);
       }
       store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
     }
@@ -545,9 +563,8 @@ struct PointwiseOpScalar0dTensorFunctor {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           // input + alpha * op(tensor1_val, tensor2)
-          r_args[0][ii] = static_cast<T>(
-              static_cast<opmath_t>(r_args[0][ii]) +
-              alpha * op(tensor1_val, static_cast<opmath_t>(r_args[1][ii])));
+          r_args[0][ii] = pointwise_op_impl<opmath_t>(
+              r_args[0][ii], tensor1_val, r_args[1][ii], alpha, op);
         }
         // store
         load_store(args[res_arg_index], r_args[0], i_start, 0);
@@ -570,9 +587,8 @@ struct PointwiseOpScalar0dTensorFunctor {
         }
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
-          r_args[0][ii] = static_cast<T>(
-              static_cast<opmath_t>(r_args[0][ii]) +
-              alpha * op(tensor1_val, static_cast<opmath_t>(r_args[1][ii])));
+          r_args[0][ii] = pointwise_op_impl<opmath_t>(
+              r_args[0][ii], tensor1_val, r_args[1][ii], alpha, op);
         }
         store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
       }

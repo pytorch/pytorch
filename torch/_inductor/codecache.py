@@ -625,7 +625,7 @@ class FxGraphCachePickler(pickle.Pickler):
         try:
             self.dump(obj)
             return self._stream.getvalue()
-        except (TypeError, AttributeError, pickle.PicklingError) as e:
+        except (TypeError, AttributeError, pickle.PicklingError, ValueError) as e:
             # Some configs options may not pickle.
             log.warning("Failed to pickle cache key", exc_info=True)
             raise BypassFxGraphCache("Failed to pickle cache key") from e
@@ -1044,6 +1044,8 @@ class GuardedCache(Generic[T]):
             subdir = cls._get_tmp_dir_for_key(key)
             if os.path.exists(subdir):
                 for path in sorted(os.listdir(subdir)):
+                    if path.startswith("."):
+                        continue  # Skip temp files from concurrent write_atomic() calls
                     try:
                         with open(os.path.join(subdir, path), "rb") as f:
                             content = f.read()
