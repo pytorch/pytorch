@@ -14,9 +14,12 @@ from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
     init_device_mesh,
+    Partial,
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import TensorMeta
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -812,6 +815,223 @@ instantiate_device_type_tests(
 )
 
 instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=(DEVICE_TYPE,))
+
+
+# --- Single-dim strategy validation infrastructure ---
+
+
+def _make_arange(shape, dtype, device, input_idx=0):
+    """Ordered values for strategy validation."""
+    offset = input_idx * 100
+    return torch.arange(shape.numel(), dtype=dtype, device=device).reshape(shape) + offset
+
+
+def _make_randn(shape, dtype, device, input_idx=0):
+    """Random values for strategy validation."""
+    torch.manual_seed(42 + input_idx)
+    return torch.randn(shape, dtype=dtype, device=device)
+
+
+def _combine_tensors(tensors, placement):
+    """Combine per-device tensors into full tensor based on placement."""
+    if isinstance(placement, Replicate):
+        return tensors[0].clone()
+    elif isinstance(placement, Shard):
+        return torch.cat(tensors, dim=placement.dim)
+    elif isinstance(placement, Partial):
+        if placement.reduce_op == "sum":
+            return sum(tensors)
+        raise NotImplementedError(f"reduce_op {placement.reduce_op}")
+    raise ValueError(f"Unknown placement: {placement}")
+
+
+def _validate_output_placement(local_results, full_output, placement):
+    """Validate local results match expected output placement."""
+    if isinstance(placement, Replicate):
+        for r, local in enumerate(local_results):
+            if local.shape != full_output.shape:
+                return False, f"Replicate shape mismatch on rank {r}"
+            if not torch.allclose(local, full_output, atol=1e-5, rtol=1e-5):
+                return False, f"Replicate value mismatch on rank {r}"
+        return True, ""
+    elif isinstance(placement, Shard):
+        try:
+            combined = torch.cat(local_results, dim=placement.dim)
+        except Exception as e:
+            return False, f"Shard concat failed: {e}"
+        if combined.shape != full_output.shape:
+            return False, f"Shard shape mismatch: {combined.shape} vs {full_output.shape}"
+        if not torch.allclose(combined, full_output, atol=1e-5, rtol=1e-5):
+            return False, "Shard value mismatch"
+        return True, ""
+    elif isinstance(placement, Partial):
+        if placement.reduce_op == "sum":
+            combined = sum(local_results)
+        else:
+            return False, f"Unknown reduce_op: {placement.reduce_op}"
+        if combined.shape != full_output.shape:
+            return False, "Partial shape mismatch"
+        if not torch.allclose(combined, full_output, atol=1e-5, rtol=1e-5):
+            return False, "Partial value mismatch"
+        return True, ""
+    return False, f"Unknown placement: {placement}"
+
+
+def _generate_per_device_inputs(world_size, input_specs, input_placements, device, gen):
+    """Generate per-device inputs for validation."""
+    per_device = [[] for _ in range(world_size)]
+    for input_idx, ((shape, dtype), placement) in enumerate(
+        zip(input_specs, input_placements)
+    ):
+        full_t = gen(torch.Size(shape), dtype, device, input_idx=input_idx)
+        if isinstance(placement, Replicate):
+            for r in range(world_size):
+                per_device[r].append(full_t.clone())
+        elif isinstance(placement, Shard):
+            chunks = torch.chunk(full_t, world_size, dim=placement.dim)
+            for r in range(world_size):
+                per_device[r].append(chunks[min(r, len(chunks) - 1)].clone())
+        elif isinstance(placement, Partial):
+            for r in range(world_size):
+                if placement.reduce_op == "sum":
+                    per_device[r].append(full_t / world_size)
+                else:
+                    per_device[r].append(full_t.clone())
+    return per_device
+
+
+def _validate_strategy(op, input_placements, output_placements, per_device_inputs, kwargs=None):
+    """Validate an op strategy using pure tensor math."""
+    kwargs = kwargs or {}
+    world_size = len(per_device_inputs)
+
+    full_inputs = []
+    for i, placement in enumerate(input_placements):
+        tensors = [per_device_inputs[r][i] for r in range(world_size)]
+        full_inputs.append(_combine_tensors(tensors, placement))
+
+    try:
+        full_output = op(*full_inputs, **kwargs)
+    except Exception as e:
+        return False, f"Full op failed: {e}"
+
+    full_outputs = full_output if isinstance(full_output, (list, tuple)) else [full_output]
+
+    all_local_results = []
+    for rank in range(world_size):
+        try:
+            local_result = op(*per_device_inputs[rank], **kwargs)
+        except Exception as e:
+            return False, f"Local op failed on rank {rank}: {e}"
+        local_results = local_result if isinstance(local_result, (list, tuple)) else [local_result]
+        all_local_results.append(local_results)
+
+    for out_idx, (full_out, out_placement) in enumerate(zip(full_outputs, output_placements)):
+        locals_for_output = [all_local_results[r][out_idx] for r in range(world_size)]
+        is_valid, err = _validate_output_placement(locals_for_output, full_out, out_placement)
+        if not is_valid:
+            return False, f"Output {out_idx}: {err}"
+
+    return True, ""
+
+
+# Map aten op name -> OpInfo name
+_ATEN_TO_OPINFO = {
+    "_cdist_forward": "cdist",
+    "_euclidean_dist": "cdist",
+}
+
+
+class TestSingleDimStrategyValidation(TestCase):
+    """Validate that registered single-dim strategies are mathematically correct."""
+
+    def test_validate_single_dim_strategies(self):
+        """For each registered single-dim strategy, validate with OpInfo samples."""
+        prop = DTensor._op_dispatcher.sharding_propagator
+        single_dim_funcs = prop.op_single_dim_strategy_funcs
+
+        if not single_dim_funcs:
+            self.skipTest("No single-dim strategies registered")
+
+        generators = [_make_arange, _make_randn]
+
+        for aten_op, strategy_fn in single_dim_funcs.items():
+            op_name = aten_op.name().split("::")[1].split(".")[0]
+            opinfo_name = _ATEN_TO_OPINFO.get(op_name, op_name)
+
+            opinfo = next((op for op in op_db if op.name == opinfo_name), None)
+            if opinfo is None:
+                continue
+
+            samples = list(opinfo.sample_inputs("cpu", torch.float32, requires_grad=False))
+            for sample in samples[:3]:
+                # Extract tensor inputs
+                tensors = []
+                if isinstance(sample.input, torch.Tensor):
+                    tensors.append(sample.input)
+                for arg in sample.args:
+                    if isinstance(arg, torch.Tensor):
+                        tensors.append(arg)
+
+                if not tensors or any(t.numel() < 2 for t in tensors):
+                    continue
+
+                # Build args_schema with TensorMeta
+                args_list = [sample.input] + list(sample.args)
+                args_schema = tuple(
+                    TensorMeta(shape=a.shape, stride=a.stride(), dtype=a.dtype)
+                    if isinstance(a, torch.Tensor) else a
+                    for a in args_list
+                )
+                kwargs_schema = {
+                    k: TensorMeta(shape=v.shape, stride=v.stride(), dtype=v.dtype)
+                    if isinstance(v, torch.Tensor) else v
+                    for k, v in sample.kwargs.items()
+                }
+
+                try:
+                    strategies = strategy_fn(aten_op, args_schema, kwargs_schema)
+                except Exception:
+                    continue
+
+                for strategy in strategies:
+                    # Expand placeholders to Shard
+                    def expand(p):
+                        if isinstance(p, _ShardingPlaceholder):
+                            return Shard(p.dim)
+                        return p
+
+                    out_placement = expand(strategy[0])
+                    in_placements = [expand(p) for p in strategy[1:]]
+                    input_specs = [(t.shape, t.dtype) for t in tensors]
+
+                    if len(in_placements) != len(input_specs):
+                        continue
+
+                    # Skip if shard dim out of bounds or too small
+                    skip = False
+                    for i, p in enumerate(in_placements):
+                        if isinstance(p, Shard):
+                            shape = input_specs[i][0]
+                            if p.dim >= len(shape) or shape[p.dim] < 2:
+                                skip = True
+                                break
+                    if skip:
+                        continue
+
+                    # Validate with each generator
+                    for gen in generators:
+                        per_device = _generate_per_device_inputs(
+                            2, input_specs, in_placements, torch.device("cpu"), gen
+                        )
+                        is_valid, error = _validate_strategy(
+                            opinfo.op, in_placements, [out_placement], per_device, sample.kwargs
+                        )
+                        self.assertTrue(
+                            is_valid,
+                            f"{op_name}: {strategy} failed with {gen.__name__}: {error}",
+                        )
+
 
 if __name__ == "__main__":
     run_tests()
