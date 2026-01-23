@@ -23,17 +23,15 @@ def flatten_unflatten_for_dynamic_shapes(
     the definition of the dynamic shapes should use.
 
     Args:
-        obj:
-            object from a custom class
+        obj: Object from a custom class.
         use_dict:
             closer to the original result but
             :func:`torch.export.export` only considers the values,
             the context gives the dictionary keys but it is not expressed
             in the dynamic shapes, these specifications seems to be different
             for the strict and non strict mode. It also preserves tuple.
-        change_function:
-            to modify the tensor in the structure itself,
-            like replace them by a shape
+        change_function: Function to modify the tensor in the structure itself,
+            like replace them by a shape.
 
     Returns:
         the serialized object
