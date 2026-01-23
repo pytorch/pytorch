@@ -53,10 +53,10 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    is_warp_size_64,
     run_and_get_code,
     run_and_get_cpp_code,
     run_and_get_kernels,
@@ -153,11 +153,6 @@ from torch.testing._internal.triton_utils import (
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
-
-
-def get_warp_size():
-    dev_props = DeviceProperties.create(torch.device(GPU_TYPE))
-    return dev_props.warp_size
 
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -16650,7 +16645,7 @@ if RUN_GPU:
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
-            hidden_size = 512 if get_warp_size() > 32 else 256
+            hidden_size = 512 if is_warp_size_64(torch.device(GPU_TYPE)) else 256
 
             inp = torch.randn(
                 batch_size,

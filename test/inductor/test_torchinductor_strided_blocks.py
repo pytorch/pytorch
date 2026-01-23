@@ -14,10 +14,10 @@ from torch._dynamo.debug_utils import InputReader
 from torch._inductor import config
 from torch._inductor.choices import InductorChoices
 from torch._inductor.codegen.triton import FixedTritonConfig
-from torch._inductor.runtime.hints import DeviceProperties, TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import is_warp_size_64, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -84,11 +84,6 @@ TMA_TEST_XFAIL = dict.fromkeys(
     ),
     TMA_XFAIL,
 )
-
-
-def get_warp_size():
-    dev_props = DeviceProperties.create(torch.device(GPU_TYPE))
-    return dev_props.warp_size
 
 
 class BlockDescriptorTestBase(InductorTestCase):
@@ -532,10 +527,10 @@ class CommonTemplate:
         """
         Tests a reduction kernel.
         """
-        if view_size == (2, 3 * max_block) and get_warp_size() > 32:
+        if view_size == (2, 3 * max_block) and is_warp_size_64(torch.device(GPU_TYPE)):
             view_size = (4, 6 * max_block)
 
-        if view_size == (128, 128) and get_warp_size() > 32:
+        if view_size == (128, 128) and is_warp_size_64(torch.device(GPU_TYPE)):
             view_size = (256, 256)
 
         if self.device == "cpu" and all(
@@ -814,7 +809,7 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
-        if reduction_op == torch.sum and get_warp_size() > 32:
+        if reduction_op == torch.sum and is_warp_size_64(torch.device(GPU_TYPE)):
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
 
@@ -855,7 +850,7 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
-        if get_warp_size() > 32 and expected_num_triton_kernels == 2:
+        if is_warp_size_64(torch.device(GPU_TYPE)) and expected_num_triton_kernels == 2:
             size = (256, 256)
         view = self._discontiguous_tensor(size, self.device)
 

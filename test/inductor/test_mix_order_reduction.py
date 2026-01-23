@@ -8,9 +8,9 @@ import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
-from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import is_warp_size_64
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -19,11 +19,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-
-
-def get_warp_size():
-    dev_props = DeviceProperties.create(torch.device(GPU_TYPE))
-    return dev_props.warp_size
 
 
 class TestBase(TestCase):
@@ -192,7 +187,7 @@ class MixOrderReductionTest(TestBase):
         def f(x):
             return x.sum(dim=-1), x.sum(dim=0)
 
-        M = 32768 * 1024 if get_warp_size() > 32 else 32768 * 256
+        M = 32768 * 1024 if is_warp_size_64(torch.device(GPU_TYPE)) else 32768 * 256
         x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
         # We don't do mix order reduction for split redutions

@@ -1661,6 +1661,12 @@ class DelayReplaceLine(DeferredLineBase):
 
 
 @functools.cache
+def is_warp_size_64(device: torch.device) -> bool:
+    prop = DeviceProperties.create(device)
+    return prop.warp_size == 64
+
+
+@functools.cache
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
