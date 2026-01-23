@@ -286,19 +286,38 @@ __device__ scalar_t findPattern(
 
 #else
 
+/*
+This implementation of radixSelect optimizes the k-th element selection algorithm by dynamically utilizing shared
+memory to cache input data when possible, significantly reducing global memory traffic during the iterative bit
+discovery process. The radixSelect algorithm finds the k-th element by iteratively uncovering its bit pattern
+through multiple passes over the data. Each pass determines 2 bits of the target value's bitmap (up to 16 passes
+for float32 inputs). As iterations progress, the number of relevant values decreases by approximately 4× per pass,
+assuming uniform bit distribution. While initially the input data may be too large to fit in shared memory, it
+often becomes cacheable after a few filtering iterations as the data size shrinks. This implementation introduces
+dynamic shared memory caching that checks at each iteration whether the filtered data fits within available LDS
+(a few KB's allocated for this purpose). When the data fits, it is cached to shared memory, eliminating redundant
+global memory reads in subsequent operations within that iteration. New kernel functions countRadixUsingMaskDataSmem
+and findPatternSmem were introduced to seamlessly handle both cached (LDS) and non-cached (global memory) data
+paths. These variants maintain backward compatibility with the original algorithm and automatically fall back
+to global memory access when data exceeds LDS capacity.
+*/
+
 // this is the main loop of the countRadixUsingMask function that counts the distribution
-// of the bits in the radix digit at `radixDigitPos` to `radixDigitPos`+RADIX_BITS-1. This works for generic data accessors
-// so that it works when reading from global memory or shared memory.
+// of the bits in the radix digit at `radixDigitPos` to `radixDigitPos`+RADIX_BITS-1.
+// DataAccessor is a function that returns the input data value at index i.
+// It could potentially be a global memory accessor or a shared memory accessor.
 template <typename scalar_t, typename bitwise_t, typename index_t, typename CountType, int RadixSize, int RadixBits, typename DataAccessor>
 __device__ __forceinline__ void countRadixLoop(
-    CountType counts[RadixSize], // counts[i] will be the number of matching elements ((val & desiredMask) == desired) and that have the digits [radixDigitPos, radixDigitPos+RADIX_BITS-1] set to i.
-    bitwise_t desired, // combined with desiredMask to filter relevant elements. An element is relevant if ((val & desiredMask) == desired).
-    bitwise_t desiredMask, // combined with desired to filter relevantelements. An element is relevant if ((val & desiredMask) == desired).
+    CountType counts[RadixSize], // counts[i] will be the number of matching elements ((val & desiredMask) == desired) that have the digits [radixDigitPos, radixDigitPos+RADIX_BITS-1] set to i.
+    bitwise_t desired, // combined with desiredMask to filter relevant elements. A value is relevant if ((val & desiredMask) == desired).
+    bitwise_t desiredMask, // combined with desired to filter relevant elements. A value is relevant if ((val & desiredMask) == desired).
     int radixDigitPos, // the position of the radix digit.
     index_t loopBound, // the upper bound of the loop.
-    DataAccessor&& getData){ // a function that returns the input data value at index i.
+    DataAccessor&& getData){ // a function that returns the input data value at index i. It could potentially be a global memory accessor or a shared memory accessor.
 
+  // prefetching. This is specifically useful for global memory access.
   scalar_t v      = threadIdx.x < loopBound ? getData(threadIdx.x) : static_cast<scalar_t>(0);
+  // we pad loopbound to round_up(loopbound, warpSize) to make sure all threads in the warp participate in the ballot.
   for (index_t i = threadIdx.x; i < round_up(static_cast<index_t>(loopBound), static_cast<index_t>(warpSize)); i += blockDim.x) {
     scalar_t v_next = i + blockDim.x < loopBound ? getData(i + blockDim.x) : static_cast<scalar_t>(0); // prefetch the next value.
 
@@ -306,16 +325,18 @@ __device__ __forceinline__ void countRadixLoop(
     bitwise_t digitInRadix = static_cast<bitwise_t>(0);
     if (i < loopBound) {
       bitwise_t val = TopKTypeConfig<scalar_t>::convert(v);
-      hasVal = ((val & desiredMask) == desired);
-      digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(val, radixDigitPos, RadixBits);
+      hasVal = ((val & desiredMask) == desired); // true if bit pattern matches the pattern we have already discovered for topk value v.
+      digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(val, radixDigitPos, RadixBits); // get the bits [radixDigitPos, radixDigitPos+RADIX_BITS-1] of the value v.
     }
+
+    // counting across the warp.
     #pragma unroll
     for (uint32_t j = 0; j < RadixSize; ++j) {
-      bool vote = hasVal && (digitInRadix == j); // true if: (value is relevant) && (the digits [radixDigitPos, radixDigitPos+RADIX_BITS-1] set to j).
+      bool vote = hasVal && (digitInRadix == j);
       counts[j] += __popcll(WARP_BALLOT(vote)); // how many threads in this warp found digitInRadix == j while matching the desired pattern?
     }
 
-    v = v_next;
+    v = v_next; // closing the prefetching loop.
   }
 }
 
@@ -335,59 +356,65 @@ template <
     int RadixSize,
     int RadixBits>
 __device__ void countRadixUsingMaskDataSmem(
-    CountType counts[RadixSize], // counts[i] will be the number of matching elements ((val & desiredMask) == desired) that have the digits [radixDigitPos, radixDigitPos+RADIX_BITS-1] set to i.
+    CountType counts[RadixSize], // counts[i] will be the number of matching elements ((val & desiredMask) == desired) that have the digits [radixDigitPos, radixDigitPos+RADIX_BITS-1] set to i in the warp.
     CountType* smem, // shared memory for inter-warp reduction of counts.
     bitwise_t desired, // combined with desiredMask to filter relevant elements. An element is relevant if ((val & desiredMask) == desired).
     bitwise_t desiredMask, // combined with desired to filter relevant elements. An element is relevant if ((val & desiredMask) == desired).
     int radixDigitPos, // position of the radix digit.
     index_t sliceSize, // size of the input slice.
     index_t withinSliceStride, // stride of the input slice.
-    const scalar_t* data, // input data.
-    const scalar_t* dataSmem, // input data stored in shared memory.
-    int dataSmemSize) { // input data size stored in shared memory.
-    // Clear out per-thread counts from a previous round
-#pragma unroll
+    const scalar_t* data, // input data. This is global memory.
+    const scalar_t* dataSmem, // input data stored in shared memory. This is shared memory. It is not initialized if dataSmemSize == 0.
+    int dataSmemSize) { // input data size stored in shared memory. dataSmemSize > 0 if dataSmem is filled.
+
+  // Clear out per-thread counts from a previous round
+  #pragma unroll
   for (int i = 0; i < RadixSize; ++i) {
     counts[i] = 0; // initialize counts to 0.
   }
 
+  // initialize smem to 0. This is for reduction of counts across all warps.
   if (threadIdx.x < RadixSize) {
-    smem[threadIdx.x] = 0; // initialize smem to 0.
+    smem[threadIdx.x] = 0;
   }
-  __syncthreads();
 
-  // Scan over all the data. Upon a read, the warp will accumulate
-  // counts per each digit in the radix using warp voting.
+  __syncthreads(); // wait for all threads in the block to finish initializing smem.
 
-  if (dataSmemSize > 0) { // if data is in shared memory, use dataSmem as the input data.
+  // count the distribution of the bits in the radix digit at `radixDigitPos` to `radixDigitPos`+RADIX_BITS-1
+  // for values that match the desired pattern ((val & desiredMask) == desired).
+  // counts[] will hold the results for the current warp.
+  if (dataSmemSize > 0) { // if shared memory is filled, use dataSmem as the input data.
     countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits>(
       counts, desired, desiredMask, radixDigitPos, dataSmemSize, [&](index_t i) -> scalar_t { return dataSmem[i]; });
-  } else { // if data is in global memory, use data as the input data.
+  } else { // if shared memory is not filled, fall back to global memory.
     countRadixLoop<scalar_t, bitwise_t, index_t, int, RadixSize, RadixBits>(
       counts, desired, desiredMask, radixDigitPos, sliceSize, [&](index_t i) -> scalar_t { return doLdg(&data[i * withinSliceStride]); });
   }
 
-    // Now, for each warp, sum values
+  // accumulate the counts across all warps.
+  // sum for each warp is added to smem by thread 0 in the warp.
   if (at::cuda::getLaneId() == 0) {
-  #pragma unroll
-      for (uint32_t i = 0; i < RadixSize; ++i) {
-        gpuAtomicAddNoReturn(&smem[i], counts[i]); // thread0 in warp atomically adds the counts to smem.
-      }
-    }
-
-    __syncthreads(); // wait for all threads in the block to finish counting.
-
-    // For each thread, read in the total counts
-  #pragma unroll
+    #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      counts[i] = smem[i];
+      gpuAtomicAddNoReturn(&smem[i], counts[i]); // thread0 in warp atomically adds the counts to smem.
     }
+  }
 
-    __syncthreads(); // wait for all threads in the block to finish reading the counts.
+  __syncthreads(); // wait for all warps to finish adding their counts to smem.
+
+  // each thread reads the final counts from smem.
+  #pragma unroll
+  for (uint32_t i = 0; i < RadixSize; ++i) {
+    counts[i] = smem[i];
+  }
+
+  __syncthreads(); // wait for all threads in the block to finish reading the counts.
 }
 
-// This is the main loop of the findPattern function that finds the unique value `v` that matches the pattern ((v & desired) == desiredMask)
-// in the input data. This works for generic data accessors so that it works when reading from global memory or shared memory.
+// This is the main loop of the findPattern function that finds the unique value
+// that matches the pattern ((val & desired) == desiredMask) in the input data.
+// DataAccessor is a function that returns the input data value at index i.
+// It could potentially be a global memory accessor or a shared memory accessor.
 template <typename scalar_t, typename bitwise_t, typename index_t, typename DataAccessor>
 __device__ __forceinline__ scalar_t findPatternLoop(
     scalar_t* smem, // shared memory for inter-thread communication of the found value.
@@ -396,40 +423,49 @@ __device__ __forceinline__ scalar_t findPatternLoop(
     index_t loopBound, // the upper bound of the loop.
     DataAccessor&& getData){ // a function that returns the input data value at index i.
 
+  // TODO: this loop has two areas for improvement:
+  //   1. no need to synchronize two times at each iteration. The assumption here is that the
+  //      data is unique. So we can have the loop truncated to the part that smem is filled.
+  //      We then do __syncthreads outside the loop. The current early termination is probably
+  //      costing us way more performance than it's worth. If synchronization is moved outside
+  //      the loop, we no longer need to pad loopbound to round_up(loopbound, blockDim.x).
+  //   2. given this loop is potentially reading from global memory, we can prefetch the next value
+  //      to improve performance. But it should not have a significant impact unless point 1 above is
+  //      addressed.
+
+  // we pad loopbound to round_up(loopbound, blockDim.x) to make sure all threads in the block participate in the synchronization.
   for (index_t i = threadIdx.x; i < round_up(loopBound, static_cast<index_t>(blockDim.x)); i += blockDim.x) {
     bool inRange = (i < loopBound);
     scalar_t v = inRange ? getData(i) : static_cast<scalar_t>(0);
 
-    if (inRange &&
-        ((TopKTypeConfig<scalar_t>::convert(v) & desiredMask) == desired)) {
+    if (inRange && ((TopKTypeConfig<scalar_t>::convert(v) & desiredMask) == desired)) {
       // There should not be conflicts if we are using findPattern,
       // since the result is unique
-      smem[0] = static_cast<scalar_t>(1);
-      smem[1] = v; // can't use val as the flag, since it could be 0
+      smem[0] = static_cast<scalar_t>(1); // set the flag to 1.
+      smem[1] = v; // store the value in smem. can't use val as the flag, since it could be 0.
     }
 
-    __syncthreads();
+    __syncthreads(); // wait for all threads in the warp to finish setting the flag and storing the value.
 
-    scalar_t found = smem[0];
-    scalar_t val = smem[1];
+    scalar_t found = smem[0]; // read the flag from smem.
+    scalar_t val = smem[1]; // read the value from smem.
 
-    __syncthreads();
+    __syncthreads(); // wait for all threads in the warp to finish reading the flag and value.
 
-    // Check to see if a thread found the value
+    // Checking to see if a thread found the value. If so, all threads return this value.
     if (found != static_cast<scalar_t>(0)) {
-      // all threads return this value
       return val;
     }
   }
 
-    // should not get here
-  CUDA_KERNEL_ASSERT(false);
-  return static_cast<scalar_t>(0);
+  CUDA_KERNEL_ASSERT(false); // should not get here.
+  return static_cast<scalar_t>(0); // to make sure the compiler is happy.
 }
 
-// This finds the unique value `v` that matches the pattern ((v & desired) == desiredMask)
-// in the input data. This is an smem-friendly version of the findPattern function.
-// This works for generic data accessors so that it works when reading from global memory or shared memory.
+// This function finds the unique value that matches the pattern
+// ((val & desired) == desiredMask) in the input data.
+// this is an smem-friendly version of the findPattern function.
+// It works when data is in global memory or in shared memory.
 template <typename scalar_t, typename bitwise_t, typename index_t>
 __device__ scalar_t findPatternDataSmem(
     scalar_t* smem, // shared memory for inter-thread communication of the found value.
@@ -440,30 +476,44 @@ __device__ scalar_t findPatternDataSmem(
     bitwise_t desiredMask, // combined with desired to filter relevant elements. An element is relevant if ((val & desiredMask) == desired).
     const scalar_t* dataSmem, // input data stored in shared memory.
     index_t dataSmemSize) { // input data size stored in shared memory.
-  if (threadIdx.x < 2) {
-    smem[threadIdx.x] = static_cast<scalar_t>(0); // initialize smem to 0.
-  }
-  __syncthreads();
 
-  if (dataSmemSize > 0) { // if data is in shared memory, use dataSmem as the input data.
+  // initialize smem to 0.
+  // smem[0] is a flag to indicate if a value has been found.
+  // smem[1] is the found value.
+  if (threadIdx.x < 2) {
+    smem[threadIdx.x] = static_cast<scalar_t>(0);
+  }
+
+  __syncthreads(); // all threads in the block wait for smem to be initialized.
+
+  if (dataSmemSize > 0) { // if shared memory is filled, use dataSmem as the input data.
     return findPatternLoop<scalar_t, bitwise_t, index_t>(
       smem, desired, desiredMask, dataSmemSize, [&](index_t i) -> scalar_t { return dataSmem[i]; });
-  } else { // if data is in global memory, use data as the input data.
+  } else { // if shared memory is not filled, fall back to global memory.
     return findPatternLoop<scalar_t, bitwise_t, index_t>(
       smem, desired, desiredMask, sliceSize, [&](index_t i) -> scalar_t { return doLdg(&data[i * withinSliceStride]); });
   }
 
-  return static_cast<scalar_t>(0);
+  return static_cast<scalar_t>(0); // should not get here. This is to make sure the compiler is happy.
 }
 
 
-// This function fills the shared memory with the input data.
-// this function is called before the main loop of the radixSelect function.
-// if dataSmemSize > 0, the shared memory is already filled, so we return.
-// otherwise we check if the input data is small enough to fit into shared memory.
-// if it is, all the data is put into shared memory. If not, but dataSizeRemaining <= dataSmemCap,
-// it means that the data has been filtered (through having (val & desiredMask) == desired) so much
-// that it fits into the shared memory. So we put the filtered data into shared memory.
+// This function fills the shared memory dataSmem with the input data.
+// It is called at each iteration of the main loop of the radixSelect function.
+//
+// Four possible scenarios:
+//    1. dataSmem is already filled (dataSmemSize > 0). This means at a previous iteration
+//       we have filled the shared memory with the input data. We return.
+//    2. dataSmem is not filled (dataSmemSize == 0) and the input data is small enough to
+//       fit into shared memory (sliceSize <= dataSmemCap). If this case happens, it should
+//       happen at the first iteration. In this case, we put all the data into shared memory.
+//    3. dataSmem is not filled (dataSmemSize == 0) and the input data, although not fitting
+//       into shared memory originally (otherwise we would have ended up in case 2), now fits
+//       into shared memory (dataSizeRemaining <= dataSmemCap). In this case, filter the data
+//       using the desired pattern ((val & desiredMask) == desired) and put the filtered data
+//       into shared memory.
+//    4. None of the above. Data does not fit into shared memory. We return. The situation
+//       may change in the next iteration.
 template <typename scalar_t, typename bitwise_t, typename index_t>
 __device__ __forceinline__ void fillDataSmem(
     scalar_t* dataSmem, // shared memory to store the input data.
@@ -475,7 +525,7 @@ __device__ __forceinline__ void fillDataSmem(
     const scalar_t* data, // input data.
     bitwise_t desired, // combined with desiredMask to filter relevant elements. An element is relevant if ((val & desiredMask) == desired).
     bitwise_t desiredMask, // combined with desired to filter relevant elements. An element is relevant if ((val & desiredMask) == desired).
-    int& DataSmemWriteIndex // index used to write data to dataSmem. Incremented atomically.
+    int& DataSmemWriteIndex // index used to write data to dataSmem. Incremented atomically. Shared by all threads in the block.
     ) {
 
   if (dataSmemSize > 0) return; // already filled
@@ -488,13 +538,15 @@ __device__ __forceinline__ void fillDataSmem(
     for (index_t i = threadIdx.x; i < sliceSize; i += blockDim.x) {
       scalar_t v_next = (i+blockDim.x)<sliceSize ? doLdg(&data[(i + blockDim.x) * withinSliceStride]) : static_cast<scalar_t>(0);
       dataSmem[i] = v;
-      v = v_next;
+      v = v_next; // closing the prefetching loop.
     }
 
     __syncthreads(); // wait for all threads in the block to finish writing to dataSmem.
+
     if (threadIdx.x == 0){
       dataSmemSize = sliceSize; // thread 0 updates dataSmemSize to the size of the input slice.
     }
+
     __syncthreads(); // wait for all threads in the block to see the updated dataSmemSize.
 
   } else if (dataSizeRemaining <= dataSmemCap){ // if data did not fit originally, but now it does.
@@ -506,11 +558,13 @@ __device__ __forceinline__ void fillDataSmem(
 
     int lane_id = at::cuda::getLaneId(); // = threadIdx.x % WARP_SIZE
 
+    // prefetching from global memory.
+    scalar_t v = threadIdx.x < sliceSize ? doLdg(&data[threadIdx.x * withinSliceStride]) : static_cast<scalar_t>(0);
     for (index_t i = threadIdx.x; i < round_up(static_cast<index_t>(sliceSize), static_cast<index_t>(warpSize)); i += blockDim.x) {
-      scalar_t v = static_cast<scalar_t>(0);
+      scalar_t v_next = (i + blockDim.x) < sliceSize ? doLdg(&data[(i + blockDim.x) * withinSliceStride]) : static_cast<scalar_t>(0);
+
       bool match = false;
       if (i < sliceSize) {
-        v = doLdg(&data[i * withinSliceStride]);
         match = ((TopKTypeConfig<scalar_t>::convert(v) & desiredMask) == desired);
       }
 
@@ -518,24 +572,28 @@ __device__ __forceinline__ void fillDataSmem(
       uint64_t ballot = WARP_BALLOT(match); // what threads in this warp match the desired pattern?
       int warp_count = __popcll(ballot); // how many threads in this warp match the desired pattern?
 
-      int warp_base = 0;
-      if (lane_id == 0 && warp_count > 0) {
+      int warp_base = 0; // base index to write data to dataSmem shared by all threads in the warp.
+      if (lane_id == 0 && warp_count > 0) { // warp_count > 0 means there are matching elements in this warp. Only thread 0 in the warp needs to do this.
         warp_base = atomicAdd(&DataSmemWriteIndex, warp_count); // reserve warp_count slots in dataSmem for this warp, and get the base index.
       }
       warp_base = __shfl(warp_base, 0); // broadcast the warp_base to all threads in the warp.
 
-      if (match) { // if the current thread matches the desired pattern, store the value in dataSmem.
+      if (match) { // if the current thread has a matching value, store the value in dataSmem.
         uint64_t my_mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and lane_id 1s.
-        int my_offset = __popcll(ballot & my_mask); // count the number of threads that have match to the right of the current thread in bitmask.
-        dataSmem[warp_base + my_offset] = v;
+        int my_offset = __popcll(ballot & my_mask); // count the number of threads that have matches to the right of the current thread in bitmask.
+        dataSmem[warp_base + my_offset] = v; // store the value in dataSmem.
       }
 
+      v = v_next; // closing the prefetching loop.
     }
-    __syncthreads();
+
+    __syncthreads(); // wait for all threads in the block to finish writing to dataSmem.
+
     if (threadIdx.x == 0) {
-      dataSmemSize = DataSmemWriteIndex;
+      dataSmemSize = DataSmemWriteIndex; // thread 0 updates dataSmemSize to the number of elements in dataSmem.
     }
-    __syncthreads();
+
+    __syncthreads(); // all threads in the block wait for dataSmemSize to be updated.
   }
 }
 
@@ -554,7 +612,9 @@ __device__ void radixSelect(
   // Per-thread buckets into which we accumulate digit counts in our
   // radix
   int counts[RADIX_SIZE];
+
 #ifdef USE_ROCM
+
   // this kernel reads all the data at most (sizeof(scalar_t)*2/RADIX_BITS + 1) times.
   // if data fits into shared memory, we can avoid reading data from global memory.
   // if not, we may still be able to put the filtered data, after a few iterations,
@@ -566,12 +626,15 @@ __device__ void radixSelect(
   __shared__ index_t dataSmemSize;  // actual number of elements in dataSmem.
   __shared__ index_t dataSizeRemaining; // number of relevant elements remaining. We put data on dataSmem once dataSizeRemaining <= dataSmemCap.
   __shared__ int DataSmemWriteIndex; // index used to write data to dataSmem.
+
   if (threadIdx.x == 0) {
     dataSmemSize = 0;
     DataSmemWriteIndex = 0;
     dataSizeRemaining = sliceSize;
   }
-  __syncthreads();
+
+  __syncthreads(); // so the initialization is visible to all threads in the blocks.
+
 #endif
 
   // We only consider elements x such that (x & desiredMask) == desired
@@ -591,7 +654,10 @@ __device__ void radixSelect(
        digitPos -= RADIX_BITS) {
     // Count radix distribution for the current position and reduce
     // across all threads
+
 #ifdef USE_ROCM
+
+    // fill dataSmem with the input data if not already filled.
     fillDataSmem<scalar_t, bitwise_t, index_t>(
       dataSmem,
       dataSmemCap,
@@ -604,6 +670,7 @@ __device__ void radixSelect(
       desiredMask,
       DataSmemWriteIndex);
 
+    // count the distribution of the bits in the radix digit at `digitPos` to `digitPos`+RADIX_BITS-1
     countRadixUsingMaskDataSmem<
         scalar_t,
         bitwise_t,
@@ -654,7 +721,9 @@ __device__ void radixSelect(
         /* However, we do not yet know what the actual element is. We */
         /* need to perform a search through the data to find the */
         /* element that matches this pattern. */
+
 #ifndef USE_ROCM
+
         *topK = findPattern<scalar_t, bitwise_t, index_t>(
             (scalar_t*)smem,
             data,
@@ -662,7 +731,9 @@ __device__ void radixSelect(
             withinSliceStride,
             desired,
             desiredMask);
+
 #else
+        // find the unique value that matches the desired pattern
         *topK = findPatternDataSmem<scalar_t, bitwise_t, index_t>(
             (scalar_t*)smem,
             data,
