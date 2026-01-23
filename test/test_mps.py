@@ -11361,6 +11361,61 @@ class TestConvolutionMPS(TestCaseMPS):
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
 
+    def test_grid_sample_2d_border(self):
+        """Test grid_sample with border padding mode (uses Metal shader instead of MPSGraph)."""
+        for align_corners in (True, False):
+            for dtype in (torch.float32, torch.float16):
+                # Test with known input and groundtruth
+                input_cpu = torch.arange(1., 11, device="cpu", dtype=torch.float32).view(1, 1, 2, 5)
+                grid_cpu = torch.tensor(
+                    [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-6], [0.5, 1.0]],
+                     [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]],
+                    device="cpu", dtype=torch.float32).view(1, 2, 5, 2)
+
+                # Groundtruth for bilinear + border
+                if align_corners:
+                    groundtruth = torch.tensor(
+                        [[1.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
+                         [2.2500, 6.3332500450, 5.0000, 5.1000, 8.7500]],
+                        device="cpu", dtype=torch.float32).view(1, 1, 2, 5)
+                else:
+                    groundtruth = torch.tensor(
+                        [[1.0000, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
+                         [1.0000, 7.1665000916, 5.0000, 5.0000000000, 10.0000]],
+                        device="cpu", dtype=torch.float32).view(1, 1, 2, 5)
+
+                input_mps = input_cpu.to("mps", dtype=dtype)
+                grid_mps = grid_cpu.to("mps", dtype=dtype)
+
+                output_mps = F.grid_sample(
+                    input_mps, grid_mps, mode='bilinear', padding_mode='border',
+                    align_corners=align_corners)
+
+                atol = 1e-2 if dtype == torch.float16 else 1e-5
+                self.assertEqual(output_mps.cpu().float(), groundtruth, atol=atol, rtol=0,
+                                 msg=f"failed for align_corners={align_corners}, dtype={dtype}")
+
+                # Test random inputs against CPU for correctness
+                N, C, H, W = 2, 3, 8, 8
+                OH, OW = 6, 6
+                input_cpu = torch.randn(N, C, H, W, dtype=torch.float32)
+                grid_cpu = torch.randn(N, OH, OW, 2, dtype=torch.float32)
+                grid_cpu.clamp_(-2, 2)  # Keep grid values in reasonable range
+
+                out_cpu = F.grid_sample(
+                    input_cpu, grid_cpu, mode='bilinear', padding_mode='border',
+                    align_corners=align_corners)
+
+                input_mps = input_cpu.to("mps", dtype=dtype)
+                grid_mps = grid_cpu.to("mps", dtype=dtype)
+                out_mps = F.grid_sample(
+                    input_mps, grid_mps, mode='bilinear', padding_mode='border',
+                    align_corners=align_corners)
+
+                atol = 1e-2 if dtype == torch.float16 else 1e-4
+                self.assertEqual(out_mps.cpu().float(), out_cpu, atol=atol, rtol=1e-4,
+                                 msg=f"random input test failed for align_corners={align_corners}, dtype={dtype}")
+
     def test_grid_sample_non_contig(self):
         inp = torch.randn((1, 4, 4, 8, 8), device="mps")
         grid_noncontig = torch.randn((1, 3, 4, 8, 8), device="mps").permute(0, 2, 3, 4, 1)

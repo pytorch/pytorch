@@ -34,6 +34,53 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
   check_grid_sampler_common(input, grid);
   check_grid_sampler_2d(input, grid);
 
+  // Border padding mode is not supported by MPSGraph, so we use the Metal shader
+  if (static_cast<GridSamplerPadding>(padding_mode) == GridSamplerPadding::Border) {
+    // Metal shader only supports Bilinear interpolation for 2D
+    TORCH_CHECK(static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bilinear,
+                "MPS: Border padding mode only supports Bilinear interpolation for grid_sampler_2d");
+
+    auto ipadding_mode = static_cast<GridSamplerPadding>(padding_mode);
+    auto iinterpolation_mode = static_cast<GridSamplerInterpolation>(interpolation_mode);
+
+    auto input_size = input.sizes();
+    auto grid_size = grid.sizes();
+    auto dims = input.dim();
+
+    GridSamplerParams<5> params;
+    params.sampler_dims = 2;
+    params.padding_mode = ipadding_mode;
+    params.interpolation_mode = iinterpolation_mode;
+    params.align_corners = align_corners;
+
+    for (const auto dim : c10::irange(dims)) {
+      params.output_sizes[dim] = safe_downcast<int32_t, int64_t>(output.size(dim));
+      params.output_strides[dim] = safe_downcast<int32_t, int64_t>(output.stride(dim));
+      params.input_sizes[dim] = safe_downcast<int32_t, int64_t>(input.size(dim));
+      params.input_strides[dim] = safe_downcast<int32_t, int64_t>(input.stride(dim));
+      params.grid_sizes[dim] = safe_downcast<int32_t, int64_t>(grid.size(dim));
+      params.grid_strides[dim] = safe_downcast<int32_t, int64_t>(grid.stride(dim));
+    }
+
+    auto num_threads = output.numel();
+    MPSStream* mpsStream = getCurrentMPSStream();
+
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+        auto pso = lib.getPipelineStateForFunc("grid_sampler_" + scalarToMetalTypeString(input));
+
+        getMPSProfiler().beginProfileKernel(pso, "grid_sampler_2d", {input, grid});
+        [computeEncoder setComputePipelineState:pso];
+        mtl_setArgs(computeEncoder, output, input, grid, params);
+
+        mtl_dispatch1DJob(computeEncoder, pso, num_threads);
+        getMPSProfiler().endProfileKernel(pso);
+      }
+    });
+    return;
+  }
+
   MPSGraphResizeMode samplingMode;
   MPSGraphPaddingMode paddingMode;
 
@@ -47,6 +94,7 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
       paddingMode = MPSGraphPaddingModeZero;
       break;
     case GridSamplerPadding::Border:
+      // Should not reach here - handled above with Metal shader
       TORCH_CHECK(false, "MPS: Unsupported Border padding mode");
       break;
     case GridSamplerPadding::Reflection:

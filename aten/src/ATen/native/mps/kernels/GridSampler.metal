@@ -111,6 +111,40 @@ T get_tensor_val(
   return found_idx_zero ? 0 : input[offset];
 }
 
+// This function performs 2D bilinear interpolation for one value.
+// Similar to 3D but for 2 dimensions with 4 corners instead of 8.
+template <typename T>
+T interpolate_linear_2d(
+    constant T* input,
+    constant int32_t* input_strides,
+    int32_t left_indices[2],
+    int32_t right_indices[2],
+    opmath_t<T> scales[2]) {
+  int32_t a_idx[2] = {left_indices[0], left_indices[1]};
+  int32_t b_idx[2] = {left_indices[0], right_indices[1]};
+  int32_t c_idx[2] = {right_indices[0], left_indices[1]};
+  int32_t d_idx[2] = {right_indices[0], right_indices[1]};
+  auto a =
+      static_cast<opmath_t<T>>(get_tensor_val<2>(input, input_strides, a_idx));
+  auto b =
+      static_cast<opmath_t<T>>(get_tensor_val<2>(input, input_strides, b_idx));
+  auto c =
+      static_cast<opmath_t<T>>(get_tensor_val<2>(input, input_strides, c_idx));
+  auto d =
+      static_cast<opmath_t<T>>(get_tensor_val<2>(input, input_strides, d_idx));
+
+  auto scale0_right = scales[0];
+  auto scale1_right = scales[1];
+  auto scale0_left = 1 - scale0_right;
+  auto scale1_left = 1 - scale1_right;
+
+  return static_cast<T>(
+      scale0_left * scale1_left * a +
+      scale0_left * scale1_right * b +
+      scale0_right * scale1_left * c +
+      scale0_right * scale1_right * d);
+}
+
 // This function performs 3D linear interpolation for one value. One way to
 // think of how this works is to imagine a unit cube where each corner of the
 // cube has one scalar value associated with it. Inside the cube, the values
@@ -257,7 +291,10 @@ void grid_sampler_single_element(
 
   // Now that we have the bounding indices and scale factor for each dimension
   // of the input, we can interpolate.
-  if (dims == 3) {
+  if (dims == 2) {
+    *output = interpolate_linear_2d(
+        input, input_strides, left_indices, right_indices, scales);
+  } else if (dims == 3) {
     *output = interpolate_linear_3d(
         input, input_strides, left_indices, right_indices, scales);
   }
