@@ -1442,7 +1442,7 @@ def export(
         if registry is None:
             registry = _registration.ONNXRegistry.from_torchlib()
 
-        # Process the exported program to run decompositionss and type promotions etc.
+        # Process the exported program to run decompositions and type promotions etc.
         decomposed_program = _prepare_exported_program_for_export(
             program, registry=registry
         )
