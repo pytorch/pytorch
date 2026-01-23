@@ -263,6 +263,15 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
     return nullptr;
   }
   CUdevice device = static_cast<CUdevice>(device_ptr); // NOLINT
+
+  // Ensure CUDA context is initialized before loading kernel
+  CUcontext pctx = nullptr;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxRetain(&pctx, device));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxSetCurrent(pctx));
+  }
+
   CUfunction func = nullptr;
   func = loadKernel(filePath, funcName, sharedMemBytes, device);
   // Taken from triton/nvidia/backend/driver.c

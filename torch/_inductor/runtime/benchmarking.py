@@ -9,19 +9,15 @@ from typing import Any, Concatenate, Optional, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
+import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import (
-    inductor_default_autotune_rep,
-    inductor_default_autotune_warmup,
-    use_experimental_benchmarker,
-)
 from torch.utils._debug_mode import DebugMode
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 use_experimental_benchmarker = (
-    use_experimental_benchmarker and torch.cuda.is_available()
+    inductor_config.use_experimental_benchmarker and torch.cuda.is_available()
 )
 
 
@@ -194,8 +190,8 @@ class Benchmarker:
         else:
             _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
 
-        warmup = kwargs.pop("warmup", inductor_default_autotune_warmup)
-        rep = kwargs.pop("rep", inductor_default_autotune_rep)
+        warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
+        rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
 
         # Surfacing all kernels during autotuning is super noisy; filtering these out.
         with DebugMode._benchmarking_inductor():

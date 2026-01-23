@@ -22,7 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfRocm
+    TEST_WITH_ROCM, decorateIf
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -2362,7 +2362,6 @@ class TestImports(TestCase):
 
     # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
-    @skipIfRocm
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2377,6 +2376,7 @@ class TestImports(TestCase):
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
+                           "torch.distributed.debug._frontend",  # depends on tabulate
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp

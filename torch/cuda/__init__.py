@@ -311,6 +311,7 @@ DEVICE_REQUIREMENT: dict[int, Union[_CompatSet, _CompatInterval]] = {
     103: _CompatInterval(start=103),
     110: _CompatInterval(start=110),
     120: _CompatInterval(start=120),
+    121: _CompatInterval(start=121),
 }
 
 
@@ -791,7 +792,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
 
 
 def set_stream(stream: Stream):
-    r"""Set the current stream.This is a wrapper API to set the stream.
+    r"""Set the current stream. This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 
@@ -1307,7 +1308,7 @@ def _get_amdsmi_handler(device: Device = None):
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
         raise RuntimeError(
-            "amdsmi driver can't be loaded, requires >=ROCm5.6 installation"
+            "amdsmi driver can't be loaded, requires >=ROCm6.0 installation"
         ) from e
     device = _get_amdsmi_device_index(device)
     handle = amdsmi.amdsmi_get_processor_handles()[device]
