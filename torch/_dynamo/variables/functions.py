@@ -31,7 +31,7 @@ import sys
 import traceback
 import types
 from collections import namedtuple
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from types import CellType, FunctionType
 from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
@@ -395,6 +395,9 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_code(self) -> types.CodeType:
         raise NotImplementedError
 
+    def has_self(self) -> bool:
+        raise NotImplementedError
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -521,7 +524,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         self,
         parent: "InstructionTranslator",
         args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+        kwargs: Mapping[str, VariableTracker],
     ) -> dict[str, VariableTracker]:
         """
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
@@ -1290,6 +1293,9 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self) -> dict[str, Any]:
         return self.vt.get_globals()
 
+    def has_self(self) -> bool:
+        return self.vt.has_self()
+
     def _build_inline_tracer(
         self,
         tx: "InstructionTranslatorBase",
@@ -1745,7 +1751,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self,
         parent: "InstructionTranslator",
         args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+        kwargs: Mapping[str, VariableTracker],
     ) -> dict[str, VariableTracker]:
         code = self.get_code()
         func = types.FunctionType(
