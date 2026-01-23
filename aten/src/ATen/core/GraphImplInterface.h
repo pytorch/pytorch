@@ -43,12 +43,12 @@ struct TORCH_API GraphImplInterface {
   // `capture_mode` controls how capture interacts with other concurrent work.
   // Its exact semantics are backend-specific. If a backend does not support the
   // requested capture mode, it may choose to emit a warning, raise an error, or
-  // fall back to the default mode.
+  // fall back to `GraphCaptureMode::Default` or a backend-specific mode.
   virtual void capture_begin(
       MempoolId_t pool = {0, 0},
       GraphCaptureMode capture_mode = GraphCaptureMode::Default) = 0;
 
-  // End graph capture and finalize the captured graph.
+  // End graph capture and maybe finalize the captured graph.
   virtual void capture_end() = 0;
 
   // Instantiate the captured graph for execution.
