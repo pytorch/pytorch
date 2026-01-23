@@ -228,6 +228,16 @@ def can_use_triton_kernel(
     if not has_triton():
         return False
 
+    triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
+    triton_has_experimental_make_tensor_descriptor = hasattr(
+        tl, "_experimental_make_tensor_descriptor"
+    )
+    if not (
+        triton_has_make_tensor_descriptor
+        or triton_has_experimental_make_tensor_descriptor
+    ):
+        return False
+
     # The _grouped_mm()/_scaled_grouped_mm() operator do not support
     # bias nor scale_result yet.
     if bias is not None:
@@ -373,13 +383,8 @@ def _tuned_grouped_mm_common(
         a_is_k_major = mat_a.get_stride()[-1] == 1
         b_is_k_major = mat_b.get_stride()[-2] == 1
 
-        triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
         triton_has_experimental_make_tensor_descriptor = hasattr(
             tl, "_experimental_make_tensor_descriptor"
-        )
-        use_tma_load = (
-            triton_has_make_tensor_descriptor
-            or triton_has_experimental_make_tensor_descriptor
         )
         kwargs = {
             "SCALED": scaled,
@@ -389,7 +394,6 @@ def _tuned_grouped_mm_common(
             "B_IS_K_MAJOR": b_is_k_major,
             "USE_FAST_ACCUM": use_fast_accum,
             "NUM_SMS": get_num_sms(),
-            "USE_TMA_LOAD": use_tma_load,
             "USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR": triton_has_experimental_make_tensor_descriptor,
         }
 
