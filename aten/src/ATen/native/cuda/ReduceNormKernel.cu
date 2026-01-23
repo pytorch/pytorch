@@ -52,9 +52,9 @@ void norm_launch_kernel(TensorIterator& iter, double ord) {
 template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
 void powsum_kernel_cuda_impl(TensorIterator& iter, double p) {
   if (p == static_cast<double>(2)) {
-    gpu_reduce_kernel<scalar_t, out_t>(iter, NormTwoNoRootOps<scalar_t, acc_t, out_t>(), 0);
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormTwoOps<scalar_t, acc_t, out_t, false>(), 0);
   } else {
-    gpu_reduce_kernel<scalar_t, out_t>(iter, NormNoRootOps<scalar_t, acc_t, out_t>{acc_t(p)}, 0);
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOps<scalar_t, acc_t, out_t, false>{acc_t(p)}, 0);
   }
 }
 
