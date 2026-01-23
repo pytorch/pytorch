@@ -709,7 +709,7 @@ class SizeVarAllocator:
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
         # TODO optimize _sub_unbacked_exprs
         expr = self._sub_unbacked_exprs(sympy.factor(original))
-        # remove precomputed_replacements
+
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
 
@@ -773,12 +773,8 @@ class SizeVarAllocator:
         """
         simplified = self._maybe_realize_expr(self.simplify(expr), None)
 
-        if isinstance(simplified, (int, sympy.Integer)):
-            return int(simplified)
-        if simplified in (int_oo, sympy.oo):
-            return sys.maxsize
-        if simplified in (-int_oo, -sympy.oo):
-            return -sys.maxsize
+        if simplified is not None:
+            return simplified
 
         # Dynamic shape: use hint_override if set,
         # else return optimization_hint
