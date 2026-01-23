@@ -6686,6 +6686,42 @@ class TestMPS(TestCaseMPS):
                 helper((2, 2, 16, 16), (2, 16), return_indices, dtype)
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
+    def test_adaptive_avg_pool3d_simple(self):
+        def helper(input_shape, out_shape):
+            cpu_x = torch.randn(input_shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            avg_result = torch.nn.AdaptiveAvgPool3d(out_shape)(x)
+            avg_result_cpu = torch.nn.AdaptiveAvgPool3d(out_shape)(cpu_x)
+
+            cpu_grad = torch.randn(avg_result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            avg_result.backward(gradient=grad)
+            avg_result_cpu.backward(gradient=cpu_grad)
+
+            self.assertEqual(avg_result, avg_result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        # 5D input (batch mode) - downsampling
+        helper((2, 2, 4, 4, 4), (2, 2, 2))
+        helper((2, 2, 9, 9, 9), (3, 3, 3))
+        helper((2, 2, 8, 8, 8), (4, 4, 4))
+
+        # 4D input (no batch) - downsampling
+        helper((2, 8, 8, 8), (4, 4, 4))
+        helper((2, 6, 6, 6), (2, 2, 2))
+
+        # Global pooling
+        helper((2, 2, 4, 4, 4), (1, 1, 1))
+
+        # Upsampling (output larger than input)
+        helper((2, 2, 2, 2, 2), (4, 4, 4))
+        helper((2, 2, 3, 3, 3), (9, 9, 9))
+
+        # 4D input upsampling
+        helper((2, 2, 2, 2), (4, 4, 4))
+
     def test_gelu_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
