@@ -498,7 +498,9 @@ monotonic_pointwise_ops: set[torch._ops.OpOverload] = {
     aten.trunc_.default,
     # Special
     aten.asinh.default,
+    aten.asinh_.default,
     aten.atanh.default,
+    aten.atanh_.default,
     aten.erf.default,
     aten.erf_.default,
 }
