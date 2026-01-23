@@ -677,6 +677,8 @@ class DTensorRedistributePlanner:
                     )
                 elif isinstance(placement, _StridedShard):
                     new_size, _ = placement.local_shard_size_and_offset(
+                        placement.dim,
+                        placement.split_factor,
                         new_logical_shape[tensor_dim],
                         self.device_mesh.size(mesh_dim=mdim),
                         self.device_mesh._sym_get_coordinate(mdim),
