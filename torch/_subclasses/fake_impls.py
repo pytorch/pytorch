@@ -637,7 +637,7 @@ def _compute_stride(
 
 
 def _view_has_unbacked_input(
-    a: FakeTensor, shape: ShapeType | tuple[ShapeType]
+    a: FakeTensor | torch.Tensor, shape: ShapeType | tuple[ShapeType]
 ) -> bool:
     from torch.fx.experimental.symbolic_shapes import has_hint
 
@@ -651,10 +651,10 @@ def _view_has_unbacked_input(
 
 
 def _view_unbacked_meta(
-    a: FakeTensor,
+    a: FakeTensor | torch.Tensor,
     shape: ShapeType | tuple[ShapeType],
     size_oblivious_enabled: bool = True,
-) -> FakeTensor:
+) -> FakeTensor | torch.Tensor:
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
@@ -738,20 +738,24 @@ def _reshape_copy(
             memory_format=torch.contiguous_format
         )
     else:
-        return _view_meta(
+        result = _view_meta(
             fake_mode,
             func,
-            # pyrefly: ignore[bad-argument-type]
             a.clone(memory_format=torch.contiguous_format),
             *shape,
         )
+        assert isinstance(result, FakeTensor)
+        return result
 
 
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(
-    fake_mode: FakeTensorMode, func: OpOverload, a: FakeTensor, *shape: Any
-) -> FakeTensor:
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    a: FakeTensor | torch.Tensor,
+    *shape: Any,
+) -> FakeTensor | torch.Tensor:
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
@@ -769,6 +773,7 @@ def _view_meta_copy(
     out: FakeTensor | None = None,
 ) -> FakeTensor:
     result = _view_meta(fake_mode, func, a, *shape)
+    assert isinstance(result, FakeTensor)
     if out is not None:
         return result
 

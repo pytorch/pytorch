@@ -4931,7 +4931,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             return torch.fft.fft(x)
 
         x = torch.rand(4, 8, dtype=torch.complex64)
-        torch._dynamo.decorators.mark_unbacked(x, 0, duck_shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(x, 0)
 
         torch._dynamo.reset()
         # This should not raise GuardOnDataDependentSymNode

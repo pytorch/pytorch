@@ -14,8 +14,8 @@ from torch._higher_order_ops.utils import (
     redirect_to_mode,
     reenter_make_fx,
     register_fake,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
@@ -73,6 +73,16 @@ def _permute_strides(out: torch.Tensor, query_strides: tuple[int, ...]) -> torch
     fill_order = get_fill_order(query_strides)
     assert out.storage_offset() == 0, "Only support storage_offset == 0"
     out_strides = _construct_strides(out.shape, fill_order)
+
+    # Attention kernels require stride[-1]=1 for efficient memory access.
+    # Ensure this by moving last dim to front of fill_order if needed.
+    if out_strides[-1] != 1:
+        last_dim = len(out.shape) - 1
+        fill_order = list(fill_order)
+        fill_order.remove(last_dim)
+        fill_order = [last_dim] + fill_order
+        out_strides = _construct_strides(out.shape, fill_order)
+
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
@@ -765,7 +775,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
             )
         # no grads for you sir
         ctx.mark_non_differentiable(max_scores)
-        save_tensors_and_symints_for_backward(
+        save_values_for_backward(
             ctx,
             (
                 query,
@@ -788,7 +798,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         grad_logsumexp: Tensor,
         grad_max_scores: Tensor,
     ) -> tuple[Optional[Tensor], ...]:
-        fw_args = saved_tensors_and_symints(ctx)
+        fw_args = saved_values(ctx)
         (
             query,
             key,
@@ -1377,7 +1387,8 @@ def flex_attention_backward_fake_tensor_mode(
     Bq, _, _, qk_head_dim = query.shape
     Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
-    grad_query = torch.empty_like(query)
+    grad_query = query.new_empty(query.shape)
+    grad_query = _permute_strides(grad_query, query.stride())
     # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
     grad_score_mod_captured = tuple(
         (
