@@ -468,6 +468,8 @@ void multi_tensor_apply_dim(
               tensorListMeta.num_rows[loc_tensor_info - 1];
           tensorListMeta.num_cols[0] =
               tensorListMeta.num_cols[loc_tensor_info - 1];
+          tensorListMeta.prod_of_other_dim[0] =
+              tensorListMeta.prod_of_other_dim[loc_tensor_info - 1];
           for (int d = 0; d < depth; d++) {
             tensorListMeta.addresses[d][0] =
                 tensorListMeta.addresses[d][loc_tensor_info - 1];
