@@ -969,10 +969,6 @@ python_ref_db: list[OpInfo] = [
                 }
             ),
         ),
-        skips=(
-            # The operator 'aten::special_erfcx.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
