@@ -624,11 +624,9 @@ def _private_register_pytree_node(
 
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
-            # TODO: change this warning to an error after OSS/internal stabilize
-            warnings.warn(
+            raise ValueError(
                 f"{cls} is already registered as pytree node. "
                 "Overwriting the previous registration.",
-                stacklevel=2,
             )
 
         node_def = NodeDef(cls, flatten_fn, unflatten_fn, flatten_with_keys_fn)
