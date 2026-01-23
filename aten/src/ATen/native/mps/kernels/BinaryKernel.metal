@@ -415,6 +415,14 @@ struct igammac_functor {
   REGISTER_BINARY_OP(NAME, char, char);   \
   REGISTER_BINARY_OP(NAME, bool, bool)
 
+// Integer ops without bool (matches AT_DISPATCH_INTEGRAL_TYPES)
+#define REGISTER_INTEGER_NOBOOL_BINARY_OP(NAME) \
+  REGISTER_BINARY_OP(NAME, long, long);         \
+  REGISTER_BINARY_OP(NAME, int, int);           \
+  REGISTER_BINARY_OP(NAME, short, short);       \
+  REGISTER_BINARY_OP(NAME, uchar, uchar);       \
+  REGISTER_BINARY_OP(NAME, char, char)
+
 #define REGISTER_INT2FLOAT_BINARY_OP(NAME) \
   REGISTER_BINARY_OP(NAME, long, float);   \
   REGISTER_BINARY_OP(NAME, int, float);    \
@@ -471,8 +479,8 @@ REGISTER_FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_FLOAT_BINARY_OP(hermite_polynomial_he);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_he);
-REGISTER_INTEGER_BINARY_OP(gcd);
-REGISTER_INTEGER_BINARY_OP(lcm);
+REGISTER_INTEGER_NOBOOL_BINARY_OP(gcd);
+REGISTER_INTEGER_NOBOOL_BINARY_OP(lcm);
 REGISTER_FLOAT_BINARY_OP(add);
 REGISTER_INTEGER_BINARY_OP(add);
 REGISTER_OPMATH_FLOAT_BINARY_OP(mul);
