@@ -378,6 +378,210 @@ graph():
     return (foo,)""",
             )
 
+    def test_compile_non_infra_inside_compile(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = torch.compile(func, backend=backend, fullgraph=True)(
+                    *args, **kwargs
+                )
+                return out
+
+        x = torch.randn(5)
+        with YoloMode():
+            out = torch.add(x, x)
+
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_compile_non_infra_empty(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        x = torch.ones(5)
+        with YoloMode():
+            out = torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
+
+        self.assertEqual(out.sum().item(), 5.0)
+        self.assertEqual(len(backend.graphs), 0)
+
+    def test_compile_non_infra_empty_with_disalloed_dispatch_mode(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        class YoloMode(TorchDispatchMode):
+            @classmethod
+            def _should_skip_dynamo(cls):
+                return False
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.ops.aten.mul.Tensor(args[0], args[1])
+
+        x = torch.ones(5)
+        with YoloMode():
+            out = torch.compile(torch.add, backend=backend, fullgraph=True)(x, x)
+
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_compile_non_infra_multiple(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend3 = torch._dynamo.testing.EagerAndRecordGraphs()
+        backend2 = torch._dynamo.testing.EagerAndRecordGraphs()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        class YoloMode2(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = torch.compile(
+                    lambda x, y: func(x, y), backend=backend3, fullgraph=True
+                )(*args, **kwargs)
+                return out
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                def random_fn(func, *args, **kwargs):
+                    return func(*args, **kwargs)
+
+                random_fn(func, *args, **kwargs)
+                out = torch.compile(torch.add, backend=backend2, fullgraph=True)(
+                    args[0], args[1]
+                )
+                return out
+
+        x = torch.ones(5)
+        with YoloMode(), YoloMode2():
+            torch.compile(
+                lambda x, y: torch.add(x, y), fullgraph=True, backend=backend
+            )(x, x)
+
+        self.assertEqual(len(backend2.graphs), 1)
+        self.assertEqual(len(backend3.graphs), 0)
+        self.assertEqual(len(backend.graphs), 0)
+
+    def test_compile_non_infra_multiple_compile_internal(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend3 = torch._dynamo.testing.EagerAndRecordGraphs()
+        backend2 = torch._dynamo.testing.EagerAndRecordGraphs()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        class YoloMode2(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = torch.compile(
+                    lambda x, y: func(x, y), backend=backend3, fullgraph=True
+                )(*args, **kwargs)
+                return out
+
+            @classmethod
+            def ignore_compile_internals(cls):
+                return True
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = torch.compile(torch.add, backend=backend2, fullgraph=True)(
+                    args[0], args[1]
+                )
+                return out
+
+            @classmethod
+            def ignore_compile_internals(cls):
+                return True
+
+        x = torch.ones(5)
+        with YoloMode(), YoloMode2():
+            torch.compile(
+                lambda x, y: torch.add(x, y), fullgraph=True, backend=backend
+            )(x, x)
+
+        self.assertEqual(len(backend2.graphs), 1)
+        self.assertEqual(len(backend3.graphs), 1)
+        self.assertEqual(len(backend.graphs), 1)
+
+    def test_compile_non_infra_multiple_compile_internal_mixed(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend3 = torch._dynamo.testing.EagerAndRecordGraphs()
+        backend2 = torch._dynamo.testing.EagerAndRecordGraphs()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        class YoloMode2(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = torch.compile(
+                    lambda x, y: func(x, y), backend=backend3, fullgraph=True
+                )(*args, **kwargs)
+                return out
+
+            @classmethod
+            def ignore_compile_internals(cls):
+                return True
+
+        class YoloMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = torch.compile(torch.add, backend=backend2, fullgraph=True)(
+                    args[0], args[1]
+                )
+                return out
+
+        x = torch.ones(5)
+        with YoloMode(), YoloMode2():
+            torch.compile(
+                lambda x, y: torch.add(x, y), fullgraph=True, backend=backend
+            )(x, x)
+
+        self.assertEqual(len(backend2.graphs), 1)
+        self.assertEqual(len(backend3.graphs), 0)
+        self.assertEqual(len(backend.graphs), 0)
+
+        torch._dynamo.reset()
+
+        backend3 = torch._dynamo.testing.EagerAndRecordGraphs()
+        backend2 = torch._dynamo.testing.EagerAndRecordGraphs()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        with YoloMode2(), YoloMode():
+            torch.compile(
+                lambda x, y: torch.add(x, y), fullgraph=True, backend=backend
+            )(x, x)
+
+        self.assertEqual(len(backend2.graphs), 1)
+        self.assertEqual(len(backend3.graphs), 1)
+        self.assertEqual(len(backend.graphs), 0)
+
+    @torch._dynamo.config.patch(inline_torch_dispatch_torch_compile=False)
+    def test_compile_non_infra_disabled_config(self):
+        """Test that setting inline_torch_dispatch_torch_compile=False reverts to old behavior."""
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        # When the config is False, torch.compile inside __torch_dispatch__ should
+        # be skipped (old behavior) because we are inside a dispatch mode.
+        class YoloMode(TorchDispatchMode):
+            @classmethod
+            def _should_skip_dynamo(cls):
+                return False
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = torch.compile(func, backend=backend, fullgraph=True)(
+                    *args, **kwargs
+                )
+                return out
+
+        x = torch.randn(5)
+        with YoloMode():
+            out = torch.add(x, x)
+
+        # With the config disabled, compile should be skipped, so 0 graphs captured
+        self.assertEqual(len(backend.graphs), 0)
+
     @torch._dynamo.config.patch(accumulated_recompile_limit=1)
     def test_dynamo_disabled_in_custom_op_kernels(self):
         counters.clear()
@@ -1393,6 +1597,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_ops=20,
         )
 
+    def test_tensor_share_memory(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hidden_size = 64
+                self.num_layers = 2
+
+            def forward(self, x):
+                batch_size = x.size(0)
+                h = torch.zeros(
+                    self.num_layers, batch_size, self.hidden_size
+                ).share_memory_()
+                c = torch.zeros(self.num_layers, batch_size, self.hidden_size)
+                return x + h.sum() + c.sum()
+
+        model = Model()
+        x = torch.randn(4, 10)
+        expected = model(x)
+        compiled_model = torch.compile(model, fullgraph=False)
+        actual = compiled_model(x)
+        self.assertEqual(expected, actual)
+
     def test_empty_list(self):
         def fn(x, ll):
             if len(ll) == 0 and not ll and ll is not None:
@@ -1433,6 +1659,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_ops=1,
             expected_ops_dynamic=ifdynstaticdefault(1, 7),
         )
+
+    def test_min_max_tuple_const(self):
+        # min/max on tuple constants should use ConstantVariable.create
+        # to properly handle the tuple return type
+        def fn():
+            a = min((1, 2), (3, 4))
+            b = max((1, 2), (3, 4))
+            return a, b
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        result = opt_fn()
+        self.assertEqual(result, ((1, 2), (3, 4)))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
@@ -2183,6 +2421,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         actual = fn_opt(x, y)
 
         self.assertEqual(actual, expected)
+
+    def test_structseq_repr(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            result = torch.max(x, dim=0)
+            s = repr(result)
+            return result.values
+
+        x = torch.randn(3, 2)
+
+        # Verify that fullgraph=True fails (confirms graph break occurs)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, fullgraph=True, backend="eager")(x)
+
+        # Verify that it works without fullgraph
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        result = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_range_input(self):
         def fn(a, rng):
@@ -4787,6 +5044,40 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn(x, 1), 9)
         self.assertEqual(opt_fn(x, -2), 9)
 
+    def test_torch_size_tensor_index_scalar_constant(self):
+        def fn(x):
+            idx = torch.tensor(1)
+            dim_size = x.shape[idx]
+            return x.reshape(-1, dim_size)
+
+        x = torch.randn(2, 3, 4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_torch_size_tensor_index_non_scalar(self):
+        def fn(x):
+            idx = torch.tensor([1, 1])
+            try:
+                dim_size = x.shape[idx]
+                return x * dim_size
+            except TypeError:
+                return x.sum()
+
+        x = torch.randn(2, 3, 4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref, res))
+
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -6259,6 +6550,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_tensor_dot_grad_no_graph_break(self):
         def fn(a, b):
             y = 3 * a**3 - b**2
@@ -6272,7 +6564,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         _, b_grad = opt_fn(a, b)
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_torch_nn_parameter_isinstance(self):
         def fn(x):
@@ -9123,6 +9415,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
+            assert torch.are_deterministic_algorithms_enabled() is True
             torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
@@ -9584,6 +9877,17 @@ def ___make_guard_fn():
         opt_model = torch.compile(MyModule(), backend="eager")
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
+
+    def test_compile_with_userland_fake_tensor_mode(self):
+        # Test that torch.compile works when called inside a user's FakeTensorMode.
+        # The user's fake tensors should be "refakified" to Dynamo's fake mode.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            model = torch.nn.Linear(4, 4)
+            inp = torch.rand(4, 4)
+            loss = torch.compile(model, backend="aot_eager")(inp).sum()
+            loss.backward()
 
     def test_scalar_tensor_is_equivalent_to_symint_argument(self):
         class GumbelTopKSampler(torch.nn.Module):
@@ -11448,6 +11752,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> backed_var_to_val: values don't match.
+  >  Left: {s44: 2, s93: 3}
+  > Right: {}
 ==> name_to_node: values don't match.
   >  Left: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {}
@@ -11468,9 +11775,6 @@ ShapeEnv not equal: field values don't match:
   > Right: {}
 ==> var_to_sources: values don't match.
   >  Left: {s44: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)], s93: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)]}
-  > Right: {}
-==> var_to_val: values don't match.
-  >  Left: {s44: 2, s93: 3}
   > Right: {}
 """,
         )
@@ -13336,6 +13640,33 @@ fn
         self.assertEqual(ref, res)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_builtin_bool_on_tensor(self):
+        def f_all(mask):
+            return bool((mask == 0).all())
+
+        opt_f_all = torch.compile(f_all, backend="eager", fullgraph=True)
+
+        mask_zeros = torch.zeros(2, 3)
+        mask_nonzero = torch.tensor([[0, 1], [0, 0]])
+
+        self.assertEqual(f_all(mask_zeros), opt_f_all(mask_zeros))
+        self.assertEqual(f_all(mask_nonzero), opt_f_all(mask_nonzero))
+
+        def f(x):
+            return bool(x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        for val in [42, 0, 3.14, 0.0]:
+            x = torch.tensor(val)
+            self.assertEqual(f(x), opt_f(x))
+        non_scalar = torch.tensor([1, 2, 3])
+        with self.assertRaises(RuntimeError):
+            f(non_scalar)
+        with self.assertRaises(RuntimeError):
+            opt_f(non_scalar)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_builtin_bool_on_symfloat(self):
         def f(x):
             return bool(x.item())
@@ -13415,6 +13746,69 @@ fn
         x = torch.randn(3)
         f(x)
         self.assertEqual(counter.frame_count, 2)
+
+    def test_debugmode(self):
+        # Test that DebugMode works
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("alias_op(Tensor x) -> (Tensor, Tensor)")
+            lib.impl(
+                "alias_op",
+                lambda x: (x.view_as(x), x.view_as(x)),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("alias_op", lambda x: (x.view_as(x), x.view_as(x)), "Meta")
+
+            def fn(x):
+                aliased, _ = torch.ops.mylib.alias_op(x)
+                return aliased + 1
+
+            x = torch.randn(10, 10)
+            compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
+            with torch._functorch.config.patch(
+                check_custom_op_aliasing=True,
+                error_on_custom_op_aliasing=True,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
+                # Shouldn't error here because we already invoked once
+                _ = compiled_fn(x)
+
+                compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
+
+    def test_debugmode_warns_outside_ci(self):
+        # Test that DebugMode emits warnings (not errors) when error_on_custom_op_aliasing=False
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("alias_op2(Tensor x) -> (Tensor, Tensor)")
+            lib.impl(
+                "alias_op2",
+                lambda x: (x.view_as(x), x.view_as(x)),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("alias_op2", lambda x: (x.view_as(x), x.view_as(x)), "Meta")
+
+            def fn(x):
+                aliased, _ = torch.ops.mylib.alias_op2(x)
+                return aliased + 1
+
+            x = torch.randn(10, 10)
+            compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
+            # Use error_on_custom_op_aliasing=False to emit warnings instead of errors
+            with torch._functorch.config.patch(
+                check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
+            ):
+                with self.assertWarnsRegex(
+                    UserWarning,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

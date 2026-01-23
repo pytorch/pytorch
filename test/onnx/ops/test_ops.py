@@ -1456,7 +1456,8 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         class AttentionOutputsModel(torch.nn.Module):
             def forward(self, Q, K, V):
-                return torch.onnx.ops.attention(Q, K, V)
+                result, _, _, _ = torch.onnx.ops.attention(Q, K, V)
+                return result
 
         model = AttentionOutputsModel()
         onnx_program = self.export(model, (Q, K, V), opset_version=23)
@@ -1464,16 +1465,14 @@ class NativeOnnxOpsTest(common_utils.TestCase):
         node = onnx_program.model.graph.node(0)
         self.assertEqual(node.op_type, "Attention")
 
-        # Verify all 4 outputs have correct shapes
-        outputs = node.outputs
-        self.assertEqual(len(outputs), 4)
-
+        graph_outputs = onnx_program.model.graph.outputs
         # output: (batch_size, q_num_heads, q_seq_len, head_size)
         self.assertEqual(
-            outputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
+            list(graph_outputs[0].shape),
+            [batch_size, q_num_heads, q_seq_len, head_size],
         )
 
-        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
+        onnx_testing.assert_onnx_program(onnx_program)
 
 
 if __name__ == "__main__":

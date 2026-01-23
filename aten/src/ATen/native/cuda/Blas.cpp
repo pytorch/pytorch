@@ -24,8 +24,8 @@
 #include <ATen/native/cuda/GroupMM.h>
 #include <ATen/ceil_div.h>
 
-#ifdef USE_FBGEMM_GENAI
-#include <fbgemm_gpu/torch_ops.h>
+#ifdef USE_MSLK
+#include <mslk/gemm/gemm_torch.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -120,15 +120,7 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   // When hipBLASLt is not supported on the architecture, return true
   #ifdef USE_ROCM
-  static const std::vector<std::string> archs = {
-        "gfx90a", "gfx942",
-    #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
-    #endif
-    #if ROCM_VERSION >= 70000
-        "gfx950", "gfx1150", "gfx1151"
-    #endif
-  };
+  const auto& archs = at::detail::getCUDAHooks().getHipblasltSupportedArchs();
   const auto is_hipblas_lt_arch_supported = at::detail::getCUDAHooks().isGPUArch(archs, device.index());
   if (!is_hipblas_lt_arch_supported) {
     return true;
@@ -218,28 +210,6 @@ static bool isInputCompliesAddmmCudaLt(
       // Strangely, if mat2 has only 1 row or column, we get
       // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
       mat2_sizes[0] > 1 && mat2_sizes[1] > 1
-      // The last conditions is to skip 16b transA and non-trans-B having
-      // leading dim >> rows when they are sliced from a large tensor
-      // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
-      #if !(defined(CUDA_VERSION) && CUDA_VERSION >= 12010 || defined(USE_ROCM))
-      // Related to avoiding the leading stride >> leading dim problematic case
-      // with 16b dtypes described above. For such dtypes we only allow inputs
-      // which are either row- or col-major (i.e. non-overlapping, compact memory layout).
-      // In that case the leading stride will be equal to the outer dim len.
-      // Why do we catch this case here? The following `prepare_matrix_for_cublas` method
-      // does not modify inputs as long as there is a stride of length 1
-      // and the leading stride is at least max(1, other dim length), so we might
-      // end up with contiguous cols but not rows (i.e. holes between different rows)
-      // and vice versa.
-      && mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32
-      && mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32
-      && (
-        // filter by dtype
-        (scalar_type != at::ScalarType::Half && scalar_type != at::ScalarType::BFloat16) ||
-        // check mat1/mat2 is row-/col-major
-        (mat1.is_non_overlapping_and_dense() && mat2.is_non_overlapping_and_dense())
-      )
-      #endif
     )
   );
 
@@ -741,11 +711,11 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-if (self._is_zerotensor() || other._is_zerotensor()) {
-  return at::_efficientzerotensor({}, self.options());
-}
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
 
-return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
       [&] {

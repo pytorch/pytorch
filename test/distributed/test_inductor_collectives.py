@@ -4,6 +4,7 @@ import functools
 import unittest
 from collections import Counter
 from typing import Optional
+from unittest import mock
 from unittest.mock import patch
 
 import torch
@@ -2193,6 +2194,58 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self.assertEqual(saved_values, [wt1])
 
     @skip_if_lt_x_gpu(2)
+    def test_align_runtime_estimations_across_all_distributed_ranks(self):
+        from torch._inductor.ir import ExternKernel
+        from torch._inductor.scheduler import (
+            BaseSchedulerNode,
+            ExternKernelSchedulerNode,
+        )
+
+        mock_node_1 = mock.create_autospec(ExternKernelSchedulerNode)
+        mock_node_1.node = mock.create_autospec(ExternKernel)
+        mock_node_1.node.python_kernel_name = "extern_kernels.mm"
+
+        mock_node_2 = mock.create_autospec(ExternKernelSchedulerNode)
+        mock_node_3 = mock.create_autospec(BaseSchedulerNode)
+
+        if self.rank == 0:
+            mock_node_1.override_estimated_runtime = 0.1
+            mock_node_2.override_estimated_runtime = 0.3
+            mock_node_3.override_estimated_runtime = 0.5
+        else:
+            mock_node_1.override_estimated_runtime = 0.2
+            mock_node_2.override_estimated_runtime = 0.4
+            mock_node_3.override_estimated_runtime = 0.6
+
+        mock_node_1.get_estimated_runtime.side_effect = (
+            lambda: mock_node_1.override_estimated_runtime
+        )
+        mock_node_2.get_estimated_runtime.side_effect = (
+            lambda: mock_node_2.override_estimated_runtime
+        )
+        mock_node_3.get_estimated_runtime.side_effect = (
+            lambda: mock_node_3.override_estimated_runtime
+        )
+
+        self._init_process_group()
+        from torch._inductor.comms import (
+            align_runtime_estimations_across_all_distributed_ranks,
+        )
+
+        align_runtime_estimations_across_all_distributed_ranks(
+            [mock_node_1, mock_node_2, mock_node_3]
+        )
+
+        # only MM related nodes should be aligned
+        self.assertEqual(mock_node_1.override_estimated_runtime, 0.1)
+        self.assertEqual(
+            mock_node_2.override_estimated_runtime, 0.3 if self.rank == 0 else 0.4
+        )
+        self.assertEqual(
+            mock_node_3.override_estimated_runtime, 0.5 if self.rank == 0 else 0.6
+        )
+
+    @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.cuda.set_device(self.rank)
@@ -2443,7 +2496,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([4, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([4, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2480,7 +2533,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([u0, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([u0, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2501,7 +2554,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([s75, s75])"]
+                assert str(n.meta["val"].size()) == "torch.Size([s75, s75])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2555,7 +2608,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([8, 1])"]
+                assert str(n.meta["val"].size()) == "torch.Size([8, 1])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2592,7 +2645,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([4*u0, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([4*u0, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2615,9 +2668,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in [
-                    "torch.Size([2*(((s75**2)//2)), s75])"
-                ]
+                assert (
+                    str(n.meta["val"].size()) == "torch.Size([2*(((s75**2)//2)), s75])"
+                )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )

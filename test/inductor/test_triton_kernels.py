@@ -26,12 +26,7 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import (
-    parametrize,
-    skipIfRocm,
-    skipIfWindows,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
@@ -136,6 +131,15 @@ class KernelTests(torch._inductor.test_case.TestCase):
             f(t1)
         except torch._inductor.exc.InductorError as e:
             if isinstance(e.inner_exception, triton.compiler.errors.CompilationError):
+                catch_error = True
+            if (
+                isinstance(
+                    e.inner_exception,
+                    torch._inductor.compile_worker.subproc_pool.SubprocException,
+                )
+                and "triton.compiler.errors.CompilationError"
+                in e.inner_exception.details
+            ):
                 catch_error = True
         finally:
             # we assert user custom Triton kernel compile error can be captured
@@ -2586,15 +2590,21 @@ def forward(self, arg0_1, arg1_1):
 
     @requires_gpu
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
-    @skipIfRocm
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_inline_asm(self, quotes):
-        kernel = (
-            kernel_inline_asm_single_quotes
-            if quotes == "single"
-            else kernel_inline_asm_double_quotes
-        )
+        if torch.version.cuda:
+            kernel = (
+                kernel_inline_asm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_double_quotes
+            )
+        else:
+            kernel = (
+                kernel_inline_asm_rocm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_rocm_double_quotes
+            )
 
         # https://github.com/pytorch/pytorch/issues/155006
         def fn(inp):

@@ -7,7 +7,8 @@ from typing import Union
 import torch
 from torch import Tensor
 from torch._C import FileCheck
-from torch._inductor import config, utils
+from torch._inductor import config, inductor_prims, utils
+from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -17,6 +18,8 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
+    SM100OrLater,
+    SM90OrLater,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -32,6 +35,7 @@ from torch.testing._internal.inductor_utils import (
     _to_fp8_saturated,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
+    is_big_gpu,
 )
 from torch.utils._triton import has_triton_tma_device
 
@@ -394,6 +398,40 @@ class TestFP8Types(TestCase):
             f"LN only Inductor: {ln_latency}ms."
         )
 
+    @unittest.skipIf(
+        not SM90OrLater or torch.version.hip, "PDL requires NVIDIA SM 9.0+"
+    )
+    @onlyOn(["cuda", "xpu"])
+    def test_scaled_mm_pdl_handles_none_bias(self, device):
+        dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
+        M, K, N = 32, 64, 32
+
+        # A row-major, B column-major view (transpose of contiguous)
+        a = torch.randn(M, K, device=device, dtype=torch.float16).to(dtype_float8)
+        b = torch.randn(N, K, device=device, dtype=torch.float16).to(dtype_float8).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        scale_r = torch.tensor(1.0, device=device)
+
+        def linear(a, b, sa, sb, sr):
+            return torch._scaled_mm(a, b, sa, sb, None, sr, out_dtype=torch.bfloat16)
+
+        expected = linear(a, b, scale_a, scale_b, scale_r)
+
+        patch_cfg = {
+            "triton.enable_pdl": True,
+            "triton.use_tensor_descriptor": False,
+            "max_autotune_gemm": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "max_autotune_gemm_search_space": "EXHAUSTIVE",
+        }
+
+        with config.patch(patch_cfg):
+            compiled = torch.compile(linear, mode="max-autotune")
+            actual = compiled(a, b, scale_a, scale_b, scale_r)
+
+        self.assertEqual(expected, actual, rtol=5e-2, atol=0.07)
+
 
 class TestFP8Lowering(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -573,7 +611,8 @@ class TestFP8Lowering(TestCase):
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_tma_device() or not is_big_gpu(),
+        "Need device-side TMA support in Triton and max-autotune",
     )
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
@@ -733,7 +772,8 @@ class TestFP8Lowering(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_tma_device() or not is_big_gpu(),
+        "Need device-side TMA support in Triton and max-autotune",
     )
     @onlyCUDA
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
@@ -827,8 +867,9 @@ class TestFP8Lowering(TestCase):
     @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
-        "scaling_block_sizes", ((1, 128, 128, 128), (1, 128, 1, 128))
-    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128)
+        "scaling_block_sizes",
+        ((1, 128, 128, 128), (1, 128, 1, 128), (128, 128, 1, 128)),
+    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128), (BlockWise128x128, BlockWise1x128)
     def test_main_loop_scaling(
         self,
         shape: tuple[int, int, int],
@@ -1426,6 +1467,62 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
         self.assertTrue("Invalid scaling configuration." in str(cm.exception))
+
+
+@unittest.skipIf(not SM100OrLater, "Requires SM100+ (Blackwell) for PTX instruction")
+class TestCvtE8M0Rceil(TestCase):
+    """Tests for cvt_e8m0_rceil prim with PTX lowering on Blackwell."""
+
+    def test_correctness(self):
+        """Test correctness for various dtypes."""
+
+        def fn(inp):
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        for dtype in [torch.float32, torch.bfloat16, torch.float16]:
+            inp = torch.cat(
+                [
+                    torch.arange(-1024, 0, device="cuda", dtype=dtype),
+                    torch.arange(1, 1025, device="cuda", dtype=dtype),
+                ]
+            )
+            eager_result = fn(inp)
+            compiled_result = torch.compile(fn)(inp)
+            self.assertEqual(compiled_result, eager_result)
+
+    def test_pattern_match(self):
+        """Test that the log2+ceil pattern gets matched and replaced."""
+        _misc_patterns_init()
+
+        E8M0_BIAS = 127
+
+        def fn_with_log2_pattern(inp):
+            log2_val = torch.log2(inp)
+            ceil_val = torch.ceil(log2_val)
+            clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
+            biased = clamped + E8M0_BIAS
+            return biased.to(torch.uint8)
+
+        inp = torch.tensor(
+            [1.0, 2.0, 4.0, 3.0, 1.5], device="cuda", dtype=torch.float32
+        )
+
+        eager_result = fn_with_log2_pattern(inp)
+        compiled_result = torch.compile(fn_with_log2_pattern)(inp)
+        self.assertEqual(compiled_result, eager_result)
+
+    def test_ptx_code_generation(self):
+        """Test that PTX instruction appears in generated code."""
+
+        def fn(inp):
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        inp = torch.rand(32, device="cuda", dtype=torch.float32)
+        compiled_fn = torch.compile(fn)
+        _, code = run_and_get_code(compiled_fn, inp)
+
+        code_str = "\n".join(code)
+        self.assertIn("cvt.rp.satfinite.ue8m0x2.f32", code_str)
 
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)

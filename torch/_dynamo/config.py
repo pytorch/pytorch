@@ -13,6 +13,7 @@ behavior, including:
 import getpass
 import os
 import sys
+import sysconfig
 import tempfile
 from collections.abc import Callable
 from os.path import abspath, dirname
@@ -38,6 +39,18 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
+# Override backend for specific graphs (for debugging/bisecting).
+# Format: "filter1:backend1;filter2:backend2;..." where filter can be:
+#   - Individual IDs: "0,5,10"
+#   - Ranges: "10-20" (inclusive)
+#   - Comparisons: ">10", ">=10", "<5", "<=5"
+# Backends can be: "eager", "aot_eager", "inductor", "inductor:reduce-overhead", etc.
+# Examples:
+#   ">10:eager"                    - Run graphs with frame_id > 10 in dynamo eager backend
+#   "<=5:aot_eager;>5:inductor"    - First 6 graphs use aot_eager, rest use inductor
+# [@compile_ignored: debug]
+debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 
@@ -52,10 +65,12 @@ dead_code_elimination = True
 replay_side_effects = True
 
 # Configure side effect warning level
-# If `silent`, we silently allow side effects
-# If `warn`, we warn side effects
+# If `info` (default): allow side effects and log to TORCH_LOGS="side_effects" and tlparse
+# If `silent`, we allow side effects, no logs are made.
+# If `warn`, we allow side effects but issue warnings
 # If `error`, we error on side effects
-side_effect_replay_policy = "silent"
+# NOTE: it is NOT safe to change this config during compilation!
+side_effect_replay_policy = "info"
 
 # disable (for a function) when cache reaches this size
 
@@ -120,7 +135,9 @@ assume_static_by_default = True
 # with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = True
+automatic_dynamic_shapes = (
+    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_SHAPES", "1") == "1"
+)
 
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
@@ -423,6 +440,11 @@ error_on_nested_jit_trace = True
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
 
+# If true, force dynamo compilation even when inside FX symbolic tracing.
+# This allows nested compilation where the outer tracer (e.g., make_fx) can
+# trace over dynamo-compiled functions. Use with error_on_nested_fx_trace=False.
+force_compile_during_fx_trace = False
+
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
@@ -445,6 +467,9 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
+
+# Trace through torch.autograd.grad or graphbreak
+trace_autograd_ops = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32
@@ -670,6 +695,16 @@ enable_dynamo_decompositions = True
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
 
+# If True, enable calling torch.compile inside __torch_dispatch__ handlers.
+# When enabled:
+# 1. __torch_dispatch__ methods are automatically wrapped with torch._dynamo.disable
+# 2. torch.compile is skipped when active TorchDispatchModes are on the stack
+#    (unless they have ignore_compile_internals=True)
+# This allows torch.compile to work inside dispatch mode handlers once all
+# ambient modes have been "consumed".
+# See https://github.com/pytorch/pytorch/issues/155331 for more context.
+inline_torch_dispatch_torch_compile = True
+
 # Eager AC/SAC reapplies the mutations (like global dict mutations) in the
 # backward during the recomputation of forward. torch.compile has no easy way to
 # reapply python mutations in the backward. But many users might be ok to skip
@@ -753,7 +788,8 @@ pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", N
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
-    default=True,
+    # Disable by default on free-threaded builds since they always do a full collection, which can be slow
+    default=sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
