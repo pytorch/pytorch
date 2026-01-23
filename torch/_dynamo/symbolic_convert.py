@@ -105,6 +105,7 @@ from .output_graph import GraphCompileReason, OutputGraph, StackLocalsMetadata
 from .polyfills import (
     impl_CONTAINS_OP_fallback,
     impl_IS_MAPPING,
+    impl_MATCH_CLASS,
     impl_MATCH_KEYS,
     impl_MATCH_SEQUENCE,
 )
@@ -3769,6 +3770,21 @@ class InstructionTranslatorBase(
                 {},
             )
         )
+
+    def MATCH_CLASS(self, inst: Instruction) -> None:
+        subject, cls, names = self.popn(3)
+        self.push(
+            self.inline_user_function_return(
+                VariableTracker.build(self, impl_MATCH_CLASS),
+                [subject, cls, inst.arg, names],
+                {},
+            )
+        )
+
+        if sys.version_info < (3, 11):
+            # for versions < 3.11, also push the boolean result
+            tos = self.stack[-1]
+            self.push(ConstantVariable.create(not istype(tos, ConstantVariable)))
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
         keys = self.stack[-1]
