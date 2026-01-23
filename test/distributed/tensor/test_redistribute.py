@@ -1414,22 +1414,22 @@ class DistributeWithStridedShardTest(DTensorTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]_S(0, 3)->S(0)[0]S(0)[1]R->S(0)[0]RR->RRR->RS(0)[1]R->RS(0)[1]S(0)[2]""",  # noqa: B950
+                    """S(0)[0]S(0)[1]_S(0, 3)->S(0)[0]S(0)[1]S(1)->S(0)[0]S(1)[1]S(1)[0]->RS(1)[1]S(1)[0]->RS(0)[1]S(1)->RS(0)[1]S(0)[2]""",  # noqa: B950
                 )
             elif idx == 1:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->RS(0)R->RS(0)_S(0, 3)""",
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]S(1)->RS(0)S(1)->RS(0)_S(0, 3)""",
                 )
             elif idx == 2:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[1]_S(0, 3)S(0)[2]->S(0)[1]_S(0, 3)R->S(0)[1]RR->RRR->_S(0, 3)RR->_S(0, 3)S(0)[0]R""",
+                    """S(0)[1]_S(0, 3)S(0)[2]->S(0)[1]_S(0, 3)R->S(0)[1]S(1)R->S(1)[1]S(1)[0]R->_S(0, 3)S(1)R->_S(0, 3)S(0)[0]R""",
                 )
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)_S(1, 5)R->R_S(1, 5)R->R_S(1, 5)S(0)""",
+                    """S(0)[0]S(0)[1]R->S(0)_S(1, 5)R->R_S(1, 5)R->R_S(1, 5)S(0)""",
                 )
             expected_dt = _distribute_tensor(
                 input_data.clone(),
