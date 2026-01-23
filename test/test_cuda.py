@@ -6500,6 +6500,8 @@ class TestCudaOptims(TestCase):
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
 
+    # This test cases compares autocast scaling on a fused optim vs autocast scaling
+    # on a forloop optim.
     @onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
@@ -6537,7 +6539,17 @@ class TestCudaOptims(TestCase):
                 opt_control = optim_cls(mod_control.parameters(), **optimizer_kwargs)
                 scaler_scaling = torch.amp.GradScaler(device, init_scale=128.0)
                 scaler_control = torch.amp.GradScaler(device, init_scale=128.0)
+
                 tracker = TensorTracker()
+                # Increase the tolerance for param and (max_)exp_avg_sq when betas aren't tensors
+                # cuz the discrepancy between double vs float betas becomes too big. When Tensor
+                # betas are used, fused and forloop both would have float betas and the default
+                # tolerances are fine.
+                assert_eq_kwargs = {}
+                if "betas" in opt_control.param_groups[0] and not torch.is_tensor(
+                    opt_control.param_groups[0]["betas"][0]
+                ):
+                    assert_eq_kwargs = {"atol": 2e-5, "rtol": 2e-5}
                 for input, target in data:
                     opt_control.zero_grad()
                     with torch.autocast(device_type=device, dtype=torch.half):
@@ -6565,7 +6577,7 @@ class TestCudaOptims(TestCase):
                         tracker.add(param_control.grad)
                         tracker.pop_check_set(param_scaling.grad, self)
                         tracker.add(param_control)
-                        tracker.pop_check_set(param_scaling, self)
+                        tracker.pop_check_set(param_scaling, self, assert_eq_kwargs)
 
                         state_control, state_scaling = (
                             opt_control.state[param_control],
@@ -6577,7 +6589,13 @@ class TestCudaOptims(TestCase):
                             if k == "step":
                                 actual = actual.squeeze()
                             tracker.add(state_control[k])
-                            tracker.pop_check_set(actual, self)
+                            tracker.pop_check_set(
+                                actual,
+                                self,
+                                assert_eq_kwargs
+                                if k == "exp_avg_sq" or k == "max_exp_avg_sq"
+                                else {},
+                            )
 
     @onlyCUDA
     @parametrize("in_place_unscale", [False, True])
