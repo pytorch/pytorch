@@ -7,7 +7,10 @@ namespace c10d {
 void DebugInfoWriter::write(const std::string& trace) {
   std::string filename = filename_;
   if (enable_dynamic_filename_) {
-    filename = c10::str(getCvarString({"TORCH_FR_DUMP_TEMP_FILE"}, ""), rank_);
+    LOG(INFO) << "Writing Flight Recorder debug info to a dynamic file name";
+    filename = c10::str(getCvarString({"TORCH_FR_DUMP_TEMP_FILE"}, ""));
+  } else {
+    LOG(INFO) << "Writing Flight Recorder debug info to a static file name";
   }
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
@@ -39,10 +42,21 @@ void DebugInfoWriter::write(const std::string& trace) {
 
 DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
   if (writer_ == nullptr) {
-    // Attempt to write to running user's HOME directory cache folder - if it
-    // exists.
-    auto homeDir = getCvarString({"HOME"}, "/tmp");
-    auto cacheDirPath = c10::filesystem::path(homeDir + "/.cache/torch");
+// Attempt to write to running user's HOME directory cache folder - if it
+// exists.
+#ifdef _WIN32
+    const char* cacheHome = nullptr;
+#else
+    // Uses XDG_CACHE_HOME if it's set
+    const char* cacheHome = std::getenv("XDG_CACHE_HOME");
+#endif
+    std::string cacheRoot;
+    if (cacheHome) {
+      cacheRoot = cacheHome;
+    } else {
+      cacheRoot = getCvarString({"HOME"}, "/tmp") + "/.cache";
+    }
+    auto cacheDirPath = std::filesystem::path(cacheRoot + "/torch");
     // Create the .cache directory if it doesn't exist
     c10::filesystem::create_directories(cacheDirPath);
     auto defaultLocation = cacheDirPath / "comm_lib_trace_rank_";

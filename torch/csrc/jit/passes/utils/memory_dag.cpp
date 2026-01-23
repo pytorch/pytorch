@@ -2,7 +2,6 @@
 
 #include <c10/util/flat_hash_map.h>
 #include <algorithm>
-#include <queue>
 
 namespace torch::jit {
 namespace {

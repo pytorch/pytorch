@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import ast
 import inspect
+import sys
 import textwrap
 import warnings
 
@@ -74,7 +75,16 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         init_ast = ast.parse(textwrap.dedent(source_lines))
 
         # Get items annotated in the class body
-        self.class_level_annotations = list(nn_module.__annotations__.keys())
+        if sys.version_info >= (3, 14):
+            import annotationlib
+
+            self.class_level_annotations = list(
+                annotationlib.get_annotations(
+                    nn_module, format=annotationlib.Format.FORWARDREF
+                ).keys()
+            )
+        else:
+            self.class_level_annotations = list(nn_module.__annotations__.keys())
 
         # Flag for later
         self.visiting_class_level_ann = False
@@ -106,7 +116,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
 
         return True
 
-    def visit_Assign(self, node):
+    def visit_Assign(self, node) -> None:
         """Store assignment state when assigning to a Call Node.
 
         If we're visiting a Call Node (the right-hand side of an
@@ -129,7 +139,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         self.generic_visit(node)
         self.visiting_class_level_ann = False
 
-    def visit_AnnAssign(self, node):
+    def visit_AnnAssign(self, node) -> None:
         """Visit an AnnAssign node in an ``nn.Module``'s ``__init__`` method.
 
         It checks if it conforms to our attribute annotation rules."""
@@ -180,10 +190,11 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             "instance-level annotations on empty non-base "
             "types in `__init__`. Instead, either 1) use a "
             "type annotation in the class body, or 2) wrap "
-            "the type in `torch.jit.Attribute`."
+            "the type in `torch.jit.Attribute`.",
+            stacklevel=2,
         )
 
-    def visit_Call(self, node):
+    def visit_Call(self, node) -> None:
         """Determine if a Call node is 'torch.jit.annotate' in __init__.
 
         Visit a Call node in an ``nn.Module``'s ``__init__``
@@ -245,5 +256,6 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
             "instance-level annotations on empty non-base "
             "types in `__init__`. Instead, either 1) use a "
             "type annotation in the class body, or 2) wrap "
-            "the type in `torch.jit.Attribute`."
+            "the type in `torch.jit.Attribute`.",
+            stacklevel=2,
         )

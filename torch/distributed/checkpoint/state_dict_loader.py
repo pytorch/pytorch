@@ -4,7 +4,7 @@ import inspect
 import logging
 import os
 import warnings
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -36,10 +36,10 @@ logger = logging.getLogger()
 def load_state_dict(
     state_dict: dict[str, Any],
     storage_reader: StorageReader,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner | None = None,
 ) -> None:
     """This method is deprecated. Please switch to 'load'."""
     storage_reader.reset()
@@ -60,10 +60,10 @@ def load_state_dict(
 def load(
     state_dict: dict[str, Any],
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_reader: Optional[StorageReader] = None,
-    planner: Optional[LoadPlanner] = None,
-    process_group: Optional[dist.ProcessGroup] = None,
+    checkpoint_id: str | os.PathLike | None = None,
+    storage_reader: StorageReader | None = None,
+    planner: LoadPlanner | None = None,
+    process_group: dist.ProcessGroup | None = None,
     no_dist: bool = False,
 ) -> None:
     """
@@ -158,7 +158,8 @@ def load(
     no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process.",
+            stacklevel=2,
         )
 
     with _profile():
@@ -172,17 +173,15 @@ def load(
         # the same order.
         keys = sorted(state_dict.keys())
 
-        statetful_sd = {}
+        stateful_sd = {}
         for key in keys:
             if key not in state_dict:
                 continue
             elem = state_dict[key]
-            statetful_sd[key] = (
-                elem.state_dict() if isinstance(elem, Stateful) else elem
-            )
+            stateful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
         _load_state_dict(
-            state_dict=statetful_sd,
+            state_dict=stateful_sd,
             storage_reader=storage_reader,
             process_group=process_group,
             no_dist=no_dist,
@@ -195,19 +194,19 @@ def load(
             if isinstance(elem, Stateful):
                 # If the state_dict is a Stateful object,
                 # DCP does an in-place load in the original state dict.
-                elem.load_state_dict(statetful_sd[key])
+                elem.load_state_dict(stateful_sd[key])
             else:
                 # Otherwise, replace the state_dict with the loaded state_dict.
-                state_dict[key] = statetful_sd[key]
+                state_dict[key] = stateful_sd[key]
 
 
 def _load_state_dict(
     state_dict: dict[str, Any],
     storage_reader: StorageReader,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner | None = None,
 ) -> None:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
@@ -221,7 +220,7 @@ def _load_state_dict(
         ckpt_kwargs["process_group"] = distW.group
 
     use_collectives = True
-    metadata: Optional[Metadata] = None
+    metadata: Metadata | None = None
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
@@ -246,8 +245,10 @@ def _load_state_dict(
             except Exception:
                 logger.info("Rank local metadata is not found.")
 
-        assert planner is not None
-        assert metadata is not None
+        if planner is None:
+            raise AssertionError("planner is None")
+        if metadata is None:
+            raise AssertionError("metadata is None")
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
 
         if (
@@ -269,12 +270,13 @@ def _load_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def global_step(all_local_plans):
-        assert planner is not None
+        if planner is None:
+            raise AssertionError("planner is None")
         all_local_plans = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: Optional[LoadPlan] = None
+    central_plan: LoadPlan | None = None
     if use_collectives:
         central_plan = distW.reduce_scatter("plan", local_step, global_step)
     else:
@@ -284,8 +286,10 @@ def _load_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
-        assert planner is not None
-        assert central_plan is not None
+        if planner is None:
+            raise AssertionError("planner is None")
+        if central_plan is None:
+            raise AssertionError("central_plan is None")
         final_local_plan = planner.finish_plan(central_plan)
         all_reads = storage_reader.read_data(final_local_plan, planner)
 
@@ -300,11 +304,11 @@ def _load_state_dict(
 
 
 def _load_state_dict_from_keys(
-    keys: Optional[Union[set[str], str]] = None,
+    keys: set[str] | str | None = None,
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_reader: Optional[StorageReader] = None,
-    process_group: Optional[dist.ProcessGroup] = None,
+    checkpoint_id: str | os.PathLike | None = None,
+    storage_reader: StorageReader | None = None,
+    process_group: dist.ProcessGroup | None = None,
 ) -> dict[str, Any]:
     """
     Load only the specified keys from the checkpoint, if no keys are specified, the entire
@@ -360,7 +364,8 @@ def _load_state_dict_from_keys(
     no_dist = not (dist.is_available() and dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process.",
+            stacklevel=2,
         )
 
     storage_reader = cast(

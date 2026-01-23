@@ -448,7 +448,7 @@ kernel void upsample_trilinear_backward(
 
 // See Note [ Weights computation for uint8_t and multiplication trick ]
 // Essentially fall back to fixed floating point arithmetic during uint8
-// interpolation, which is not necesserily more accurate (see example below),
+// interpolation, which is not necessarily more accurate (see example below),
 // but matches closes to what CPU can deliver
 // I.e. mid-point 152+249+172+35 is 152, but algorithm yields 153 as horizontal
 // and vertical interpolation is done in separate steps and results are rounded

@@ -115,8 +115,8 @@ ViewInfo ViewInfo::chain(
         // view_func() AND as_strided() isn't supported; there's no obvious way
         // to chain the two views.
         auto error_msg =
-            ("Attempted to chain views when the parent view has no view_func() and "
-             "does not support as_strided(). This is not supported.");
+            "Attempted to chain views when the parent view has no view_func() and "
+            "does not support as_strided(). This is not supported.";
         view_func = std::make_unique<ErroringViewFunc>(error_msg);
         rev_view_func = [=](const at::Tensor& root_view) {
           TORCH_CHECK(false, error_msg);

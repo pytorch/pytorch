@@ -13,6 +13,7 @@ struct THPStream {
   int64_t device_index;
   // Used to switch stream context management, initialized lazily.
   PyObject* context;
+  PyObject* weakreflist;
 };
 extern TORCH_API PyTypeObject* THPStreamClass;
 

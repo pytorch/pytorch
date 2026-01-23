@@ -13,9 +13,11 @@
 #else
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
+#include <ATen/ops/cauchy_native.h>
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
 #include <ATen/ops/random_native.h>
@@ -57,6 +59,7 @@ Tensor& random_mps_impl(Tensor& self,
   if (self.numel() == 0) {
     return self;
   }
+  at::assert_no_internal_overlap(self);
   // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
   const auto need_reshape = self.ndimension() > 4;
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
@@ -153,8 +156,16 @@ Tensor& random_mps_impl(Tensor& self,
       feeds[meanPlaceholder.getMPSGraphTensor()] = meanPlaceholder.getMPSGraphTensorData();
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self);
+    // Handle non-contiguous output tensors by creating a contiguous temporary
+    const auto needs_gather = needsGather(self);
+    Tensor self_ = needs_gather ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self_);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+
+    // Copy results back to original non-contiguous output
+    if (needs_gather) {
+      self.copy_(self_);
+    }
   }
 
   return self;
@@ -176,6 +187,7 @@ static Tensor& normal_mps_impl(Tensor& self,
     if (mean_t.defined())
       TORCH_CHECK(mean_t.numel() == std_t.numel(), op_name, ": mean and std must have same number of elements")
   }
+  TORCH_CHECK(!(mean_t.defined() && mean_t.is_complex()), op_name, " expects mean to be non-complex");
 
   RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
@@ -424,6 +436,64 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
                                       MPSGraphRandomDistributionUniform,
                                       gen,
                                       "exponential_mps_:" + std::to_string(lambda),
+                                      random_op_block);
+}
+
+Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    return [mpsGraph exponentWithTensor:randomTensor name:nil];
+  };
+
+  return mps::random_mps_impl<double>(self,
+                                      mean,
+                                      std,
+                                      std::nullopt,
+                                      std::nullopt,
+                                      MPSGraphRandomDistributionNormal,
+                                      gen,
+                                      "log_normal_mps_:" + std::to_string(mean) + ":" + std::to_string(std),
+                                      random_op_block);
+}
+
+Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Generator> gen) {
+  TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
+
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    auto mpsGraph = cachedGraph->graph();
+    // cauchy distwith inverse CDF: median + sigma * tan(pi * (U - 0.5))
+    const auto halfTensor = [mpsGraph constantWithScalar:0.5 dataType:randomTensor.dataType];
+    const auto piTensor = [mpsGraph constantWithScalar:M_PI dataType:randomTensor.dataType];
+    const auto medianTensor = [mpsGraph constantWithScalar:median dataType:randomTensor.dataType];
+    const auto sigmaTensor = [mpsGraph constantWithScalar:sigma dataType:randomTensor.dataType];
+
+    // (U - 0.5)
+    const auto shiftedTensor = [mpsGraph subtractionWithPrimaryTensor:randomTensor secondaryTensor:halfTensor name:nil];
+    // pi * (U - 0.5)
+    const auto scaledTensor = [mpsGraph multiplicationWithPrimaryTensor:piTensor
+                                                        secondaryTensor:shiftedTensor
+                                                                   name:nil];
+    // tan(pi * (U - 0.5))
+    const auto tanTensor = [mpsGraph tanWithTensor:scaledTensor name:nil];
+
+    // sigma * tan(pi * (U - 0.5))
+    const auto multipliedTensor = [mpsGraph multiplicationWithPrimaryTensor:sigmaTensor
+                                                            secondaryTensor:tanTensor
+                                                                       name:nil];
+    // median + sigma * tan(pi * (U - 0.5))
+    return [mpsGraph additionWithPrimaryTensor:medianTensor secondaryTensor:multipliedTensor name:nil];
+  };
+  auto eps = std::numeric_limits<float>::epsilon();
+  return mps::random_mps_impl<double>(self,
+                                      eps,
+                                      1.0 - eps,
+                                      std::nullopt,
+                                      std::nullopt,
+                                      MPSGraphRandomDistributionUniform,
+                                      gen,
+                                      "cauchy_mps_:" + std::to_string(median) + ":" + std::to_string(sigma),
                                       random_op_block);
 }
 

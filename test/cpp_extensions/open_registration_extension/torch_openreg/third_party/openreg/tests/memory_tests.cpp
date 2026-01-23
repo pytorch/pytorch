@@ -26,6 +26,12 @@ TEST_F(MemoryTest, AllocateAndFreeHost) {
   EXPECT_EQ(orFreeHost(ptr), orSuccess);
 }
 
+TEST_F(MemoryTest, FreeNullptrIsNoop) {
+  // Freeing a nullptr should behave like CUDA: treated as a no-op success.
+  EXPECT_EQ(orFree(nullptr), orSuccess);
+  EXPECT_EQ(orFreeHost(nullptr), orSuccess);
+}
+
 TEST_F(MemoryTest, AllocateNullptr) {
   EXPECT_EQ(orMalloc(nullptr, 4096), orErrorUnknown);
   EXPECT_EQ(orMallocHost(nullptr, 4096), orErrorUnknown);
@@ -86,6 +92,48 @@ TEST_F(MemoryTest, MemcpyInvalidKind) {
   EXPECT_EQ(orFree(dev_ptr), orSuccess);
 }
 
+TEST_F(MemoryTest, MemcpyInvalidCombinations) {
+  void *dev_src = nullptr, *dev_dst = nullptr;
+  EXPECT_EQ(orMalloc(&dev_src, 8), orSuccess);
+  EXPECT_EQ(orMalloc(&dev_dst, 8), orSuccess);
+
+  char host_buf[8] = {};
+
+  // Deliberately pass mismatched kinds to ensure validation coverage.
+  EXPECT_EQ(
+      orMemcpy(host_buf, dev_src, 4, orMemcpyHostToDevice), orErrorUnknown);
+  EXPECT_EQ(
+      orMemcpy(dev_dst, host_buf, 4, orMemcpyDeviceToHost), orErrorUnknown);
+  EXPECT_EQ(
+      orMemcpy(dev_dst, dev_src, 4, orMemcpyHostToDevice), orErrorUnknown);
+
+  EXPECT_EQ(orFree(dev_src), orSuccess);
+  EXPECT_EQ(orFree(dev_dst), orSuccess);
+}
+
+TEST_F(MemoryTest, MemcpyAsyncHostToDevice) {
+  orStream_t stream = nullptr;
+  EXPECT_EQ(orStreamCreate(&stream), orSuccess);
+
+  const char host_src[] = "async";
+  char host_dst[6] = {};
+  void* dev_ptr = nullptr;
+  EXPECT_EQ(orMalloc(&dev_ptr, sizeof(host_src)), orSuccess);
+
+  // Async copies should complete once the stream is synchronized.
+  EXPECT_EQ(
+      orMemcpyAsync(dev_ptr, host_src, sizeof(host_src), orMemcpyHostToDevice, stream),
+      orSuccess);
+  EXPECT_EQ(orStreamSynchronize(stream), orSuccess);
+  EXPECT_EQ(orMemcpy(
+                host_dst, dev_ptr, sizeof(host_src), orMemcpyDeviceToHost),
+            orSuccess);
+  EXPECT_STREQ(host_dst, host_src);
+
+  EXPECT_EQ(orFree(dev_ptr), orSuccess);
+  EXPECT_EQ(orStreamDestroy(stream), orSuccess);
+}
+
 TEST_F(MemoryTest, PointerAttributes) {
   void* dev_ptr = nullptr;
   EXPECT_EQ(orMalloc(&dev_ptr, 32), orSuccess);
@@ -102,6 +150,14 @@ TEST_F(MemoryTest, PointerAttributes) {
   EXPECT_EQ(orFree(dev_ptr), orSuccess);
 }
 
+TEST_F(MemoryTest, PointerAttributesInvalidArgs) {
+  // Attribute queries must fail on null inputs to avoid dereferencing.
+  char buffer[8] = {};
+  orPointerAttributes attr{};
+  EXPECT_EQ(orPointerGetAttributes(nullptr, buffer), orErrorUnknown);
+  EXPECT_EQ(orPointerGetAttributes(&attr, nullptr), orErrorUnknown);
+}
+
 TEST_F(MemoryTest, ProtectUnprotectDevice) {
   void* dev_ptr = nullptr;
   EXPECT_EQ(orMalloc(&dev_ptr, 64), orSuccess);
@@ -110,6 +166,26 @@ TEST_F(MemoryTest, ProtectUnprotectDevice) {
   EXPECT_EQ(orMemoryProtect(dev_ptr), orSuccess);
 
   EXPECT_EQ(orFree(dev_ptr), orSuccess);
+}
+
+TEST_F(MemoryTest, ProtectReferenceCounting) {
+  void* dev_ptr = nullptr;
+  EXPECT_EQ(orMalloc(&dev_ptr, 64), orSuccess);
+
+  // Call unprotect/protect twice to exercise the refcount transitions.
+  EXPECT_EQ(orMemoryUnprotect(dev_ptr), orSuccess);
+  EXPECT_EQ(orMemoryUnprotect(dev_ptr), orSuccess);
+  EXPECT_EQ(orMemoryProtect(dev_ptr), orSuccess);
+  EXPECT_EQ(orMemoryProtect(dev_ptr), orSuccess);
+
+  EXPECT_EQ(orFree(dev_ptr), orSuccess);
+}
+
+TEST_F(MemoryTest, DoubleFreeFails) {
+  void* dev_ptr = nullptr;
+  EXPECT_EQ(orMalloc(&dev_ptr, 32), orSuccess);
+  EXPECT_EQ(orFree(dev_ptr), orSuccess);
+  EXPECT_EQ(orFree(dev_ptr), orErrorUnknown);
 }
 
 } // namespace

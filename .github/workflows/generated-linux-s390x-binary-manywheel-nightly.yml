@@ -16,6 +16,7 @@ on:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
+      - 'ciflow/s390/*'
   workflow_dispatch:
 
 permissions:
@@ -68,6 +69,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   manywheel-py3_10-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -132,6 +134,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   manywheel-py3_11-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -196,6 +199,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   manywheel-py3_12-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -260,6 +264,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   manywheel-py3_13-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -324,6 +329,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   manywheel-py3_13t-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -388,6 +394,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   manywheel-py3_14-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -452,6 +459,7 @@ jobs:
       build_environment: linux-s390x-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   manywheel-py3_14t-cpu-s390x-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:

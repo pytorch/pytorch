@@ -151,7 +151,7 @@ class TestUpgraders(JitTestCase):
         version = self._load_model_version(loaded_func)
         self.assertTrue(version == 5)
 
-        # make sure we preserve old behaviou
+        # make sure we preserve old behaviour
         torch._C._calculate_package_version_based_on_upgraders(current_flag_value)
 
     def test_aten_linspace(self):
