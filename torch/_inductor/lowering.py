@@ -6389,6 +6389,9 @@ def use_two_step_variance(x, axis, keepdim, threshold=1024):
 
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
+    device = x.get_device()
+    if not (device and device.type == "cpu"):
+        threshold = config.unroll_reductions_threshold
     return (
         isinstance(reduction_numel, sympy.Integer)
         and int(reduction_numel) <= threshold
