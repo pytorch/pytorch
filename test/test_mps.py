@@ -7778,6 +7778,73 @@ class TestMPS(TestCaseMPS):
             else:
                 self.assertEqual(input.grad, output_grad)
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_fused_dropout(self, dtype):
+        """Test _fused_dropout MPS implementation.
+
+        Tests: mask dtype (uint8), keep-probability semantics, generator usage, zero-size edge cases.
+        """
+        shapes = [
+            (100_000,),
+            (100, 1000),
+            (10, 100, 100),
+        ]
+        # Note: _fused_dropout uses keep probability (1-p), not drop probability
+        keep_prob_list = [0.0, 0.34, 0.78, 1.0]
+
+        for shape, keep_prob in itertools.product(shapes, keep_prob_list):
+            input = torch.randn(shape, device='mps', dtype=dtype, requires_grad=True)
+            output, mask = torch._fused_dropout(input, keep_prob)
+
+            # Verify mask dtype is uint8
+            self.assertEqual(mask.dtype, torch.uint8, "Mask should be uint8")
+
+            # Verify shapes match
+            self.assertEqual(output.shape, input.shape)
+            self.assertEqual(mask.shape, input.shape)
+
+            # Verify keep probability semantics
+            kept_rate = mask.sum().float() / mask.numel()
+            self.assertEqual(kept_rate, keep_prob, atol=1e-2, rtol=1e-2)
+
+            # Verify zeros where mask is 0
+            self.assertTrue((output[mask == 0] == 0).all())
+
+            # Verify scaling where mask is 1 (scaled by 1/keep_prob)
+            if keep_prob > 0:
+                scale = 1 / keep_prob
+                self.assertEqual(output[mask > 0], input[mask > 0] * scale)
+
+            # Test gradient
+            output_grad = torch.randn_like(output)
+            output.backward(output_grad)
+
+            if keep_prob > 0:
+                scale = 1 / keep_prob
+                expected_grad = output_grad * (mask > 0).to(dtype) * scale
+                self.assertEqual(input.grad, expected_grad)
+            else:
+                self.assertTrue((input.grad == 0).all())
+
+            input.grad = None
+
+        # Test with generator
+        g_mps = torch.Generator(device='mps')
+        g_mps.manual_seed(42)
+        x = torch.randn(1000, device='mps', dtype=dtype)
+        out1, mask1 = torch._fused_dropout(x, 0.5, g_mps)
+
+        g_mps.manual_seed(42)
+        out2, mask2 = torch._fused_dropout(x, 0.5, g_mps)
+        self.assertEqual(mask1, mask2, "Same seed should produce same mask")
+        self.assertEqual(out1, out2, "Same seed should produce same output")
+
+        # Test zero-size tensor fast path
+        empty = torch.randn(0, device='mps', dtype=dtype)
+        out_empty, mask_empty = torch._fused_dropout(empty, 0.5)
+        self.assertEqual(out_empty.numel(), 0)
+        self.assertEqual(mask_empty.numel(), 0)
+        self.assertEqual(mask_empty.dtype, torch.uint8)
 
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
