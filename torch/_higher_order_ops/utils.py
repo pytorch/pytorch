@@ -28,6 +28,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 @dataclass
@@ -435,6 +436,14 @@ def _collect_fake_inputs(inputs):
                                 f"Expected FakeTensor after unwrapping, got {type(val)}"
                             )
                         inputs_fake.append(val)
+                    elif is_traceable_wrapper_subclass(val):
+                        for attr_name in val.__tensor_flatten__()[0]:
+                            unwrapped_input = getattr(val, attr_name)
+                            if not isinstance(unwrapped_input, FakeTensor):
+                                raise AssertionError(
+                                    f"Expected FakeTensor after unwrapping, got {type(unwrapped_input)}"
+                                )
+                            inputs_fake.append(unwrapped_input)
                     else:
                         # This is the standard case of a TensorVariable
                         if not isinstance(val, FakeTensor):

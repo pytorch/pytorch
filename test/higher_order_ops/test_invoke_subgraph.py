@@ -12,6 +12,7 @@ import torch._dynamo
 import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
+import torch.distributed as dist
 import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
@@ -29,6 +30,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -36,6 +38,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 
@@ -3273,6 +3276,192 @@ class NegativeTesting(TestCase):
             r"Higher Order Operator: torch\.ops\.higher_order\.invoke_subgraph",
         ):
             torch.compile(fn, backend="eager")(x)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphDTensor(TestCase):
+    """Tests for invoke_subgraph with DTensor inputs."""
+
+    def setUp(self):
+        super().setUp()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=0, world_size=2)
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_simple_dtensor_input(self):
+        """Test nested_compile_region with DTensor input."""
+
+        @nested_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x) + gn(x)
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        local_tensor = torch.randn(4, 4)
+        x = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        ref = fn(x)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref.to_local(), res.to_local())
+
+    def test_multiple_inputs_outputs_dtensor(self):
+        """Test nested_compile_region with multiple DTensor inputs and outputs."""
+
+        @nested_compile_region
+        def gn(x, y):
+            return torch.sin(x) + y, torch.cos(y) * x
+
+        def fn(x, y):
+            a, b = gn(x, y)
+            c, d = gn(a, b)
+            return c, d
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        local_tensor1 = torch.randn(4, 4)
+        local_tensor2 = torch.randn(4, 4)
+        x = DTensor.from_local(local_tensor1, mesh, [Shard(0)], run_check=False)
+        y = DTensor.from_local(local_tensor2, mesh, [Shard(0)], run_check=False)
+
+        ref_c, ref_d = fn(x, y)
+        res_c, res_d = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        self.assertEqual(ref_c.to_local(), res_c.to_local())
+        self.assertEqual(ref_d.to_local(), res_d.to_local())
+
+    def test_different_shardings_dtensor(self):
+        """Test nested_compile_region with DTensors having different shardings."""
+
+        @nested_compile_region
+        def gn(x, y):
+            return x + y, x * y
+
+        def fn(x, y):
+            a, b = gn(x, y)
+            return a + b
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        local_tensor1 = torch.randn(4, 4)
+        # Replicated tensor needs global shape [8, 4] to match sharded tensor
+        local_tensor2 = torch.randn(8, 4)
+        # One tensor sharded, one tensor replicated
+        x = DTensor.from_local(local_tensor1, mesh, [Shard(0)], run_check=False)
+        y = DTensor.from_local(local_tensor2, mesh, [Replicate()], run_check=False)
+
+        ref = fn(x, y)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        self.assertEqual(ref.to_local(), res.to_local())
+
+    def test_dtensor_with_activation_checkpointing(self):
+        """Test nested HOPs: nested_compile_region with activation checkpointing and DTensor."""
+
+        def inner_fn(x):
+            return torch.sin(x) * torch.cos(x)
+
+        @nested_compile_region
+        def fn_with_ac(x):
+            # This creates a nested HOP: invoke_subgraph wrapping tag_activation_checkpoint
+            return torch.utils.checkpoint.checkpoint(inner_fn, x, use_reentrant=False)
+
+        def fn(x):
+            return fn_with_ac(x) + fn_with_ac(x)
+
+        mesh = DeviceMesh("cpu", torch.arange(2))
+        local_tensor = torch.randn(4, 4, requires_grad=True)
+        x = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        ref = fn(x)
+
+        local_tensor_clone = local_tensor.clone().detach().requires_grad_(True)
+        x_clone = DTensor.from_local(
+            local_tensor_clone, mesh, [Shard(0)], run_check=False
+        )
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x_clone)
+
+        self.assertEqual(ref.to_local(), res.to_local())
+
+        # Test backward
+        ref.to_local().sum().backward()
+        res.to_local().sum().backward()
+        self.assertEqual(local_tensor.grad, local_tensor_clone.grad)
+
+
+@skipIfTorchDynamo("Not a torch._dynamo test")
+class TestInvokeSubgraphTwoTensor(TestCase):
+    """Tests for invoke_subgraph with TwoTensor inputs."""
+
+    def test_simple_two_tensor_input(self):
+        """Test nested_compile_region with TwoTensor input."""
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @nested_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x) + gn(x)
+
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+        x = TwoTensor(a, b)
+
+        ref = fn(x)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(ref.a, res.a)
+        self.assertEqual(ref.b, res.b)
+
+    def test_multiple_inputs_outputs_two_tensor(self):
+        """Test nested_compile_region with multiple TwoTensor inputs and outputs."""
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @nested_compile_region
+        def gn(x, y):
+            return torch.sin(x) + y, torch.cos(y) * x
+
+        def fn(x, y):
+            a, b = gn(x, y)
+            c, d = gn(a, b)
+            return c, d
+
+        x = TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+        y = TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+
+        ref_c, ref_d = fn(x, y)
+        res_c, res_d = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        self.assertEqual(ref_c.a, res_c.a)
+        self.assertEqual(ref_c.b, res_c.b)
+        self.assertEqual(ref_d.a, res_d.a)
+        self.assertEqual(ref_d.b, res_d.b)
+
+    def test_mixed_two_tensor_and_regular_tensor(self):
+        """Test nested_compile_region with mixed TwoTensor and regular tensor inputs."""
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        @nested_compile_region
+        def gn(x, y):
+            return x + y, x * y
+
+        def fn(x, y):
+            a, b = gn(x, y)
+            return a + b
+
+        # x is TwoTensor, y is regular tensor
+        x = TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+        y = torch.randn(4, 4)
+
+        ref = fn(x, y)
+        res = torch.compile(fn, backend="aot_eager", fullgraph=True)(x, y)
+
+        self.assertEqual(ref.a, res.a)
+        self.assertEqual(ref.b, res.b)
 
 
 if __name__ == "__main__":
