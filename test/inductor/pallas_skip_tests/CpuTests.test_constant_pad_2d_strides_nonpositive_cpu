@@ -1,2 +1,0 @@
-SKIP
-Flaky test - sometimes passes, sometimes fails with numerical differences due to non-contiguous tensor handling

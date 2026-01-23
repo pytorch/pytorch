@@ -1,9 +1,0 @@
-# a.h
-a
-symC
-symD
-
-# bbb.h
-bbb
-symD
-symDef
