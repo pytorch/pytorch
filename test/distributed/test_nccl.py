@@ -238,7 +238,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -266,7 +265,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -298,7 +296,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -339,7 +336,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -359,6 +355,86 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             # handle.wait_signal(src_rank=0)
             # TODO: remove after we have wait_signal
             c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_tensor_factory(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        mempool = symm_mem.get_mem_pool(self.device)
+
+        with torch.cuda.use_mem_pool(mempool):
+            tensor = torch.arange(numel, dtype=dtype, device=self.device)
+
+        # Rendezvous should not error out
+        symm_mem.rendezvous(tensor, group=group_name)
+        tensor = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
+        expected = (
+            torch.arange(numel, dtype=dtype, device=self.device) * self.world_size
+        )
+        self.assertEqual(tensor, expected)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_compute_ops(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        dim = 1024
+        w = torch.ones(dim, dim, dtype=dtype, device=self.device)
+        x = torch.ones(1, dim, dtype=dtype, device=self.device)
+
+        mempool = symm_mem.get_mem_pool(self.device)
+
+        with torch.cuda.use_mem_pool(mempool):
+            y = torch.mm(x, w)
+
+        # One-shot all-reduce should not error out
+        y = torch.ops.symm_mem.one_shot_all_reduce(y, "sum", group_name)
+        expected = torch.mm(x, w) * self.world_size
+        self.assertEqual(y, expected)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl_version(
+        (2, 29), "NCCL Symmetric Memory multicast support from nccl 2.29"
+    )
+    def test_multicast_ptr(self) -> None:
+        """
+        Get the multicast pointer
+        """
+        from torch._C._autograd import DeviceType
+        from torch._C._distributed_c10d import _SymmetricMemory
+
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        tensor = symm_mem.empty(1, device=self.device)
+        handle = symm_mem.rendezvous(tensor, group_name)
+        if _SymmetricMemory.has_multicast_support(DeviceType.CUDA, self.device.index):
+            self.assertNotEqual(handle.multicast_ptr, 0)
+        else:
+            self.assertEqual(handle.multicast_ptr, 0)
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")

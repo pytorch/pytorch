@@ -36,7 +36,7 @@ import types
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, NoReturn, Optional, overload, TYPE_CHECKING, Union
 
 import sympy
 
@@ -56,7 +56,11 @@ from torch._dynamo.utils import (
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
+from torch._library.opaque_object import (
+    is_opaque_reference_type,
+    is_opaque_type,
+    is_opaque_value_type,
+)
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -220,7 +224,7 @@ from .higher_order_ops import (
     TorchHigherOrderOperatorVariable,
 )
 from .iter import ItertoolsVariable
-from .lazy import LazyVariableTracker
+from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -248,6 +252,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
+    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -457,6 +462,7 @@ class VariableBuilder:
         self,
         tx: "InstructionTranslator",
         source: Source,
+        allow_lazy_constant: bool = True,
     ) -> None:
         assert source is not None, (
             "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
@@ -466,6 +472,10 @@ class VariableBuilder:
         self.tx = tx
         self.source = source
         self.name = source.name
+        # allow_lazy_constant controls whether LazyConstantVariable can be returned
+        # for int/float/bool/str. Set to False when called from LazyCache.realize()
+        # to prevent double-wrapping (LazyVariableTracker containing LazyConstantVariable).
+        self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
@@ -489,7 +499,13 @@ class VariableBuilder:
 
         cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
         if cached_vt:
-            return cached_vt
+            # If allow_lazy_constant=False but the cached VT is a lazy variable,
+            # we need to rebuild to get a non-lazy version. This happens when
+            # LazyConstantVariable.realize() calls VariableBuilder.
+            if self.allow_lazy_constant or not isinstance(
+                cached_vt, LazyVariableTracker
+            ):
+                return cached_vt
 
         vt = self._wrap(value)
 
@@ -524,6 +540,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            TorchScriptObjectVariable,
         }
 
     def get_source(self) -> Source:
@@ -582,12 +599,12 @@ class VariableBuilder:
 
         return result
 
-    def wrap_regex_pattern(self, value: re.Pattern) -> ConstantLikeVariable:
+    def wrap_regex_pattern(self, value: re.Pattern[Any]) -> ConstantLikeVariable:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return ConstantLikeVariable(value)
 
-    def wrap_weakref(self, value: weakref.ReferenceType) -> WeakRefVariable:
+    def wrap_weakref(self, value: weakref.ReferenceType[Any]) -> WeakRefVariable:
         self.install_guards(GuardBuilder.TYPE_MATCH)
         return WeakRefVariable.build(self.tx, value, source=self.source)
 
@@ -629,7 +646,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k, v):
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -641,6 +658,7 @@ class VariableBuilder:
         items = dict(build_key_value(k, v) for k, v in value.items())
 
         # Create a dict_vt to be used in the mapping proxy variable
+        # pyrefly: ignore[bad-argument-type]
         dict_vt = ConstDictVariable(items, source=None)
         result = MappingProxyVariable(dict_vt, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
@@ -750,18 +768,24 @@ class VariableBuilder:
 
         if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            output = [
+            output: list[VariableTracker] = [
                 LazyVariableTracker.create(
                     getattr(value, name),
                     source=AttrSource(self.source, name),
                 )
                 for name in namedtuple_fields(type(value))
             ]
+
+            tuple_vt = TupleVariable(
+                output,
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
             result = NamedTupleVariable(
-                # type: ignore[arg-type]
                 output,
                 tuple_cls=type(value),
                 source=self.source,
+                tuple_vt=tuple_vt,
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
@@ -795,7 +819,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1066,7 +1090,8 @@ class VariableBuilder:
             )
             return GetAttrVariable(
                 AutogradFunctionVariable(
-                    value.__self__, source=AttrSource(self.source, member="__self__")
+                    value.__self__,
+                    source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
             )
@@ -1526,20 +1551,13 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            if is_opaque_type(type(value)):
-                # Check if this is a value-type opaque object (registered as both opaque type and constant)
-                if is_opaque_value_type(type(value)):
-                    # Value-type: guard on equality (will use __eq__)
-                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                    return TorchScriptObjectVariable.create(
-                        value,  # type: ignore[arg-type]
-                        value,
-                        source=self.source,
-                    )
-                else:
-                    # Reference-type: guard only on type/identity
-                    self.install_guards(GuardBuilder.TYPE_MATCH)
-
+            if is_opaque_value_type(type(value)):
+                # Value-type: guard on equality (will use __eq__)
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            elif is_opaque_reference_type(type(value)):
+                # Reference-type: guard only on type, and registered guard_fn
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                self.install_guards(GuardBuilder.OPAQUE_OBJ_GUARD_FN_MATCH)
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.
                 # The implications are:
@@ -1567,27 +1585,29 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
+            if is_opaque_value_type(type(value)):
+                proxy = value
+            else:
+                proxy = self.tx.output.root_tracer.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    type(value),
+                    fake_script_obj,
+                    source=self.source,
+                )
+                # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
+                # setting example to be real value because these example values will be used
+                # as example_inputs for user compiler.
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.source,
+                    value,  # type: ignore[arg-type]
+                    False,
+                    None,
+                    False,
+                    fake_script_obj,  # type: ignore[arg-type]
+                )
 
-            proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                type(value),
-                fake_script_obj,
-                source=self.source,
-            )
-
-            # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-            # setting example to be real value because these example values will be used
-            # as example_inputs for user compiler.
-            proxy.node.meta["grapharg"] = GraphArg(
-                self.source,
-                value,  # type: ignore[arg-type]
-                False,
-                None,
-                False,
-                fake_script_obj,  # type: ignore[arg-type]
-            )
             return TorchScriptObjectVariable.create(
-                proxy,
+                proxy,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
                 source=self.source,
             )
@@ -1604,7 +1624,9 @@ class VariableBuilder:
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
-            def build_key_value(i, k, v):
+            def build_key_value(
+                i: Any, k: Any, v: Any
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -1624,6 +1646,7 @@ class VariableBuilder:
             )
 
             dict_vt = ConstDictVariable(
+                # pyrefly: ignore[bad-argument-type]
                 result,
                 user_cls=(
                     collections.OrderedDict
@@ -1762,6 +1785,9 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif istype(value, object):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return ObjectVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -1774,7 +1800,7 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(
-        self, value: Union[tuple, list, odict_values, NamedTuple]
+        self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
     ) -> VariableTracker:
         for item in value:
             if item is value:
@@ -1940,9 +1966,9 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defiend]
+            # type: ignore[attr-defined]
             var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defiend]
+                # type: ignore[attr-defined]
                 value._dynamo_static_input_type
             )
 
@@ -1987,7 +2013,7 @@ class VariableBuilder:
                 context=str(value),
                 explanation="Dynamo does not support RNN, GRU, or LSTM.",
                 hints=[
-                    "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+                    "Set torch._dynamo.config.allow_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -2113,6 +2139,7 @@ class VariableBuilder:
 
     def wrap_literal(self, value: object) -> VariableTracker:
         if type(value) is int:
+            assert isinstance(value, int)
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
@@ -2120,7 +2147,7 @@ class VariableBuilder:
 
             if is_unbacked_source(self.source.name):
                 log.debug("%s marked unbacked via source whitelist", self.source.name)
-                return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
+                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -2156,15 +2183,64 @@ class VariableBuilder:
                     )
                     return ConstantVariable.create(value=value, source=self.source)
 
-            return self.wrap_symint(value)
-        elif not config.specialize_float and type(value) is float:
-            return self.wrap_symfloat(value)
+                return self._wrap_lazy_constant(value, self._wrap_symint_for_lazy)
+
+            return self._wrap_lazy_constant(value)
+        elif type(value) is float:
+            assert isinstance(value, float)
+            if not config.specialize_float:
+                return self._wrap_lazy_constant(value, self._wrap_symfloat_for_lazy)
+
+            return self._wrap_lazy_constant(value)
+        elif type(value) in (bool, str):
+            assert isinstance(value, (bool, str))
+            return self._wrap_lazy_constant(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
             if isinstance(value, (list, set)):
                 return self.tx.output.side_effects.track_mutable(value, result)
             return result
+
+    def _wrap_symint_for_lazy(self, value: int) -> VariableTracker:
+        return self.wrap_symint(value)
+
+    def _wrap_symfloat_for_lazy(self, value: float) -> VariableTracker:
+        return self.wrap_symfloat(value)
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: int,
+        wrap_fn: Callable[[int], VariableTracker],
+    ) -> VariableTracker: ...
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: float,
+        wrap_fn: Callable[[float], VariableTracker],
+    ) -> VariableTracker: ...
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: Union[int, float, bool, str],
+        wrap_fn: None = None,
+    ) -> VariableTracker: ...
+
+    def _wrap_lazy_constant(
+        self,
+        value: Union[int, float, bool, str],
+        wrap_fn: Optional[Callable[[Any], VariableTracker]] = None,
+    ) -> VariableTracker:
+        """Wrap a primitive constant, deferring guard installation if allowed."""
+        if not self.allow_lazy_constant:
+            if wrap_fn is not None:
+                return wrap_fn(value)
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+        return LazyConstantVariable.create(value, source=self.source)
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
@@ -2289,7 +2365,7 @@ class VariableBuilder:
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
                 explanation="torch.compile does not support sparse Tensors",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
 
         if (
@@ -3150,7 +3226,7 @@ def handle_traced_output(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
                 context=str(example_value),
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
@@ -3177,6 +3253,8 @@ def handle_traced_output(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target is torch.random.set_rng_state
     ):
+        assert type(proxy.node.target) is not str
+        # pyrefly: ignore[bad-argument-type]
         return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
         proxy.node.target is torch._C._DisableFuncTorch
@@ -3212,7 +3290,9 @@ def handle_traced_output(
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
-                        base=source, index=i, index_is_slice=False
+                        base=source,
+                        index=i,
+                        index_is_slice=False,
                     )
                 else:
                     # use the same options object as parent
@@ -3244,7 +3324,7 @@ def handle_traced_output(
             ), (
                 f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             )
-            return NamedTupleVariable(unpacked, example_value.__class__, **options)
+            return NamedTupleVariable(unpacked, example_value.__class__, **options)  # type: ignore[arg-type]
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -3357,6 +3437,17 @@ def handle_traced_output(
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif is_opaque_type(type(example_value)):
+        # This is for handling opaque objects in custom ops
+        if is_opaque_value_type(type(example_value)):
+            proxy = example_value  # pyrefly: ignore[bad-assignment]
+        fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+            tx.output.fake_mode, example_value
+        )
+        return TorchScriptObjectVariable.create(
+            proxy,
+            fake_script_obj,
+        )
     else:
         unimplemented(
             gb_type="torch.* op returned non-Tensor",
@@ -3451,9 +3542,7 @@ def get_automatic_dynamic_shapes_mark_as() -> DimDynamic:
     if config.automatic_dynamic_shapes_mark_as == "dynamic":
         return DimDynamic.DYNAMIC
     elif config.automatic_dynamic_shapes_mark_as == "unbacked":
-        return DimDynamic.SIZE_LIKE_UNBACKED
-    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
-        return DimDynamic.OBLIVIOUS_SIZE
+        return DimDynamic.UNBACKED
     else:
         raise ValueError(
             f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
@@ -3586,7 +3675,7 @@ def _automatic_dynamic(
     name = source.name
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
-        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
+        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else {}
     )
 
     # Get base context if the tensor is a view
@@ -3631,7 +3720,6 @@ def _automatic_dynamic(
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
-            # type: ignore[assignment]
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
@@ -3650,7 +3738,6 @@ def _automatic_dynamic(
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
-            # type: ignore[assignment]
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
@@ -3662,7 +3749,9 @@ def _automatic_dynamic(
     t_id = id(e)
     dim2constraint = {}
 
-    def update_dim2constraint(dim, constraint_range, name):
+    def update_dim2constraint(
+        dim: int, constraint_range: "StrictMinMaxConstraint", name: str
+    ) -> None:
         if dim in dim2constraint:
             from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
@@ -3800,7 +3889,7 @@ def _automatic_dynamic(
         constraint_strides.append(constraint_stride)
 
         if marked_unbacked or is_unbacked_source(name):
-            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+            dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None
             or marked_dynamic
@@ -3836,8 +3925,8 @@ def _automatic_dynamic(
         specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,
-        # type: ignore[arg-type]
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        shape_ids=getattr(e, "_dynamo_shape_ids", None),
     )
 
 
@@ -3982,6 +4071,15 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
+        elif is_opaque_value_type(type(value)):
+            # This is for handling opaque objects in custom ops
+            fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                tx.output.fake_mode, value
+            )
+            return TorchScriptObjectVariable.create(
+                value,
+                fake_script_obj,
+            )
         # type: ignore[attr-defined]
         elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return UserDefinedObjectVariable(value)
@@ -4055,6 +4153,8 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
+        elif istype(value, object):
+            return ObjectVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
@@ -4063,7 +4163,7 @@ class SourcelessBuilder:
         )
 
     @staticmethod
-    def wrap_constant_literal(value) -> VariableTracker:
+    def wrap_constant_literal(value: object) -> VariableTracker:
         assert ConstantVariable.is_literal(value)
         return ConstantVariable.create(value=value)
 

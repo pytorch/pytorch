@@ -396,7 +396,7 @@ def cudagraph_mark_step_begin():
             torch.compiler.cudagraph_mark_step_begin()
             rand_foo() + rand_foo()
 
-    For more details, see `torch.compiler_cudagraph_trees <https://pytorch.org/docs/main/torch.compiler_cudagraph_trees.html>`__
+    For more details, see `torch.compiler_cudagraph_trees <https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_cudagraph_trees.html>`__  # noqa: B950
     """
     from torch._inductor import cudagraph_trees
 
@@ -701,7 +701,7 @@ def nested_compile_region(
 
         if not dynamo_config.enable_invoke_subgraph_regional_compile:
             raise RuntimeError(
-                "nested_compile_region config is an experiemntal feature for testing only."
+                "nested_compile_region config is an experimental feature for testing only."
             )
 
     from torch._higher_order_ops.invoke_subgraph import (
@@ -712,7 +712,10 @@ def nested_compile_region(
 
 
 def load_compiled_function(
-    file: io.IOBase, *, f_globals: Optional[dict[str, object]] = None
+    file: io.IOBase,
+    *,
+    f_globals: dict[str, object] | None = None,
+    external_data: dict[str, Any] | None = None,
 ) -> Callable[..., Any]:
     """
     Load an aot-compiled function from a file.
@@ -723,7 +726,10 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional globals to be loaded into the compiled function.
+        f_globals: Optional global scope enclosing the compiled function.
+        external_data: Optional data to be loaded into the runtime environment
+                       of the compiled function. This should contains the same
+                       data as AOTCompileResult.external_data returned from save_compiled_function() call.
 
     Returns:
         A torch-compiled function with compilation preloaded from disk.
@@ -731,4 +737,4 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals)
+    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
