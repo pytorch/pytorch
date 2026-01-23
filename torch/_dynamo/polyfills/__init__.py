@@ -85,7 +85,7 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
-def impl_IS_MAPPING(a: Any) -> bool:
+def impl_IS_MAPPING(a: object) -> bool:
     return isinstance(a, Mapping)
 
 
