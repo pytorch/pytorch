@@ -1943,7 +1943,7 @@ class TestLinalg(TestCase):
                     self.assertEqual(result, expected)
 
     @onlyCPU
-    def test_powsum_dtype_kwarg_cpu(self, device):
+    def test_powsum_dtype_kwarg_1d_reduction(self, device):
         # Test dtype kwarg on CPU with bfloat16 input and float32 computation
         # Tests both the 1D reduction path (explicit conversion) and larger reductions (kernel handles it)
         ords = [0.5, 1, 2, 3]
