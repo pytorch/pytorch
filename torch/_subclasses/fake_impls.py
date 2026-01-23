@@ -744,7 +744,8 @@ def _reshape_copy(
             a.clone(memory_format=torch.contiguous_format),
             *shape,
         )
-        assert isinstance(result, FakeTensor)
+        if not isinstance(result, FakeTensor):
+            raise TypeError(f"Expected FakeTensor, got {type(result)}")
         return result
 
 
@@ -761,7 +762,7 @@ def _view_meta(
     ):
         return _view_unbacked_meta(a, shape)
     else:
-        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)  # type: ignore[return-value]
+        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
 
 
 @register_op_impl(aten.view_copy.default)
@@ -773,7 +774,8 @@ def _view_meta_copy(
     out: FakeTensor | None = None,
 ) -> FakeTensor:
     result = _view_meta(fake_mode, func, a, *shape)
-    assert isinstance(result, FakeTensor)
+    if not isinstance(result, FakeTensor):
+        raise TypeError(f"Expected FakeTensor, got {type(result)}")
     if out is not None:
         return result
 
