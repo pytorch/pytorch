@@ -997,7 +997,6 @@ inductor_one_sample["xpu"] = {
 # TODO: Fix these so strides match.
 inductor_skip_exact_stride = {
     "complex",
-    "empty_permuted",
     "fft.irfftn",
     "fft.irfft2",
     "linalg.diagonal",
