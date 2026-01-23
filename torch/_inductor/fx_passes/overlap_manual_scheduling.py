@@ -114,8 +114,6 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
         assert len(new_waits) == 1, f"Expected exactly one new wait, got {new_waits}"
         new_wait = new_waits[0]
-        new_start = new_wait.args[0]
-        assert isinstance(new_start, fx.Node)
 
         # Set manual bucketing-specific metadata
         # Note: Generic metadata (nn_module_stack, fwd_nn_module_stack, custom, stack_trace)
