@@ -16,7 +16,8 @@ from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
-    from torch.onnx._internal._lazy_import import onnx_ir as ir
+    from onnxscript import ir
+
     from torch.onnx._internal.exporter import _onnx_program
 
 
