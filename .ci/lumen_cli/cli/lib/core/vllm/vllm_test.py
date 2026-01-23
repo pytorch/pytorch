@@ -195,11 +195,6 @@ class VllmTestRunner(BaseRunner):
         # install test packages
         self._install_test_dependencies()
 
-        # TODO(huydhn): Remove this once https://github.com/vllm-project/vllm/pull/32287
-        # lands or a newer transformers version is used on vLLM. This is needed to fix
-        # the offline mode
-        pip_install_packages(packages=["transformers==4.57.5"], prefer_uv=True)
-
     def _set_envs(self, inputs: VllmTestParameters):
         os.environ["TORCH_CUDA_ARCH_LIST"] = inputs.torch_cuda_arch_list
         if not validate_cuda(get_env("TORCH_CUDA_ARCH_LIST")):
