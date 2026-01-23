@@ -13699,6 +13699,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             elements = torch.tensor([1, 2, 3, 4])
             test_elements = 1
             self.common(torch.isin, (elements, test_elements), {"invert": invert})
+            torch._dynamo.reset()
+            elements = torch.tensor([1, 2, 3, 4], device=self.device)
+            test_elements = torch.tensor(2, device=self.device)
+            self.common(torch.isin, (elements, test_elements), {"invert": invert})
 
         elements = torch.tensor(3.0)
         test_elements = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
