@@ -379,6 +379,14 @@ struct igammac_functor {
   }
 };
 
+struct heaviside_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    // Returns b when a == 0, otherwise returns 1 if a > 0 or 0 if a < 0
+    return a == T(0) ? b : static_cast<T>(a > T(0));
+  }
+};
+
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
   REGISTER_BINARY_OP(NAME, int, int);     \
@@ -493,6 +501,10 @@ REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, half, half, half);
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat, bfloat);
+
+// Heaviside step function
+REGISTER_FLOAT_BINARY_OP(heaviside);
+REGISTER_INTEGER_BINARY_OP(heaviside);
 
 // Complex binary functions
 REGISTER_BINARY_OP(polar, float, float2);
