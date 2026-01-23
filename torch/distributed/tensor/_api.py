@@ -206,20 +206,22 @@ class _FromTorchTensor(torch.autograd.Function):
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
         # local gradients directly
-        if grad_output.placements != forward_input_placements:
-            current_spec = grad_output._spec
+        normalized_placements: list[Placement] = []
+        # if forward placement is partial, we always redistribute grad_input to Replicate:
+        # Partial(fwd) - Replicate(grad_output) - Replicate(grad_input): no redistribution needed
+        # Partial(fwd) - Partial(grad_output) - Replicate(grad_input): redistribute Partial to Replicate
 
-            # if target gradient placement is partial, we always redistribute to replicate, this means
-            # for backward replicate -> partial, we do replicate -> replicate
-            # for backward partial -> partial, we do partial -> replicate.
-            # For partial -> partial, redistributing to replicate might not be efficient but we choose to do so to avoid ambiguity
-            normalized_placements: list[Placement] = []
-            for current, target in zip(
-                current_spec.placements, forward_input_placements
-            ):
-                if target.is_partial():
-                    normalized_placements.append(Replicate())
+        # The second case is BC breaking:
+        # was: Partial(fwd) - Partial(grad_output) - Partial(grad_input)
+        # now: Partial(fwd) - Partial(grad_output) - Replicate(grad_input)
+        for current, target in zip(grad_output.placements, forward_input_placements):
+            if target.is_partial():
+                normalized_placements.append(Replicate())
+            else:
+                normalized_placements.append(target)
 
+        if grad_output.placements != tuple(normalized_placements):
+            current_spec: DTensorSpec = grad_output._spec
             target_spec = DTensorSpec(
                 forward_input_device_mesh,
                 tuple(normalized_placements),
@@ -419,15 +421,22 @@ class DTensor(torch.Tensor):
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
 
-        .. note:: During backward, if the target placement is :class:`Partial`, we always
-            redistribute the gradient to :class:`Replicate` instead. This means:
+        .. note:: During backward, ``from_local`` provides the following gradient placement
+            guarantees. For each mesh dimension, the gradient placement maps as follows:
 
-            - For backward ``Replicate`` -> ``Partial``, we do ``Replicate`` -> ``Replicate``
-            - For backward ``Partial`` -> ``Partial``, we do ``Partial`` -> ``Replicate``
+            +---------------------+--------------------+
+            | Forward Placement   | Gradient Placement |
+            +=====================+====================+
+            | ``Shard``           | ``Shard``          |
+            +---------------------+--------------------+
+            | ``Replicate``       | ``Replicate``      |
+            +---------------------+--------------------+
+            | ``Partial``         | ``Replicate``      |
+            +---------------------+--------------------+
 
-            Redistributing to ``Replicate`` in the ``Partial`` -> ``Partial`` case may not be the
-            most efficient option, but we choose to do so to avoid ambiguity and provide clearer
-            gradient semantics to users.
+            When the forward placement is :class:`Partial`, we always redistribute the gradient
+            to :class:`Replicate` instead of keeping it :class:`Partial`. This may not be the most
+            efficient option, but it avoids ambiguity and provides clearer gradient semantics to users.
         """
         # `local_tensor` argument cannot be DTensor
         if isinstance(local_tensor, DTensor):

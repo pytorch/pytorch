@@ -223,6 +223,74 @@ class DTensorTest(DTensorTestBase):
             DTensor.from_local(dtensor, device_mesh, shard_spec)
 
     @with_comms
+    def test_from_local_backward(self):
+        """Test that from_local backward gives the correct gradient placements.
+
+        Verifies the gradient placement guarantees documented in from_local:
+        - Shard forward -> Shard gradient
+        - Replicate forward -> Replicate gradient
+        - Partial forward -> Replicate gradient
+        """
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        # Test 1: Shard -> Shard (no redistribution needed in backward)
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Shard(0)])
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Shard(0)]
+            )
+            output.backward(grad)
+            self.assertEqual(local_tensor.grad, torch.ones(3, 3) * 2)
+        # Gradient should flow back without redistribution
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # Test 2: Replicate -> Replicate (no redistribution needed in backward)
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Replicate()])
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type),
+                device_mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            output.backward(grad)
+            self.assertEqual(local_tensor.grad, torch.ones(3, 3) * 2)
+        # Gradient should flow back without redistribution
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # Test 3: Partial -> Replicate (gradient normalized to Replicate)
+        # When forward placement is Partial, backward should redistribute to Replicate
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            local_tensor = torch.randn(
+                3, 3, device=self.device_type, requires_grad=True
+            )
+            dt = DTensor.from_local(local_tensor, device_mesh, [Partial()])
+            output = dt * 2
+            grad = DTensor.from_local(
+                torch.ones(3, 3, device=self.device_type), device_mesh, [Partial()]
+            )
+            output.backward(grad)
+            # The gradient should be redistribute from Partial to Replicate
+            # Since grad was Partial with ones, after all-reduce it becomes world_size * ones
+            # Then multiplied by 2 from the backward of (dt * 2)
+            expected_grad = torch.ones(3, 3) * 2 * self.world_size
+            self.assertEqual(local_tensor.grad, expected_grad)
+
+        # Verify that an all-reduce happened for the Partial -> Replicate case
+        self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+
+    @with_comms
     def test_from_local_uneven_sharding(self):
         device_mesh = self.build_device_mesh()
 
