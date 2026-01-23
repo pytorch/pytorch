@@ -3436,6 +3436,7 @@ MOD_INLINELIST = [
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
+    "torch.export._patches",
     "torch.export._tree_utils",
     "torch.export._unlift",
     "torch.export._wrapper_utils",
