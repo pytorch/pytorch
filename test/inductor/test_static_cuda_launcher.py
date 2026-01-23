@@ -2,6 +2,7 @@
 import os
 import random
 import tempfile
+from unittest import mock
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
@@ -13,6 +14,7 @@ from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import requires_cuda
+from torch.torch_version import TorchVersion
 
 
 @requires_cuda
@@ -155,10 +157,13 @@ class TestStaticCudaLauncher(TestCase):
 
         compiled_kernel = floats[1,](*args)
         launcher = self._make_launcher(compiled_kernel)
-        # TODO: in Pytorch's pinned version of triton, arg3 is typed as regular float
-        # but in triton 3.3.0, this is fixed and it's 0ffd. We'll need to update later.
-        self.assertEqual(launcher.arg_tys, "Offf")
-        self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
+        if TorchVersion(triton.__version__) >= TorchVersion("3.4.0"):
+            self.assertEqual(launcher.arg_tys, "Offd")
+        else:
+            self.assertEqual(launcher.arg_tys, "Offf")
+        # TODO this line fails on Triton 3.4.0 (https://github.com/triton-lang/triton/issues/6176)
+        # Add the check back when this is fixed in Triton
+        # self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device="cuda"))
         new_arg0 = torch.zeros(1, dtype=torch.float64, device="cuda")
         device_interface = get_interface_for_device("cuda")
         stream = device_interface.get_raw_stream(device_interface.current_device())
@@ -465,6 +470,28 @@ class TestStaticTritonCompileResult(TestCase):
         )
 
     @skipIfRocm
+    # The error gets raised on a worker, so we want to not use a separate process
+    @torch._inductor.config.patch(
+        {"compile_threads": 1, "static_launch_user_defined_triton_kernels": True}
+    )
+    def test_static_launch_user_defined_triton_kernels(self):
+        # User defined triton kernel
+        @triton.jit
+        def custom_kernel(arg_0, arg_1):
+            x = tl.load(arg_0)
+            y = arg_1
+            tl.store(arg_0, x + y)
+
+        @torch.compile
+        def foo(x):
+            custom_kernel[1,](x, 5)
+            return x
+
+        x = torch.randn(1, device="cuda")
+        x2 = x.clone().detach_()
+        self.assertEqual(foo(x), x2 + 5)
+
+    @skipIfRocm
     def test_empty_tensor(self):
         @torch.compile()
         def foo(x, y):
@@ -495,6 +522,24 @@ class TestStaticTritonCompileResult(TestCase):
         eager_result = fn(arg)
         compiled_result = compiled_fn(arg)
         self.assertEqual(eager_result, compiled_result)
+
+    @skipIfRocm
+    def test_disable_static_cuda_launcher(self):
+        @torch.compile
+        def fn(x, y):
+            return torch.cat(((x * 4), y + 10))
+
+        # Test that static cuda launcher is in fact disabled
+        with torch._inductor.config.patch("use_static_cuda_launcher", False):
+            x = torch.rand(20, device="cuda")
+            y = torch.rand(20, device="cuda")
+            with mock.patch(
+                "torch._inductor.runtime.triton_heuristics.StaticTritonCompileResult.make_launcher"
+            ) as mocked:
+                result = fn(x, y)
+                mocked.assert_not_called()
+
+            self.assertEqual(result, torch.cat(((x * 4), y + 10)))
 
 
 if __name__ == "__main__":

@@ -12,10 +12,10 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
+    OpSpec,
     OpStrategy,
     OutputSharding,
     OutputSpecType,
-    PlacementStrategy,
     RuntimeSchemaInfo,
     StrategyType,
     TupleStrategy,
@@ -227,7 +227,7 @@ class ShardingPropagator:
 
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):
-                return OpStrategy([PlacementStrategy(spec)])
+                return OpStrategy([OpSpec(spec)])
             elif (
                 isinstance(spec, (list, tuple))
                 and len(spec) > 0
@@ -365,8 +365,8 @@ class ShardingPropagator:
                 )
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding processing
-                # runtime selected placement strategy for each TupleStrategy input arg
-                selected_strategies: list[PlacementStrategy] = []
+                # runtime select OpSpec for each TupleStrategy input arg
+                selected_strategies: list[OpSpec] = []
                 out_spec_list: list[DTensorSpec] = []
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
@@ -487,21 +487,21 @@ class ShardingPropagator:
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
 
-    def _select_strategy(self, strategy: OpStrategy) -> PlacementStrategy:
+    def _select_strategy(self, strategy: OpStrategy) -> OpSpec:
         if len(strategy.strategies) == 1:
-            # short cut with only one possible strategy
+            # short cut with only one possible OpSpec
             return strategy.strategies[0]
 
-        strategy_costs: list[float] = []
-        for strtg in strategy.strategies:
-            assert strtg.redistribute_cost is not None, (
-                "must set redistribute cost each strategy!"
+        op_spec_costs: list[float] = []
+        for op_spec in strategy.strategies:
+            assert op_spec.redistribute_cost is not None, (
+                "must set redistribute cost each OpSpec!"
             )
-            redistribute_cost = sum(chain.from_iterable(strtg.redistribute_cost))
-            strategy_costs.append(redistribute_cost)
+            redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
+            op_spec_costs.append(redistribute_cost)
 
         # for eager execution, we just select the one with the minimal redistribute cost
-        return strategy.strategies[strategy_costs.index(min(strategy_costs))]
+        return strategy.strategies[op_spec_costs.index(min(op_spec_costs))]
 
     def _adjust_shape_and_stride_args(
         self,

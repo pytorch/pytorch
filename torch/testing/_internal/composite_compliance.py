@@ -127,7 +127,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             # by a Composite operation; if the Composite
             # operator attempts to read from the storage without dispatching then it'll
             # raise a RuntimeError due to it being a meta storage.
-            r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            r = torch.Tensor._make_wrapper_subclass(
                 cls, elem.size(),
                 dtype=elem.dtype, layout=elem.layout,
                 device=elem.device, requires_grad=elem.requires_grad,
@@ -359,7 +359,7 @@ def check_all_permutations(op, args, kwargs, assert_equal_fn):
         # - data_ptr accesses
         # The first is easy to filter for (we could make the error a different
         # error class), the second is always going to be a RuntimeError due to
-        # how it is implemented (if you try to access the data_ptr of thex
+        # how it is implemented (if you try to access the data_ptr of the
         # wrapper Tensor, it raises you some internal RuntimeError).
         #
         # So the most general thing to catch here was RuntimeError. If you

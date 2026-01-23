@@ -308,7 +308,13 @@ def _check_symint(
     keypath: KeyPath,
     i: Optional[int] = None,
 ) -> None:
-    if isinstance(arg, torch.SymInt) and not arg.node.expr.is_number:
+    from torch.export.dynamic_shapes import _IntWrapper
+
+    if (
+        isinstance(arg, torch.SymInt)
+        and not arg.node.expr.is_number
+        or isinstance(arg, _IntWrapper)
+    ):
         # This can happen when, say, arg is a fake tensor.
         # We do not run checks on symbolic shapes of fake inputs as
         # such checks can affect the shape env.
@@ -442,9 +448,9 @@ def register_dataclass_as_pytree_node(
     from_dumpable_context: Optional[FromDumpableContextFn] = None,
     return_none_fields: bool = False,
 ) -> None:
-    assert dataclasses.is_dataclass(
-        cls
-    ), f"Only dataclasses can be registered with this function: {cls}"
+    assert dataclasses.is_dataclass(cls), (
+        f"Only dataclasses can be registered with this function: {cls}"
+    )
 
     def default_flatten_fn(obj: Any) -> tuple[list[Any], Context]:
         flattened = []
@@ -638,11 +644,14 @@ def _insert_aten_to_metadata_assert_pass(gm: torch.fx.GraphModule) -> None:
                 continue
 
             if (tensor_val := node.args[0].meta.get("val")) is not None:
-                with gm.graph.inserting_before(node), _set_node_metadata_hook(
-                    gm,
-                    functools.partial(
-                        _node_metadata_hook,
-                        stack_trace=node.meta.get("stack_trace"),
+                with (
+                    gm.graph.inserting_before(node),
+                    _set_node_metadata_hook(
+                        gm,
+                        functools.partial(
+                            _node_metadata_hook,
+                            stack_trace=node.meta.get("stack_trace"),
+                        ),
                     ),
                 ):
                     gm.graph.call_function(
@@ -1336,6 +1345,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
 
         import torch
 
+
         class Module(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1344,11 +1354,14 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
             def forward(self, x):
                 return self.linear(x)
 
+
         torch._export.utils.register_module_as_pytree_node(InputDataClass)
+
 
         class Mod(torch.nn.Module):
             def forward(self, x, m):
                 return m(x) + x
+
 
         ep = torch.export.export(Mod(), (torch.randn(3), Module()))
         print(ep)

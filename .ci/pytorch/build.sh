@@ -27,6 +27,12 @@ cmake --version
 echo "Environment variables:"
 env
 
+# The sccache wrapped version of nvcc gets put in /opt/cache/lib in docker since
+# there are some issues if it is always wrapped, so we need to add it to PATH
+# during CI builds.
+# https://github.com/pytorch/pytorch/blob/0b6c0898e6c352c8ea93daec854e704b41485375/.ci/docker/common/install_cache.sh#L97
+export PATH="/opt/cache/lib:$PATH"
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
   export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
@@ -51,12 +57,6 @@ fi
 # Enable LLVM dependency for TensorExpr testing
 export USE_LLVM=/opt/llvm
 export LLVM_DIR=/opt/llvm/lib/cmake/llvm
-
-if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
-  # To build test_edge_op_registration
-  export BUILD_EXECUTORCH=ON
-  export USE_CUDA=0
-fi
 
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
@@ -198,10 +198,8 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]] && [ -z "$MAX_JOBS_OVERRIDE" ]; then
-  echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
-  echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
-  export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]]; then
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j 2"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -257,6 +255,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e -o pipefail
 
   get_bazel
+  python3 tools/optional_submodules.py checkout_eigen
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -394,10 +393,8 @@ else
     # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
     # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
     # 16 CPUs
-    if [ -z "$MAX_JOBS_OVERRIDE" ]; then
-      MAX_JOBS=$(nproc --ignore=4)
-      export MAX_JOBS
-    fi
+    MAX_JOBS=$(nproc --ignore=4)
+    export MAX_JOBS
 
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.

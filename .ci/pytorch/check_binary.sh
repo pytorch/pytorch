@@ -313,7 +313,7 @@ if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
   # Please see issue for reference: https://github.com/pytorch/pytorch/issues/152426
   if [[ "$(uname -m)" == "s390x" ]]; then
     cxx_abi="19"
-  elif [[ "$DESIRED_CUDA" != 'cu118' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'rocm'* ]]; then
+  elif [[ "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'rocm'* ]]; then
     cxx_abi="18"
   else
     cxx_abi="16"

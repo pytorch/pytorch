@@ -26,7 +26,7 @@ function install_ubuntu() {
     wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
         | gpg --dearmor > /usr/share/keyrings/oneapi-archive-keyring.gpg.gpg
     echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg.gpg] \
-        https://apt.repos.intel.com/${XPU_REPO_NAME} all main" \
+        https://apt.repos.intel.com/oneapi all main" \
         | tee /etc/apt/sources.list.d/oneAPI.list
 
     # Update the packages list and repository index
@@ -56,14 +56,10 @@ function install_ubuntu() {
 
 function install_rhel() {
     . /etc/os-release
-    if [[ "${ID}" == "rhel" ]]; then
-        if [[ ! " 8.8 8.9 9.0 9.2 9.3 " =~ " ${VERSION_ID} " ]]; then
-            echo "RHEL version ${VERSION_ID} not supported"
-            exit
-        fi
-    elif [[ "${ID}" == "almalinux" ]]; then
-        # Workaround for almalinux8 which used by quay.io/pypa/manylinux_2_28_x86_64
-        VERSION_ID="8.8"
+
+    if [[ ! " 8.8 8.10 9.0 9.2 9.3 " =~ " ${VERSION_ID} " ]]; then
+        echo "RHEL version ${VERSION_ID} not supported"
+        exit
     fi
 
     dnf install -y 'dnf-command(config-manager)'
@@ -74,7 +70,7 @@ function install_rhel() {
     tee > /etc/yum.repos.d/oneAPI.repo << EOF
 [oneAPI]
 name=Intel for Pytorch GPU dev repository
-baseurl=https://yum.repos.intel.com/${XPU_REPO_NAME}
+baseurl=https://yum.repos.intel.com/oneapi
 enabled=1
 gpgcheck=1
 repo_gpgcheck=1
@@ -118,7 +114,7 @@ function install_sles() {
         https://repositories.intel.com/gpu/sles/${VERSION_SP}${XPU_DRIVER_VERSION}/unified/intel-gpu-${VERSION_SP}.repo
     rpm --import https://repositories.intel.com/gpu/intel-graphics.key
     # To add the online network network package repository for the Intel Support Packages
-    zypper addrepo https://yum.repos.intel.com/${XPU_REPO_NAME} oneAPI
+    zypper addrepo https://yum.repos.intel.com/oneapi oneAPI
     rpm --import https://yum.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
 
     # The xpu-smi packages
@@ -141,10 +137,10 @@ if [[ "${XPU_DRIVER_TYPE,,}" == "rolling" ]]; then
     XPU_DRIVER_VERSION=""
 fi
 
-XPU_REPO_NAME="intel-for-pytorch-gpu-dev"
-XPU_PACKAGES="intel-for-pytorch-gpu-dev-0.5 intel-pti-dev-0.9"
-if [[ "$XPU_VERSION" == "2025.0" ]]; then
-    XPU_REPO_NAME="oneapi"
+# Default use Intel® oneAPI Deep Learning Essentials 2025.0
+if [[ "$XPU_VERSION" == "2025.1" ]]; then
+    XPU_PACKAGES="intel-deep-learning-essentials-2025.1"
+else
     XPU_PACKAGES="intel-deep-learning-essentials-2025.0"
 fi
 

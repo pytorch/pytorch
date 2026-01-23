@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 
-r"""Importing this file includes common utility methods and base clases for
+r"""Importing this file includes common utility methods and base classes for
 checking quantization api and properties of resulting modules.
 """
 
@@ -2806,7 +2806,7 @@ class ModelWithFunctionals(torch.nn.Module):
         self.myadd = nnq.FloatFunctional()
         self.myadd_relu = nnq.FloatFunctional()
         self.mymatmul = nnq.FloatFunctional()
-        # Tracing doesnt work yet for c10 ops with scalar inputs
+        # Tracing doesn't work yet for c10 ops with scalar inputs
         # https://github.com/pytorch/pytorch/issues/27097
         # self.my_scalar_add = nnq.FloatFunctional()
         # self.my_scalar_mul = nnq.FloatFunctional()
@@ -2816,7 +2816,7 @@ class ModelWithFunctionals(torch.nn.Module):
         z = self.myadd.add(y, y)
         w = self.myadd_relu.add_relu(z, z)
         u = self.mymatmul.matmul(w, w.T)
-        # Tracing doesnt work yet for c10 ops with scalar inputs
+        # Tracing doesn't work yet for c10 ops with scalar inputs
         # https://github.com/pytorch/pytorch/issues/27097
         # w = self.my_scalar_add.add_scalar(w, -0.5)
         # w = self.my_scalar_mul.mul_scalar(w, 0.5)
@@ -3183,12 +3183,13 @@ class TestHelperModules:
             x = self.adaptive_avg_pool2d(x)
             return x
 
+
     class ConvWithBNRelu(torch.nn.Module):
-        def __init__(self, relu, dim=2, bn=True, bias=True):
+        def __init__(self, relu, dim=2, bn=True, bias=True, padding=0):
             super().__init__()
-            convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d}
-            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
-            self.conv = convs[dim](3, 3, 3, bias=bias)
+            convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
+            self.conv = convs[dim](3, 3, 3, bias=bias, padding=padding)
 
             if bn:
                 self.bn = bns[dim](3)

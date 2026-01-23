@@ -14,6 +14,13 @@ DISTRIBUTED = [
 ]
 
 register_log(
+    "async_compile",
+    [
+        "torch._inductor.async_compile",
+        "torch._inductor.compile_worker.tracked_process_pool",
+    ],
+)
+register_log(
     "cache", ("torch._inductor.remote_cache", "torch._inductor.fb.remote_cache")
 )
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
@@ -70,6 +77,10 @@ register_artifact(
     "Prints the dynamo traced graph (prior to AOTDispatch) in a table. If you prefer python code use `graph_code` instead. ",
 )
 register_artifact("graph_code", "Like `graph`, but gives you the Python code instead.")
+register_artifact(
+    "graph_code_verbose",
+    "Verbose FX pass logs, e.g. from tensorify_python_scalars and runtime_assert.",
+)
 register_artifact(
     "graph_sizes", "Prints the sizes of all FX nodes in the dynamo graph."
 )
@@ -183,6 +194,12 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "loop_tiling",
+    "Logs related to loop ordering",
+    off_by_default=True,
+)
+
+register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
     off_by_default=True,
@@ -218,4 +235,14 @@ register_artifact(
     off_by_default=True,
 )
 
+register_artifact(
+    "inductor_metrics",
+    "Logs Inductor metrics, such as num_bytes, nodes_num_elem, node_runtimes",
+    off_by_default=True,
+)
+register_artifact(
+    "hierarchical_compile",
+    "Logs debug info for hierarchical compilation",
+    off_by_default=True,
+)
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")

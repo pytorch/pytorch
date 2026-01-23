@@ -15,7 +15,7 @@ from torch.fx._lazy_graph_module import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import TestCase
 
 
 class TestLazyGraphModule(TestCase):
@@ -276,4 +276,7 @@ class TestLazyGraphModule(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

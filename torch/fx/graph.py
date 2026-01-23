@@ -449,7 +449,7 @@ class CodeGen:
                         # This code-path used in Python < 3.9
                         return origin_typename
 
-                    return f'{origin_typename}[{",".join(args)}]'
+                    return f"{origin_typename}[{','.join(args)}]"
                 else:
                     # Bare type, such as `typing.Tuple` with no subscript
                     # This code-path used in Python 3.9+
@@ -573,7 +573,7 @@ class CodeGen:
                             summary_str = parsed_stack_trace.get_summary_str()
                         else:
                             summary_str = ""
-                        body.append(f'\n {dim(f"# {summary_str}")}\n')
+                        body.append(f"\n {dim(f'# {summary_str}')}\n")
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     no_stacktrace_msg = "# No stacktrace found for following nodes"
@@ -842,7 +842,7 @@ class _PyTreeCodeGen(CodeGen):
             if len(has_annotation) > 0:
                 fn_definition += "\n    " + "".join(has_annotation) + "\n"
             fn_definition += f"""
-    {', '.join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+    {", ".join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
 
     def generate_output(self, output_args):
@@ -1005,7 +1005,7 @@ class Graph:
 
         Returns:
 
-            Iteratable of nodes with the requested op and target.
+            Iterable of nodes with the requested op and target.
         """
         node_list = self._find_nodes_lookup_table.find_nodes(op=op, target=target)
         if sort:
@@ -1565,7 +1565,7 @@ class Graph:
         # To do this, we create a new namespace just for this source. All names
         # that get printed must come from this namespace.
         #
-        # Why can't we re-use node.name? Because it was generated within the
+        # Why can't we reuse node.name? Because it was generated within the
         # namespace `self._graph_namespace`. In order to provide uniqueness
         # over both locals (node.name) *and* globals, we create a completely
         # new namespace to put all identifiers in.
@@ -1573,7 +1573,7 @@ class Graph:
 
         # Override Node's repr to generate a valid name within our namespace.
         # Since repr() is designed to produce a valid Python expression, it
-        # makes sense to re-use it. This way, it's easy to print something like
+        # makes sense to reuse it. This way, it's easy to print something like
         # Tuple[Node, Node] by simply calling repr() on it. Node's __repr__ is
         # implemented cooperatively to allow this.
         def node_repr(n: Node):
@@ -1877,7 +1877,9 @@ class Graph:
             # through `insert_pdb`:
             gm.graph.on_generate_code(
                 lambda current_trans: (
-                    lambda body: insert_pdb(current_trans(body) if current_trans else body)
+                    lambda body: insert_pdb(
+                        current_trans(body) if current_trans else body
+                    )
                 )
             )
 
@@ -1916,7 +1918,7 @@ class Graph:
 
 @contextmanager
 def _override_sym_repr(
-    override: Callable[["torch.types.PySymType"], str]
+    override: Callable[["torch.types.PySymType"], str],
 ) -> Iterator[None]:
     tmp = CodeGen._sym_repr
     try:

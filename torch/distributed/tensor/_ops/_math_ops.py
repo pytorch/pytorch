@@ -11,9 +11,9 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
+    OpSpec,
     OpStrategy,
     PlacementList,
-    PlacementStrategy,
     RuntimeSchemaInfo,
     TupleStrategy,
 )
@@ -267,20 +267,20 @@ def common_reduction_strategy(
     # by default follow reduction input strategy
     reduction_strategy = OpStrategy([])
 
-    for strtg in input_strategy.strategies:
+    for op_spec in input_strategy.strategies:
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
             input_placements = replicate_reduction_dims(
-                strtg.output_spec.placements, reduce_dims
+                op_spec.output_spec.placements, reduce_dims
             )
         else:
-            input_placements = strtg.output_spec.placements
+            input_placements = op_spec.output_spec.placements
 
         input_spec = DTensorSpec(
             mesh=input_strategy.mesh,
             placements=input_placements,
-            tensor_meta=strtg.output_spec.tensor_meta,
+            tensor_meta=op_spec.output_spec.tensor_meta,
         )
 
         reduce_dims_map = _infer_reduce_dims_map(reduce_dims, input_spec.ndim, keep_dim)
@@ -289,7 +289,7 @@ def common_reduction_strategy(
         )
         redistribute_cost = [generate_redistribute_costs(input_strategy, input_spec)]
         reduction_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=DTensorSpec(
                     mesh=input_strategy.mesh,
                     placements=out_placements,
@@ -465,7 +465,7 @@ def linalg_replicate_strategy(op_schema: OpSchema) -> OpStrategy:
     assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
     mesh = input_strategy.mesh
 
-    output_strategies: list[PlacementStrategy] = []
+    output_strategies: list[OpSpec] = []
     for placement_strategy in input_strategy.strategies:
         replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
         replicate_spec = DTensorSpec(
@@ -476,7 +476,7 @@ def linalg_replicate_strategy(op_schema: OpSchema) -> OpStrategy:
         redistribute_cost = [
             generate_redistribute_costs(input_strategy, replicate_spec)
         ]
-        replicate_strategy = PlacementStrategy(
+        replicate_strategy = OpSpec(
             output_specs=replicate_spec,
             input_specs=(replicate_spec,),
             redistribute_cost=redistribute_cost,
@@ -514,7 +514,7 @@ def softmax_strategy(op_schema: OpSchema) -> OpStrategy:
         )
         output_target_spec = input_target_spec
         output_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=output_target_spec,
                 input_specs=[input_target_spec],
                 redistribute_cost=redistribute_costs,
@@ -559,7 +559,7 @@ def softmax_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
         redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
         grad_in_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=tgt_spec,
                 redistribute_cost=[redist_grad_out_cost, redist_out_cost],
             )
@@ -682,7 +682,7 @@ def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
             )
 
         output_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=(output_expected_spec, total_weight_expected_spec),
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
@@ -797,7 +797,7 @@ def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
 
         grad_in_expected_spec = input_expected_spec
         grad_in_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=grad_in_expected_spec,
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
@@ -894,7 +894,7 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         # the output spec is the same as input spec
         output_target_spec = input_target_spec
         output_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=output_target_spec,
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
@@ -944,7 +944,7 @@ def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
     # output triple: (d_input, d_weight, d_bias)
     out_tuple_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
-        # args for PlacementStrategy
+        # args for OpSpec
         output_specs_list: list[Optional[DTensorSpec]] = []
         input_specs_list: list[DTensorSpec] = []
         redistribute_costs = []
@@ -1052,7 +1052,7 @@ def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
             output_specs_list.append(None)
 
         out_tuple_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=tuple(output_specs_list),
                 input_specs=input_specs_list,
                 redistribute_cost=redistribute_costs,

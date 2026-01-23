@@ -67,7 +67,7 @@ TORCH_API std::shared_ptr<Node> get_current_node();
 // or more input `Variable`s and producing zero or more output `Variable`s. All
 // functions in PyTorch's autograd machinery derive from this class and
 // override its `apply` method. Instances of such subclasses will then be
-// invokable via the call operator.
+// invocable via the call operator.
 //
 //                    Nodes in the Autograd Graph
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -592,10 +592,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //   1) Extract tensors/symint args
   //   2) Collect node information for specialization and caching
   // Implementations in subclasses should call args.collect() with all node
-  // attrs. These functions are only called durring backward.
+  // attrs. These functions are only called during backward.
   virtual void compiled_args(CompiledNodeArgs& args) const {
-    throw std::runtime_error(
-        std::string("compiled_args not implemented: ") + name());
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, std::string("compiled_args not implemented: ") + name());
   }
 
   // Used by compiled autograd to call apply() with different saved tensors
@@ -604,8 +604,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   virtual variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) {
-    throw std::runtime_error(
-        std::string("apply_with_saved not implemented: ") + name());
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, std::string("apply_with_saved not implemented: ") + name());
   }
 
   // If this node is the AOTBackward node produced by torch.compile.

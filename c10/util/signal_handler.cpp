@@ -59,7 +59,7 @@ void hookupHandler() {
   if (hookedUpCount++) {
     return;
   }
-  struct sigaction sa {};
+  struct sigaction sa{};
   // Setup the handler
   sa.sa_handler = &handleSignal;
   // Restart the system call, if at all possible
@@ -80,7 +80,7 @@ void unhookHandler() {
   if (--hookedUpCount > 0) {
     return;
   }
-  struct sigaction sa {};
+  struct sigaction sa{};
   // Setup the sighub handler
   sa.sa_handler = SIG_DFL;
   // Restart the system call, if at all possible
@@ -273,7 +273,7 @@ void FatalSignalHandler::installFatalSignalHandlers() {
     return;
   }
   fatalSignalHandlersInstalled = true;
-  struct sigaction sa {};
+  struct sigaction sa{};
   sigemptyset(&sa.sa_mask);
   // Since we'll be in an exiting situation it's possible there's memory
   // corruption, so make our own stack just in case.

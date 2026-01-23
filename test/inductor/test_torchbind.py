@@ -283,15 +283,16 @@ class TestTorchbind(TestCase):
         with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             package_path = package_aoti(f.name, aoti_files)
 
-            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
-                package_path, "r"
-            ) as zip_ref:
-                zip_ref.extractall(tmp_dir)
-                tmp_path_model = Path(tmp_dir) / "data" / "aotinductor" / "model"
-                tmp_path_constants = Path(tmp_dir) / "data" / "constants"
+            with zipfile.ZipFile(package_path, "r") as zip_ref:
+                all_files = zip_ref.namelist()
+                base_folder = all_files[0].split("/")[0]
+                tmp_path_model = Path(base_folder) / "data" / "aotinductor" / "model"
+                tmp_path_constants = Path(base_folder) / "data" / "constants"
 
-                self.assertTrue((tmp_path_model / "custom_objs_config.json").exists())
-                self.assertTrue((tmp_path_constants / "custom_obj_0").exists())
+                self.assertTrue(
+                    str(tmp_path_model / "custom_objs_config.json") in all_files
+                )
+                self.assertTrue(str(tmp_path_constants / "custom_obj_0") in all_files)
 
     def test_torchbind_aoti(self):
         ep, inputs, orig_res, _ = self.get_exported_model()
@@ -408,6 +409,30 @@ class TestTorchbind(TestCase):
             expected_regex="TorchBind object inputs are not supported in AOTInductor",
         ):
             aot_compile(ep.module(), inputs, options={"aot_inductor.package": True})
+
+    def test_aoti_torchbind_name_collision(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self._torchbind_obj0 = torch.classes._TorchScriptTesting._Foo(2, 3)
+
+            def forward(self, x):
+                a = self._torchbind_obj0.add_tensor(x)
+                torchbind = torch.classes._TorchScriptTesting._Foo(4, 5)
+                b = torchbind.add_tensor(x)
+                return a + b
+
+        m = M()
+        inputs = (torch.ones(2, 3),)
+        orig_res = m(*inputs)
+
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
+
+        pt2_path = torch._inductor.aoti_compile_and_package(ep)
+        optimized = torch._inductor.aoti_load_package(pt2_path)
+        result = optimized(*inputs)
+        self.assertEqual(result, orig_res)
 
 
 if __name__ == "__main__":

@@ -128,9 +128,17 @@ class TCPClient {
   }
   template <typename T>
   std::optional<T> receiveValueWithTimeout(std::chrono::milliseconds timeout) {
-    if (!socket_.waitForInput(timeout))
+    if (!socket_.waitForInput(timeout)) {
       return {};
-    return tcputil::recvValue<T>(socket_.handle());
+    }
+
+    try {
+      return tcputil::recvValue<T>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING(
+          "recvValueWithTimeout failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
   void setTimeout(std::chrono::milliseconds value);
 

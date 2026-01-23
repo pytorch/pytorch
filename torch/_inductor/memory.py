@@ -147,7 +147,17 @@ def compute_size_for_scheduler_buffer(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
     ) -> int:
         if isinstance(sched_buf.node.layout, NoneLayout):
-            sched_buf_to_size[sched_buf.get_name()] = (0, 0)
+            # mutations should inherit the size of the mutated buffer
+            if sched_buf.get_mutations():
+                mutated_buf_name = sched_buf.get_mutations()[0]
+                if mutated_buf_name in sched_buf_to_size:
+                    (_size_alloc, _size_free) = sched_buf_to_size[mutated_buf_name]
+                else:
+                    (_size_alloc, _size_free) = (0, 0)
+                sched_buf_to_size[sched_buf.get_name()] = (0, _size_free)
+                sched_buf_to_size[mutated_buf_name] = (_size_alloc, 0)
+            else:
+                sched_buf_to_size[sched_buf.get_name()] = (0, 0)
             return 0
         elif isinstance(sched_buf.node.layout, MultiOutputLayout):
             size_alloc = 0

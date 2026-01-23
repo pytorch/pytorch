@@ -118,7 +118,7 @@ struct TORCH_API SugaredValue
 
   // If we are iterating over a Sugared Value and it returns a value from this
   // function, then we emit an unrolled loop over the variable. This allows us
-  // to support containers of Heterogenous types, like Module Containers &
+  // to support containers of Heterogeneous types, like Module Containers &
   // Tuples
   virtual std::optional<int64_t> staticLen() {
     return std::nullopt;
@@ -140,7 +140,7 @@ struct TORCH_API SugaredValue
                          << " object is not iterable");
   }
 
-  // expression for ith elemement for iterable value
+  // expression for ith element for iterable value
   virtual std::shared_ptr<SugaredValue> getitem(
       const SourceRange& loc,
       GraphFunction& m,
@@ -297,7 +297,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
     return shared_from_this();
   }
 
-  // Because this is used to contain SugaredValues of Heterogenous types,
+  // Because this is used to contain SugaredValues of Heterogeneous types,
   // we define staticLen() so that when this is iterated over it is emitted
   // as an unrolled loop.
   std::optional<int64_t> staticLen() override {
@@ -319,7 +319,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
       GraphFunction& m,
       const std::string& field) override {
     if (field == "autograd") {
-      // When refering torch.autograd, it is also considered to be a
+      // When referring torch.autograd, it is also considered to be a
       // BuiltinModule and we will dispatch to the aten operators for the
       // methods under its module.
       return std::make_shared<BuiltinModule>("aten", version);
@@ -331,12 +331,12 @@ struct TORCH_API BuiltinModule : public SugaredValue {
 
  private:
   std::string name;
-  // when we add operator versioning, emit this op as it exising at 'version'
+  // when we add operator versioning, emit this op as it existing at 'version'
   // if not set, use the latest version
   std::optional<int64_t> version;
 };
 
-// Represents a class, analagous to `int` or `dict`. Instances of classes,
+// Represents a class, analogous to `int` or `dict`. Instances of classes,
 // like `1` or `{"foo": 5}`, are represented as SimpleValues
 struct TORCH_API ClassValue : public SugaredValue {
   explicit ClassValue(ClassTypePtr type) : type_(std::move(type)) {}

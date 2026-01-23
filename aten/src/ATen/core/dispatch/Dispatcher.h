@@ -165,6 +165,10 @@ class TORCH_API Dispatcher final {
   // Returns a list of all operator names present in the operatorLookupTable_
   const std::vector<OperatorName> getAllOpNames();
 
+  // Returns a list of all operator names present in the operatorLookupTable_
+  // for a given dispatch key
+  const std::vector<OperatorName> getAllOpNamesForDispatchKey(DispatchKey k);
+
   // ------------------------------------------------------------------------
   //
   // Invoking operators

@@ -97,7 +97,8 @@ Reducer::Reducer(
     bool gradient_as_bucket_view,
     std::unordered_map<size_t, std::string> param_names,
     int64_t first_bucket_bytes_cap,
-    bool skip_all_reduce_unused_params)
+    bool skip_all_reduce_unused_params,
+    bool use_python_reducer)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -121,7 +122,8 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
-      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
+      first_bucket_bytes_cap_(first_bucket_bytes_cap),
+      use_python_reducer_(use_python_reducer) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
@@ -199,8 +201,9 @@ Reducer::Reducer(
                 this->autograd_hook(variable_index);
                 return outputs;
               },
-              [=](torch::autograd::CompiledNodeArgs& args) {
-                TORCH_INTERNAL_ASSERT(
+              [this](torch::autograd::CompiledNodeArgs& args) {
+                TORCH_CHECK(
+                    this->use_python_reducer_,
                     "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
               })),
           grad_accumulator);
@@ -1242,7 +1245,7 @@ void Reducer::initialize_buckets(
       // patterns when copy_ing grad data in and out of its bucket view.
       // However, numerics remain correct, because the bucket view is the same
       // on either end of the raw allreduce.  bucket_view_in.copy(grad)
-      // tranposes
+      // transposes
       // (+ densifies) to the bucket view's layout, the data is allreduced,
       // then grad.copy_(bucket_view_out) transposes it back to grad's layout.
       //

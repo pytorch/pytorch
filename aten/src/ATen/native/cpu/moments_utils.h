@@ -8,7 +8,6 @@
 #include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
-#include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -118,9 +117,11 @@ std::pair<opmath_t<T>, opmath_t<T>> RowwiseMomentsImpl(const T* X, int64_t N, in
 
   using Vec = vec::Vectorized<math_t>;
   const Vec kZeroVec(math_t(0));
-  c10::SmallVector<int64_t, kMaxDepth> m0_stk(depth, 0);
-  c10::SmallVector<Vec, kMaxDepth> m1_stk(depth, kZeroVec);
-  c10::SmallVector<Vec, kMaxDepth> m2_stk(depth, kZeroVec);
+  std::array<int64_t, kMaxDepth> m0_stk = {{0}};
+  std::array<Vec, kMaxDepth> m1_stk;
+  m1_stk.fill(kZeroVec);
+  std::array<Vec, kMaxDepth> m2_stk;
+  m2_stk.fill(kZeroVec);
 
   for (const auto i : c10::irange(m)) {
     const T* X_ptr = X + i * kChunkSize * kVecSize;

@@ -13,7 +13,7 @@ from torch._inductor.fx_passes.micro_pipeline_tp import (
     micro_pipeline_tp_pass,
 )
 from torch._inductor.fx_passes.post_grad import remove_noop_ops, view_to_reshape
-from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
+from torch._inductor.utils import fresh_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
     all_gather_tensor,
     reduce_scatter_tensor,
@@ -81,7 +81,7 @@ class MicroPipelineTPTest(TestCase):
         dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_find_all_gather_patterns(self):
         group = dist.group.WORLD
 
@@ -134,7 +134,7 @@ class MicroPipelineTPTest(TestCase):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_find_reduce_scatter_patterns(self):
         group = dist.group.WORLD
 
@@ -173,7 +173,7 @@ class MicroPipelineTPTest(TestCase):
         self.assertEqual(reduce_scatters[1].scatter_dim, 1)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_get_unexposed_collectives(self):
         group = dist.group.WORLD
 
@@ -201,7 +201,7 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
     @parametrize("return_A", [True, False])
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_fuse_all_gather_matmul(self, A_dims, gather_dim, return_A):
         if gather_dim >= A_dims:
             return
@@ -248,7 +248,7 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
     @parametrize("return_A", [True, False])
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_fuse_all_gather_scaled_matmul(self, A_dims, gather_dim, return_A):
         if gather_dim >= A_dims:
             return
@@ -321,7 +321,7 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_fuse_matmul_reduce_scatter(self, A_dims, scatter_dim):
         if scatter_dim >= A_dims:
             return
@@ -350,7 +350,7 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("scatter_dim", [0, 1, 2])
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter(self, A_dims, scatter_dim):
         if scatter_dim >= A_dims:
             return
@@ -403,7 +403,7 @@ class MicroPipelineTPTest(TestCase):
     @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("scatter_dim", [0, 1, 2])
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, scatter_dim
     ):
@@ -465,7 +465,7 @@ class MicroPipelineTPTest(TestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("shard_dim", [0, 1])
-    @fresh_inductor_cache()
+    @fresh_cache()
     def test_dtensor_seq_par(self, shard_dim: int):
         model: torch.nn.Module = MLPModule(device="cuda", bias=False)
         device_mesh = DeviceMesh(

@@ -12,6 +12,9 @@ def define_targets(rules):
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
+        deps = [
+            "//torch/headeronly:torch_headeronly",
+        ],
     )
 
     rules.cmake_configure_file(

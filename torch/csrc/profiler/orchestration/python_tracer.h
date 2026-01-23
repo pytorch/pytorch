@@ -66,7 +66,7 @@ struct TORCH_API PythonMemoryTracerBase {
 
   virtual void start() = 0;
   virtual void stop() = 0;
-  virtual void export_memory_history(const std::string path) = 0;
+  virtual void export_memory_history(const std::string& path) = 0;
 };
 
 using MakeMemoryFn = std::unique_ptr<PythonMemoryTracerBase> (*)();

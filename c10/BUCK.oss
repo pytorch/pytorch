@@ -15,6 +15,7 @@ cxx_library(
         "//third_party:cpuinfo",
         "//third_party:fmt",
         "//third_party:glog",
+        "//third_party:moodycamel",
     ],
     exported_deps = [],
     compiler_flags = [

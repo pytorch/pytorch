@@ -776,7 +776,7 @@ Tensor scaled_dot_product_attention(
 #ifdef USE_MPS
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
-      const auto all_contiguous = query_.is_contiguous() && key.is_contiguous() && value.is_contiguous();
+      const auto all_contiguous = query_.is_contiguous_or_false() && key.is_contiguous_or_false() && value.is_contiguous_or_false();
       if (query_device_type == DeviceType::MPS && dropout_p == 0.0
           && !(GradMode::is_enabled() && any_inputs_require_grad)
           && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))

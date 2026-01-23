@@ -70,6 +70,9 @@ struct BlendRegs<index, false> {
 };
 
 template <>
+struct is_vec_specialized_for<float> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<float> {
  private:
   float32x4_t values;
@@ -94,14 +97,14 @@ class Vectorized<float> {
       const Vectorized<float>& a,
       const Vectorized<float>& b) {
     Vectorized<float> vec;
-    vec.values =
-        BlendRegs<0, (mask & 0x01) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<1, (mask & 0x02) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<2, (mask & 0x04) != 0>::impl(a.values, b.values, vec.values);
-    vec.values =
-        BlendRegs<3, (mask & 0x08) != 0>::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 0,
+    (mask & 0x01) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 1,
+    (mask & 0x02) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 2,
+    (mask & 0x04) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 3,
+    (mask & 0x08) != 0 > ::impl(a.values, b.values, vec.values);
     return vec;
   }
   static Vectorized<float> blendv(
@@ -199,18 +202,14 @@ class Vectorized<float> {
     store(tmp);
     return tmp[idx];
   }
-  // For boolean version where we want to if any 1/all zero
-  // etc. can be done faster in a different way.
   int zero_mask() const {
-    __at_align__ float tmp[size()];
-    store(tmp);
-    int mask = 0;
-    for (int i = 0; i < size(); ++i) {
-      if (tmp[i] == 0.f) {
-        mask |= (1 << i);
-      }
-    }
-    return mask;
+    uint32x4_t is_zero_vec = vceqzq_f32(values);
+    const int32x4_t shift = vcombine_s32(
+        vcreate_s32(0x0 | (int64_t(0x1) << 32)),
+        vcreate_s32(0x2 | (int64_t(0x3) << 32)));
+    uint32x4_t bits_vec =
+        vshlq_u32(vandq_u32(is_zero_vec, vdupq_n_u32(1)), shift);
+    return vaddvq_u32(bits_vec);
   }
   Vectorized<float> isnan() const {
     return vreinterpretq_f32_u32(vmvnq_u32(vceqq_f32(values, values)));

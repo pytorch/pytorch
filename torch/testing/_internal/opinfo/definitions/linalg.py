@@ -725,7 +725,7 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     if device.type == "cpu" or has_cusolver():
         deltas = (-1, 0, +1)
     # only square systems if Cusolver is not available
-    # becase we solve a lstsq problem with a transposed matrix in the backward
+    # because we solve a lstsq problem with a transposed matrix in the backward
     else:
         deltas = (0,)
 
@@ -1751,13 +1751,6 @@ op_db: list[OpInfo] = [
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         generate_args_kwargs=sample_kwargs_vector_norm,
         aten_name="linalg_vector_norm",
-        skips=(
-            # FIXME: sum reduces all dimensions when dim=[]
-            DecorateInfo(unittest.expectedFailure, "TestReductions", "test_dim_empty"),
-            DecorateInfo(
-                unittest.expectedFailure, "TestReductions", "test_dim_empty_keepdim"
-            ),
-        ),
     ),
     OpInfo(
         "linalg.lu_factor",

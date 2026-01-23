@@ -573,7 +573,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   }
 
   const bool sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = !dense_dims_to_sum_v.empty();
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {

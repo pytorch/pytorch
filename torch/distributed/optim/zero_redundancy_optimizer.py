@@ -284,7 +284,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     r"""
     Wrap an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>` and shards its states across ranks in the group.
 
-    The sharing is done as described by ZeRO_.
+    The sharing is done as described by `ZeRO <https://arxiv.org/abs/1910.02054>`_.
 
     The local optimizer instance in each rank is only
     responsible for updating approximately ``1 / world_size`` parameters and
@@ -365,9 +365,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         is to prepend dummy inputs.
 
     .. warning:: ZeroRedundancyOptimizer is experimental and subject to change.
-
-    .. _ZeRO: https://arxiv.org/abs/1910.02054
-
     """
 
     def __init__(

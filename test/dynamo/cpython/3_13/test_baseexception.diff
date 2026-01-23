@@ -1,0 +1,94 @@
+diff --git a/test/dynamo/cpython/3_13/test_baseexception.py b/test/dynamo/cpython/3_13/test_baseexception.py
+index e599b02c17d..3dc102e3b8a 100644
+--- a/test/dynamo/cpython/3_13/test_baseexception.py
++++ b/test/dynamo/cpython/3_13/test_baseexception.py
+@@ -1,10 +1,61 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ import builtins
+ import os
+ from platform import system as platform_system
+ 
+ 
+-class ExceptionClassTests(unittest.TestCase):
++class ExceptionClassTests(__TestCase):
+ 
+     """Tests for anything relating to exception objects themselves (e.g.,
+     inheritance hierarchy)"""
+@@ -78,9 +129,6 @@ class ExceptionClassTests(unittest.TestCase):
+                 last_depth = depth
+         finally:
+             inheritance_tree.close()
+-
+-        # Underscore-prefixed (private) exceptions don't need to be documented
+-        exc_set = set(e for e in exc_set if not e.startswith('_'))
+         self.assertEqual(len(exc_set), 0, "%s not accounted for" % exc_set)
+ 
+     interface_tests = ("length", "args", "str", "repr")
+@@ -142,7 +190,7 @@ class ExceptionClassTests(unittest.TestCase):
+         gc.collect()
+ 
+ 
+-class UsageTests(unittest.TestCase):
++class UsageTests(__TestCase):
+ 
+     """Test usage of exceptions"""
+ 
+@@ -208,5 +256,5 @@ class UsageTests(unittest.TestCase):
+         self.catch_fails("spam")
+ 
+ 
+-if __name__ == '__main__':
+-    unittest.main()
++if __name__ == "__main__":
++    run_tests()

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RAdam algorithm."""
+
 from typing import cast, Optional, Union
 
 import torch
@@ -55,17 +56,17 @@ class RAdam(Optimizer):  # noqa: D101
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            maximize=maximize,
-            foreach=foreach,
-            capturable=capturable,
-            decoupled_weight_decay=decoupled_weight_decay,
-            differentiable=differentiable,
-        )
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "maximize": maximize,
+            "foreach": foreach,
+            "capturable": capturable,
+            "decoupled_weight_decay": decoupled_weight_decay,
+            "differentiable": differentiable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):  # noqa: D105
@@ -285,7 +286,9 @@ def _single_tensor_radam(
             assert (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            ), (
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -386,7 +389,9 @@ def _multi_tensor_radam(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
             for p, step in zip(params, state_steps)
-        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        ), (
+            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+        )
 
     lr = _to_scalar(lr)
 
@@ -456,7 +461,7 @@ def _multi_tensor_radam(
             if decoupled_weight_decay:
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                # Reuse the intermediate memory (grouped_grads) already allocated for maximize
                 if maximize:
                     torch._foreach_add_(
                         grouped_grads, grouped_params, alpha=weight_decay

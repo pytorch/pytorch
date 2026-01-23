@@ -54,16 +54,6 @@ COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 ENV CUDA_HOME /usr/local/cuda
 
-FROM cuda as cuda11.8
-RUN bash ./install_cuda.sh 11.8
-RUN bash ./install_magma.sh 11.8
-RUN ln -sf /usr/local/cuda-11.8 /usr/local/cuda
-
-FROM cuda as cuda12.4
-RUN bash ./install_cuda.sh 12.4
-RUN bash ./install_magma.sh 12.4
-RUN ln -sf /usr/local/cuda-12.4 /usr/local/cuda
-
 FROM cuda as cuda12.6
 RUN bash ./install_cuda.sh 12.6
 RUN bash ./install_magma.sh 12.6
@@ -73,6 +63,11 @@ FROM cuda as cuda12.8
 RUN bash ./install_cuda.sh 12.8
 RUN bash ./install_magma.sh 12.8
 RUN ln -sf /usr/local/cuda-12.8 /usr/local/cuda
+
+FROM cuda as cuda12.9
+RUN bash ./install_cuda.sh 12.9
+RUN bash ./install_magma.sh 12.9
+RUN ln -sf /usr/local/cuda-12.9 /usr/local/cuda
 
 FROM cpu as rocm
 ARG ROCM_VERSION

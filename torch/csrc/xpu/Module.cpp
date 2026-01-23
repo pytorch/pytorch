@@ -18,7 +18,7 @@ using namespace torch;
 static PyObject* THXPModule_getArchFlags(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #ifdef XPU_ARCH_FLAGS
-  static const char* flags = C10_STRINGIZE(XPU_ARCH_FLAGS);
+  static const std::string flags = std::string(C10_STRINGIZE(XPU_ARCH_FLAGS));
   return THPUtils_packString(flags);
 #else
   Py_RETURN_NONE;
@@ -305,6 +305,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(name)                                                   \
       ._(platform_name)                                          \
       ._(vendor)                                                 \
+      ._(device_id)                                              \
       ._(driver_version)                                         \
       ._(version)                                                \
       ._(max_compute_units)                                      \
@@ -333,8 +334,10 @@ static void registerXpuDeviceProperties(PyObject* module) {
             std::ostringstream stream;
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
-                   << get_device_type(prop) << "', driver_version='"
-                   << prop.driver_version << "', total_memory="
+                   << get_device_type(prop) << "', device_id=0x" << std::hex
+                   << std::uppercase << prop.device_id << std::dec
+                   << ", driver_version='" << prop.driver_version
+                   << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024) << "MB"
                    << ", max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count

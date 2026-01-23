@@ -152,7 +152,7 @@ class TestDecomp(NNTestCase):
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
     def test_some(self, device, dtype):
         # this Pytorch data type is not fully supported on cuda today
-        # - unfortunately we can't skipIf because we don't see the actual parms in skipIf
+        # - unfortunately we can't skipIf because we don't see the actual params in skipIf
         if device.startswith(GPU_TYPE) and dtype == torch.int:
             return
 
@@ -172,7 +172,7 @@ class TestDecomp(NNTestCase):
     @parametrize("bs", [1, 2, 4, 10])
     def test_some_batched(self, device, dtype, bs):
         # this Pytorch data type is not fully supported on cuda today
-        # - unfortunately we can't skipIf because we don't see the actual parms in skipIf
+        # - unfortunately we can't skipIf because we don't see the actual params in skipIf
         if device.startswith(GPU_TYPE) and dtype == torch.int:
             return
 

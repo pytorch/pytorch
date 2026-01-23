@@ -162,7 +162,7 @@ def _create_c10d_store(
     hostname, port, rank, world_size, timeout, use_libuv=True
 ) -> Store:
     """
-    Smartly creates a c10d Store object on ``rank`` based on whether we need to re-use agent store.
+    Smartly creates a c10d Store object on ``rank`` based on whether we need to reuse agent store.
 
     The TCPStore server is assumed to be hosted
     on ``hostname:port``.
@@ -213,7 +213,7 @@ def _tcp_rendezvous_handler(
         return _rendezvous_error("tcp:// rendezvous: " + msg)
 
     result = urlparse(url)
-    if not result.port:
+    if result.port is None:
         raise _error("port number missing")
     query_dict = _query_to_dict(result.query)
     if "rank" not in query_dict:

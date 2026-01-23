@@ -122,6 +122,9 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
 
   ~FunctionalStorageImpl() override = default;
 
+  uint64_t mutation_counter() {
+    return mutation_counter_;
+  }
   void mark_mutation() {
     mutation_counter_++;
   }
@@ -150,10 +153,15 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   void mark_inductor_storage_resize(c10::SymInt new_size) {
     inductor_storage_resized_ = true;
     curr_storage_size_ = std::move(new_size);
+    inductor_storage_resized_counter_++;
   }
 
   bool was_inductor_storage_resized() {
     return inductor_storage_resized_;
+  }
+
+  uint64_t inductor_storage_resized_counter() {
+    return inductor_storage_resized_counter_;
   }
 
  private:
@@ -201,6 +209,7 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // (1) There were any storage resizes on a graph input
   // (2) The original/curr storage size tell us if these resizes result in a nop
   bool inductor_storage_resized_ = false;
+  uint64_t inductor_storage_resized_counter_ = 0;
   c10::SymInt original_storage_size_;
   c10::SymInt curr_storage_size_;
 };

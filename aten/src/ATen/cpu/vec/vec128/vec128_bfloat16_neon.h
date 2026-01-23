@@ -129,6 +129,9 @@ struct BlendBFloat16Regs<index, false> {
 };
 
 template <>
+struct is_vec_specialized_for<c10::BFloat16> : std::bool_constant<true> {};
+
+template <>
 class Vectorized<c10::BFloat16> : public Vectorized16<
                                       at_bfloat16x8_t,
                                       c10::BFloat16,

@@ -30,6 +30,7 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
   auto rpc_module =
       THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
   if (!rpc_module) {
@@ -631,8 +632,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_device_map",
-          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst) const) &
-              TensorPipeAgent::getDeviceMap,
+          (DeviceMap(TensorPipeAgent::*)(const WorkerInfo& dst)
+               const)&TensorPipeAgent::getDeviceMap,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_get_backend_options",
@@ -845,6 +846,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   module.def("_disable_jit_rref_pickle", &disableJitRRefPickle);
 
   Py_RETURN_TRUE;
+  END_HANDLE_TH_ERRORS
 }
 
 } // namespace

@@ -6,6 +6,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 3. regenerating/replaying views from their base
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -452,14 +453,14 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    assert (
-                        n.args[0] in placeholders
-                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    assert n.args[0] in placeholders, (
+                        f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    )
                 mutation_count += 1
             else:
-                assert (
-                    not n.target._schema.is_mutable
-                ), f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+                assert not n.target._schema.is_mutable, (
+                    f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+                )
     return mutation_count
 
 
@@ -472,9 +473,9 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
             if n.target is torch.ops.aten.copy_.default:
                 # Can only copy_ into an input, and can only do so once
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    assert (
-                        n.args[0] in placeholders
-                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    assert n.args[0] in placeholders, (
+                        f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    )
                     placeholders.remove(n.args[0])
                 copy_from_node = n.args[1]
                 # Pre-condition: every node has a "stack_trace" field in its meta,

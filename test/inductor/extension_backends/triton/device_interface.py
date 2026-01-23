@@ -80,16 +80,16 @@ class DeviceInterface(device_interface.DeviceInterface):
 
     @staticmethod
     def maybe_exchange_device(device: int) -> int:
-        assert (
-            device == 0
-        ), f"Only device index 0 is supported, tried to set index to {device}"
+        assert device == 0, (
+            f"Only device index 0 is supported, tried to set index to {device}"
+        )
         return 0  # previous device is always 0
 
     @staticmethod
     def exchange_device(device: int) -> int:
-        assert (
-            device == 0
-        ), f"Only device index 0 is supported, tried to set index to {device}"
+        assert device == 0, (
+            f"Only device index 0 is supported, tried to set index to {device}"
+        )
         return 0  # previous device is always 0
 
     @staticmethod

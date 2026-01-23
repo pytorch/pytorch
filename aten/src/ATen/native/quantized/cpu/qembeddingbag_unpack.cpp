@@ -44,9 +44,9 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
             num_elem_per_byte};
 
     auto scales = at::from_blob(
-        w_scale.data(), w_scale.size(), device(c10::kCPU).dtype(c10::kFloat));
+        w_scale.data(), w_scale.size(), at::device(c10::kCPU).dtype(c10::kFloat));
     auto zero_points = at::from_blob(
-        w_zp.data(), w_zp.size(), device(c10::kCPU).dtype(c10::kFloat));
+        w_zp.data(), w_zp.size(), at::device(c10::kCPU).dtype(c10::kFloat));
 
     auto output_columns = output_shape[1];
     uint8_t* output_data = nullptr;
@@ -58,7 +58,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
           scales.toType(c10::kFloat),
           zero_points.toType(c10::kFloat),
           0, // The output channel axis is 0
-          device(c10::kCPU).dtype(c10::kQUInt8));
+          at::device(c10::kCPU).dtype(c10::kQUInt8));
       output_data = static_cast<uint8_t*>(weight_origin.data_ptr());
     } else {
       // We create empty qtensor with the full output shape, and dtype set to
@@ -69,7 +69,7 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
           scales.toType(c10::kFloat),
           zero_points.toType(c10::kFloat),
           0, // The output channel axis is 0
-          device(c10::kCPU).dtype(c10::kQUInt4x2));
+          at::device(c10::kCPU).dtype(c10::kQUInt4x2));
       output_data = static_cast<uint8_t*>(weight_origin.data_ptr());
     }
 

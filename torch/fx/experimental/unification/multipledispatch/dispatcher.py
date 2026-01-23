@@ -354,7 +354,7 @@ class Dispatcher:
         self._cache = {}
 
     @property
-    def __doc__(self):
+    def __doc__(self):  # type: ignore[override]
         docs = [f"Multiply dispatched method: {self.name}"]
 
         if self.doc:

@@ -99,4 +99,4 @@ We can override a generic setting for a specific operator or backend if the fp32
   torch.backends.mkldnn.matmul.fp32_precision = "ieee"
 
 For such case, both `torch.backends.mkldnn.fp32_precision` and `torch.backends.mkldnn.matmul.fp32_precision`
-is overrided to bf16.
+is overridden to bf16.

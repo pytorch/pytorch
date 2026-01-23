@@ -93,7 +93,7 @@ class ForwardDerivative:
     # This is only used by inplace operations
     required_original_self_value: bool
 
-    # If this formula is specified in derivatives.yaml or if we are re-using the
+    # If this formula is specified in derivatives.yaml or if we are reusing the
     # out of place formula for inplace
     is_reusing_outplace_formula: bool
 
@@ -632,7 +632,7 @@ def match_differentiability_info(
             info_dict = non_functional_info_by_signature[f_sig]
             # See https://github.com/pytorch/pytorch/pull/76320/files#r874816389
             assert not any(
-                any("self" in str(inpt.nctype.name) for inpt in info.all_saved_inputs)
+                any("self" in str(input.nctype.name) for input in info.all_saved_inputs)
                 for info in info_dict.values()
             ), f"""\
 Attempted to convert a derivative formula for a mutable operator
@@ -699,7 +699,7 @@ Attempted to convert a derivative formula for a mutable operator
                 #      we make sure that the original value of the input that is being modified inplace (self_p) is
                 #      not used in the formula. Note that the formula can use "original_self_p" here and that would
                 #      trigger a clone of the original input.
-                #    - If we are re-using the out of place formula (is_exact_match == False) then we replace every
+                #    - If we are reusing the out of place formula (is_exact_match == False) then we replace every
                 #      occurrence of self_p and self_t by original_self_p and original_self_t. These will be
                 #      populated by cloned version of the original input (either the clone done by the backward AD
                 #      logic if self is also used in a backward formula or a special clone that we add).

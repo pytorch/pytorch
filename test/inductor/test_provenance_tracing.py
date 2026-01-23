@@ -64,7 +64,7 @@ class TestProvenanceTracingArtifact(TestCase):
 
     def _check_provenance_tracing_artifact(self, filepath, expected_data):
         self.assertTrue(filepath.is_dir())
-        filename = Path(filepath) / "inductor_triton_kernel_to_post_grad_nodes.json"
+        filename = Path(filepath) / "inductor_generated_kernel_to_post_grad_nodes.json"
         with open(filename) as f:
             actual_data = json.load(f)
         # check that the generated provenance tracing artifact is expected

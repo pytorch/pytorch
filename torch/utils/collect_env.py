@@ -439,7 +439,7 @@ def get_pip_packages(run_lambda, patterns=None):
     if patterns is None:
         patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
 
-    pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
+    pip_version = 'pip3' if sys.version_info.major == 3 else 'pip'
 
     os.environ['PIP_DISABLE_PIP_VERSION_CHECK'] = '1'
     # People generally have pip as `pip` or `pip3`
@@ -493,7 +493,7 @@ def get_env_info():
     Caching allocator config, XNNPACK availability and CPU information.
 
     Returns:
-        SystemEnv (namedtuple): A tuple containining various environment details
+        SystemEnv (namedtuple): A tuple containing various environment details
             and system information.
     """
     run_lambda = run

@@ -266,7 +266,7 @@ class IteratorVariable(VariableTracker):
 
     def next_variable(self, tx):
         unimplemented_v2(
-            gb_type="Unsupported next() call",
+            gb_type="Unimplemented next() call",
             context=f"next({self})",
             explanation="This abstract method must be implemented",
             hints=[*graph_break_hints.DYNAMO_BUG],

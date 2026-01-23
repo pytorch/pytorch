@@ -11,7 +11,6 @@
 import math
 import os
 import sys
-import tempfile
 
 import torch
 import torch.distributed as c10d
@@ -30,9 +29,9 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     sm_is_or_higher_than,
-    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
+    run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
     TEST_WITH_DEV_DBG_ASAN,
@@ -937,6 +936,25 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         )
         torch.testing.assert_close(output_tensor, expected)
 
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_reduce_scatter_bfloat16(self):
+        device = torch.device("cuda", self.rank_to_GPU[self.rank][0])
+
+        numel = 1024
+        output_tensor = torch.zeros(numel, dtype=torch.float32, device=device).to(
+            torch.bfloat16
+        )
+        input_tensor = torch.ones(
+            self.world_size * numel, dtype=torch.float32, device=device
+        ).to(torch.bfloat16)
+        # currently only reduce_scatter_tensor supports bfloat16
+        dist.reduce_scatter_tensor(output_tensor, input_tensor)
+
+        expected = (
+            torch.empty_like(output_tensor).fill_(self.world_size).to(torch.bfloat16)
+        )
+        torch.testing.assert_close(output_tensor, expected)
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_barrier(self):
@@ -1044,24 +1062,4 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
 
 if __name__ == "__main__":
-    if not torch.cuda.is_available():
-        sys.exit(TEST_SKIPS["no_cuda"].exit_code)
-
-    rank = int(os.getenv("RANK", -1))
-    world_size = int(os.getenv("WORLD_SIZE", -1))
-
-    if world_size == -1:  # Not set by external launcher
-        world_size = torch.cuda.device_count()
-
-    if rank != -1:
-        # Launched with torchrun or other multi-proc launchers. Directly run the test.
-        ProcessGroupNCCLOpTest.run_rank(rank, world_size)
-    else:
-        # Launched as a single process. Spawn subprocess to run the tests.
-        # Also need a rendezvous file for `init_process_group` purpose.
-        rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
-        torch.multiprocessing.spawn(
-            ProcessGroupNCCLOpTest.run_rank,
-            nprocs=world_size,
-            args=(world_size, rdvz_file),
-        )
+    run_tests()

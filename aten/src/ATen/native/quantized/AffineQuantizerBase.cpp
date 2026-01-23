@@ -104,21 +104,6 @@ inline float dequantize_val(double scale, int64_t zero_point, T value) {
 }
 #else // USE_FBGEMM
 
-#if defined(__ANDROID__) && !defined(__NDK_MAJOR__)
-template <class T>
-inline float Round(const float x) {
-  return ::nearbyintf(x);
-}
-inline double Round(const double x) {
-  return ::nearbyint(x);
-}
-#else
-template <class T>
-inline T Round(const T x) {
-  return std::nearbyint(x);
-}
-#endif
-
 template <typename T>
 T quantize_val(double scale, int64_t zero_point, float value) {
   // std::nearbyint results in nearest integer value according to the current
@@ -132,7 +117,7 @@ T quantize_val(double scale, int64_t zero_point, float value) {
   constexpr int64_t qmin = std::numeric_limits<typename T::underlying>::min();
   constexpr int64_t qmax = std::numeric_limits<typename T::underlying>::max();
   float inv_scale = 1.0f / static_cast<float>(scale);
-  qvalue = static_cast<int64_t>(zero_point + Round(value * inv_scale));
+  qvalue = static_cast<int64_t>(zero_point + std::nearbyint(value * inv_scale));
   qvalue = std::max<int64_t>(qvalue, qmin);
   qvalue = std::min<int64_t>(qvalue, qmax);
   return static_cast<T>(qvalue);
@@ -147,7 +132,7 @@ T quantize_val_arm(
   constexpr int32_t qmax = std::numeric_limits<T>::max();
   float inv_scale = 1.0f / scale;
 #ifndef _MSC_VER
-  auto r = static_cast<int32_t>(Round(value * inv_scale));
+  auto r = static_cast<int32_t>(std::nearbyint(value * inv_scale));
   // builtin_add_overflow() returns true in case of overflow
   if (__builtin_add_overflow(zero_point, r, &r)) {
     // zero_point must be a non-negative value between qmin and qmax,
@@ -155,7 +140,7 @@ T quantize_val_arm(
     r = qmax;
   }
 #else
-  auto r = zero_point + static_cast<int32_t>(Round(value * inv_scale));
+  auto r = zero_point + static_cast<int32_t>(std::nearbyint(value * inv_scale));
 #endif
   r = std::max(r, qmin);
   r = std::min(r, qmax);
@@ -191,7 +176,7 @@ TORCH_API float dequantize_val(double scale, int64_t zero_point, T value) {
 
 /*
 * Quantize value based on the following equation
-* Xq = Round(Xf * inv_scale + zero_point)
+* Xq = std::nearbyint(Xf * inv_scale + zero_point)
 * where zero_point is in float.
 *
 * Note: For the case of embedding quantization we will set zero_point

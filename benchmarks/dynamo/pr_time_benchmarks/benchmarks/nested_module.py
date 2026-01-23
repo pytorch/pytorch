@@ -4,7 +4,7 @@ from benchmark_base import BenchmarkBase
 
 import torch
 import torch.nn as nn
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class NestedModule(nn.Module):
@@ -67,7 +67,7 @@ class Benchmark(BenchmarkBase):
         # enable_cpp_symbolic_shape_guards has impact on this benchmark
         # Keep using False value for consistency.
         with (
-            fresh_inductor_cache(),
+            fresh_cache(),
         ):
             opt_m = torch.compile(backend=self.backend(), dynamic=self.is_dynamic())(
                 self.m.cuda() if self._is_gpu else self.m

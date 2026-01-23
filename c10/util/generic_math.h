@@ -93,7 +93,7 @@ template <
     std::enable_if_t<std::is_integral_v<scalar_t>, int> = 0>
 inline C10_HOST_DEVICE scalar_t div_mod(scalar_t a, scalar_t b) {
   auto mod = a % b;
-  if ((b < 0) != (mod < 0)) {
+  if (mod != 0 && (b < 0) != (mod < 0)) {
     mod += b;
   }
   return mod;

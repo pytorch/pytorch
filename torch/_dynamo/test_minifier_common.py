@@ -73,6 +73,8 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        if not os.path.exists(cls.DEBUG_DIR):
+            cls.DEBUG_DIR = tempfile.mkdtemp()
         cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             torch._dynamo.config.patch(debug_dir_root=cls.DEBUG_DIR)
         )

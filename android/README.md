@@ -2,7 +2,9 @@
 
 ## Demo applications and tutorials
 
-Demo applications with code walk-through can be find in [this github repo](https://github.com/pytorch/android-demo-app).
+Please refer to [pytorch-labs/executorch-examples](https://github.com/pytorch-labs/executorch-examples/tree/main/dl3/android/DeepLabV3Demo) for the Android demo app based on [ExecuTorch](https://github.com/pytorch/executorch).
+
+Please join our [Discord](https://discord.com/channels/1334270993966825602/1349854760299270284) for any questions.
 
 ## Publishing
 
@@ -119,8 +121,6 @@ We also have to add all transitive dependencies of our aars.
 As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.10.5'` and `'com.facebook.fbjni:fbjni-java-only:0.2.2'`, we need to add them.
 (In case of using maven dependencies they are added automatically from `pom.xml`).
 
-You can check out [test app example](https://github.com/pytorch/pytorch/blob/master/android/test_app/app/build.gradle) that uses aars directly.
-
 ## Linking to prebuilt libtorch library from gradle dependency
 
 In some cases, you may want to use libtorch from your android native build.
@@ -202,7 +202,7 @@ find_library(FBJNI_LIBRARY fbjni
   NO_CMAKE_FIND_ROOT_PATH)
 
 target_link_libraries(${PROJECT_NAME}
-  ${PYTORCH_LIBRARY})
+  ${PYTORCH_LIBRARY}
   ${FBJNI_LIBRARY})
 
 ```
@@ -232,8 +232,6 @@ void loadAndForwardModel(const std::string& modelPath) {
 ```
 
 To load torchscript model for mobile we need some special setup which is placed in `struct JITCallGuard` in this example. It may change in future, you can track the latest changes keeping an eye in our [pytorch android jni code]([https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/cpp/pytorch_jni_jit.cpp#L28)
-
-[Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/master/android/test_app)
 
 ## PyTorch Android API Javadoc
 
