@@ -139,16 +139,17 @@ def _scaled_dot_product_attention_quantized(
             UserWarning,
         )
     # Directly call the internal flash attention operator which has descale support
-    result = torch._scaled_dot_product_flash_attention(
+    # NOTE: This should be torch._scaled_dot_product_flash_attention, but it does not work with torch.compile
+    result = torch.ops.aten._scaled_dot_product_flash_attention.quantized(
         query,
         key,
         value,
         q_descale,
         k_descale,
         v_descale,
-        0.0,  # dropout_p is always 0.0 for FP8
+        0.0,
         is_causal,
-        False,  # return_debug_mask is always False for FP8
+        False,
         scale=scale,
     )
     return result[0]  # Return the output tensor, mirroring scaled_dot_product_attention
