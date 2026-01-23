@@ -933,8 +933,22 @@ class ComplexWrapper(CompilerWrapper):
     """
 
     complex_wrap_mode: TorchDispatchMode = WrapComplexMode()
-    wrapped_arg_indices: list[int] = field(default_factory=list)
+    wrapped_arg_indices: set[int] = field(default_factory=set)
     did_wrap: bool = False
+
+    @staticmethod
+    def is_leaf(arg: Any) -> bool:
+        return isinstance(arg, torch.Tensor) and arg.dtype.is_complex
+
+    @staticmethod
+    def wrap(arg: Any) -> Any:
+        return (
+            ComplexTensor.from_interleaved(arg) if ComplexWrapper.is_leaf(arg) else arg
+        )
+
+    @staticmethod
+    def unwrap(arg: Any) -> Any:
+        return arg.as_interleaved() if isinstance(arg, ComplexTensor) else arg
 
     def wrap_args(self, args):
         return [
@@ -953,25 +967,23 @@ class ComplexWrapper(CompilerWrapper):
     ) -> tuple[TraceFn, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         @simple_wraps(flat_fn)
         def wrapped_flat_fn(*args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]:
-            wrapped_args = pytree.tree_map(ComplexTensor.from_interleaved, args)
             with self.complex_wrap_mode:
-                outs, out_descs = call_and_expect_output_descs(flat_fn, wrapped_args)
+                outs, out_descs = call_and_expect_output_descs(flat_fn, args)
             return outs, out_descs
 
         if config.enable_complex_wrapper:
-            wrapped_args = pytree.tree_map(ComplexTensor.from_interleaved, flat_args)
-            self.wrapped_arg_indices = [
+            wrapped_args = pytree.tree_map(self.wrap, flat_args)
+            self.wrapped_arg_indices = {
                 i
                 for i, arg in enumerate(wrapped_args)
                 if isinstance(arg, ComplexTensor)
-            ]
+            }
             wrapped_args_descs = [
                 ComplexWrappedAOTInput(inp_desc)
                 if i in self.wrapped_arg_indices
                 else inp_desc
                 for i, inp_desc in enumerate(flat_args_descs)
             ]
-
             updated_metadata = run_functionalized_fw_and_collect_metadata(
                 without_output_descs(wrapped_flat_fn),
                 flat_args_descs=wrapped_args_descs,
@@ -998,11 +1010,7 @@ class ComplexWrapper(CompilerWrapper):
             wrapped_args = self.wrap_args(args)
             args.clear()
             outs = compiled_fn(wrapped_args)
-            outs_unwrapped = pytree.tree_map(
-                lambda x: x.as_interleaved(),
-                outs,
-                is_leaf=lambda x: isinstance(x, ComplexTensor),
-            )
+            outs_unwrapped = pytree.tree_map(self.unwrap, outs)
             return outs_unwrapped
 
         wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
