@@ -6,7 +6,7 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <torch/csrc/inductor/static_cuda_launcher.h>
+#include <torch/csrc/inductor/static_launcher/cuda.h>
 #include <cstdint>
 
 #include <torch/csrc/utils/python_numbers.h>
