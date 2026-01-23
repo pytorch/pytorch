@@ -201,6 +201,7 @@ class NVUniversalGemmKernel(Kernel):
             {extra_imports}
 
             {kernel_name_var} = "{kernel_name_str}"
+            # Maps (shape, dtype, shape, dtype, ...) -> compiled kernel artifact
             {cache_var} = {{}}
 
             def {self.kernel_name}_main({params_str}):
@@ -213,10 +214,11 @@ class NVUniversalGemmKernel(Kernel):
                 {create_args_code}
 
                 cache_key = {cache_key_code}
-                if cache_key not in {cache_var}:
-                    {cache_var}[cache_key] = kernel.compile(args)
+                artifact = {cache_var}.get(cache_key)
+                if artifact is None:
+                    artifact = kernel.compile(args)
+                    {cache_var}[cache_key] = artifact
 
-                artifact = {cache_var}[cache_key]
                 kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
             """
         )
