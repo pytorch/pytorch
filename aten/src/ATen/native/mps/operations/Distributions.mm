@@ -500,25 +500,22 @@ Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Gen
 
 // Geometric distribution
 // Returns the number of Bernoulli trials needed to get a success.
-// Uses inverse CDF: floor(log(U) / log(1-p)) + 1
+// Uses inverse CDF: ceil(log(U) / log(1-p))
 Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
   TORCH_CHECK(p > 0.0 && p < 1.0, "geometric_ expects 0 < p < 1, but got p=", p);
 
   mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
-    // Geometric distribution via inverse CDF: floor(log(U) / log(1-p)) + 1
+    // Geometric distribution via inverse CDF: ceil(log(U) / log(1-p))
     // where U is uniform(0, 1)
     MPSGraphTensor* logOneMinusP = [mpsGraph constantWithScalar:std::log(1.0 - p) dataType:randomTensor.dataType];
-    MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:randomTensor.dataType];
 
     // log(U)
     MPSGraphTensor* logU = [mpsGraph logarithmWithTensor:randomTensor name:nil];
     // log(U) / log(1-p)
     MPSGraphTensor* divided = [mpsGraph divisionWithPrimaryTensor:logU secondaryTensor:logOneMinusP name:nil];
-    // floor(log(U) / log(1-p))
-    MPSGraphTensor* floored = [mpsGraph floorWithTensor:divided name:nil];
-    // floor(log(U) / log(1-p)) + 1
-    return [mpsGraph additionWithPrimaryTensor:floored secondaryTensor:oneTensor name:nil];
+    // ceil(log(U) / log(1-p))
+    return [mpsGraph ceilWithTensor:divided name:nil];
   };
   auto eps = std::numeric_limits<float>::epsilon();
   return mps::random_mps_impl<double>(self,
