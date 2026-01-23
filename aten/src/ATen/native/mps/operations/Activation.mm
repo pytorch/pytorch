@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Activation.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/mps/MPSGeneratorImpl.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -16,11 +17,13 @@
 #include <ATen/ops/glu_backward_native.h>
 #include <ATen/ops/glu_native.h>
 #include <ATen/ops/hardtanh_backward_native.h>
+#include <ATen/ops/leaky_relu.h>
 #include <ATen/ops/log_sigmoid_backward_native.h>
 #include <ATen/ops/log_sigmoid_forward_native.h>
 #include <ATen/ops/mish_backward_native.h>
 #include <ATen/ops/mish_native.h>
 #include <ATen/ops/relu_native.h>
+#include <ATen/ops/rrelu_with_noise_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
 #include <ATen/ops/silu_backward_native.h>
 #include <ATen/ops/silu_native.h>
@@ -1406,6 +1409,156 @@ Tensor& hardtanh_backward_out_mps(const Tensor& grad_output,
   }
 
   return grad_input;
+}
+
+// rrelu_with_noise MPS implementation
+// During training: if x <= 0, output = x * r where r ~ Uniform(lower, upper), stored in noise
+//                  if x > 0, output = x, noise = 1
+// During inference: use leaky_relu with slope = (lower + upper) / 2
+
+Tensor& rrelu_with_noise_out_mps(
+    const Tensor& self,
+    Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> gen,
+    Tensor& output) {
+  TORCH_CHECK(self.sym_sizes() == noise.sym_sizes(),
+              "noise tensor shape must match self tensor shape. Got self.shape = ",
+              self.sym_sizes(), " noise.shape = ", noise.sym_sizes());
+
+  if (!training) {
+    // Inference mode: use average of lower and upper as negative slope
+    double negative_slope = (lower.toDouble() + upper.toDouble()) / 2.0;
+    return at::leaky_relu_out(output, self, negative_slope);
+  }
+
+  // Training mode: generate random slopes for negative values
+  if (output.numel() == 0) {
+    return output;
+  }
+
+  auto self_contiguous = self.contiguous();
+
+  struct CachedGraph : public mps::MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor = nil;
+    MPSGraphTensor* noiseTensor = nil;
+    MPSGraphTensor* outputTensor = nil;
+    MPSGraphTensor* noiseOutputTensor = nil;
+    MPSGraphTensor* stateTensor = nil;
+  };
+
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+  auto stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    double lower_val = lower.toDouble();
+    double upper_val = upper.toDouble();
+    std::string key = "rrelu_with_noise_mps:" + getTensorsStringKey({self_contiguous}) +
+                      ":" + std::to_string(lower_val) + ":" + std::to_string(upper_val);
+
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      MPSDataType inputType = getMPSDataType(self_contiguous);
+
+      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self_contiguous);
+      newCachedGraph->stateTensor =
+          mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
+
+      // Generate uniform random values between lower and upper for the random slopes
+      MPSGraphRandomOpDescriptor* desc = [MPSGraphRandomOpDescriptor
+          descriptorWithDistribution:MPSGraphRandomDistributionUniform
+                            dataType:inputType];
+      desc.min = static_cast<float>(lower_val);
+      desc.max = static_cast<float>(upper_val);
+
+      NSArray<MPSGraphTensor*>* resultTensors =
+          [mpsGraph randomTensorWithShape:getMPSShape(self_contiguous)
+                               descriptor:desc
+                              stateTensor:newCachedGraph->stateTensor
+                                     name:nil];
+      MPSGraphTensor* randomTensor = resultTensors[0];
+
+      // Create mask for negative values: x <= 0
+      MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputType];
+      MPSGraphTensor* negMask = [mpsGraph lessThanOrEqualToWithPrimaryTensor:newCachedGraph->inputTensor
+                                                             secondaryTensor:zeroTensor
+                                                                        name:@"negMask"];
+      MPSGraphTensor* negMaskFloat = [mpsGraph castTensor:negMask toType:inputType name:@"negMaskFloat"];
+
+      // Create mask for positive values: x > 0
+      MPSGraphTensor* posMask = [mpsGraph greaterThanWithPrimaryTensor:newCachedGraph->inputTensor
+                                                       secondaryTensor:zeroTensor
+                                                                  name:@"posMask"];
+      MPSGraphTensor* posMaskFloat = [mpsGraph castTensor:posMask toType:inputType name:@"posMaskFloat"];
+
+      // noise = random * negMask + 1 * posMask
+      MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:inputType];
+      MPSGraphTensor* noiseNeg = [mpsGraph multiplicationWithPrimaryTensor:randomTensor
+                                                           secondaryTensor:negMaskFloat
+                                                                      name:@"noiseNeg"];
+      MPSGraphTensor* noisePos = [mpsGraph multiplicationWithPrimaryTensor:oneTensor
+                                                           secondaryTensor:posMaskFloat
+                                                                      name:@"noisePos"];
+      newCachedGraph->noiseOutputTensor = [mpsGraph additionWithPrimaryTensor:noiseNeg
+                                                              secondaryTensor:noisePos
+                                                                         name:@"noiseOutput"];
+
+      // output = input * noise (for x <= 0: x * r, for x > 0: x * 1 = x)
+      newCachedGraph->outputTensor = [mpsGraph multiplicationWithPrimaryTensor:newCachedGraph->inputTensor
+                                                               secondaryTensor:newCachedGraph->noiseOutputTensor
+                                                                          name:@"output"];
+    });
+
+    // Update random state
+    auto& philox_state = mps_gen->philox_engine_inputs(self.numel());
+    auto philox_data = [NSData dataWithBytes:philox_state.data()
+                                      length:at::mps::detail::PHILOX_STATE_N * sizeof(uint32_t)];
+    auto philoxTensor = [[MPSGraphTensorData alloc] initWithMTLBuffer:
+                           [[stream->device() newBufferWithBytes:philox_data.bytes
+                                                          length:philox_data.length
+                                                         options:MTLResourceStorageModeShared] autorelease]
+                                                                shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]
+                                                             dataType:MPSDataTypeInt32];
+
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, self_contiguous);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder noiseOutputPlaceholder = Placeholder(cachedGraph->noiseOutputTensor, noise);
+
+    NSMutableDictionary* feeds = [[NSMutableDictionary alloc] init];
+    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
+    feeds[cachedGraph->stateTensor] = philoxTensor;
+
+    NSMutableDictionary* results = [[NSMutableDictionary alloc] init];
+    results[outputPlaceholder.getMPSGraphTensor()] = outputPlaceholder.getMPSGraphTensorData();
+    results[noiseOutputPlaceholder.getMPSGraphTensor()] = noiseOutputPlaceholder.getMPSGraphTensorData();
+
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+
+  return output;
+}
+
+Tensor rrelu_with_noise_mps(
+    const Tensor& self,
+    Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> gen) {
+  auto output = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return rrelu_with_noise_out_mps(self, noise, lower, upper, training, std::move(gen), output);
+}
+
+Tensor& rrelu_with_noise_mps_(
+    Tensor& self,
+    Tensor& noise,
+    const Scalar& lower,
+    const Scalar& upper,
+    bool training,
+    std::optional<Generator> gen) {
+  return rrelu_with_noise_out_mps(self, noise, lower, upper, training, std::move(gen), self);
 }
 
 } // namespace at::native

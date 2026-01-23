@@ -12333,12 +12333,14 @@
   dispatch:
     CPU: rrelu_with_noise_out_cpu
     CUDA: rrelu_with_noise_out_cuda
+    MPS: rrelu_with_noise_out_mps
 
 - func: rrelu_with_noise(Tensor self, Tensor(b!) noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu
     CUDA: rrelu_with_noise_cuda
+    MPS: rrelu_with_noise_mps
   tags: nondeterministic_seeded
   autogen: rrelu_with_noise_functional
 
@@ -12354,6 +12356,7 @@
   dispatch:
     CPU: rrelu_with_noise_cpu_
     CUDA: rrelu_with_noise_cuda_
+    MPS: rrelu_with_noise_mps_
 
 - func: softplus.out(Tensor self, Scalar beta=1, Scalar threshold=20, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
