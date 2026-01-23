@@ -512,9 +512,7 @@ def dist_strategy(op_schema: OpSchema) -> OpStrategy:
 
     # Full reduction: all tensor dims are reduced
     # Use broadcast shape to handle different-sized inputs correctly
-    broadcast_shape = torch.broadcast_shapes(
-        input_strategy.shape, other_strategy.shape
-    )
+    broadcast_shape = torch.broadcast_shapes(input_strategy.shape, other_strategy.shape)
     tensor_ndim = len(broadcast_shape)
     reduce_dims = list(range(tensor_ndim))
     reduce_dims_map = [-1] * tensor_ndim
