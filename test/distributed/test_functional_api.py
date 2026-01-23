@@ -421,7 +421,7 @@ class TestGradCollectives(MultiThreadedTestCase):
         y = torch.rand([4], requires_grad=True)
         out = ft_c.all_reduce(x, "sum", dist.group.WORLD)
         (out + y).sum().backward()
-        self.assertIsNone(x.grad)
+        self.assertIsNotNone(x.grad)
 
 
 class TestMakeFx(TestCase):
