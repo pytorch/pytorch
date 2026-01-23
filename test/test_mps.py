@@ -7778,6 +7778,72 @@ class TestMPS(TestCaseMPS):
             else:
                 self.assertEqual(input.grad, output_grad)
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_heaviside(self, dtype):
+        """Test heaviside step function MPS implementation.
+
+        Tests: float and integer inputs, broadcasting, edge cases (zeros), gradient computation.
+        """
+        shapes = [
+            (100,),
+            (10, 100),
+            (10, 10, 10),
+        ]
+
+        for shape in shapes:
+            # Create input with mix of negative, zero, and positive values
+            input_mps = torch.randn(shape, device='mps', dtype=dtype)
+            values_mps = torch.randn(shape, device='mps', dtype=dtype)
+
+            input_cpu = input_mps.cpu()
+            values_cpu = values_mps.cpu()
+
+            # Test heaviside function
+            output_mps = torch.heaviside(input_mps, values_mps)
+            output_cpu = torch.heaviside(input_cpu, values_cpu)
+            self.assertEqual(output_mps.cpu(), output_cpu, atol=1e-4, rtol=1e-4)
+
+            # Test out= variant
+            out_mps = torch.empty_like(input_mps)
+            torch.heaviside(input_mps, values_mps, out=out_mps)
+            self.assertEqual(out_mps.cpu(), output_cpu, atol=1e-4, rtol=1e-4)
+
+        # Test broadcasting
+        a = torch.tensor([-1.5, 0.0, 2.0], device='mps', dtype=dtype)
+        b = torch.tensor([0.5], device='mps', dtype=dtype)
+        output = torch.heaviside(a, b)
+        expected = torch.tensor([0.0, 0.5, 1.0], device='mps', dtype=dtype)
+        self.assertEqual(output, expected)
+
+        # Test edge cases: all zeros
+        zeros = torch.zeros(10, device='mps', dtype=dtype)
+        values = torch.ones(10, device='mps', dtype=dtype) * 0.5
+        output = torch.heaviside(zeros, values)
+        self.assertEqual(output, values)  # When input is 0, output is values
+
+        # Test edge cases: all positive
+        positive = torch.ones(10, device='mps', dtype=dtype)
+        output = torch.heaviside(positive, values)
+        self.assertTrue((output == 1.0).all())
+
+        # Test edge cases: all negative
+        negative = -torch.ones(10, device='mps', dtype=dtype)
+        output = torch.heaviside(negative, values)
+        self.assertTrue((output == 0.0).all())
+
+    @parametrize("int_dtype", [torch.int8, torch.int16, torch.int32, torch.int64])
+    def test_heaviside_int(self, int_dtype):
+        """Test heaviside with integer types."""
+        input_mps = torch.tensor([-2, -1, 0, 1, 2], device='mps', dtype=int_dtype)
+        values_mps = torch.tensor([10, 10, 10, 10, 10], device='mps', dtype=int_dtype)
+
+        output_mps = torch.heaviside(input_mps, values_mps)
+        output_cpu = torch.heaviside(input_mps.cpu(), values_mps.cpu())
+        self.assertEqual(output_mps.cpu(), output_cpu)
+
+        # Expected: [0, 0, 10, 1, 1]
+        expected = torch.tensor([0, 0, 10, 1, 1], device='mps', dtype=int_dtype)
+        self.assertEqual(output_mps, expected)
 
     def test_mps_generator(self):
         # explicit manual seeding by creating an MPS Generator
