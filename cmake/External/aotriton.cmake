@@ -15,12 +15,16 @@ if(NOT __AOTRITON_INCLUDED)
       "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
+      "manylinux_2_28"  # rocm7.1
+      "manylinux_2_28"  # rocm7.2
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.2"
       "rocm6.3"
       "rocm6.4"
       "rocm7.0"
+      "rocm7.1"
+      "rocm7.2"
       )
   set(__AOTRITON_CI_COMMIT "d34f3b6c824df77d5c5788a2e7555b2398be4b79")
   set(__AOTRITON_SHA256_LIST
@@ -28,6 +32,8 @@ if(NOT __AOTRITON_INCLUDED)
       "662fc06239c8091f57e13793a4fac0e783241c9f5e86b1701bbb2ba308ef4279"  # rocm6.3
       "367062cba487492e58b38bb54720fb239e65b8717d0e11084f8059f2c5748af0"  # rocm6.4
       "deb8046e9ef976c2739fd0563b50239e12dc002d7d4f97c1c4a1874acb65abc4"  # rocm7.0
+      "c1613ed9e9eecc7359f04a1624bb528e54f5e6369e682dd446eaa936d9452358"  # rocm7.1
+      "56ca31254c1655fa4d5168e2db3159781c2442d5f6b01882155e93859b85cf16"  # rocm7.2
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
