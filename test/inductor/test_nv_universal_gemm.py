@@ -84,7 +84,7 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
             }
         ):
             compiled_fn = torch.compile(matmul)
@@ -118,7 +118,7 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
             }
         ):
             compiled_fn = torch.compile(matmul)
@@ -157,7 +157,7 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
             }
         ):
             compiled_fn = torch.compile(fn)
@@ -201,7 +201,7 @@ class TestNVUniversalGemm(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "NVGEMM",
-                    "cuda.nvgemm_max_profiling_configs": 3,
+                    "nvgemm_max_profiling_configs": 3,
                 }
             ):
                 result, (code,) = run_and_get_code(
@@ -249,7 +249,7 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
             }
         ):
             compiled_fn = torch.compile(bmm)
@@ -303,7 +303,7 @@ class TestNVUniversalGemm(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
+                "nvgemm_max_profiling_configs": 3,
                 "autotune_fallback_to_aten": False,
             }
         ):
@@ -486,7 +486,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 2,
+                "nvgemm_max_profiling_configs": 2,
             }
         ):
             compiled_fn = torch.compile(fn, dynamic=True)
@@ -507,7 +507,7 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 2,
+                "nvgemm_max_profiling_configs": 2,
             }
         ):
             compiled_fn = torch.compile(matmul, dynamic=True)

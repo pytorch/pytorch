@@ -414,7 +414,7 @@ def _add_nv_gemm_choices_impl(
         log.debug("No compatible %s kernels found", variant.op_name)
         return
 
-    max_configs = config.cuda.nvgemm_max_profiling_configs or len(kernels)
+    max_configs = config.nvgemm_max_profiling_configs or len(kernels)
     if variant == GemmVariant.GEMM and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
         kernels = heuristics.filter_kernels(
