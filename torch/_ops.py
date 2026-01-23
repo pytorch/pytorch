@@ -402,9 +402,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 else:
                     if curr_mode.supports_higher_order_operators:
                         with _pop_mode_temporarily() as mode:
-                            result = curr_mode.__torch_dispatch__(
-                                self, [], args, kwargs
-                            )
+                            return curr_mode.__torch_dispatch__(self, [], args, kwargs)
                     else:
                         raise NotImplementedError(
                             f"There was no rule registered for HigherOrderOperator {self._name} and mode {curr_mode}."
