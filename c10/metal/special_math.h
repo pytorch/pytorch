@@ -3036,7 +3036,7 @@ namespace metal {
  * Evaluates polynomial with coefficients in array at point x
  */
 template <typename T, int N>
-inline T polevl(T x, constant const float (&coeff)[N]) {
+inline T polevl(T x, const float (&coeff)[N]) {
   T result = coeff[0];
   for (int i = 1; i < N; ++i) {
     result = result * x + coeff[i];
@@ -3057,7 +3057,7 @@ inline T ndtri(T y0) {
   constexpr float zero = 0.0f;
 
   /* approximation for 0 <= |y - 0.5| <= 3/8 */
-  constant const float P0[5] = {
+  constexpr float P0[5] = {
       -5.99633501014107895267e1f,
       9.80010754185999661536e1f,
       -5.66762857469070293439e1f,
@@ -3065,7 +3065,7 @@ inline T ndtri(T y0) {
       -1.23916583867381258016e0f,
   };
 
-  constant const float Q0[9] = {
+  constexpr float Q0[9] = {
       1.00000000000000000000e0f,
       1.95448858338141759834e0f,
       4.67627912898881538453e0f,
@@ -3080,7 +3080,7 @@ inline T ndtri(T y0) {
   /* Approximation for interval z = sqrt(-2 log y ) between 2 and 8
    * i.e., y between exp(-2) = .135 and exp(-32) = 1.27e-14.
    */
-  constant const float P1[9] = {
+  constexpr float P1[9] = {
       4.05544892305962419923e0f,
       3.15251094599893866154e1f,
       5.71628192246421288162e1f,
@@ -3092,7 +3092,7 @@ inline T ndtri(T y0) {
       -8.57456785154685413611e-4f,
   };
 
-  constant const float Q1[9] = {
+  constexpr float Q1[9] = {
       1.00000000000000000000e0f,
       1.57799883256466749731e1f,
       4.53907635128879210584e1f,
@@ -3107,7 +3107,7 @@ inline T ndtri(T y0) {
   /* Approximation for interval z = sqrt(-2 log y ) between 8 and 64
    * i.e., y between exp(-32) = 1.27e-14 and exp(-2048) = 3.67e-890.
    */
-  constant const float P2[9] = {
+  constexpr float P2[9] = {
       3.23774891776946035970e0f,
       6.91522889068984211695e0f,
       3.93881025292474443415e0f,
@@ -3119,7 +3119,7 @@ inline T ndtri(T y0) {
       6.23974539184983293730e-9f,
   };
 
-  constant const float Q2[9] = {
+  constexpr float Q2[9] = {
       1.00000000000000000000e0f,
       6.02427039364742014255e0f,
       3.67983563856160859403e0f,
