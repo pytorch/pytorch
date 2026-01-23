@@ -50,7 +50,6 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 _P = ParamSpec("_P")
@@ -403,17 +402,3 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return is_opaque_value_type(
             type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
         )
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self.source is not None:
-            self.source.reconstruct(codegen)
-            return
-
-        if hasattr(self.value, "real_obj") and is_opaque_value_type(
-            type(self.value.real_obj)
-        ):
-            real_obj = self.value.real_obj
-            codegen.append_output(codegen.create_load_const_unchecked(real_obj))
-            return
-
-        super().reconstruct(codegen)

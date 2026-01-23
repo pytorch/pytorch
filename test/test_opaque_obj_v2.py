@@ -1694,23 +1694,6 @@ def forward(self, arg0_1):
         x = torch.randn(3, 3)
         self.assertEqual(opt_f(x), foo(x))
 
-    def test_value_type_reconstruct_on_graph_break(self):
-        def foo(x):
-            cfg = SizeStore(5)
-            y = x + cfg.size
-            torch._dynamo.graph_break()
-            z = y + cfg.size
-            return z
-
-        x = torch.randn(3)
-
-        cnt = CompileCounter()
-        opt_f = torch.compile(foo, backend=cnt)
-        result = opt_f(x)
-
-        self.assertEqual(result, foo(x))
-        self.assertEqual(cnt.frame_count, 2)
-
     def test_getitem(self):
         def foo(x):
             y = x * 2 + 1
