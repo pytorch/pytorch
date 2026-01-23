@@ -5,12 +5,24 @@ import torch._dynamo.testing
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
 
 
+class ComplexDynamoTestCase(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        torch._functorch.config.enable_complex_wrapper = True
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        torch._functorch.config.enable_complex_wrapper = False
+
+
 def sample_function(a: torch.Tensor, b: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     y = torch.mm(a, b)
     return y.abs() + x
 
 
-class ComplexTests(torch._dynamo.test_case.TestCase):
+class ComplexTests(ComplexDynamoTestCase):
     def test_simple(self):
         fn_c = torch.compile(sample_function, fullgraph=True)
         a = torch.randn(2, 2, dtype=torch.complex64)
