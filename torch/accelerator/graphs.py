@@ -6,6 +6,40 @@ import torch
 from torch._C import _acceleratorGraph
 
 
+def generate_graph_pool_handle() -> tuple[int, int]:
+    r"""
+    Returns a unique handle that identifies a graph memory pool.
+
+    This function does not create an actual memory pool and does not allocate any resources.
+    The returned handle is purely an identifier and intended to be passed to graph capture APIs
+    to control memory sharing and isolation between graphs.
+
+    Returns:
+        tuple[int, int]: An unique identifier for a graph memory pool.
+
+    Example::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> x = torch.zeros([2000], device=0)
+
+        >>> stream = torch.Stream()
+        >>> pool = torch.accelerator.generate_graph_pool_handle()
+        >>> g0 = torch.accelerator.Graph(pool=pool)
+        >>> g1 = torch.accelerator.Graph(pool=pool)
+        >>> # Capture operations into g0, sharing memory pool handle 'pool'
+        >>> with stream, g0:
+        ...     x += 1
+
+        >>> # Capture operations into g1, sharing memory pool handle 'pool'
+        >>> with stream, g1:
+        ...     x *= 2
+
+        >>> g0.replay()
+        >>> g1.replay()
+    """
+    return torch._C._accelerator_generateGraphPoolHandle()
+
+
 class Graph(_acceleratorGraph):
     r"""
     Wrapper around an :ref:`accelerator<accelerators>` graph that supports capture and replay.
@@ -23,19 +57,26 @@ class Graph(_acceleratorGraph):
             Defaults to ``False``.
         pool (tuple[int, int], optional): Memory pool identifier for this graph. Multiple graphs
             can share the same pool by passing the same identifier, which can reduce memory overhead.
-            Defaults to ``None``.
+            Obtain a pool identifier by calling ``generate_graph_pool_handle()``. Defaults to ``None``.
 
     Example::
 
-        >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> x = torch.zeros([2000], device=0)
 
         >>> stream = torch.Stream()
-        >>> graph = torch.accelerator.Graph()
-        >>> with stream, graph:
+        >>> g0 = torch.accelerator.Graph()
+        >>> # Capture operations into g0
+        >>> with stream, g0:
         ...     x += 1
 
-        >>> graph.replay()
+        >>> g1 = torch.accelerator.Graph(g0.pool())
+        >>> # Capture operations into g1, sharing g0's memory pool
+        >>> with stream, g1:
+        ...     x *= 2
+
+        >>> g0.replay()
+        >>> g1.replay()
     """
 
     def __new__(
@@ -163,4 +204,4 @@ class Graph(_acceleratorGraph):
         self.capture_end()
 
 
-__all__ = ["Graph"]
+__all__ = ["Graph", "generate_graph_pool_handle"]
