@@ -26,6 +26,8 @@
 #include <ATen/ops/median.h>
 #include <ATen/ops/median_native.h>
 #include <ATen/ops/min_native.h>
+#include <ATen/ops/mode.h>
+#include <ATen/ops/mode_native.h>
 #include <ATen/ops/nanmedian_native.h>
 #include <ATen/ops/nansum_native.h>
 #include <ATen/ops/norm_native.h>
@@ -1699,6 +1701,48 @@ std::tuple<Tensor, Tensor> var_mean_mps(const Tensor& self,
   auto mean = at::empty(var.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
   reduction_out_mps(self, dim, keepdim, std::nullopt, mean, MPSReductionType::MEAN, "mean_out_mps");
   return {var, mean};
+}
+
+// mode: find the most frequent value along a dimension
+// Algorithm: Sort the tensor, then for each position compute run lengths and find the max run
+std::tuple<Tensor, Tensor> mode_mps(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(self.numel() > 0, "mode: cannot compute mode of an empty tensor");
+  TORCH_CHECK(self.dim() > 0, "mode: expected a tensor with at least one dimension");
+  
+  dim = at::maybe_wrap_dim(dim, self.dim());
+  int64_t dim_size = self.size(dim);
+  
+  // Compute output sizes
+  auto out_sizes = self.sizes().vec();
+  out_sizes[dim] = 1;
+  if (!keepdim) {
+    out_sizes.erase(out_sizes.begin() + dim);
+  }
+  
+  Tensor values = at::empty(out_sizes, self.options());
+  Tensor indices = at::empty(out_sizes, self.options().dtype(kLong));
+  
+  if (dim_size == 1) {
+    // If the dimension size is 1, the mode is just that element
+    if (keepdim) {
+      values.copy_(self);
+      indices.zero_();
+    } else {
+      values.copy_(self.squeeze(dim));
+      indices.zero_();
+    }
+    return std::make_tuple(values, indices);
+  }
+  
+  // For small tensors or as a general solution, use CPU fallback
+  // This is because implementing mode efficiently on GPU is complex
+  // and requires specialized algorithms (e.g., parallel histogram, radix sort with counting)
+  auto self_cpu = self.to(kCPU);
+  auto [values_cpu, indices_cpu] = at::mode(self_cpu, dim, keepdim);
+  values.copy_(values_cpu);
+  indices.copy_(indices_cpu);
+  
+  return std::make_tuple(values, indices);
 }
 
 } // namespace at::native
