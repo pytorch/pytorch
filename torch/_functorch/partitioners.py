@@ -1761,9 +1761,6 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
     The with_effects node returns a tuple (token, result). We recursively find all
     leaf outputs extracted via getitem and mark them as MUST_SAVE. Since these are
     saved, the with_effects op doesn't need to be recomputed in backward.
-
-    TODO: we should probably have something similar to config.unsafe_allow_optimization_of_collectives
-          to allow certain effectful ops to opt out of this when safe.
     """
 
     def mark_getitem_outputs(node: fx.Node) -> None:
@@ -1774,7 +1771,11 @@ def force_save_effectful_ops(joint_module: fx.GraphModule) -> None:
                     user.meta["recompute"] = CheckpointPolicy.MUST_SAVE
 
     for node in joint_module.graph.nodes:
-        if is_with_effects(node) and not must_recompute(node):
+        if (
+            is_with_effects(node)
+            and not must_recompute(node)
+            and not _has_tag_is_backward(node)
+        ):
             mark_getitem_outputs(node)
 
 
@@ -2090,16 +2091,7 @@ def solve_min_cut(
         if node.op == "output":
             continue
 
-        # MUST_SAVE nodes should always be saved, not recomputed.
-        # ban recomputation and ad an edge to the sink to ensure
-        # it's in the min-cut.
-        #
-        # needed even if not in required_bw_nodes (e.g., getitem nodes
-        # extracting from effectful op outputs).
-        if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
-            ban_recomputation_if_allowed(node)
-            nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
-        elif node in node_info.required_bw_nodes:
+        if node in node_info.required_bw_nodes:
             if node not in node_info.inputs:
                 nx_graph.add_edge(
                     node.name + "_in",
