@@ -154,7 +154,9 @@ def get_efc_kernel_with_epilogue(efc_kernel_name: str, epilogue_args: Any) -> An
     new_kernel = kernel_class(new_metadata)
     _t3 = _time.perf_counter()
 
-    print(f"      [Kernel] create_epilogue_metadata: {(_t1-_t0)*1000:.2f} ms, create_kernel_metadata: {(_t2-_t1)*1000:.2f} ms, instantiate_kernel: {(_t3-_t2)*1000:.2f} ms")
+    print(
+        f"      [Kernel] create_epilogue_metadata: {(_t1 - _t0) * 1000:.2f} ms, create_kernel_metadata: {(_t2 - _t1) * 1000:.2f} ms, instantiate_kernel: {(_t3 - _t2) * 1000:.2f} ms"
+    )
 
     # Cache the configured kernel
     _efc_epilogue_cache[cache_key] = new_kernel

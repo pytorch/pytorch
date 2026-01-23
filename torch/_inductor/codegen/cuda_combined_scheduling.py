@@ -178,9 +178,7 @@ class CUDACombinedScheduling(BaseScheduling):
         NVGEMM modules have get_args() and call() functions similar to Triton,
         but without the triton_ wrapper.
         """
-        import os
 
-        import torch
         from torch._dynamo.utils import preserve_rng_state
         from torch._inductor.runtime.benchmarking import benchmarker
         from torch._inductor.utils import get_interface_for_device

@@ -148,7 +148,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         """Create the appropriate GemmArguments based on variant."""
         if self.variant == GemmVariant.GROUPED_GEMM:
             a, b, offsets = input_tensors
-            b = b.permute(0, 2, 1).contiguous().permute(0, 2, 1)
             return cutlass_api.arguments.GroupedGemmArguments(
                 a,
                 b,
@@ -431,7 +430,6 @@ def _add_nv_gemm_choices_impl(
     if variant == GemmVariant.GROUPED_GEMM:
         a_tensor, b_tensor, offs_tensor = dummy_tensors
         assert b_tensor is not None
-        b_tensor = b_tensor.permute(0, 2, 1).contiguous().permute(0, 2, 1)
         args = cutlass_api.arguments.GroupedGemmArguments(
             a_tensor,
             b_tensor,
@@ -515,9 +513,7 @@ def _add_nv_gemm_choices_impl(
 
     # Add callers for both non-EFC and EFC kernels
     # Non-EFC kernels don't support epilogue fusion, EFC kernels do
-    all_kernels = [
-        (kernel, False) for kernel in non_efc_kernels
-    ] + [
+    all_kernels = [(kernel, False) for kernel in non_efc_kernels] + [
         (kernel, True) for kernel in efc_kernels
     ]
 

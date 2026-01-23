@@ -162,16 +162,13 @@ class NVUniversalGemmKernel(Kernel):
             from cutlass_api.library import ScaleMode, ScaleSwizzleMode"""
 
         # Variant-specific code generation:
-        # - preprocess_inputs: input transformations before args creation
         # - cache_key_code: expression for cache key
         # - create_args_code: code to create Arguments object
         if is_grouped:
-            preprocess_inputs = """# Transpose B from K-major to N-major for CUTLASS compatibility
-                in_ptr1_transposed = in_ptr1.permute(0, 2, 1).contiguous().permute(0, 2, 1)"""
             cache_key_code = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape)"
             create_args_code = f"""args = cutlass_api.arguments.GroupedGemmArguments(
                         in_ptr0,
-                        in_ptr1_transposed,
+                        in_ptr1,
                         out_ptr0,
                         accumulator_type={acc_dtype_str},
                         offsets=in_ptr2,
@@ -187,7 +184,6 @@ class NVUniversalGemmKernel(Kernel):
             scale_mode_b_str = scale_mode_b.name if scale_mode_b else ""
             swizzle_mode_a_str = swizzle_mode_a.name if swizzle_mode_a else ""
             swizzle_mode_b_str = swizzle_mode_b.name if swizzle_mode_b else ""
-            preprocess_inputs = ""
             cache_key_code = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape, in_ptr3.shape)"
             create_args_code = f"""scaled_a = ScaledTensor(
                     in_ptr0, in_ptr2, ScaleMode.{scale_mode_a_str}, ScaleSwizzleMode.{swizzle_mode_a_str}
@@ -202,7 +198,6 @@ class NVUniversalGemmKernel(Kernel):
                     accumulator_type={acc_dtype_str},
                 )"""
         else:
-            preprocess_inputs = ""
             cache_key_code = (
                 "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)"
             )
@@ -277,8 +272,6 @@ class NVUniversalGemmKernel(Kernel):
     import time as _time
     {epilogue_args_construction}
 
-    {preprocess_inputs}
-
     {create_args_with_epilogue}
 
     {kernel_lookup_code}
@@ -304,8 +297,6 @@ class NVUniversalGemmKernel(Kernel):
             global_decl = f"global {cache_var}"
             main_body = f"""
     {kernel_lookup_code}
-
-    {preprocess_inputs}
 
     {create_args_with_epilogue}
 
