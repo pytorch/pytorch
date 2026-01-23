@@ -696,7 +696,6 @@ if(USE_FBGEMM)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       target_compile_options_if_supported(asmjit -Wno-extra-semi)
-      target_compile_options_if_supported(fbgemm -Wno-extra-semi)
     endif()
     target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     target_compile_options_if_supported(asmjit -Wno-unused-variable)
