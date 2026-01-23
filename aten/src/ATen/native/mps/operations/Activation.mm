@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Activation.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
 
@@ -1424,6 +1425,9 @@ Tensor& rrelu_with_noise_out_mps(
     bool training,
     std::optional<Generator> gen,
     Tensor& output) {
+  // Ensure output tensor has the correct shape
+  at::native::resize_output(output, self.sizes());
+
   TORCH_CHECK(self.sym_sizes() == noise.sym_sizes(),
               "noise tensor shape must match self tensor shape. Got self.shape = ",
               self.sym_sizes(), " noise.shape = ", noise.sym_sizes());
@@ -1511,30 +1515,37 @@ Tensor& rrelu_with_noise_out_mps(
                                                                           name:@"output"];
     });
 
-    // Update random state
-    auto& philox_state = mps_gen->philox_engine_inputs(self.numel());
-    auto philox_data = [NSData dataWithBytes:philox_state.data()
-                                      length:at::mps::detail::PHILOX_STATE_N * sizeof(uint32_t)];
-    auto philoxTensor = [[MPSGraphTensorData alloc] initWithMTLBuffer:
-                           [[stream->device() newBufferWithBytes:philox_data.bytes
-                                                          length:philox_data.length
-                                                         options:MTLResourceStorageModeShared] autorelease]
-                                                                shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]
-                                                             dataType:MPSDataTypeInt32];
+    // Update random state with proper mutex locking
+    MPSNDArrayDescriptor* stateDesc =
+        [MPSNDArrayDescriptor descriptorWithDataType:MPSDataTypeInt32 shape:@[ @(at::mps::detail::PHILOX_STATE_N) ]];
+    MPSNDArray* stateNDArray = [[[MPSNDArray alloc] initWithDevice:stream->device() descriptor:stateDesc] autorelease];
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      // update the Philox state values on each run
+      mps_gen->update_philox_counters();
+      [stateNDArray writeBytes:mps_gen->state_data() strideBytes:nil];
+    }
+    MPSGraphTensorData* stateTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:stateNDArray] autorelease];
 
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, self_contiguous);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
-    Placeholder noiseOutputPlaceholder = Placeholder(cachedGraph->noiseOutputTensor, noise);
+    Placeholder noiseOutputPlaceholder = Placeholder(cachedGraph->noiseOutputTensor, noise.contiguous());
 
     NSMutableDictionary* feeds = [[NSMutableDictionary alloc] init];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    feeds[cachedGraph->stateTensor] = philoxTensor;
+    feeds[cachedGraph->stateTensor] = stateTensorData;
 
     NSMutableDictionary* results = [[NSMutableDictionary alloc] init];
     results[outputPlaceholder.getMPSGraphTensor()] = outputPlaceholder.getMPSGraphTensorData();
     results[noiseOutputPlaceholder.getMPSGraphTensor()] = noiseOutputPlaceholder.getMPSGraphTensorData();
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+
+    // Copy back noise if it wasn't contiguous
+    if (!noise.is_contiguous()) {
+      noise.copy_(noiseOutputPlaceholder.getMPSGraphTensorData().mpsndarray().tensor());
+    }
   }
 
   return output;
