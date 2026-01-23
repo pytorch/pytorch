@@ -2094,7 +2094,8 @@ def use_nv_universal_gemm_template(
     g: Optional[_IntLike] = None,
 ) -> bool:
     """
-    Returns True if we can use the NVIDIA Universal GEMM Template
+    Return True if we can use the NVIDIA Universal GEMM Template.
+
     Required conditions:
         1. NVGEMM backend is enabled
         2. cutlass_api is available
@@ -2104,9 +2105,13 @@ def use_nv_universal_gemm_template(
         6. Base pointers are 16-byte aligned
         7. Shape dimensions are not unbacked symbols
 
-    Note: Shape and stride constraints are handled internally by
-    cutlass_api.get_kernels() which filters incompatible kernels.
-    Dynamic shapes are supported as long as they have hints (from example inputs).
+    Note:
+        - Shape and stride constraints are handled internally by
+          cutlass_api.get_kernels() which filters incompatible kernels.
+        - GroupedGemm currently only supports TN layout (column-major B).
+          Any other layout will act as a noop and fall back to ATen.
+        - Dynamic shapes are supported as long as they have hints
+          (from example inputs).
     """
     from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
