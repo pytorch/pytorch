@@ -62,6 +62,28 @@ class MPSBasicTests(TestCase):
     def test_atanh(self):
         self.common(lambda x: x.atanh(), (torch.rand(1024),))
 
+    def test_tanh(self):
+        self.common(lambda x: x.tanh(), (torch.rand(1024),))
+
+    def test_tanh_large_values(self):
+        # Test that tanh handles large values correctly (should saturate to ±1)
+        x = torch.tensor([-100.0, -50.0, -15.0, 0.0, 15.0, 50.0, 100.0], device="mps")
+
+        @torch.compile
+        def fn(x):
+            return x.tanh()
+
+        result = fn(x)
+        assert torch.allclose(result[0], torch.tensor(-1.0, device="mps")), (
+            "tanh(-100) should be -1"
+        )
+        assert torch.allclose(result[-1], torch.tensor(1.0, device="mps")), (
+            "tanh(100) should be +1"
+        )
+        assert not torch.isnan(result).any(), (
+            "tanh should not produce NaN for large values"
+        )
+
     def test_floor(self):
         self.common(lambda x: x.floor(), (torch.rand(1024),))
 
@@ -121,6 +143,20 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_conv_train(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/161905
+        def fn(x, y):
+            return torch.nn.functional.conv2d(x, y, None, 1, 1, 1)
+
+        self.common(
+            fn,
+            (
+                torch.rand(4, 512, 7, 7, requires_grad=True),
+                torch.rand(512, 512, 3, 3),
+            ),
+            check_gradient=True,
+        )
+
     def test_cholesky(self):
         def fn(x):
             return (
@@ -129,6 +165,31 @@ class MPSBasicTests(TestCase):
             )
 
         self.common(fn, (torch.eye(64),), check_lowp=False)
+
+    def test_reduced_max(self):
+        # inductor test do not validate that max of say 16K half elements can be computed
+        self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
+
+    def test_linalg_inv(self):
+        def fn(x):
+            return torch.linalg.inv(torch.linalg.cholesky(x))
+
+        A = torch.diag(torch.tensor([20.0, 0.5, 5.0], dtype=torch.float32) ** 2)
+        self.common(fn, (A,), check_lowp=False)
+
+    def test_large_reduction(self):
+        def fn(a, b):
+            return (a[:, None] - b[None, :]).sum()
+
+        a = torch.randn(32, device="mps")
+        b = torch.randn(64, device="mps")
+        self.common(
+            fn,
+            (
+                a,
+                b,
+            ),
+        )
 
 
 class MPSBasicTestsAOTI(TestCase):
@@ -148,6 +209,23 @@ class MPSBasicTestsAOTI(TestCase):
         inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
         m = M().to("mps")
         self.check_model(m, inp)
+
+    def test_tanh_codegen(self):
+        # Verify that tanh uses metal::precise::tanh in generated Metal shader
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.tanh()
+
+        example_inputs = (torch.randn(1024, device="mps"),)
+        model = Model()
+
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            # Verify metal::precise::tanh is used (not clamped version)
+            FileCheck().check("metal::precise::tanh").run(src_code)
 
     def test_fallback_mps(self):
         class M(torch.nn.Module):
@@ -245,7 +323,7 @@ class MPSBasicTestsAOTI(TestCase):
         ep = torch.export.export(model, example_inputs)
         package_path = torch._export.aot_compile(ep.module(), example_inputs)
 
-        target_str = 'mps_lib_0.getKernelFunction("generated_kernel")'
+        target_str = "aoti_torch_mps_get_kernel_function("
         target_count = 1
 
         with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:

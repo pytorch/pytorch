@@ -480,7 +480,7 @@ REGISTER_ZVECTOR_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets
 REGISTER_SVE256_DISPATCH(_segment_reduce_offsets_stub, &_segment_reduce_offsets_cpu_kernel)
 
 // Currently some computation is being duplicated across forward and backward.
-// TODO: Cache indices in forward pass to re-use in backward
+// TODO: Cache indices in forward pass to reuse in backward
 Tensor _segment_reduce_backward_kernel(
     const Tensor& grad,
     const Tensor& output,

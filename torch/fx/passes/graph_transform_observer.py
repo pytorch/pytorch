@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import os
-from typing import Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Optional, TypeVar
 
 from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility
@@ -31,18 +32,21 @@ class GraphTransformObserver:
         """
         log_url is inferred to be torch._inductor.config.trace.log_url_for_graph_xform unless otherwise specified
         """
-        from torch._inductor.config import trace
+        from torch._inductor import config as inductor_config
 
         self.gm = gm
         self.passname = passname
         self.subsystem = subsystem
 
         if log_url is None:
-            log_url = trace.log_url_for_graph_xform
+            log_url = inductor_config.trace.log_url_for_graph_xform
 
         self.log_url = log_url
 
-        self.active = trace.enabled or self.log_url is not None
+        self.active = (
+            self.log_url is not None
+            or inductor_config.trace.provenance_tracking_level == 1
+        )
 
         if self.active:
             self.erased_nodes: set[str] = set()
@@ -73,20 +77,37 @@ class GraphTransformObserver:
         return cls.__pass_count
 
     def apply_gm_pass(self, pass_fn: Callable[[GraphModule], T]) -> Optional[T]:
+        from torch._dynamo.utils import dynamo_timed
+
         with self:
-            if not self._check_disable_pass():
+            if self._check_disable_pass():
+                return None
+            with dynamo_timed(
+                f"pass.{self.subsystem}.{self.passname}"
+                if self.subsystem
+                else f"pass.{self.passname}"
+            ):
                 return pass_fn(self.gm)
 
-        return None
-
     def apply_graph_pass(self, pass_fn: Callable[[Graph], T]) -> Optional[T]:
+        from torch._dynamo.utils import dynamo_timed
+
         with self:
-            if not self._check_disable_pass():
+            if self._check_disable_pass():
+                return None
+            with dynamo_timed(
+                f"pass.{self.subsystem}.{self.passname}"
+                if self.subsystem
+                else f"pass.{self.passname}"
+            ):
                 return pass_fn(self.gm.graph)
 
-        return None
-
     def _check_disable_pass(self):
+        from torch._inductor import config as inductor_config
+
+        if self.passname.upper() in inductor_config.disabled_passes.upper():
+            return True
+
         if self.subsystem is None:
             return False
 
@@ -189,6 +210,12 @@ class GraphTransformObserver:
                 return
 
             assert isinstance(new_node, Node)
+
+            # replace hook is called once for each user of old
+            # this avoids adding duplicated source nodes
+            added_nodes = {s.name for s in new_node.meta.get("from_node", [])}
+            if old.name in added_nodes:
+                return
 
             action = [NodeSourceAction.REPLACE]
             if new_node.name in self.created_nodes:

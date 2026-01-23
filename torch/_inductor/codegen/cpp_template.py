@@ -4,8 +4,8 @@ import functools
 import itertools
 import logging
 import sys
-from collections.abc import Iterable
-from typing import Callable, Optional, Union
+from collections.abc import Callable, Iterable
+from typing import Optional, Union
 from unittest.mock import patch
 
 import sympy
@@ -112,6 +112,7 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
+            # pyrefly: ignore [bad-index, index-error]
             self.output_node[0].get_layout()
             if isinstance(self.output_node, Iterable)
             else self.output_node.get_layout(),
@@ -131,7 +132,7 @@ class CppTemplate(KernelTemplate):
             "win32",
         ]
         if enable_kernel_profile:
-            res.writelines(["#include <ATen/record_function.h>"])
+            res.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
         return res
 
     def render(self, **kwargs) -> str:

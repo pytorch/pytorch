@@ -264,7 +264,6 @@ REGISTER_CPU_KERNEL("torch.ops.aten.relu.default", aten_relu, {
     KernelOutput(0) = create_empty_from(in0_t);
   }
   auto& out_t = KernelOutput(0).toTensor();
-  fastResizeToZero(out_t);
   at::cpu::threshold_out(out_t, in0_t, 0, 0);
 });
 ```
@@ -282,7 +281,7 @@ RuntimeConfigs {
 
 Constant folding is the process of finding all of the constant-evaluable
 subgraphs, evaluating them at startup, and then storing their results as
-constants as opposed to re-evaluting them every time.
+constants as opposed to re-evaluating them every time.
 
 To enable constant folding, you can set the following configurations.
 

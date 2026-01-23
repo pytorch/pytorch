@@ -89,7 +89,7 @@ struct NoInferSchemaTag {};
 
 #define HAS_PT2_COMPLIANT_TAG
 
-// For multipy/torchdeploy use case
+// For multipy/torchdeploy use case  // codespell:ignore multipy
 enum class _RegisterOrVerify { REGISTER, VERIFY };
 
 template <class CurClass>
@@ -115,7 +115,7 @@ class TORCH_API CppFunction final {
       Func* f,
       std::enable_if_t<
           c10::guts::is_function_type<Func>::value,
-          std::nullptr_t> = nullptr)
+          std::nullptr_t>  /*unused*/= nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f)),
         cpp_signature_(c10::impl::CppSignature::make<Func>()),
         schema_(
@@ -129,7 +129,7 @@ class TORCH_API CppFunction final {
       FuncPtr f,
       std::enable_if_t<
           c10::is_compile_time_function_pointer<FuncPtr>::value,
-          std::nullptr_t> = nullptr)
+          std::nullptr_t>  /*unused*/= nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedFunction(f)),
         cpp_signature_(
             c10::impl::CppSignature::make<typename FuncPtr::FuncType>()),
@@ -144,7 +144,7 @@ class TORCH_API CppFunction final {
       Lambda&& f,
       std::enable_if_t<
           c10::guts::is_functor<std::decay_t<Lambda>>::value,
-          std::nullptr_t> = nullptr)
+          std::nullptr_t>  /*unused*/= nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedLambda(
             std::forward<Lambda>(f))),
         cpp_signature_(c10::impl::CppSignature::make<Lambda>()),
@@ -310,7 +310,7 @@ class TORCH_API CppFunction final {
 
   // The "setter" for dispatch_key_
   template <typename Func>
-  friend CppFunction dispatch(c10::DispatchKey, Func&&);
+  friend CppFunction dispatch(c10::DispatchKey /*k*/, Func&& /*raw_f*/);
 
   // The only class which actually pulls out values from CppFunction (does so
   // destructively, felt too lazy to write accessors that I don't even
@@ -353,6 +353,7 @@ inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
 template <typename Func>
 inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
   auto deviceTypeToDispatchKey = [](c10::DeviceType t) {
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
     switch (t) {
       // This list is synchronized with the k-constants in c10/core/DeviceType.h
       case c10::DeviceType::CPU:
@@ -389,6 +390,7 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
             " cannot be overloaded at dispatch time, "
             "please file a bug report explaining what you were trying to do.");
     }
+    C10_DIAGNOSTIC_POP()
   };
   return dispatch(deviceTypeToDispatchKey(type), std::forward<Func>(raw_f));
 }
@@ -746,14 +748,14 @@ class TORCH_API Library final {
   // These overloads cover cases when a SelectiveStr (see Note [Selective
   // build]) has been disabled at compile time.  In that case, don't generate
   // any code referencing the passed in functions at all.
-  Library& def(detail::SelectiveStr<false>, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
+  Library& def(detail::SelectiveStr<false> /*unused*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
     return *this;
   }
   Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
     return def(raw_schema.operator const char*(), tags);
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
+  Library& def(detail::SelectiveStr<false> /*unused*/, Func&& /*raw_f*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
     return *this;
   }
   template <typename Func>
@@ -764,12 +766,12 @@ class TORCH_API Library final {
 
   template <typename Func>
   // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-  Library& impl(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
+  Library& impl(detail::SelectiveStr<false> /*unused*/, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Dispatch, typename Func>
   Library& impl(
-      detail::SelectiveStr<false>,
+      detail::SelectiveStr<false> /*unused*/,
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       Dispatch&& /*key*/,
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
@@ -877,7 +879,7 @@ class TORCH_API Library final {
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
   Library& _def(
-      std::variant<c10::OperatorName, c10::FunctionSchema>&&,
+      std::variant<c10::OperatorName, c10::FunctionSchema>&& /*name_or_schema*/,
       CppFunction&& f,
       const std::vector<at::Tag>& tags = {}) &;
   Library& _impl(
@@ -926,7 +928,7 @@ class TorchLibraryInit final {
             }
 
       void initialize() {
-        lib = std::unique_ptr<Library>(new Library(kind, ns, key, file, line));
+        lib = std::make_unique<Library>(kind, ns, key, file, line);
         init_function(*lib);
       }
 };
@@ -1022,7 +1024,7 @@ class TorchLibraryInit final {
 /// Macro for defining a function that will be run at static
 /// initialization time to define operator overrides for dispatch key
 /// `k` (must be an unqualified enum member of c10::DispatchKey) in
-/// namespace `ns` (must be a valid C++ identifer, no quotes).  Use this
+/// namespace `ns` (must be a valid C++ identifier, no quotes).  Use this
 /// macro when you want to implement a preexisting set of custom
 /// operators on a new dispatch key (e.g., you want to provide CUDA
 /// implementations of already existing operators).  One common usage

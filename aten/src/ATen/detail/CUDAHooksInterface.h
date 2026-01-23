@@ -118,6 +118,14 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
+  virtual bool hasCKSDPA() const {
+    return false;
+  }
+
+  virtual bool hasCKGEMM() const {
+    return false;
+  }
+
   virtual const at::cuda::NVRTC& nvrtc() const {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
@@ -158,12 +166,28 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
+  virtual bool supportsBFloat16RNNWithCuDNN() const {
+    return false;
+  }
+
   virtual long versionCuDNN() const {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
+  virtual long versionRuntimeCuDNN() const {
+    TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual long versionCuDNNFrontend() const {
+    TORCH_CHECK(false, "Cannot query cuDNN Frontend version without ATen_cuda library. ", CUDA_HELP);
+  }
+
   virtual long versionMIOpen() const {
     TORCH_CHECK(false, "Cannot query MIOpen version without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual long versionHipBLASLt() const {
+    TORCH_CHECK(false, "Cannot query HipBLASLt version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual long versionCUDART() const {
@@ -202,6 +226,18 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
 #ifdef USE_ROCM
   virtual bool isGPUArch(const std::vector<std::string>& /*archs*/, DeviceIndex = -1 /*device_index*/) const {
     TORCH_CHECK(false, "Cannot check GPU arch without ATen_cuda library. ", CUDA_HELP);
+  }
+
+  virtual const std::vector<std::string>& getHipblasltPreferredArchs() const {
+    static const std::vector<std::string> empty;
+    TORCH_CHECK(false, "Cannot get hipBLASLt preferred archs without ATen_cuda library. ", CUDA_HELP);
+    return empty;
+  }
+
+  virtual const std::vector<std::string>& getHipblasltSupportedArchs() const {
+    static const std::vector<std::string> empty;
+    TORCH_CHECK(false, "Cannot get hipBLASLt supported archs without ATen_cuda library. ", CUDA_HELP);
+    return empty;
   }
 #endif
 

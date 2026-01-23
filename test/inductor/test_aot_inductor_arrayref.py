@@ -70,7 +70,9 @@ CPU_TEST_FAILURES = {
     "test_cond_with_multiple_outputs": fail_minimal_arrayref_interface(),
     "test_cond_with_parameters": fail_minimal_arrayref_interface(),
     "test_cond_with_reinterpret_view_inputs_outputs": fail_minimal_arrayref_interface(),
-    "test_cond_share_predicte": fail_stack_allocation(is_skip=True),
+    "test_custom_op_in_subgraph": fail_minimal_arrayref_interface(),
+    "test_cond_share_predicate": fail_stack_allocation(is_skip=True),
+    "test_cond_predicate_on_cpu": fail_stack_allocation(is_skip=True),
     "test_cond_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_minimal_arrayref_interface(),
     "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_minimal_arrayref_interface(),
@@ -84,6 +86,7 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_pytree_inputs": fail_stack_allocation(),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
+    "test_aot_inductor_consts_cpp_build": fail_stack_allocation(is_skip=True),
     "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),

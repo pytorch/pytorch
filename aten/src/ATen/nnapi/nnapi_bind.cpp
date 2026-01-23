@@ -1,7 +1,6 @@
 #include <utility>
 #include <vector>
 
-#include <ATen/ATen.h>
 #include <ATen/nnapi/nnapi_bind.h>
 #include <ATen/nnapi/nnapi_wrapper.h>
 #include <ATen/nnapi/nnapi_model_loader.h>
@@ -26,7 +25,7 @@ static void load_platform_library() {
   (void)run_once;
 }
 
-// NnapiCompilation functon definitions:
+// NnapiCompilation function definitions:
 
 // Could possibly call load_platform_library in constructor, but error reporting
 // can be complicated if the constructor is called during model loading.

@@ -7,8 +7,9 @@ import logging
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, cast, IO, Optional
+from typing import Any, cast, IO, Optional
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer

@@ -1,5 +1,3 @@
-#include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/DispatchKey.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
@@ -35,7 +33,11 @@ at::Tensor allocate_all_gather_output(
     int64_t group_size) {
   TORCH_CHECK(input.is_contiguous());
   auto output_size = input.sizes().vec();
-  output_size[0] *= group_size;
+  if (output_size.empty()) {
+    output_size.push_back(group_size);
+  } else {
+    output_size[0] *= group_size;
+  }
   return at::empty(
       output_size,
       at::TensorOptions().dtype(input.dtype()).device(input.device()));
@@ -199,6 +201,25 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   return outputs;
 }
 
+static std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
+    std::vector<at::Tensor> inputs,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string reduce_op,
+    int64_t group_size,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string group_name,
+    std::vector<at::Tensor>& outputs) {
+  c10d::ReduceScatterOptions opts;
+  opts.reduceOp = to_reduce_op(reduce_op);
+
+  auto group = c10d::resolve_process_group(std::move(group_name));
+  auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
+  for (const auto& tensor : outputs) {
+    c10d::register_work(tensor, work);
+  }
+  return outputs;
+}
+
 at::Tensor reduce_scatter_tensor(
     const at::Tensor& input,
     std::string reduce_op,
@@ -216,19 +237,60 @@ at::Tensor reduce_scatter_tensor(
       inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
 }
 
+at::Tensor reduce_scatter_tensor_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t group_size,
+    std::string group_name,
+    at::Tensor& output) {
+  TORCH_CHECK(input.is_contiguous());
+  if (input.is_complex()) {
+    TORCH_CHECK(output.is_complex())
+    auto real_input = at::view_as_real(input);
+    std::vector<at::Tensor> inputs{std::move(real_input)};
+    auto real_output = at::view_as_real(output);
+    std::vector<at::Tensor> outputs{std::move(real_output)};
+    return at::view_as_complex(reduce_scatter_tensor_coalesced_out(
+        inputs,
+        std::move(reduce_op),
+        group_size,
+        std::move(group_name),
+        outputs)[0]);
+  }
+  std::vector<at::Tensor> inputs{std::move(input)};
+  std::vector<at::Tensor> outputs{std::move(output)};
+  return reduce_scatter_tensor_coalesced_out(
+      inputs,
+      std::move(reduce_op),
+      group_size,
+      std::move(group_name),
+      outputs)[0];
+}
+
 at::Tensor all_to_all_single(
     const at::Tensor& input,
-    std::vector<int64_t> output_split_sizes,
-    std::vector<int64_t> input_split_sizes,
+    c10::SymIntArrayRef _output_split_sizes,
+    c10::SymIntArrayRef _input_split_sizes,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name) {
+  std::vector<int64_t> output_split_sizes;
+  std::vector<int64_t> input_split_sizes;
+  output_split_sizes.reserve(_output_split_sizes.size());
+  input_split_sizes.reserve(_input_split_sizes.size());
+  for (const auto& size : _output_split_sizes) {
+    output_split_sizes.emplace_back(size.expect_int());
+  }
+  for (const auto& size : _input_split_sizes) {
+    input_split_sizes.emplace_back(size.expect_int());
+  }
+
   TORCH_CHECK(input.is_contiguous());
   std::vector<int64_t> output_sizes = input.sizes().vec();
   output_sizes[0] = std::accumulate(
       output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
   auto output = input.new_empty(output_sizes);
 
-  auto group = c10d::resolve_process_group(group_name);
+  auto group = c10d::resolve_process_group(std::move(group_name));
   auto work = group->alltoall_base(
       output,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -318,6 +380,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
+      "reduce_scatter_tensor_out(Tensor input, str reduce_op, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          c10d::reduce_scatter_tensor_out),
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
+
+  m.def(
       "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, str group_name) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
@@ -360,14 +429,14 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
       torch::autograd::AutogradContext* ctx,
       const at::Tensor& input,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<int64_t> output_split_sizes,
+      at::SymIntArrayRef output_split_sizes,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<int64_t> input_split_sizes,
+      at::SymIntArrayRef input_split_sizes,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::string group_name) {
     // swap sizes for backwards pass
-    ctx->saved_data["output_split_sizes"] = input_split_sizes;
-    ctx->saved_data["input_split_sizes"] = output_split_sizes;
+    ctx->saved_data["output_split_sizes"] = input_split_sizes.vec();
+    ctx->saved_data["input_split_sizes"] = output_split_sizes.vec();
     ctx->saved_data["group_name"] = group_name;
 
     return c10::Dispatcher::singleton()
@@ -379,10 +448,10 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext* ctx,
       const torch::autograd::variable_list& grad_out_list) {
-    const std::vector<int64_t>& output_split_sizes =
-        ctx->saved_data["output_split_sizes"].toIntVector();
-    const std::vector<int64_t>& input_split_sizes =
-        ctx->saved_data["input_split_sizes"].toIntVector();
+    std::vector<c10::SymInt> output_split_sizes =
+        ctx->saved_data["output_split_sizes"].toSymIntVector();
+    std::vector<c10::SymInt> input_split_sizes =
+        ctx->saved_data["input_split_sizes"].toSymIntVector();
     const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
 
     DCHECK(grad_out_list.size() == 1);
@@ -407,8 +476,8 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
 
 at::Tensor all_to_all_single_autograd(
     const at::Tensor& input,
-    const std::vector<int64_t>& output_split_sizes,
-    const std::vector<int64_t>& input_split_sizes,
+    at::SymIntArrayRef output_split_sizes,
+    at::SymIntArrayRef input_split_sizes,
     const std::string& group_name) {
   return AllToAllSingle::apply(
       input, output_split_sizes, input_split_sizes, group_name);

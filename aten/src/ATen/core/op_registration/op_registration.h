@@ -21,7 +21,7 @@ namespace c10 {
 
 namespace detail {
 // The first argument of the schema might be of type DispatchKeySet, in which case we remove it.
-// We do this because every argument in a function schema is expected to be convertable
+// We do this because every argument in a function schema is expected to be convertible
 // to an ivalue, but DispatchKeySet is not a type we want the jit to be aware of.
 // See Note [Plumbing Keys Through The Dispatcher]
 template<class KernelFunctor>
@@ -411,7 +411,6 @@ public:
 
     Options()
     : schemaOrName_(std::nullopt)
-    , kernels()
     , aliasAnalysisKind_(std::nullopt)
     {}
 
@@ -420,7 +419,6 @@ public:
     struct KernelRegistrationConfig final {
       KernelRegistrationConfig()
         : dispatch_key(std::nullopt)
-        , func()
         , cpp_signature(std::nullopt)
         , inferred_function_schema(nullptr)
       {}

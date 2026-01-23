@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
-
-
-
 BERT_pytorch,pass,6
 
 
@@ -78,62 +74,6 @@ functorch_maml_omniglot,pass,7
 
 
 
-hf_Albert,pass,6
-
-
-
-hf_Bart,pass,6
-
-
-
-hf_Bert,pass,6
-
-
-
-hf_Bert_large,pass,6
-
-
-
-hf_BigBird,pass,6
-
-
-
-hf_DistilBert,pass,6
-
-
-
-hf_GPT2,pass,6
-
-
-
-hf_GPT2_large,pass_due_to_skip,0
-
-
-
-hf_Reformer,pass,23
-
-
-
-hf_Roberta_base,pass,6
-
-
-
-hf_T5_base,eager_2nd_run_OOM,0
-
-
-
-hf_T5_large,pass_due_to_skip,0
-
-
-
-hf_Whisper,pass,6
-
-
-
-hf_distil_whisper,model_fail_to_load,0
-
-
-
 lennard_jones,pass,7
 
 
@@ -146,7 +86,7 @@ maml_omniglot,pass,7
 
 
 
-microbench_unbacked_tolist_sum,pass,8
+microbench_unbacked_tolist_sum,pass,9
 
 
 
@@ -242,39 +182,11 @@ squeezenet1_1,pass,6
 
 
 
-stable_diffusion_text_encoder,pass,5
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
-
-
-
-timm_efficientnet,fail_accuracy,7
-
-
-
-timm_regnet,pass,7
-
-
-
-timm_resnest,pass,6
-
-
-
-timm_vision_transformer,pass,6
-
-
-
-timm_vision_transformer_large,pass_due_to_skip,0
-
-
-
-timm_vovnet,pass,6
-
-
-
 torch_multimodal_clip,pass,7
+
+
+
+torchrec_dlrm,pass,6
 
 
 
@@ -286,7 +198,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,39
+vision_maskrcnn,pass,40
 
 
 

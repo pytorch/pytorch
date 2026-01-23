@@ -16,11 +16,9 @@ Classes:
 """
 
 import abc
-import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from logging import getLogger
-from typing import Any, TypeVar, Union
+from typing import Any, TypeVar
 
 import torch
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
@@ -29,9 +27,6 @@ from .types import STATE_DICT
 
 
 T = TypeVar("T")
-
-logger = getLogger()
-logger.setLevel(logging.INFO)
 
 
 class CheckpointStager(abc.ABC):
@@ -48,7 +43,7 @@ class CheckpointStager(abc.ABC):
         self,
         state_dict: STATE_DICT,
         **kwargs: Any,
-    ) -> Union[STATE_DICT, Future[STATE_DICT]]:
+    ) -> STATE_DICT | Future[STATE_DICT]:
         """
         Stage a state dictionary for checkpointing.
 
@@ -82,7 +77,7 @@ class CheckpointStagerConfig:
         use_async_staging (bool): Enable asynchronous staging using a
             background thread pool. Allows overlapping computation with
             staging operations. Requires CUDA. Default: True
-        use_cuda_non_blocking_copy (bool): Use non-blocking CUDA memory
+        use_non_blocking_copy (bool): Use non-blocking device memory
             copies with stream synchronization. Improves performance by
             allowing CPU work to continue during GPU transfers. Default: True
 
@@ -93,7 +88,7 @@ class CheckpointStagerConfig:
     use_pinned_memory: bool = True
     use_shared_memory: bool = True
     use_async_staging: bool = True
-    use_cuda_non_blocking_copy: bool = True
+    use_non_blocking_copy: bool = True
 
 
 class DefaultStager(CheckpointStager):
@@ -152,26 +147,32 @@ class DefaultStager(CheckpointStager):
         self._staging_stream = None
 
         if self._config.use_async_staging:
+            # pyrefly: ignore [bad-assignment]
             self._staging_executor = ThreadPoolExecutor(max_workers=1)
-            if torch.cuda.is_available():
+            if torch.accelerator.is_available():
                 # Note: stream needs to be initialized on the main thread after default cuda
                 # stream is setup/used to avoid the risk of accidentally reusing the main
                 # compute stream or in other cases kernels actually launching from the
                 # main thread.
-                self._staging_stream = torch.cuda.Stream()
+                # pyrefly: ignore [bad-assignment]
+                self._staging_stream = torch.Stream()
 
-        if self._config.use_cuda_non_blocking_copy:
-            assert torch.cuda.is_available(), "Non-blocking copy requires CUDA"
+        if self._config.use_non_blocking_copy:
+            if not torch.accelerator.is_available():
+                raise AssertionError(
+                    "Non-blocking copy requires that the current accelerator is available."
+                )
 
     def stage(
         self,
         state_dict: STATE_DICT,
         **kwargs: Any,
-    ) -> Union[STATE_DICT, Future[STATE_DICT]]:
+    ) -> STATE_DICT | Future[STATE_DICT]:
         if self._config.use_async_staging:
-            assert self._staging_executor is not None, (
-                "Staging executor should be initialized for async staging"
-            )
+            if self._staging_executor is None:
+                raise AssertionError(
+                    "Staging executor should be initialized for async staging"
+                )
             return self._staging_executor.submit(
                 self._stage,
                 state_dict,
@@ -182,16 +183,17 @@ class DefaultStager(CheckpointStager):
 
     def _stage(self, state_dict: STATE_DICT, **kwargs: Any) -> STATE_DICT:
         state_dict = self._state_dict_stager.stage(
-            state_dict, non_blocking=self._config.use_cuda_non_blocking_copy, **kwargs
+            state_dict, non_blocking=self._config.use_non_blocking_copy, **kwargs
         )
 
-        if self._config.use_cuda_non_blocking_copy:
-            assert self._staging_stream or not self._config.use_async_staging, (
-                "Non-blocking cuda copy in a background thread for async staging needs staging_stream to be initialized."
-            )
+        if self._config.use_non_blocking_copy:
+            if not (self._staging_stream or not self._config.use_async_staging):
+                raise AssertionError(
+                    "Non-blocking copy in a background thread for async staging needs staging_stream to be initialized."
+                )
 
             # waits for the enqued copy operations to finish.
-            self._staging_stream.synchronize() if self._staging_stream else torch.cuda.synchronize()
+            self._staging_stream.synchronize() if self._staging_stream else torch.accelerator.synchronize()
 
         return state_dict
 

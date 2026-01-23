@@ -7,7 +7,7 @@
 
 import copy
 import sys
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from typing import Any, cast
 
 import numpy as np
@@ -37,10 +37,8 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     skip_if_lt_x_gpu,
     skip_if_no_gpu,
-    skip_if_rocm_multiprocess,
     skip_if_win32,
 )
-from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -57,7 +55,21 @@ except ImportError:
     HAS_TORCHVISION = False
 
 
-device_type = str(get_devtype())
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
+
+
+@contextmanager
+def deterministic_algorithms(enabled=True):
+    prev_state = torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(enabled)
+    try:
+        yield
+    finally:
+        torch.use_deterministic_algorithms(prev_state)
 
 
 class TestZeroRedundancyOptimizer(DistributedTestBase):
@@ -359,7 +371,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
 
     @skip_if_no_gpu
-    @skip_if_rocm_multiprocess
     def test_step(self):
         """Check that ZeroRedundancyOptimizer properly exposes the ``step()``
         interface."""
@@ -399,7 +410,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             self.assertEqual(m.bias, m_zero.bias)
 
     @skip_if_no_gpu
-    @skip_if_rocm_multiprocess
     def test_step_with_closure(self):
         """Check that ZeroRedundancyOptimizer properly exposes the
         ``step(closure)`` interface."""
@@ -618,7 +628,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 torch.testing.assert_close(layer1.bias, layer3.bias)
 
     @skip_if_no_gpu
-    @skip_if_rocm_multiprocess
     def test_collect_shards(self):
         """Check the state consolidation mechanism and the state dict exposed
         by ZeroRedundancyOptimizer."""
@@ -1048,7 +1057,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             grads=grads,
         ):
             for _ in range(NUM_EPOCHS):
-                for input in inputs:
+                for _input in inputs:
                     # Notify join context that this process has not joined
                     Join.notify_join_context(gradient_setter)
                     # Set gradients manually
@@ -1165,27 +1174,23 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
                 # Increased tolerances are needed to pass when using TF32
                 # See: https://github.com/pytorch/pytorch/issues/67764
-                (
-                    torch.testing.assert_close(
-                        local_loss.cpu(),
-                        ddp_loss.cpu(),
-                        rtol=1e-03,
-                        atol=1e-08,
-                    ),
-                    "Losses differ between local optimizer and ZeRO",
+                torch.testing.assert_close(
+                    local_loss.cpu(),
+                    ddp_loss.cpu(),
+                    rtol=1e-03,
+                    atol=1e-08,
+                    msg="Losses differ between local optimizer and ZeRO",
                 )
 
                 for local_p, ddp_p in zip(
                     local_model.parameters(), ddp_model.parameters()
                 ):
-                    (
-                        torch.testing.assert_close(
-                            local_p.cpu(),
-                            ddp_p.cpu(),
-                            rtol=1e-03,
-                            atol=1e-04,
-                        ),
-                        "Models differ after a step",
+                    torch.testing.assert_close(
+                        local_p.cpu(),
+                        ddp_p.cpu(),
+                        rtol=1e-03,
+                        atol=1e-04,
+                        msg="Models differ after a step",
                     )
 
     @skipIfHpu
@@ -1245,7 +1250,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     enabled=True, deterministic=True, benchmark=False
                 )
                 if "cuda" in device
-                else torch.use_deterministic_algorithms(True)
+                else deterministic_algorithms(True)
             )
             with det_ctx:
                 device_ids = [rank] if requires_ddp_rank(device) else None
@@ -1348,7 +1353,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @skip_if_win32()
     @requires_accelerator_dist_backend()
     @skip_if_no_gpu
-    @skip_if_rocm_multiprocess
     @parametrize(
         "use_gpu",
         [True],

@@ -2,10 +2,11 @@
 import collections
 import inspect
 import logging
+import warnings
 import weakref
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Literal, Optional, overload, Union
+from typing import Any, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -13,6 +14,7 @@ from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
+from .effects import EffectType
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -22,12 +24,13 @@ log = logging.getLogger(__name__)
 @overload
 def custom_op(
     name: str,
-    fn: Literal[None] = None,
+    fn: None = None,
     /,
     *,
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
@@ -40,6 +43,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> "CustomOpDef": ...
 
 
@@ -74,13 +78,13 @@ def custom_op(
         mutates_args (Iterable[str] or "unknown"): The names of args that the function mutates.
             This MUST be accurate, otherwise, the behavior is undefined. If "unknown",
             it pessimistically assumes that all inputs to the operator are being mutated.
-        device_types (None | str | Sequence[str]): The device type(s) the function
+        device_types (str | None | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
             Examples: "cpu", "cuda".
             When registering a device-specific implementation for an operator that accepts no Tensors,
             we require the operator to have a "device: torch.device argument".
-        schema (None | str): A schema string for the operator. If None
+        schema (str | None): A schema string for the operator. If None
             (recommended) we'll infer a schema for the operator from its type
             annotations. We recommend letting us infer a schema unless you
             have a specific reason not to.
@@ -210,6 +214,7 @@ class CustomOpDef:
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
         self._disabled_kernel: set = set()
+        self._used_triton_kernels: list[Any] = list()
         OPDEFS[self._qualname] = self
 
     @property
@@ -345,13 +350,15 @@ class CustomOpDef:
                             fn = self._backend_fns[device_type]
                             return inspect.getmodule(fn)
 
-                        utils._c_check_aliasing_constraint(
-                            self._name,
-                            args,
-                            kwargs,
-                            result,
-                            get_module,
-                        )
+                        schema = self._opoverload._schema
+                        if not schema._is_view_op():
+                            utils._c_check_aliasing_constraint(
+                                self._name,
+                                args,
+                                kwargs,
+                                result,
+                                get_module,
+                            )
                         return result
 
                     if device_type is None:
@@ -403,7 +410,7 @@ class CustomOpDef:
         (sizes/strides/storage_offset/device), it specifies what the properties of
         the output Tensors are.
 
-        Please see :func:`torch.library.impl_abstract` for more details.
+        Please see :func:`torch.library.register_fake` for more details.
 
         Args:
             fn (Callable): The function to register as the FakeTensor
@@ -465,6 +472,9 @@ class CustomOpDef:
         """
         self._abstract_fn = fn
         return fn
+
+    def register_effect(self, effect: Optional[EffectType]) -> None:
+        self._lib._register_effectful_op(self._qualname, effect)
 
     def register_torch_dispatch(
         self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
@@ -584,7 +594,7 @@ class CustomOpDef:
 
         """
         schema = self._opoverload._schema
-        if not utils.is_functional_schema(schema):
+        if not utils.is_functional_schema(schema, allow_valid_view=True):
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
@@ -595,10 +605,6 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self, tags: Sequence[_C.Tag]) -> None:
-        if torch._running_with_deploy():
-            utils.warn_deploy(stacklevel=5)
-            return
-
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
@@ -633,27 +639,40 @@ class CustomOpDef:
 
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
-
         schema = self._opoverload._schema
+
+        if schema._is_view_op() or schema.is_mutable:
+            lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
+
         if schema.is_mutable:
             mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
 
+            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+                f"{lib.ns}::{self._name}", "ADInplaceOrView"
+            )
+
             def adinplaceorview_impl(keyset, *args, **kwargs):
+                # Handle the mutated idx the user gave us explicitly
+
                 for idx in mutated_idxs:
                     increment_version(args[idx])
                 for key in mutated_keys:
                     increment_version(kwargs[key])
-                with _C._AutoDispatchBelowADInplaceOrView():
-                    return self._opoverload.redispatch(
-                        keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
-                    )
+                # Handle view + mutation that are in the schema
+                return original_kernel.call_boxed(keyset, *args, **kwargs)
 
-            lib.impl(
-                self._name,
-                adinplaceorview_impl,
-                "ADInplaceOrView",
-                with_keyset=True,
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Warning only once for all operators",
+                    category=UserWarning,
+                )
+                lib.impl(
+                    self._name,
+                    adinplaceorview_impl,
+                    "ADInplaceOrView",
+                    with_keyset=True,
+                )
 
     def _register_backend_select_dispatcher(self, device_arg_index: int):
         """
@@ -829,7 +848,10 @@ class CustomOpDef:
             self._autocast_cpu_dtype = cast_inputs
 
         def kernel(_, *args, **kwargs):
-            assert len(kwargs) == 0, "Custom ops do not support kwargs yet."
+            if len(kwargs) != 0:
+                raise AssertionError(
+                    f"Custom ops do not support kwargs yet, got {list(kwargs.keys())}"
+                )
             autocast_keyset = torch._C.DispatchKeySet(
                 torch._C.DispatchKey.AutocastCPU
             ) | torch._C.DispatchKeySet(torch._C.DispatchKey.AutocastCUDA)
@@ -923,7 +945,8 @@ def _maybe_get_opdef(
         return op
     if isinstance(op, _ops.OpOverload):
         op = op._name
-    assert isinstance(op, str)
+    if not isinstance(op, str):
+        raise AssertionError(f"op must be str, got {type(op)}")
     if op in OPDEFS:
         return OPDEFS[op]
     return None

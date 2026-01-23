@@ -85,7 +85,7 @@ class NodeNameGenerator {
 
  protected:
   virtual void CreateNodeName(Node* n) = 0;
-  void PopulateNodeNames(Block*);
+  void PopulateNodeNames(Block* /*b*/);
   void UpdateOutputsNames(Node* n);
   bool IsGraphOutput(const Value* v, const std::shared_ptr<Graph>& graph) const;
 

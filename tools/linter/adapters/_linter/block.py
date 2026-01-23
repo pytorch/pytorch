@@ -5,13 +5,16 @@ import itertools
 import token
 from enum import Enum
 from functools import cached_property, total_ordering
-from typing import Any, Optional, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from tokenize import TokenInfo
+    from typing_extensions import Self
+
+
+_OVERRIDES = {"@override", "@typing_extensions.override", "@typing.override"}
 
 
 @total_ordering
@@ -35,11 +38,8 @@ class Block:
     # The index of the very first token in the block (the "class" or "def" keyword)
     begin: int
 
-    # The index of the first INDENT token for this block
-    indent: int
-
-    # The index of the DEDENT token for this end of this block
-    dedent: int
+    # The index of the last token for this block
+    end: int
 
     # The docstring for the block
     docstring: str
@@ -61,22 +61,27 @@ class Block:
     is_method: bool = dc.field(default=False, repr=False)
 
     # A block index to the parent of this block, or None for a top-level block.
-    parent: Optional[int] = None
+    parent: int | None = None
 
     # A list of block indexes for the children
     children: list[int] = dc.field(default_factory=list)
 
     @property
     def start_line(self) -> int:
-        return self.tokens[max(self.indent, self.index)].start[0]
+        """The line number for the def or class statement"""
+        return self.tokens[self.begin].start[0]
 
     @property
     def end_line(self) -> int:
-        return self.tokens[max(self.dedent, self.index)].start[0]
+        return self.tokens[self.end].start[0]
 
     @property
     def line_count(self) -> int:
-        return self.end_line - self.start_line
+        return self.end_line - self.start_line + 1
+
+    @property
+    def line_range(self) -> range:
+        return range(self.start_line, self.end_line + 1)
 
     @property
     def is_class(self) -> bool:
@@ -99,9 +104,7 @@ class Block:
 
     @cached_property
     def is_override(self) -> bool:
-        return not self.is_class and any(
-            d.rpartition(".")[2] == "override" for d in self.decorators
-        )
+        return not self.is_class and bool(_OVERRIDES.intersection(self.decorators))
 
     DATA_FIELDS = (
         "category",
@@ -149,9 +152,9 @@ def _get_decorators(tokens: Sequence[TokenInfo], block_start: int) -> list[str]:
     def decorators() -> Iterator[str]:
         rev = reversed(range(block_start))
         newlines = (i for i in rev if tokens[i].type == token.NEWLINE)
-        newlines = itertools.chain(newlines, [-1])  # To account for the first line
+        it = iter(itertools.chain(newlines, [-1]))
+        # The -1 accounts for the very first line in the file
 
-        it = iter(newlines)
         end = next(it, -1)  # Like itertools.pairwise in Python 3.10
         for begin in it:
             for i in range(begin + 1, end):

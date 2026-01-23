@@ -5,7 +5,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 if [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
   pip install click mock tabulate networkx==2.0
-  pip -q install --user "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+  pip -q install "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
 fi
 
 # Skip tests in environments where they are not built/applicable
@@ -147,8 +147,8 @@ export DNNL_MAX_CPU_ISA=AVX2
 if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
   # TODO(sdym@meta.com) remove this when the linked issue resolved.
   # py is temporary until https://github.com/Teemu/pytest-sugar/issues/241 is fixed
-  pip install --user py==1.11.0
-  pip install --user pytest-sugar
+  pip install py==1.11.0
+  pip install pytest-sugar
   # NB: Warnings are disabled because they make it harder to see what
   # the actual erroring test is
   "$PYTHON" \

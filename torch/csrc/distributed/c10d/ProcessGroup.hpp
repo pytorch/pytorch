@@ -11,7 +11,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
 // versions 1.7 and 1.8.
@@ -71,6 +70,21 @@ C10_EXPORT bool allow_inflight_collective_as_graph_input();
 //
 class TORCH_API ProcessGroup : public torch::CustomClassHolder {
  public:
+  struct TORCH_API MergeOptions : torch::CustomClassHolder {
+    explicit MergeOptions(
+        const std::chrono::milliseconds timeout = kProcessGroupDefaultTimeout,
+        const std::optional<std::string> group_name = std::nullopt,
+        const std::optional<std::string> group_desc = std::nullopt)
+        : timeout(timeout), group_name(group_name), group_desc(group_desc) {}
+    ~MergeOptions() override = default;
+    MergeOptions(const MergeOptions&) = delete;
+    MergeOptions& operator=(const MergeOptions&) = delete;
+
+    std::chrono::milliseconds timeout;
+    std::optional<std::string> group_name;
+    std::optional<std::string> group_desc;
+  };
+
   enum BackendType : uint8_t {
     UNDEFINED = 0,
     GLOO = 1,
@@ -162,6 +176,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         backendType == BackendType::XCCL || backendType == BackendType::UCC)
       return true;
     return false;
+  }
+
+  virtual void setTimeout(std::chrono::milliseconds timeout) {
+    for (auto& backend : backendTypeToBackend_) {
+      backend.second->setTimeout(timeout);
+    }
+  }
+
+  int64_t incrementSplitCount() {
+    return splitCounter_++;
   }
 
   virtual void startCoalescing(c10::DeviceType deviceType) {
@@ -942,12 +966,32 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return bound_device_id_;
   }
 
+  c10::intrusive_ptr<c10d::Store> getStore() const {
+    return store_;
+  }
+
   void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
     bound_device_id_ = device;
   }
+
+  // This creates a new subgroup using the specified ranks.
+  // The current rank must be included in the list of new_ranks.
+  virtual c10::intrusive_ptr<ProcessGroup> splitGroup(
+      const std::vector<int>& ranks,
+      const std::optional<std::chrono::milliseconds>& timeout,
+      const std::optional<c10::intrusive_ptr<Backend::Options>>& opts,
+      const std::optional<std::string>& name,
+      const std::optional<std::string>& groupDesc);
+
+  // This creates a new subgroup using the specified ranks.
+  // The current rank must be included in the list of new_ranks.
+  virtual c10::intrusive_ptr<ProcessGroup> mergeRemoteGroup(
+      const c10::intrusive_ptr<Store>& store,
+      const MergeOptions& opts,
+      const int& size);
 
  protected:
   // Implementations of this interface need to call this to setup
@@ -962,6 +1006,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   BackendType backendType_;
   std::string pg_desc_;
+  int64_t splitCounter_;
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
@@ -969,7 +1014,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Backend classes for this ProcessGroup
   std::unordered_set<c10::DeviceType> deviceTypes_;
-  std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
+  // This mapping is ordered, as splitGroup must call split on the underlying
+  // backends in a consistent order.
+  std::map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
   std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>>
       deviceTypeToBackend_;
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>
@@ -977,5 +1024,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   std::optional<at::Device> bound_device_id_;
 };
+
+// Thread local functions for managing the currently active process group.
+TORCH_API c10::intrusive_ptr<ProcessGroup>& currentProcessGroup();
+TORCH_API void setProcessGroup(c10::intrusive_ptr<ProcessGroup> processGroup);
 
 } // namespace c10d

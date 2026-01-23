@@ -35,7 +35,9 @@ inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
   auto self_device = self.device();
   for (const std::optional<Tensor>& i : indices) {
     if (!i.has_value() || !(*i).defined()) {
-      num_ind++;
+      if (!mask.defined()) {
+        num_ind++;
+      }
     } else {
       const Tensor& index = *i;
       if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
@@ -75,7 +77,7 @@ inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   // next broadcast all index tensors together
   try {
     indices = expand_outplace(indices);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     TORCH_CHECK_INDEX(
         false,
         "shape mismatch: indexing tensors could not be broadcast together"

@@ -190,12 +190,12 @@ def map_job_data(jobNames: Any, shaGrid: Any) -> dict[str, Any]:
 
 
 def is_job_failed(job: Any) -> bool:
-    conclusion = job["conclusion"] if "conclusion" in job else None
+    conclusion = job.get("conclusion", None)
     return conclusion is not None and conclusion != SUCCESS and conclusion != PENDING
 
 
 def is_job_skipped(job: Any) -> bool:
-    conclusion = job["conclusion"] if "conclusion" in job else None
+    conclusion = job.get("conclusion", None)
     return conclusion in (NEUTRAL, SKIPPED) or conclusion is None
 
 

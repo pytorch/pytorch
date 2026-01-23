@@ -2,7 +2,7 @@ import io
 import json
 import struct
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
@@ -41,20 +41,22 @@ DCP_SHARDING_INFO_KEY = "DCP_SHARDING_INFO"
 FORMAT_KEY = "format"
 FORMAT_VALUE = "pt"
 
+NUM_BYTES_FOR_HEADER_LEN = 8
+
+SHARDED_DIR_NAME = "sharded"
+
 
 @dataclass
 class _HFStorageInfo:
     """This is the per entry storage info."""
 
     relative_path: str
-    offset: int
-    length: int
     shape: torch.Size
     dtype: torch.dtype
 
 
 def _gen_file_name(
-    index: int, largest_index: int, shard_index: Optional[int] = None
+    index: int, largest_index: int, shard_index: int | None = None
 ) -> str:
     if shard_index is not None:
         return (
@@ -80,12 +82,11 @@ def _get_safetensors_file_metadata(file_bytes: io.IOBase) -> tuple[Any, int]:
     # and follows their documentation on how their files are serialized
     # https://huggingface.co/docs/safetensors/index#format
 
-    num_bytes_for_header_len = 8
-    header_len_bytes = file_bytes.read(num_bytes_for_header_len)
+    header_len_bytes = file_bytes.read(NUM_BYTES_FOR_HEADER_LEN)
     header_len = struct.unpack("<Q", header_len_bytes)[0]
     header_json = file_bytes.read(header_len)
     metadata = json.loads(header_json)
-    return (metadata, header_len + num_bytes_for_header_len)
+    return (metadata, header_len + NUM_BYTES_FOR_HEADER_LEN)
 
 
 def _get_dtype(dtype_str: str) -> torch.dtype:
@@ -97,7 +98,7 @@ def _get_dtype(dtype_str: str) -> torch.dtype:
     return dtype
 
 
-def _get_dcp_custom_metadata(metadata: Any) -> Optional[Any]:
+def _get_dcp_custom_metadata(metadata: Any) -> Any | None:
     if DEFAULT_EXTRA_METADATA_KEY in metadata:
         custom_metadata = metadata[DEFAULT_EXTRA_METADATA_KEY]
         if CUSTOM_METADATA_KEY in custom_metadata:

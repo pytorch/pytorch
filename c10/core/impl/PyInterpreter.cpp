@@ -11,14 +11,21 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void incref(PyObject* pyobj) const override {} // do nothing
 
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
-  } // do nothing
+  void decref(PyObject* pyobj) const override {} // do nothing
+
+  bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const override {
+    return false;
+  }
 
 #define PANIC(m)              \
   TORCH_INTERNAL_ASSERT(      \
       0,                      \
       "attempted to call " #m \
       " on a Tensor with nontrivial PyObject after corresponding interpreter died")
+
+  size_t refcnt(PyObject* pyobj) const override {
+    PANIC(refcnt);
+  }
 
   c10::intrusive_ptr<TensorImpl> detach(const TensorImpl* self) const override {
     PANIC(detach);
@@ -35,7 +42,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
-      c10::DispatchKey,
+      c10::DispatchKey /*unused*/,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack,
       bool with_keyset,
@@ -52,15 +59,21 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
 
   void python_dispatcher(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet,
+      c10::DispatchKeySet /*unused*/,
       torch::jit::Stack* stack) const override {
     PANIC(python_dispatcher);
   }
 
-  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override {
+  bool is_contiguous(const TensorImpl* self, at::MemoryFormat /*unused*/)
+      const override {
     PANIC(is_contiguous);
   }
-  bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
+  c10::SymBool sym_is_contiguous(
+      const TensorImpl* self,
+      at::MemoryFormat /*unused*/) const override {
+    PANIC(sym_is_contiguous);
+  }
+  bool is_strides_like(const TensorImpl* self, at::MemoryFormat /*unused*/)
       const override {
     PANIC(is_strides_like);
   }

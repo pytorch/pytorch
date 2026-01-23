@@ -1,5 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <c10/util/irange.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/variable.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

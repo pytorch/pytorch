@@ -2,7 +2,6 @@
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/AccumulateType.h>
 
 namespace at::native {
@@ -79,7 +78,7 @@ struct CPUValueSelectionIntersectionKernel {
               const auto* ptr_argsort = argsort.const_data_ptr<index_t>();
 
               for (int64_t i = 0; i < n; ++i) {
-                // Exctract data
+                // Extract data
                 auto* ptr_res_values = reinterpret_cast<scalar_t*>(ptr_res_values_bytes);
                 const auto* ptr_lhs_values = reinterpret_cast<const scalar_t*>(ptr_lhs_values_bytes);
                 const auto lhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_lhs_select_idx_bytes);

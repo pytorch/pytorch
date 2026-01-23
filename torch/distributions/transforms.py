@@ -4,7 +4,6 @@ import math
 import operator
 import weakref
 from collections.abc import Sequence
-from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -97,7 +96,7 @@ class Transform:
 
     def __init__(self, cache_size: int = 0) -> None:
         self._cache_size = cache_size
-        self._inv: Optional[weakref.ReferenceType[Transform]] = None
+        self._inv: weakref.ReferenceType[Transform] | None = None
         if cache_size == 0:
             pass  # default behavior
         elif cache_size == 1:
@@ -226,23 +225,29 @@ class _InverseTransform(Transform):
         self._inv: Transform = transform  # type: ignore[assignment]
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def domain(self):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv.codomain
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def codomain(self):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv.domain
 
     @property
     def bijective(self) -> bool:  # type: ignore[override]
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv.bijective
 
     @property
     def sign(self) -> int:
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv.sign
 
     @property
@@ -250,24 +255,28 @@ class _InverseTransform(Transform):
         return self._inv
 
     def with_cache(self, cache_size=1):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self.inv.with_cache(cache_size).inv
 
     def __eq__(self, other):
         if not isinstance(other, _InverseTransform):
             return False
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv == other._inv
 
     def __repr__(self):
         return f"{self.__class__.__name__}({repr(self._inv)})"
 
     def __call__(self, x):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return self._inv._inv_call(x)
 
     def log_abs_det_jacobian(self, x, y):
-        assert self._inv is not None
+        if self._inv is None:
+            raise AssertionError("_inv must not be None")
         return -self._inv.log_abs_det_jacobian(y, x)
 
     def forward_shape(self, shape):
@@ -300,6 +309,7 @@ class ComposeTransform(Transform):
         return self.parts == other.parts
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def domain(self):
         if not self.parts:
             return constraints.real
@@ -309,12 +319,16 @@ class ComposeTransform(Transform):
         for part in reversed(self.parts):
             event_dim += part.domain.event_dim - part.codomain.event_dim
             event_dim = max(event_dim, part.domain.event_dim)
-        assert event_dim >= domain.event_dim
+        if event_dim < domain.event_dim:
+            raise AssertionError(
+                f"event_dim {event_dim} must be >= domain.event_dim {domain.event_dim}"
+            )
         if event_dim > domain.event_dim:
             domain = constraints.independent(domain, event_dim - domain.event_dim)
         return domain
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def codomain(self):
         if not self.parts:
             return constraints.real
@@ -324,7 +338,10 @@ class ComposeTransform(Transform):
         for part in self.parts:
             event_dim += part.codomain.event_dim - part.domain.event_dim
             event_dim = max(event_dim, part.codomain.event_dim)
-        assert event_dim >= codomain.event_dim
+        if event_dim < codomain.event_dim:
+            raise AssertionError(
+                f"event_dim {event_dim} must be >= codomain.event_dim {codomain.event_dim}"
+            )
         if event_dim > codomain.event_dim:
             codomain = constraints.independent(codomain, event_dim - codomain.event_dim)
         return codomain
@@ -434,12 +451,14 @@ class IndependentTransform(Transform):
         )
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def domain(self):
         return constraints.independent(
             self.base_transform.domain, self.reinterpreted_batch_ndims
         )
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def codomain(self):
         return constraints.independent(
             self.base_transform.codomain, self.reinterpreted_batch_ndims
@@ -507,10 +526,12 @@ class ReshapeTransform(Transform):
         super().__init__(cache_size=cache_size)
 
     @constraints.dependent_property
+    # pyrefly: ignore [bad-override]
     def domain(self):
         return constraints.independent(constraints.real, len(self.in_shape))
 
     @constraints.dependent_property
+    # pyrefly: ignore [bad-override]
     def codomain(self):
         return constraints.independent(constraints.real, len(self.out_shape))
 
@@ -749,8 +770,8 @@ class AffineTransform(Transform):
 
     def __init__(
         self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
+        loc: Tensor | float,
+        scale: Tensor | float,
         event_dim: int = 0,
         cache_size: int = 0,
     ) -> None:
@@ -764,12 +785,14 @@ class AffineTransform(Transform):
         return self._event_dim
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def domain(self):
         if self.event_dim == 0:
             return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def codomain(self):
         if self.event_dim == 0:
             return constraints.real
@@ -803,7 +826,7 @@ class AffineTransform(Transform):
         return True
 
     @property
-    def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
+    def sign(self) -> Tensor | int:  # type: ignore[override]
         if isinstance(self.scale, _Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
@@ -840,7 +863,7 @@ class AffineTransform(Transform):
 
 class CorrCholeskyTransform(Transform):
     r"""
-    Transforms an uncontrained real vector :math:`x` with length :math:`D*(D-1)/2` into the
+    Transforms an unconstrained real vector :math:`x` with length :math:`D*(D-1)/2` into the
     Cholesky factor of a D-dimension correlation matrix. This Cholesky factor is a lower
     triangular matrix with positive diagonals and unit Euclidean norm for each row.
     The transform is processed as follows:
@@ -867,6 +890,7 @@ class CorrCholeskyTransform(Transform):
         # apply stick-breaking on the squared values
         # Note that y = sign(r) * sqrt(z * z1m_cumprod)
         #             = (sign(r) * sqrt(z)) * sqrt(z1m_cumprod) = r * sqrt(z1m_cumprod)
+        # pyrefly: ignore [unsupported-operation]
         z = r**2
         z1m_cumprod_sqrt = (1 - z).sqrt().cumprod(-1)
         # Diagonal elements must be 1.
@@ -907,7 +931,7 @@ class CorrCholeskyTransform(Transform):
         N = shape[-1]
         D = round((0.25 + 2 * N) ** 0.5 + 0.5)
         if D * (D - 1) // 2 != N:
-            raise ValueError("Input is not a flattend lower-diagonal number")
+            raise ValueError("Input is not a flattened lower-diagonal number")
         return shape[:-1] + (D, D)
 
     def inverse_shape(self, shape):
@@ -1076,10 +1100,11 @@ class CatTransform(Transform):
         self,
         tseq: Sequence[Transform],
         dim: int = 0,
-        lengths: Optional[Sequence[int]] = None,
+        lengths: Sequence[int] | None = None,
         cache_size: int = 0,
     ) -> None:
-        assert all(isinstance(t, Transform) for t in tseq)
+        if not all(isinstance(t, Transform) for t in tseq):
+            raise AssertionError("All elements of tseq must be Transform instances")
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
         super().__init__(cache_size=cache_size)
@@ -1087,7 +1112,10 @@ class CatTransform(Transform):
         if lengths is None:
             lengths = [1] * len(self.transforms)
         self.lengths = list(lengths)
-        assert len(self.lengths) == len(self.transforms)
+        if len(self.lengths) != len(self.transforms):
+            raise AssertionError(
+                f"lengths ({len(self.lengths)}) must match transforms ({len(self.transforms)})"
+            )
         self.dim = dim
 
     @lazy_property
@@ -1104,8 +1132,14 @@ class CatTransform(Transform):
         return CatTransform(self.transforms, self.dim, self.lengths, cache_size)
 
     def _call(self, x):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == self.length
+        if not (-x.dim() <= self.dim < x.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for tensor with {x.dim()} dimensions"
+            )
+        if x.size(self.dim) != self.length:
+            raise AssertionError(
+                f"x.size({self.dim}) = {x.size(self.dim)} must equal length {self.length}"
+            )
         yslices = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -1115,8 +1149,14 @@ class CatTransform(Transform):
         return torch.cat(yslices, dim=self.dim)
 
     def _inverse(self, y):
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == self.length
+        if not (-y.dim() <= self.dim < y.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for tensor with {y.dim()} dimensions"
+            )
+        if y.size(self.dim) != self.length:
+            raise AssertionError(
+                f"y.size({self.dim}) = {y.size(self.dim)} must equal length {self.length}"
+            )
         xslices = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -1126,10 +1166,22 @@ class CatTransform(Transform):
         return torch.cat(xslices, dim=self.dim)
 
     def log_abs_det_jacobian(self, x, y):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == self.length
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == self.length
+        if not (-x.dim() <= self.dim < x.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for x with {x.dim()} dimensions"
+            )
+        if x.size(self.dim) != self.length:
+            raise AssertionError(
+                f"x.size({self.dim}) = {x.size(self.dim)} must equal length {self.length}"
+            )
+        if not (-y.dim() <= self.dim < y.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for y with {y.dim()} dimensions"
+            )
+        if y.size(self.dim) != self.length:
+            raise AssertionError(
+                f"y.size({self.dim}) = {y.size(self.dim)} must equal length {self.length}"
+            )
         logdetjacs = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -1155,12 +1207,14 @@ class CatTransform(Transform):
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
+    # pyrefly: ignore [bad-override]
     def domain(self):
         return constraints.cat(
             [t.domain for t in self.transforms], self.dim, self.lengths
         )
 
     @constraints.dependent_property
+    # pyrefly: ignore [bad-override]
     def codomain(self):
         return constraints.cat(
             [t.codomain for t in self.transforms], self.dim, self.lengths
@@ -1185,7 +1239,8 @@ class StackTransform(Transform):
     def __init__(
         self, tseq: Sequence[Transform], dim: int = 0, cache_size: int = 0
     ) -> None:
-        assert all(isinstance(t, Transform) for t in tseq)
+        if not all(isinstance(t, Transform) for t in tseq):
+            raise AssertionError("All elements of tseq must be Transform instances")
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
         super().__init__(cache_size=cache_size)
@@ -1201,26 +1256,50 @@ class StackTransform(Transform):
         return [z.select(self.dim, i) for i in range(z.size(self.dim))]
 
     def _call(self, x):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == len(self.transforms)
+        if not (-x.dim() <= self.dim < x.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for tensor with {x.dim()} dimensions"
+            )
+        if x.size(self.dim) != len(self.transforms):
+            raise AssertionError(
+                f"x.size({self.dim}) = {x.size(self.dim)} must equal len(transforms) {len(self.transforms)}"
+            )
         yslices = []
         for xslice, trans in zip(self._slice(x), self.transforms):
             yslices.append(trans(xslice))
         return torch.stack(yslices, dim=self.dim)
 
     def _inverse(self, y):
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == len(self.transforms)
+        if not (-y.dim() <= self.dim < y.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for tensor with {y.dim()} dimensions"
+            )
+        if y.size(self.dim) != len(self.transforms):
+            raise AssertionError(
+                f"y.size({self.dim}) = {y.size(self.dim)} must equal len(transforms) {len(self.transforms)}"
+            )
         xslices = []
         for yslice, trans in zip(self._slice(y), self.transforms):
             xslices.append(trans.inv(yslice))
         return torch.stack(xslices, dim=self.dim)
 
     def log_abs_det_jacobian(self, x, y):
-        assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == len(self.transforms)
-        assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == len(self.transforms)
+        if not (-x.dim() <= self.dim < x.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for x with {x.dim()} dimensions"
+            )
+        if x.size(self.dim) != len(self.transforms):
+            raise AssertionError(
+                f"x.size({self.dim}) = {x.size(self.dim)} must equal len(transforms) {len(self.transforms)}"
+            )
+        if not (-y.dim() <= self.dim < y.dim()):
+            raise AssertionError(
+                f"dim {self.dim} out of range for y with {y.dim()} dimensions"
+            )
+        if y.size(self.dim) != len(self.transforms):
+            raise AssertionError(
+                f"y.size({self.dim}) = {y.size(self.dim)} must equal len(transforms) {len(self.transforms)}"
+            )
         logdetjacs = []
         yslices = self._slice(y)
         xslices = self._slice(x)
@@ -1233,10 +1312,12 @@ class StackTransform(Transform):
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
+    # pyrefly: ignore [bad-override]
     def domain(self):
         return constraints.stack([t.domain for t in self.transforms], self.dim)
 
     @constraints.dependent_property
+    # pyrefly: ignore [bad-override]
     def codomain(self):
         return constraints.stack([t.codomain for t in self.transforms], self.dim)
 
@@ -1269,7 +1350,7 @@ class CumulativeDistributionTransform(Transform):
         self.distribution = distribution
 
     @property
-    def domain(self) -> Optional[constraints.Constraint]:  # type: ignore[override]
+    def domain(self) -> constraints.Constraint | None:  # type: ignore[override]
         return self.distribution.support
 
     def _call(self, x):

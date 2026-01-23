@@ -28,7 +28,6 @@
 #include <c10/util/irange.h>
 
 #include <algorithm>
-#include <ciso646>
 #include <functional>
 #include <numeric>
 #include <utility>
@@ -77,6 +76,12 @@ Tensor toNonOptPrimal(const std::optional<Tensor>& t) {
     return t->_fw_primal(/* level */ 0);
   }
   return Tensor();
+}
+
+void update_wrapped_number(Tensor& input, Tensor& output) {
+  if (input.unsafeGetTensorImpl()->is_wrapped_number()) {
+    output.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
 }
 
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
@@ -1078,7 +1083,7 @@ std::vector<Tensor> cat_tensors_backward(
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape.size() == 1) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
+      if (TORCH_GUARD_OR_FALSE(shape[0].sym_eq(0))) {
         grad_inputs[i] = at::zeros({0}, grad_val.options());
         continue;
       }
@@ -2176,7 +2181,7 @@ Tensor _nested_split_with_sizes_backward(
     const Tensor& nt_sizes,
     const at::TensorOptions& options) {
   // add 1 to account for batch dim
-  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(nt_sizes.size(1)) + 1);
+  dim = at::maybe_wrap_dim(dim, nt_sizes.size(1) + 1);
   // it's possible some of the grads are not defined (represents tensors of all
   // 0s). Since at::cat can't handle those, let's define them
   std::vector<Tensor> grads_all_defined;
@@ -2187,10 +2192,9 @@ Tensor _nested_split_with_sizes_backward(
       const auto& length = split_sizes[i].guard_int(__FILE__, __LINE__);
       auto nt_split_size = nt_sizes.clone();
       auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
-      for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
+      for (int64_t j : c10::irange(nt_sizes.size(0))) {
         // subtract 1 to account for batch dim
-        nt_split_size_ptr
-            [j * static_cast<int64_t>(nt_sizes.size(1)) + (dim - 1)] = length;
+        nt_split_size_ptr[j * nt_sizes.size(1) + (dim - 1)] = length;
       }
       Tensor zeros_buffer = at::zeros(
           {at::native::get_numel_from_nested_size_tensor(nt_split_size)},
@@ -2215,7 +2219,7 @@ Tensor split_backward(
   auto num_splits = grads.size();
   std::vector<c10::SymInt> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] =
-      split_size - (split_size * num_splits - dim_size);
+      split_size - (split_size * c10::SymInt(num_splits) - dim_size);
   return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
 }
 
@@ -3327,7 +3331,14 @@ std::tuple<Tensor, Tensor> atan2_backward(
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>{Tensor(), Tensor()};
   }
-  auto recip = (self * self + other * other).reciprocal();
+  auto denom = self * self + other * other;
+  auto recip = denom.reciprocal();
+  if (at::areAnyTensorSubclassLike({self, other, denom, recip}) ||
+      at::GradMode::is_enabled()) {
+    recip = recip.masked_fill(denom == 0, 0);
+  } else {
+    recip.masked_fill_(denom == 0, 0);
+  }
   return std::tuple<Tensor, Tensor>{
       output_mask[0] ? grad * other * recip : Tensor(),
       output_mask[1] ? grad * -self * recip : Tensor()};
@@ -3452,8 +3463,11 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
   const auto V = Vh.mH();
 
   // dP = U^H dA V
-  auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
-                   : at::matmul(at::matmul(U.mH(), dA), V);
+  // U^H (dA V) is O(km(n + k))
+  // (U^H dA) V is O(kn(m + k))
+  // So prefer U^H (dA V) if m < n
+  auto dP = m < n ? at::matmul(U.mH(), at::matmul(dA, V))
+                  : at::matmul(at::matmul(U.mH(), dA), V);
 
   auto dS =
       is_complex ? at::real(dP.diagonal(0, -2, -1)) : dP.diagonal(0, -2, -1);
@@ -4566,7 +4580,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
   if (!grad.defined() || (!A_requires_grad && !B_requires_grad)) {
     return std::make_tuple(Tensor{}, Tensor{});
   }
-  // We always need to comput G_B
+  // We always need to compute G_B
   const Tensor A_H = A.mH();
   const Tensor G_B =
       at::linalg_solve_triangular(A_H, grad, !upper, left, unitriangular);
@@ -5023,6 +5037,103 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 }
 
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
+    const Tensor& dY,
+    const Tensor& drstd,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt,
+    std::array<bool, 2> grad_input_mask) {
+  c10::MaybeOwned<at::Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+
+  const auto input_shape = input.sizes();
+  const auto input_ndim = input.dim();
+  const int normalized_ndim = normalized_shape.size();
+  const int axis = input_ndim - normalized_ndim;
+
+  int64_t N_rms = 1;
+  for (int i = 0; i < normalized_ndim; ++i) {
+    N_rms *= input_shape[axis + i];
+  }
+
+  Tensor dX;
+  Tensor dgamma;
+
+  std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
+  for (int i = 0;
+       i < std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0);
+       ++i) {
+    rstd_view_shape.push_back(1);
+  }
+  Tensor rstd_broadcast = rstd.view(rstd_view_shape);
+  Tensor rstd_pow3 = rstd_broadcast.pow(3);
+  Tensor grad_x_hat;
+
+  if (dY.defined()) {
+    if (weight.defined()) {
+      grad_x_hat = dY * weight;
+    } else {
+      grad_x_hat = dY;
+    }
+  }
+
+  if (grad_input_mask[0]) {
+    Tensor dX_from_dY_path;
+    Tensor dX_from_drstd_path;
+
+    std::vector<int64_t> inner_sum_dims;
+    inner_sum_dims.reserve(normalized_ndim);
+    for (int i = 0; i < normalized_ndim; ++i) {
+      inner_sum_dims.push_back(axis + i);
+    }
+
+    if (dY.defined() && grad_x_hat.defined()) {
+      Tensor sum_input_times_grad_x_hat =
+          sum(input * grad_x_hat, inner_sum_dims, /*keepdim=*/true);
+      dX_from_dY_path = rstd_broadcast * grad_x_hat -
+          (input * rstd_pow3 / static_cast<double>(N_rms)) *
+              sum_input_times_grad_x_hat;
+    }
+
+    if (drstd.defined()) {
+      Tensor drstd_broadcast = drstd.view(rstd_view_shape);
+      dX_from_drstd_path =
+          -(input * rstd_pow3 / static_cast<double>(N_rms)) * drstd_broadcast;
+    }
+
+    if (dX_from_dY_path.defined() && dX_from_drstd_path.defined()) {
+      dX = dX_from_dY_path + dX_from_drstd_path;
+    } else if (dX_from_dY_path.defined()) {
+      dX = dX_from_dY_path;
+    } else if (dX_from_drstd_path.defined()) {
+      dX = dX_from_drstd_path;
+    }
+  }
+
+  if (grad_input_mask[1] && weight.defined()) {
+    if (dY.defined()) {
+      Tensor x_hat = input * rstd_broadcast;
+      Tensor dgamma_full_shape = dY * x_hat;
+
+      if (axis > 0) {
+        std::vector<int64_t> outer_sum_dims;
+        outer_sum_dims.reserve(axis);
+        for (int i = 0; i < axis; ++i) {
+          outer_sum_dims.push_back(i);
+        }
+        dgamma = sum(dgamma_full_shape, outer_sum_dims, /*keepdim=*/false);
+      } else {
+        dgamma = dgamma_full_shape;
+      }
+    }
+  }
+
+  return std::make_tuple(dX, dgamma);
+}
+
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_group_norm_backward(
     const Tensor& dY,
@@ -5231,6 +5342,15 @@ Tensor _cudnn_ctc_loss_backward(
   } else {
     return raw_grad * grad_out.unsqueeze(0).unsqueeze(2);
   }
+}
+
+Tensor _miopen_ctc_loss_backward(
+    const Tensor& grad_out,
+    const Tensor& loss,
+    const Tensor& raw_grad,
+    bool zero_infinity) {
+  // MIOpen CTC Loss backward is identical to cuDNN
+  return _cudnn_ctc_loss_backward(grad_out, loss, raw_grad, zero_infinity);
 }
 
 bool any_variable_defined(const variable_list& variables) {
@@ -5934,8 +6054,7 @@ Tensor linalg_solve_jvp(
     const Tensor& X,
     const Tensor& LU,
     const Tensor& pivots,
-    const bool left,
-    const bool use_A_T) {
+    const bool left) {
   at::NoTF32Guard disable_tf32;
   // For left=True (left=False is analogous)
   // dX = A^{-1}(dB - dAX)
@@ -5957,8 +6076,7 @@ Tensor linalg_solve_jvp(
   auto X_ = vector_to_matrix(X);
   auto dB_ = vector_to_matrix(dB);
   auto R_ = left ? dA.matmul(X_) : X_.matmul(dA);
-  auto dX_ =
-      at::linalg_lu_solve(LU, pivots, dB_ - R_, left, /*adjoint*/ use_A_T);
+  auto dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
   return matrix_to_vector(dX_);
 }
 
@@ -5996,9 +6114,8 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   if (at::GradMode::is_enabled()) {
     gB_ = at::linalg_solve(A.mH(), vector_to_matrix(gX), left);
   } else {
-    const auto use_A_T = A.is_contiguous() && !A.is_complex();
     gB_ = at::linalg_lu_solve(
-        LU, pivots, vector_to_matrix(gX), left, /*adjoint*/ !use_A_T);
+        LU, pivots, vector_to_matrix(gX), left, /*adjoint*/ true);
   }
 
   Tensor gA_;
@@ -6375,6 +6492,98 @@ Tensor layer_norm_jvp(
       weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
       weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
       bias_t.defined() ? bias_t.view(view_size_affine) : bias_t);
+}
+
+Tensor rms_norm_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
+
+  int64_t numel = 1;
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      numel *= input_t.size(static_cast<int64_t>(i));
+      view_size[i] = 1;
+      dims.push_back(static_cast<int64_t>(i));
+    }
+  }
+
+  auto rstd_p = saved_rstd.view(view_size);
+
+  Tensor rstd_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    rstd_t = -rstd_p.pow(3) * input_t * input_p;
+  } else {
+    rstd_t = input_t * input_p;
+    rstd_t *= -rstd_p.pow(3);
+  }
+  rstd_t = rstd_t.sum(dims, true);
+  rstd_t /= numel;
+
+  Tensor result_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    result_t = input_t * rstd_p + input_p * rstd_t;
+  } else {
+    result_t = input_t * rstd_p;
+    auto temp = input_p * rstd_t;
+    result_t += temp;
+  }
+
+  std::optional<Tensor> result_p = std::nullopt;
+  if (weight_p.defined()) {
+    result_p = std::optional<Tensor>(input_p * rstd_p);
+  }
+
+  return _affine_jvp(
+      result_p,
+      result_t,
+      weight_p.defined() ? weight_p.view(view_size_affine) : weight_p,
+      weight_t.defined() ? weight_t.view(view_size_affine) : weight_t,
+      Tensor());
+}
+
+Tensor rms_norm_rstd_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape) {
+  auto dims = std::vector<int64_t>{};
+  auto view_size = input_t.sizes().vec();
+  auto view_size_affine = input_t.sizes().vec();
+
+  int64_t numel = 1;
+  for (const auto i : c10::irange(view_size.size())) {
+    if (i < view_size.size() - normalized_shape.size()) {
+      view_size_affine[i] = 1;
+    } else {
+      numel *= input_t.size(static_cast<int64_t>(i));
+      view_size[i] = 1;
+      dims.push_back(static_cast<int64_t>(i));
+    }
+  }
+
+  auto rstd_p = saved_rstd.view(view_size);
+  Tensor rstd_t;
+  if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
+      input_t._is_zerotensor()) {
+    rstd_t = -rstd_p.pow(3) * input_t * input_p;
+  } else {
+    rstd_t = input_t * input_p;
+    rstd_t *= -rstd_p.pow(3);
+  }
+  rstd_t = rstd_t.sum(dims, true);
+  rstd_t /= numel;
+  return rstd_t;
 }
 
 Tensor group_norm_jvp(

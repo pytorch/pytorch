@@ -37,10 +37,10 @@ def create_int8_compensation(
     w_scale: ir.TensorBox,
 ) -> tuple[
     bool,
-    Union[ir.TensorBox, ir.ShapeAsConstantBuffer],
-    Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]],
+    ir.TensorBox,
+    Optional[ir.TensorBox],
 ]:
-    x_w_scale: Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]] = None
+    x_w_scale: Optional[ir.TensorBox] = None
     use_int8_fast_compensation_path = all(
         isinstance(item, ir.TensorBox)
         and item.get_name() in V.graph.constants
@@ -142,17 +142,18 @@ def grouped_gemm_lowering(
     num_gemm = len(w)
 
     assert config.max_autotune or config.max_autotune_gemm
+    # pyrefly: ignore [bad-assignment]
     b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
 
     choices: list[ChoiceCaller] = []
     *_, layout, x, _ = mm_args(x, permute(w[0], [1, 0]), layout=layout)
 
-    kwargs = dict(
-        has_bias=[bias is not None for bias in b],
-        trans_w=True,
-        epilogue_creator=None,
-        act_mapping=dict.fromkeys(range(num_gemm), x),
-    )
+    kwargs = {
+        "has_bias": [bias is not None for bias in b],
+        "trans_w": True,
+        "epilogue_creator": None,
+        "act_mapping": dict.fromkeys(range(num_gemm), x),
+    }
 
     input_nodes = [x, *w]
     input_nodes.extend([bias for bias in b if bias is not None])
@@ -176,6 +177,7 @@ def grouped_gemm_lowering(
         ir.MultiOutput(layout, template_buf, [(list, gemm_idx)])
         for gemm_idx in range(num_gemm)
     ]
+    # pyrefly: ignore [bad-argument-type]
     template_buf.layout = ir.MultiOutputLayout(device=input_nodes[0].get_device())
     template_buf.outputs = return_bufs
     return_tensors = [
@@ -221,7 +223,9 @@ def register_onednn_fusion_ops():
             has_out_variant=False,
             kernel_creator=mkldnn_ir.QLinearPointwiseBinaryPT2E.create,
         )
-        cpu_needs_realized_inputs = [
+        cpu_needs_realized_inputs: list[
+            Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+        ] = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
             torch.ops.mkldnn._convolution_transpose_pointwise,
@@ -353,11 +357,13 @@ def register_onednn_fusion_ops():
                             buf, attr, scalars=scalars, algorithm=algorithm
                         )
 
-                    kwargs = dict(
-                        has_bias=b is not None,
-                        trans_w=True,
-                        epilogue_creator=None if attr == "none" else epilogue_creator,
-                    )
+                    kwargs = {
+                        "has_bias": b is not None,
+                        "trans_w": True,
+                        "epilogue_creator": (
+                            None if attr == "none" else epilogue_creator
+                        ),
+                    }
                     if b is not None:
                         kwargs["input_indices"] = [2, 0, 1]  # type: ignore[assignment]
                     CppGemmTemplate.add_choices(
@@ -416,11 +422,13 @@ def register_onednn_fusion_ops():
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(buf, attr, other=y)
 
-                    kwargs = dict(
-                        has_bias=b is not None,
-                        trans_w=True,
-                        epilogue_creator=epilogue_creator,
-                    )
+                    kwargs = {
+                        "has_bias": b is not None,
+                        "trans_w": True,
+                        "epilogue_creator": epilogue_creator,
+                    }
+
+                    # pyrefly: ignore [unsupported-operation]
                     kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
                     CppGemmTemplate.add_choices(
                         choices,
@@ -532,7 +540,7 @@ def register_onednn_fusion_ops():
             x_zp,
             packed_weight: TensorBox,
             w_scale: TensorBox,
-            w_zp: TensorBox,
+            w_zp,
             bias: TensorBox,
             stride,
             padding,
@@ -545,15 +553,26 @@ def register_onednn_fusion_ops():
             scalars,
             algorithm,
         ):
-            # To align with qlinear where x_scale and x_zp are converted to Tensor
-            assert type(x_scale) == float
-            x_scale = V.graph.add_tensor_constant(
-                torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
-            )
-            assert type(x_zp) == int
-            x_zp = V.graph.add_tensor_constant(
-                torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
-            )
+            if not isinstance(x_scale, ir.TensorBox):
+                assert type(x_scale) is float
+                x_scale = V.graph.add_tensor_constant(
+                    torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+                )
+
+            if x_zp is None:
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="x_zp"
+                )
+            if not isinstance(x_zp, ir.TensorBox):
+                assert type(x_zp) is int
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+                )
+
+            if w_zp is None:
+                w_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="w_zp"
+                )
 
             return TensorBox.create(
                 mkldnn_ir.QConvPointWisePT2E.create(
@@ -589,7 +608,7 @@ def register_onednn_fusion_ops():
             x_zp,
             packed_weight: TensorBox,
             w_scale: TensorBox,
-            w_zp: TensorBox,
+            w_zp,
             accum: TensorBox,
             bias: TensorBox,
             stride,
@@ -605,17 +624,28 @@ def register_onednn_fusion_ops():
             alpha,
             unary_attr,
             unary_scalars,
-            unary_algorithmm,
+            unary_algorithm,
         ):
-            # To align with qlinear where x_scale and x_zp are converted to Tensor
-            assert type(x_scale) == float
-            x_scale = V.graph.add_tensor_constant(
-                torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
-            )
-            assert type(x_zp) == int
-            x_zp = V.graph.add_tensor_constant(
-                torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
-            )
+            if not isinstance(x_scale, ir.TensorBox):
+                assert type(x_scale) is float
+                x_scale = V.graph.add_tensor_constant(
+                    torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+                )
+
+            if x_zp is None:
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="x_zp"
+                )
+            if not isinstance(x_zp, ir.TensorBox):
+                assert type(x_zp) is int
+                x_zp = V.graph.add_tensor_constant(
+                    torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+                )
+
+            if w_zp is None:
+                w_zp = V.graph.add_tensor_constant(
+                    torch.tensor(0, dtype=torch.int32), name="w_zp"
+                )
 
             if (
                 binary_attr == "sum"
@@ -651,7 +681,7 @@ def register_onednn_fusion_ops():
                     alpha,
                     unary_attr,
                     unary_scalars,
-                    unary_algorithmm,
+                    unary_algorithm,
                 )
             )
 
@@ -672,15 +702,15 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
-            assert packed_weight.get_dtype() is torch.int8, (
-                "Only int8 weights are supported by oneDNN qlinear."
+            assert packed_weight.get_dtype() in [torch.int8, torch.float8_e4m3fn], (
+                "Only int8 and e4m3fn weights are supported by oneDNN qlinear."
             )
             x_size = x.get_size()
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
             if not isinstance(x_scale, ir.TensorBox):
-                assert type(x_scale) == float
+                assert type(x_scale) is float
                 x_scale = V.graph.add_tensor_constant(
                     torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
                 )
@@ -702,7 +732,7 @@ def register_onednn_fusion_ops():
                     torch.tensor(0, dtype=torch.int32), name="x_zp"
                 )
             if not isinstance(x_zp, ir.TensorBox):
-                assert type(x_zp) == int
+                assert type(x_zp) is int
                 x_zp = V.graph.add_tensor_constant(
                     torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
                 )
@@ -718,6 +748,7 @@ def register_onednn_fusion_ops():
                 # If w_zp is None, then it's a dummy tensor created to denote the
                 # absence of a zero point, and thus w is int8 symmetrically quantized.
                 # Moreover, oneDNN qlinear API doesn't accept None value for zp
+
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
@@ -820,6 +851,7 @@ def register_onednn_fusion_ops():
                             )
                             # Step 2: add Bias if applicable
                             if bias is not None:
+                                # pyrefly: ignore [not-callable]
                                 _bias = bias_loader(weight_compens_index)
                                 nonlocal bias_dtype
                                 assert bias_dtype in [torch.float32, torch.bfloat16]
@@ -980,18 +1012,18 @@ def register_onednn_fusion_ops():
             alpha,
             unary_attr,
             unary_scalars,
-            unary_algorithmm,
+            unary_algorithm,
             layout=None,
         ):
             x_size = x.get_size()
             x2_size = x2.get_size()
             assert len(x_size) == len(x2_size)
-            if len(x_size) > 2 and binary_attr == "add":
+            if len(x_size) > 2 and binary_attr in ["add", "sum"]:
                 # GEMM template needs 2D input, normalize input shape here
                 x = view(x, [-1, x_size[-1]])
                 x2 = view(x2, [-1, x2_size[-1]])
             if not isinstance(x_scale, ir.TensorBox):
-                assert type(x_scale) == float
+                assert type(x_scale) is float
                 x_scale = V.graph.add_tensor_constant(
                     torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
                 )
@@ -1015,7 +1047,7 @@ def register_onednn_fusion_ops():
                 )
 
             if not isinstance(x_zp, ir.TensorBox):
-                assert type(x_zp) == int
+                assert type(x_zp) is int
                 x_zp = V.graph.add_tensor_constant(
                     torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
                 )
@@ -1053,9 +1085,10 @@ def register_onednn_fusion_ops():
             x2_dtype = x2.get_dtype()
             bias_dtype = bias.get_dtype() if bias is not None else None
             choices: list[ChoiceCaller] = []
-            if (
-                config.max_autotune or config.max_autotune_gemm
-            ) and binary_attr == "add":  # <TODO> Support inplace sum fusion
+            if (config.max_autotune or config.max_autotune_gemm) and binary_attr in [
+                "add",
+                "sum",
+            ]:
                 *_, layout, x, packed_weight, x2 = mm_args(
                     x, packed_weight, x2, layout=layout, out_dtype=output_dtype
                 )
@@ -1144,6 +1177,7 @@ def register_onednn_fusion_ops():
                             )
                             # Step 2: add Bias if applicable
                             if bias is not None:
+                                # pyrefly: ignore [not-callable]
                                 _bias = bias_loader(weight_compens_index)
                                 nonlocal bias_dtype
                                 assert bias_dtype in [torch.float32, torch.bfloat16]
@@ -1173,7 +1207,7 @@ def register_onednn_fusion_ops():
                                 output_buf,
                                 unary_attr,
                                 scalars=unary_scalars,
-                                algorithm=unary_algorithmm,
+                                algorithm=unary_algorithm,
                             )
 
                         # Step 5: Cast output to Target Dtype
@@ -1250,7 +1284,7 @@ def register_onednn_fusion_ops():
                     binary_alpha=alpha,
                     unary_post_op=unary_attr,
                     unary_post_op_args=unary_scalars,
-                    unary_post_op_algorithm=unary_algorithmm,
+                    unary_post_op_algorithm=unary_algorithm,
                 )
                 if bias is None:
                     kwargs["bias"] = None
@@ -1280,8 +1314,26 @@ def register_onednn_fusion_ops():
                 layout,
                 input_gen_fns=input_gen_fns,
             )
-            if len(x_size) > 2 and binary_attr == "add":
-                result = view(result, (*x_size[:-1], result.get_size()[-1]))
+            if (
+                isinstance(result.data.data, ir.CppTemplateBuffer)
+                and binary_attr == "sum"
+                and result.data.data.layout == x2.get_layout()
+            ):
+                # In this case, since x2 is inplace updated when binary_attr is "sum"
+                # we update the layout of result to view of x2
+                result = ir.TensorBox.create(
+                    ir.CppTemplateBuffer(
+                        layout=ir.NonOwningLayout(
+                            ir.ReinterpretView(data=x2, layout=x2.get_layout())
+                        ),
+                        inputs=result.data.data.inputs,  # type: ignore[arg-type]
+                        make_kernel_render=result.data.data.make_kernel_render,  # type: ignore[arg-type]
+                        template=result.data.data.template,
+                        choice=result.data.data.choice,
+                    )
+                )
+            if len(x_size) > 2 and binary_attr in ["add", "sum"]:
+                result = view(result, (*x_size[:-1], result.get_size()[-1]))  # type: ignore[arg-type]
             return result
 
         if torch._C.has_mkl:
@@ -1345,5 +1397,3 @@ def register_onednn_fusion_ops():
                 return result
 
         add_needs_realized_inputs(cpu_needs_realized_inputs)
-    else:
-        pass

@@ -3,7 +3,7 @@
 import abc
 import io
 from collections.abc import Sequence
-from typing import cast, IO, Optional
+from typing import cast, IO
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -94,6 +94,7 @@ class ZStandard(StreamTransformExtension):
         return zstandard is not None or pyzstd is not None
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def from_descriptor(version: str) -> "ZStandard":
         if version.partition(".")[0] != "1":
             raise ValueError(f"Unknown extension {version=}")
@@ -131,7 +132,7 @@ class ZStandard(StreamTransformExtension):
             def writeable(self) -> bool:
                 return True
 
-            def write(self, b: Buffer) -> Optional[int]:
+            def write(self, b: Buffer) -> int | None:
                 outdata = self.compressor.compress(b)
                 if outdata:
                     self.output.write(outdata)
@@ -158,7 +159,7 @@ class ZStandard(StreamTransformExtension):
             def readable(self) -> bool:
                 return True
 
-            def readinto(self, b: Buffer) -> Optional[int]:
+            def readinto(self, b: Buffer) -> int | None:
                 # This needs to read enough so it can decompress
                 # something so the output doesn't look like EOF.  This
                 # means reading at least one block.  The max block
@@ -216,6 +217,7 @@ class ExtensionRegistry:
             ext = self.extensions.get(name)
             if not ext:
                 raise ValueError(f"Unknown extension {name=}")
+            # pyrefly: ignore [bad-argument-type]
             return ext.from_descriptor(version)
 
         return [from_descriptor(desc) for desc in descriptors]

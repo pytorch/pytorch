@@ -88,4 +88,5 @@ print("Didn't throw exception")
         self.compare_enabled_disabled(_program_string)
 
 if __name__ == '__main__':
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

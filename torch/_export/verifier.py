@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any, final, TYPE_CHECKING
 
 import torch
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.graph_signature import (
@@ -59,6 +60,8 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
+        elif is_opaque_type(type(val)):
+            return True
         return False
 
     def _no_returns(op):
@@ -215,6 +218,8 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_min,
                 torch.sym_not,
                 torch.sym_sqrt,
+                torch.sym_sum,
+                torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch,
                 # TODO (tmanlaibaatar)
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
@@ -222,6 +227,11 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
                 torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
+                torch._functorch.predispatch._add_batch_dim,
+                torch._functorch.predispatch._remove_batch_dim,
+                torch._functorch.predispatch._vmap_increment_nesting,
+                torch._functorch.predispatch._vmap_decrement_nesting,
+                torch._functorch.predispatch.lazy_load_decompositions,
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -274,6 +284,13 @@ class Verifier(metaclass=_VerifierMeta):
                             return isinstance(getattr(attr, name, None), ty)
 
                         if type(attr).__name__ == "LoweredBackendModule":
+                            if (
+                                _is_type("backend_id", str)
+                                and hasattr(attr, "original_module")
+                                and hasattr(attr, "module_name")
+                                and getattr(attr, "backend_id", None) == "aoti"
+                            ):
+                                continue
                             if (
                                 _is_type("backend_id", str)
                                 and _is_type("processed_bytes", bytes)
@@ -344,9 +361,16 @@ def _verify_exported_program_signature(exported_program) -> None:
     ]
 
     if len(input_node_names) != len(gs.input_specs):
+        input_spec_names = [
+            spec.arg.name for spec in gs.input_specs if hasattr(spec.arg, "name")
+        ]
+        missing_in_specs = set(input_node_names) - set(input_spec_names)
+        missing_in_graph = set(input_spec_names) - set(input_node_names)
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})\n"
+            f"Placeholders missing input_specs: {missing_in_specs}\n"
+            f"Input_specs missing placeholders: {missing_in_graph}"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
@@ -454,15 +478,26 @@ def _verify_exported_program_signature(exported_program) -> None:
     ]
 
     if len(output_nodes) != len(gs.output_specs):
+        output_spec_names = [
+            spec.arg.name if hasattr(spec.arg, "name") else str(spec.arg)
+            for spec in gs.output_specs
+        ]
+        missing_out_specs = set(output_nodes) - set(output_spec_names)
+        missing_out_graph = set(output_spec_names) - set(output_nodes)
         raise SpecViolationError(
             f"Number of output nodes {len(output_nodes)} is different "
-            "Than the number of outputs specified by the graph signature: \n"
-            f"Number of mutated buffers: {len(gs.buffers_to_mutate)}. \n"
-            f"Number of user outputs: {len(gs.user_outputs)}. \n"
+            f"Than the number of outputs specified by the graph signature: {len(gs.output_specs)}\n"
+            f"Nodes missing output_specs: {missing_out_specs}\n"
+            f"Output_specs missing nodes: {missing_out_graph}"
         )
 
     num_tokens = len(gs.output_tokens)
-    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
+    end = (
+        len(gs.buffers_to_mutate)
+        + len(gs.parameters_to_mutate)
+        + len(gs.user_inputs_to_mutate)
+        + num_tokens
+    )
     mutate_nodes: list[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end : end + len(gs.user_outputs)]
 
@@ -473,6 +508,13 @@ def _verify_exported_program_signature(exported_program) -> None:
                     f"Buffer output {mutation_node} does not point to a buffer that exists. \n"
                     f"Dict of buffers that are mutated, in order: {gs.buffers_to_mutate} \n"
                     f"Buffer nodes available: {gs.buffers} \n"
+                )
+        elif mutation_node in gs.parameters_to_mutate:
+            if gs.parameters_to_mutate[mutation_node] not in gs.parameters:
+                raise SpecViolationError(
+                    f"Parameter output {mutation_node} does not point to a parameter that exists. \n"
+                    f"Dict of parameters that are mutated, in order: {gs.parameters_to_mutate} \n"
+                    f"Parameter nodes available: {gs.parameters} \n"
                 )
         elif mutation_node in gs.user_inputs_to_mutate:
             if gs.user_inputs_to_mutate[mutation_node] not in gs.user_inputs:

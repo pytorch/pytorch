@@ -29,6 +29,7 @@ elastic/metrics
 elastic/events
 elastic/subprocess_handler
 elastic/control_plane
+elastic/numa
 ```
 
 ```{toctree}

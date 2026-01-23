@@ -20,7 +20,7 @@
 
 // SegmentReduce compilation with CUDA-12.9 causes  NVCC crash on Windows
 // See https://github.com/pytorch/pytorch/issues/156181
-#if !defined(_WIN32) || CUDART_VERSION < 12090
+#if !(defined(_WIN32) && CUDART_VERSION == 12090)
 
 namespace at::native {
 

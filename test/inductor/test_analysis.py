@@ -21,7 +21,13 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    skipIfXpu,
+    TEST_XPU,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
@@ -267,8 +273,13 @@ class TestUtils(TestCase):
         self.assertEqual(set(res2), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
 
 
+def has_supported_gpu():
+    """Check if any GPU platform with Triton support is available."""
+    return torch.xpu.is_available() or SM80OrLater or torch.version.hip
+
+
 class TestAnalysis(TestCase):
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     def test_noop(self):
         with (
             patch("sys.stdout", new_callable=StringIO) as mock_stdout,
@@ -277,7 +288,7 @@ class TestAnalysis(TestCase):
             main()
             self.assertEqual(mock_stdout.getvalue(), "")
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
     def test_diff(self, device, dtype):
         """
@@ -321,14 +332,14 @@ class TestAnalysis(TestCase):
         ):
             main()
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not (SM80OrLater or TEST_XPU), "Requires SM80 or XPU")
     def test_augment_trace_helper_unit(self):
         js = json.loads(example_profile)
         out_profile = _augment_trace_helper(js)
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
         "maxat",
@@ -337,6 +348,7 @@ class TestAnalysis(TestCase):
         ],
     )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @torch._inductor.config.patch(force_disable_caches=True)
     def test_triton_has_metadata(self, device, dtype, maxat):
         """
         make sure that the chrome trace of triton kernels contains certain values
@@ -359,7 +371,6 @@ class TestAnalysis(TestCase):
             options={
                 "benchmark_kernel": True,
                 "max_autotune_gemm_backends": backends,
-                "force_disable_caches": True,
                 "max_autotune": max_autotune,
             },
         )
@@ -382,7 +393,10 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipIfXpu(
+        msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5491"
+    )
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -396,6 +410,7 @@ class TestAnalysis(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune"
     )
+    @torch._inductor.config.patch(force_disable_caches=True)
     def test_augment_trace_against_flop_counter(self, device, dtype, maxat):
         # this tests to see if we can only use a Triton backend for max autotune
         max_autotune, backends = maxat
@@ -408,7 +423,6 @@ class TestAnalysis(TestCase):
             options={
                 "benchmark_kernel": True,
                 "max_autotune_gemm_backends": backends,
-                "force_disable_caches": True,
                 "max_autotune": max_autotune,
             },
         )
@@ -467,6 +481,7 @@ class TestAnalysis(TestCase):
                         "aten::cudnn_convolution",
                         "aten::convolution",
                         "aten::_convolution",
+                        "aten::convolution_overrideable",
                     )
                 )
                 or "conv" in name
@@ -493,7 +508,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -507,6 +522,7 @@ class TestAnalysis(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune"
     )
+    @torch._inductor.config.patch(force_disable_caches=True)
     def test_pointwise_bandwidth(self, device, dtype, maxat):
         # this tests to see if we can only use a Triton backend for max autotune
         max_autotune, backends = maxat
@@ -518,7 +534,6 @@ class TestAnalysis(TestCase):
             options={
                 "benchmark_kernel": True,
                 "max_autotune_gemm_backends": backends,
-                "force_disable_caches": True,
                 "max_autotune": max_autotune,
             },
         )
@@ -543,8 +558,104 @@ class TestAnalysis(TestCase):
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
 
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @dtypes(torch.float, torch.float16)
+    def test_combine_profiles(self, device, dtype):
+        """
+        Test combining multiple profiles into a single profile.
+        """
+        if device == "cpu" or torch.version.hip is not None:
+            return
 
-instantiate_device_type_tests(TestAnalysis, globals())
+        # Create three different models to generate different traces
+        om1 = _test_model(device, dtype, addmm=True, bmm=False)
+        om2 = _test_model(device, dtype, addmm=False, bmm=True)
+        om3 = _pointwise_test_model(device, dtype)
+
+        # Generate three separate traces
+        trace1, trace2 = trace_files()
+        trace3 = f"{TMP_DIR}/trace3-{uuid.uuid4()}.json"
+        combined_trace = f"{TMP_DIR}/combined-{uuid.uuid4()}.json"
+
+        # Generate first trace
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            with torch.profiler.profile(record_shapes=True) as p1:
+                om1()
+        p1.export_chrome_trace(trace1)
+
+        # Generate second trace
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            with torch.profiler.profile(record_shapes=True) as p2:
+                om2()
+        p2.export_chrome_trace(trace2)
+
+        # Generate third trace
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            with torch.profiler.profile(record_shapes=True) as p3:
+                om3()
+        p3.export_chrome_trace(trace3)
+
+        # Combine the three traces
+        with patch(
+            "sys.argv",
+            [
+                *prefix,
+                "--combine",
+                trace1,
+                trace2,
+                trace3,
+                combined_trace,
+            ],
+        ):
+            main()
+
+        # Verify the combined trace exists and contains expected data
+        with open(combined_trace) as f:
+            combined_profile = json.load(f)
+
+        # Load original traces for comparison
+        with open(trace1) as f:
+            profile1 = json.load(f)
+        with open(trace2) as f:
+            profile2 = json.load(f)
+        with open(trace3) as f:
+            profile3 = json.load(f)
+
+        # Verify trace events are combined
+        expected_event_count = (
+            len(profile1["traceEvents"])
+            + len(profile2["traceEvents"])
+            + len(profile3["traceEvents"])
+        )
+        self.assertEqual(len(combined_profile["traceEvents"]), expected_event_count)
+
+        # Verify device properties are present
+        self.assertIn("deviceProperties", combined_profile)
+        # XPU currently does not have the deviceProperties like CUDA.
+        # See https://github.com/intel/torch-xpu-ops/issues/2247
+        if torch.cuda.is_available():
+            self.assertGreater(len(combined_profile["deviceProperties"]), 0)
+
+        # Verify some trace events from each original profile are present
+        combined_event_names = {
+            event["name"] for event in combined_profile["traceEvents"]
+        }
+
+        # Check that we have events from each original profile
+        profile1_event_names = {event["name"] for event in profile1["traceEvents"]}
+        profile2_event_names = {event["name"] for event in profile2["traceEvents"]}
+        profile3_event_names = {event["name"] for event in profile3["traceEvents"]}
+
+        # At least some events from each profile should be in the combined profile
+        self.assertTrue(profile1_event_names.intersection(combined_event_names))
+        self.assertTrue(profile2_event_names.intersection(combined_event_names))
+        self.assertTrue(profile3_event_names.intersection(combined_event_names))
+
+
+instantiate_device_type_tests(TestAnalysis, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

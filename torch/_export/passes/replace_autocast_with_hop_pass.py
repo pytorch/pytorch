@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_autocast
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 
-def _is_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
+def _is_autocast_node(node: torch.fx.Node) -> torch.fx.Node | bool:
     return (
         node
         and node.op == "call_function"
@@ -30,19 +30,19 @@ def _is_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
     )
 
 
-def _is_enter_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
+def _is_enter_autocast_node(node: torch.fx.Node) -> torch.fx.Node | bool:
     return (
         node
         and node.op == "call_function"
-        and node.target == torch.amp.autocast_mode._enter_autocast
+        and node.target is torch.amp.autocast_mode._enter_autocast
     )
 
 
-def _is_exit_autocast_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
+def _is_exit_autocast_node(node: torch.fx.Node) -> torch.fx.Node | bool:
     return (
         node
         and node.op == "call_function"
-        and node.target == torch.amp.autocast_mode._exit_autocast
+        and node.target is torch.amp.autocast_mode._exit_autocast
     )
 
 
@@ -59,7 +59,7 @@ def _is_autocast_sub_mod(node: torch.fx.Node) -> bool:
         if (
             first_non_ph
             and first_non_ph.op == "call_function"
-            and first_non_ph.target == torch.amp.autocast_mode._enter_autocast
+            and first_non_ph.target is torch.amp.autocast_mode._enter_autocast
         ):
             # TODO: check if current auto-cast type is the same as the args of
             # _enter_autocast. If so, return False, i.e. do not create a submodule.
@@ -100,8 +100,8 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     split_autocast creates a new graph module that splits the input graph module into multiple submodules
     based on the `_enter_autocast` and `_exit_autocast` nodes. It doesn't mutate the input graph module.
 
-    Nodes between the **outer-most** `_enter_autocast` and `_exit_autocast(_enter_autocast)` are splitted
-    into a submodule. Nested autocast regions are not splitted.
+    Nodes between the **outer-most** `_enter_autocast` and `_exit_autocast(_enter_autocast)` are split
+    into a submodule. Nested autocast regions are not split.
     `_enter_autocast` and `_exit_autocast(_enter_autocast)` nodes are in the submodule as well.
 
     Below is an example of splitting. A, B, C, D, E are blocks of non-autocast nodes in the original graph
@@ -144,8 +144,8 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 
 def _sequential_split_and_maybe_inline_subgraphs(
-    gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
-) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+    gm: torch.fx.GraphModule, graph_signature: ExportGraphSignature | None
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature | None]:
     """
     Helper function for replace_autocast_with_hop_pass().
     Split the graph module into multiple subgraphs based on the autocast nodes.
@@ -176,8 +176,8 @@ def _sequential_split_and_maybe_inline_subgraphs(
 
 
 def replace_autocast_with_hop_pass(
-    gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
-) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+    gm: torch.fx.GraphModule, graph_signature: ExportGraphSignature | None
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature | None]:
     """
     Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
     then recursively call itself on each of the submodules.

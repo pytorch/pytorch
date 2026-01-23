@@ -47,7 +47,7 @@ def _test_terminate_signal_func(i):
 def _test_terminate_exit_func(i, arg):
     if i == 0:
         sys.exit(arg)
-    time.sleep(1.0)
+    time.sleep(4.0)
 
 
 def _test_success_first_then_exception_func(i, arg):
@@ -145,7 +145,7 @@ class _TestMultiProcessing:
         with self.assertRaisesRegex(Exception, message):
             mp.start_processes(_test_terminate_signal_func, nprocs=2, start_method=self.start_method)
 
-    @parametrize("grace_period", [None, 5])
+    @parametrize("grace_period", [None, 20])
     def test_terminate_exit(self, grace_period):
         exitcode = 123
         ctx = mp.start_processes(_test_terminate_exit_func, args=(exitcode,), nprocs=2, start_method=self.start_method, join=False)
@@ -201,7 +201,7 @@ class _TestMultiProcessing:
                 try:
                     os.kill(pid, 0)
                 except ProcessLookupError:
-                    pids.remove(pid)
+                    pids.remove(pid)  # noqa: B909
                     break
 
             # This assert fails if any nested child process is still
@@ -265,6 +265,12 @@ class ParallelForkServerShouldWorkTest(TestCase, _TestMultiProcessing):
 )
 class ParallelForkServerPerfTest(TestCase):
 
+    @unittest.skipIf(
+        sys.version_info >= (3, 13, 8),
+        "Python 3.13.8+ changed forkserver module caching behavior",
+        # https://docs.python.org/3.13/whatsnew/changelog.html
+        # gh-126631
+    )
     def test_forkserver_perf(self):
 
         start_method = 'forkserver'

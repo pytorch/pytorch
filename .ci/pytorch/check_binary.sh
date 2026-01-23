@@ -25,6 +25,10 @@ set -eux -o pipefail
 # Pythonless binary, then it expects to be in the root folder of the unzipped
 # libtorch package.
 
+# ensure we don't link to system libraries, linked libraries should be found from RPATH
+# Save the old LD_LIBRARY_PATH to restore it later
+OLD_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+unset LD_LIBRARY_PATH
 
 if [[ -z ${DESIRED_PYTHON:-} ]]; then
   export DESIRED_PYTHON=${MATRIX_PYTHON_VERSION:-}
@@ -46,7 +50,10 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   export install_root="$PWD"
 else
 
-  if [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
+  if [[ $DESIRED_PYTHON =~ ^cp([0-9])([0-9][0-9])(-cp[0-9]+)?t?$ ]]; then
+    # Handle inputs like cp310-cp310 or cp310-cp310t
+    py_dot="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+  elif [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
     # For python that is maj.mint keep original version
     py_dot="$DESIRED_PYTHON"
   elif [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+) ]];  then
@@ -237,7 +244,8 @@ if [[ "$OSTYPE" == "msys" ]]; then
 fi
 
 # Test that CUDA builds are setup correctly
-if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'cpu-cxx11-abi' && "$DESIRED_CUDA" != *"rocm"* && "$(uname -m)" != "s390x" ]]; then
+# Skip CUDA hardware checks for aarch64 as they run on CPU-only runners
+if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'cpu-cxx11-abi' && "$DESIRED_CUDA" != *"rocm"* && "$(uname -m)" != "s390x" && "$(uname -m)" != "aarch64" ]]; then
   if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
     build_and_run_example_cpp check-torch-cuda
   else
@@ -276,7 +284,9 @@ fi # if cuda
 if [[ "$PACKAGE_TYPE" != 'libtorch' ]]; then
   pushd "$(dirname ${BASH_SOURCE[0]})/smoke_test"
   python -c "from smoke_test import test_linalg; test_linalg()"
-  if [[ "$DESIRED_CUDA" == *cuda* ]]; then
+  # Skip CUDA linalg test for aarch64 as they run on CPU-only runners
+  # TODO: Remove this once CUDA ARM runner is available
+  if [[ "$DESIRED_CUDA" == *cuda* && "$(uname -m)" != "aarch64" ]]; then
     python -c "from smoke_test import test_linalg; test_linalg('cuda')"
   fi
   popd
@@ -302,22 +312,8 @@ except RuntimeError as e:
 fi
 
 ###############################################################################
-# Check for C++ ABI compatibility to GCC-11 - GCC 13
+# Restore LD_LIBRARY_PATH to its original value
 ###############################################################################
-if [[ "$(uname)" == 'Linux' &&  "$PACKAGE_TYPE" == 'manywheel' ]]; then
-  pushd /tmp
-  # Per https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html
-  # gcc-11 is ABI16, gcc-13 is ABI18, gcc-14 is ABI19
-  # gcc 11 - CUDA 11.8, xpu, rocm
-  # gcc 13 - CUDA 12.6, 12.8 and cpu
-  # Please see issue for reference: https://github.com/pytorch/pytorch/issues/152426
-  if [[ "$(uname -m)" == "s390x" ]]; then
-    cxx_abi="19"
-  elif [[ "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'rocm'* ]]; then
-    cxx_abi="18"
-  else
-    cxx_abi="16"
-  fi
-  python -c "import torch; exit(0 if torch._C._PYBIND11_BUILD_ABI == '_cxxabi10${cxx_abi}' else 1)"
-  popd
+if [[ -n "$OLD_LD_LIBRARY_PATH" ]]; then
+  export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
 fi

@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+
+#include <ATen/ops/tensor.h>
 #include <torch/nativert/executor/ExecutionFrame.h>
 
 namespace torch::nativert {

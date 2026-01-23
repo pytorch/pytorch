@@ -48,22 +48,29 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual void** get_buffer_ptrs_dev() = 0;
   virtual void** get_signal_pad_ptrs_dev() = 0;
   virtual size_t get_buffer_size() = 0;
-  virtual size_t get_signal_pad_size() = 0;
+  size_t get_signal_pad_size();
+
+  virtual size_t get_offset() = 0;
 
   virtual bool has_multicast_support() = 0;
   virtual void* get_multicast_ptr() = 0;
 
-  virtual at::Tensor get_buffer(
+  at::Tensor get_buffer(
       int rank,
       c10::IntArrayRef sizes,
       c10::ScalarType dtype,
-      int64_t storage_offset) = 0;
+      int64_t storage_offset);
 
-  virtual at::Tensor get_signal_pad(
+  at::Tensor get_signal_pad(
       int rank,
       c10::IntArrayRef sizes,
       std::optional<c10::ScalarType> dtype = std::nullopt,
-      int64_t storage_offset = 0) = 0;
+      int64_t storage_offset = 0);
+
+  at::Tensor get_remote_tensor(
+      int peer,
+      c10::IntArrayRef sizes,
+      c10::ScalarType dtype);
 
   virtual void barrier(int channel, size_t timeout_ms) = 0;
   virtual void put_signal(int dst_rank, int channel, size_t timeout_ms) = 0;
@@ -71,12 +78,19 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
 
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
+  virtual c10::Device get_device() = 0;
 
   virtual const std::vector<int>& get_rank_to_global_rank() {
     TORCH_CHECK(false, "NYI");
   }
 
   virtual int* get_rank_to_global_rank_dev() {
+    TORCH_CHECK(false, "NYI");
+  }
+
+  // Returns true if *all* peers within the group are accessible via direct
+  // memory load and store.
+  virtual bool world_within_direct_access() {
     TORCH_CHECK(false, "NYI");
   }
 };
@@ -131,10 +145,6 @@ struct GroupInfo {
   int rank;
   int world_size;
   c10::intrusive_ptr<c10d::Store> store;
-  // Note this field is not automatically populated by set_group_info().  If a
-  // SymmetricMemory implementation needs to use it, it must be populated by a
-  // call to exchange_global_ranks() first.
-  std::vector<int> rank_to_global_rank;
 };
 
 C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
@@ -183,5 +193,22 @@ TORCH_API bool has_multicast_support(
 TORCH_API void set_backend(const std::string& name);
 
 TORCH_API std::optional<std::string> get_backend(c10::Device device);
+
+// Get the current signal pad size for symmetric memory allocations.
+// Returns the user-configured size if set, otherwise returns the default size.
+TORCH_API size_t get_signal_pad_size();
+
+// Set the signal pad size for future symmetric memory allocations.
+// This must be called before any symmetric memory allocations are made.
+// The size should be proportional to the number of blocks the user launches
+// and the world size.
+TORCH_API void set_signal_pad_size(size_t size);
+
+C10_EXPORT void register_mempool_allocator(
+    c10::DeviceType device_type,
+    std::shared_ptr<c10::Allocator> allocator);
+
+TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(
+    c10::Device device);
 
 } // namespace c10d::symmetric_memory

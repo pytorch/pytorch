@@ -1,7 +1,5 @@
 #include <torch/library.h>
 
-#include <ATen/core/boxing/KernelFunction.h>
-
 using torch::CppFunction;
 
 TORCH_LIBRARY_IMPL(_, Named, m) {

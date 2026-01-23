@@ -1,6 +1,14 @@
 # mypy: allow-untyped-defs
-from .core import reify, unify  # type: ignore[attr-defined]
+from .core import (  # type: ignore[attr-defined]
+    _reify as core_reify,
+    _unify as core_unify,
+    reify,
+    unify,
+)
 from .dispatch import dispatch
+
+
+__all__ = ["unifiable", "reify_object", "unify_object"]
 
 
 def unifiable(cls):
@@ -21,8 +29,8 @@ def unifiable(cls):
     >>> unify(a, b, {})
     {~x: 2}
     """
-    _unify.add((cls, cls, dict), unify_object)
-    _reify.add((cls, dict), reify_object)
+    core_unify.add((cls, cls, dict), unify_object)  # type: ignore[attr-defined]
+    core_reify.add((cls, dict), reify_object)  # type: ignore[attr-defined]
 
     return cls
 
@@ -79,6 +87,7 @@ def _reify_object_slots(o, s):
 @dispatch(slice, dict)
 def _reify(o, s):
     """Reify a Python ``slice`` object"""
+
     return slice(*reify((o.start, o.stop, o.step), s))
 
 
@@ -104,7 +113,7 @@ def unify_object(u, v, s):
     >>> unify_object(f, g, {})
     {~x: 2}
     """
-    if type(u) != type(v):
+    if type(u) is not type(v):
         return False
     if hasattr(u, "__slots__"):
         return unify(

@@ -644,15 +644,6 @@ void initTorchFunctions(PyObject* module) {
             at::functionalization::impl::isFunctionalTensor(t));
         at::functionalization::impl::mark_mutation_hidden_from_autograd(t);
       });
-  py_module.def(
-      "_functionalize_apply_view_metas",
-      [](const at::Tensor& tensor, const at::Tensor& base) {
-        TORCH_INTERNAL_ASSERT(
-            at::functionalization::impl::isFunctionalTensor(tensor));
-        auto impl =
-            at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
-        return impl->apply_view_metas(base);
-      });
   py_module.def("_functionalize_is_symbolic", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);

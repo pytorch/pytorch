@@ -88,7 +88,8 @@ def build_pytorch(
 ) -> None:
     my_env = _create_build_env()
     if (
-        not check_negative_env_flag("USE_CUDA")
+        not check_negative_env_flag("USE_DISTRIBUTED")
+        and not check_negative_env_flag("USE_CUDA")
         and not check_negative_env_flag("USE_NCCL")
         and not check_env_flag("USE_SYSTEM_NCCL")
     ):

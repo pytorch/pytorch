@@ -1,14 +1,20 @@
 import logging
 import pickle
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable, cast, Optional, TypeVar, Union
+from typing import cast, TypeVar
 
 import torch
 from torch.distributed import ProcessGroup, Work
+from torch.distributed._shard.sharded_tensor import (
+    Shard as ShardedTensorShard,
+    ShardedTensor,
+    ShardMetadata,
+)
+from torch.distributed._shard.sharded_tensor.metadata import ShardedTensorMetadata
 from torch.distributed.tensor import _DTensorSpec, DTensor
 from torch.utils._pytree import (
     KeyPath,
@@ -54,6 +60,22 @@ class _DTensorMeta:
 
 
 @dataclass
+class _ShardedTensorMeta:
+    """
+    This is the metadata for a ShardedTensor that is used to transfer checkpoints.
+    It contains the metadata for all local shards and the global tensor metadata.
+
+    This must be pickleable so that it can be sent over the wire.
+    """
+
+    local_shards_meta: list[_TensorMeta]
+    local_shards_shard_metadata: list[
+        ShardMetadata
+    ]  # Original shard metadata for each local shard
+    sharded_tensor_metadata: ShardedTensorMetadata
+
+
+@dataclass
 class _StateDictMeta:
     """
     This is the metadata for a state dict that is used to transfer checkpoints.
@@ -72,7 +94,7 @@ class _StateDictMeta:
 
     treespec: TreeSpec
     paths: list[KeyPath]
-    non_tensor_leaves: list[Union[object, _TensorMeta, _DTensorMeta]]
+    non_tensor_leaves: list[object | _TensorMeta | _DTensorMeta | _ShardedTensorMeta]
 
 
 @contextmanager
@@ -104,7 +126,9 @@ def _prepare_state_dict(
     leaves, treespec = tree_flatten_with_path(state_dict)
 
     paths: list[KeyPath] = []
-    non_tensor_leaves: list[Union[object, _TensorMeta, _DTensorMeta]] = []
+    non_tensor_leaves: list[
+        object | _TensorMeta | _DTensorMeta | _ShardedTensorMeta
+    ] = []
     tensors: list[torch.Tensor] = []
     for key_path, v in leaves:
         paths.append(key_path)
@@ -118,6 +142,26 @@ def _prepare_state_dict(
                 _DTensorMeta(
                     local=tensor_meta,
                     spec=v._spec,
+                )
+            )
+        elif isinstance(v, ShardedTensor):
+            # Handle ShardedTensor by extracting all local shards
+            local_shards = v.local_shards()
+
+            # Prepare metadata for all local shards
+            local_shards_meta = []
+            local_shards_shard_metadata = []
+            for shard in local_shards:
+                tensor, tensor_meta = _prepare_tensor(shard.tensor)
+                tensors.append(tensor)
+                local_shards_meta.append(tensor_meta)
+                local_shards_shard_metadata.append(shard.metadata)
+
+            non_tensor_leaves.append(
+                _ShardedTensorMeta(
+                    local_shards_meta=local_shards_meta,
+                    local_shards_shard_metadata=local_shards_shard_metadata,
+                    sharded_tensor_metadata=v.metadata(),  # Complete metadata
                 )
             )
         elif isinstance(v, torch.Tensor):
@@ -147,12 +191,12 @@ def _cast_tensor(tensor: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     caveat that the cast tensor may be larger than the original tensor due to
     the differences in striding.
     """
-    assert type(tensor) is torch.Tensor, (
-        f"can only cast standard tensors not {type(tensor)}"
-    )
+    if type(tensor) is not torch.Tensor:
+        raise AssertionError(f"can only cast standard tensors not {type(tensor)}")
     storage = tensor.untyped_storage()
     ret = torch.tensor(storage, dtype=dtype, device=tensor.device)
-    assert ret.untyped_storage() is storage, "storage should be the same"
+    if ret.untyped_storage() is not storage:
+        raise AssertionError("storage should be the same")
     return ret
 
 
@@ -176,11 +220,12 @@ class PGTransport:
         pg: ProcessGroup,
         timeout: timedelta,
         device: torch.device,
-        state_dict: Optional[Callable[[], object]] = None,
+        state_dict: Callable[[], object] | None = None,
     ) -> None:
         self._work: list[Work] = []
         self._pg = pg
         self._timeout = timeout
+        # pyrefly: ignore [read-only]
         self._device = device
         self._state_dict = state_dict
 
@@ -242,7 +287,6 @@ class PGTransport:
         Returns:
             The reconstructed state dictionary with model parameters
         """
-
         state_dict = self._state_dict() if self._state_dict else {}
         state_dict_leaves, _ = tree_flatten_with_path(state_dict)
 
@@ -271,9 +315,8 @@ class PGTransport:
                 if isinstance(inplace, DTensor):
                     inplace = inplace._local_tensor
                 t = _cast_tensor(inplace, torch.uint8)
-                assert t.nbytes == v.nbytes, (
-                    "inplace tensor storage must be the same size"
-                )
+                if t.nbytes != v.nbytes:
+                    raise AssertionError("inplace tensor storage must be the same size")
             else:
                 t = torch.empty(v.nbytes, dtype=torch.uint8, device=self._device)
 
@@ -300,7 +343,39 @@ class PGTransport:
                 values.append(recv(path, v))
             elif isinstance(v, _DTensorMeta):
                 tensor = recv(path, v.local)
+                # pyrefly: ignore [bad-argument-type, bad-argument-count, unexpected-keyword]
                 values.append(DTensor(tensor, v.spec, requires_grad=False))
+            elif isinstance(v, _ShardedTensorMeta):
+                # Receive all local shards that were sent to us
+                local_shards = []
+                current_rank = self._pg.rank()
+
+                # Receive tensors for each local shard that was sent
+                for j, shard_meta in enumerate(v.local_shards_meta):
+                    tensor = recv(path, shard_meta)
+
+                    # Use the original shard metadata that was stored during preparation
+                    # but update the placement to reflect the current rank/device
+                    original_shard_metadata = v.local_shards_shard_metadata[j]
+                    updated_shard_metadata = ShardMetadata(
+                        shard_offsets=original_shard_metadata.shard_offsets,
+                        shard_sizes=original_shard_metadata.shard_sizes,
+                        placement=f"rank:{current_rank}/{tensor.device.type}",
+                    )
+
+                    local_shard = ShardedTensorShard(
+                        tensor=tensor, metadata=updated_shard_metadata
+                    )
+                    local_shards.append(local_shard)
+
+                # Use complete metadata to reconstruct ShardedTensor
+                sharded_tensor = (
+                    ShardedTensor._init_from_local_shards_and_global_metadata(
+                        local_shards=local_shards,
+                        sharded_tensor_metadata=v.sharded_tensor_metadata,
+                    )
+                )
+                values.append(sharded_tensor)
             else:
                 values.append(v)
 

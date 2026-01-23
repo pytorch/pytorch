@@ -7,8 +7,7 @@ saving and loading.
 """
 
 from dataclasses import dataclass
-from typing import Any
-from typing_extensions import TypeAlias
+from typing import Any, TypeAlias
 
 
 # Type alias for state dictionaries used in checkpointing

@@ -77,6 +77,7 @@ class TestSetLinter(LinterTestCase):
             ("{i for i in range(2, 3)}", 1),
             ("{1, 2}", 1),
             ("{One({'a': 1}), Two([{}, {2}, {1, 2}])}", 3),
+            ('f" {h:{w}} "', 0),
         )
         for s, expected in TESTS:
             pf = SetLinter.make_file(s)

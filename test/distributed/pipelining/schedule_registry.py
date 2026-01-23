@@ -2,7 +2,8 @@
 # Owner(s): ["oncall: distributed"]
 # This file is a Schedule zoo for testing torch.distributed.pipelining.
 # It includes schedules designed purely for testing purposes
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from torch.distributed.pipelining.schedules import (
     _Action,
@@ -45,7 +46,7 @@ class ScheduleVShaped(PipelineScheduleMulti):
         )
 
         # Go through one microbatch
-        # Note(whc) - it might be easier to work with thes schedules by writing them as a list of
+        # Note(whc) - it might be easier to work with this schedules by writing them as a list of
         # ["0F0", ...] and then parsing them in the test infra to turn them into actions.
         self.pipeline_order = {
             0: [

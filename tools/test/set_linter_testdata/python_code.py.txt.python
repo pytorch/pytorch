@@ -32,6 +32,9 @@ class A:
 
 set = A().set
 
+# An f string as in https://github.com/pytorch/pytorch/issues/159056
+f_string = f" {h:{w}} "
+
 # Braced sets
 
 set1 = OrderedSet([1])

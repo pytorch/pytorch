@@ -24,10 +24,10 @@ pull-deps: clone-deps
 	(cd ../../../FBGEMM         && git fetch && git checkout "$$(cat ../pytorch/.github/ci_commit_pins/fbgemm.txt)" && git submodule update --init --recursive)
 	(cd ../../../torchrec       && git fetch && git checkout "$$(cat ../pytorch/.github/ci_commit_pins/torchrec.txt)" && git submodule update --init --recursive)
 	(cd ../../../detectron2     && git fetch && git checkout HEAD && git submodule update --init --recursive)
-	(cd ../../../torchbenchmark && git fetch && git checkout "$$(cat ../pytorch/.github/ci_commit_pins/torchbench.txt)" && git submodule update --init --recursive)
+	(cd ../../../torchbenchmark && git fetch && git checkout HEAD && git submodule update --init --recursive)
 
 build-deps: clone-deps
-	uv pip install astunparse numpy scipy ninja pyyaml mkl mkl-include setuptools cmake \
+	uv pip install numpy scipy ninja pyyaml six mkl mkl-include setuptools wheel cmake \
 		typing-extensions requests protobuf numba cython scikit-learn librosa
 	(cd ../../../torchvision && uv pip install -e . --no-build-isolation)
 	(cd ../../../torchdata && uv pip install -e .)

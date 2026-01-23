@@ -1,12 +1,9 @@
 #include <torch/library.h>
-#include <ATen/ATen.h>
 #include <ATen/LegacyVmapTransforms.h>
 #include <ATen/LegacyBatchedFallback.h>
 #include <ATen/RedispatchFunctions.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
-#include <c10/core/SymIntArrayRef.h>
 
 #include <utility>
 
@@ -58,7 +55,7 @@ namespace at {
 namespace{
 
 // PyTorch allows operations to specify dim 0 and dim -1 on a scalar tensor.
-static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
+bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
 
@@ -365,7 +362,7 @@ Tensor select_batching_rule(const Tensor& self, int64_t dim, int64_t index) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
-static int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int64_t num_batch_dims) {
+int64_t getGradInputPhysicalDim(int64_t dim, IntArrayRef input_sizes, int64_t num_batch_dims) {
   return maybe_wrap_dim(dim, static_cast<int64_t>(input_sizes.size())) + num_batch_dims;
 }
 
@@ -488,7 +485,7 @@ Tensor view_as_complex_batching_rule(const Tensor& self) {
 // Checks that the smallest batch stride is greater than the largest example
 // stride. This is something we can support but we choose not to because it's
 // potentially error prone.
-static void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, int64_t num_batch_dims) {
+void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, int64_t num_batch_dims) {
   auto smallest_batch_stride = std::min_element(
       physical_strides.begin(), physical_strides.begin() + num_batch_dims);
   auto largest_example_stride = std::max_element(
@@ -508,7 +505,7 @@ static void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, int64_t 
 // given (sizes, strides, storage_offset) returns the maximum location that
 // can be indexed (or nullopt if such a location doesn't exist, e.g., tensors
 // with zero-size dims).
-static std::optional<int64_t> maximum_indexable_location(
+std::optional<int64_t> maximum_indexable_location(
     IntArrayRef sizes, IntArrayRef strides, int64_t storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
@@ -521,7 +518,7 @@ static std::optional<int64_t> maximum_indexable_location(
 // This checks that the range of possible memory locations accessible by
 // x.as_strided(sizes, strides, maybe_storage_offset)
 // are within the bounds of possible memory locations accessible by x.
-static void checkBasicAsStridedValidForSlice(
+void checkBasicAsStridedValidForSlice(
     const Tensor& physical_tensor,
     int64_t num_batch_dims,
     IntArrayRef sizes,

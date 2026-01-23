@@ -40,9 +40,9 @@ skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 import torch
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    parametrize,
     IS_MACOS,
     IS_WINDOWS,
-    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
@@ -82,13 +82,14 @@ class BaseTestCase(TestCase):
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
 
-    def assertProto(self, str_to_compare):
+    def assertProto(self, actual_proto):
         if expecttest.ACCEPT:
-            write_proto(str_to_compare, self)
+            write_proto(actual_proto, self)
             return True
-        expected = read_expected_content(self)
-        str_to_compare = str(str_to_compare)
-        self.assertEqual(remove_whitespace(str_to_compare), remove_whitespace(expected))
+        expected_str = read_expected_content(self)
+        expected_proto = Summary()
+        text_format.Parse(expected_str, expected_proto)
+        self.assertEqual(actual_proto, expected_proto)
 
     def assertImageProto(self, actual_proto):
         if expecttest.ACCEPT:
@@ -199,7 +200,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
                 bucket_counts=counts.tolist(),
             )
 
-            ints = torch.tensor(range(0, 100)).float()
+            ints = torch.tensor(range(100)).float()
             nbins = 100
             counts = torch.histc(ints, bins=nbins, min=0, max=99)
             limits = torch.tensor(range(nbins))
@@ -256,8 +257,8 @@ class TestTensorBoardUtils(BaseTestCase):
             total_frame = s[1]
             V_input = np.swapaxes(V_input, 0, 1)
             for f in range(total_frame):
-                x = np.reshape(V_input[f], newshape=(-1))
-                y = np.reshape(V_after[f], newshape=(-1))
+                x = np.reshape(V_input[f], -1)
+                y = np.reshape(V_after[f], -1)
                 np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
     def test_numpy_vid_uint8(self):
@@ -266,8 +267,8 @@ class TestTensorBoardUtils(BaseTestCase):
         total_frame = V_input.shape[1]
         V_input = np.swapaxes(V_input, 0, 1)
         for f in range(total_frame):
-            x = np.reshape(V_input[f], newshape=(-1))
-            y = np.reshape(V_after[f], newshape=(-1))
+            x = np.reshape(V_input[f], -1)
+            y = np.reshape(V_after[f], -1)
             np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
 
@@ -486,38 +487,23 @@ class TestTensorBoardSummary(BaseTestCase):
         summary.video("dummy", np.random.rand(16, 48, 1, 28, 28))
         summary.video("dummy", np.random.rand(20, 7, 1, 8, 8))
 
-    @unittest.skipIf(
-        IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 "
-    )
     @xfailIfS390X
     def test_audio(self):
         self.assertProto(summary.audio("dummy", tensor_N(shape=(42,))))
 
-    @unittest.skipIf(
-        IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 "
-    )
     def test_text(self):
         self.assertProto(summary.text("dummy", "text 123"))
 
-    @unittest.skipIf(
-        IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 "
-    )
     def test_histogram_auto(self):
         self.assertProto(
             summary.histogram("dummy", tensor_N(shape=(1024,)), bins="auto", max_bins=5)
         )
 
-    @unittest.skipIf(
-        IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 "
-    )
     def test_histogram_fd(self):
         self.assertProto(
             summary.histogram("dummy", tensor_N(shape=(1024,)), bins="fd", max_bins=5)
         )
 
-    @unittest.skipIf(
-        IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 "
-    )
     def test_histogram_doane(self):
         self.assertProto(
             summary.histogram(
@@ -537,9 +523,6 @@ class TestTensorBoardSummary(BaseTestCase):
             layout
         )  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
-    @unittest.skipIf(
-        IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 "
-    )
     def test_mesh(self):
         v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
         c = np.array(
@@ -549,9 +532,6 @@ class TestTensorBoardSummary(BaseTestCase):
         mesh = summary.mesh("my_mesh", vertices=v, colors=c, faces=f, config_dict=None)
         self.assertProto(mesh)
 
-    @unittest.skipIf(
-        IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 "
-    )
     def test_scalar_new_style(self):
         scalar = summary.scalar("test_scalar", 1.0, new_style=True)
         self.assertProto(scalar)
@@ -798,11 +778,15 @@ class TestTensorBoardFigure(BaseTestCase):
             figures.append(figure)
 
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
-        self.assertTrue(all(plt.fignum_exists(figure.number) is True for figure in figures))  # noqa: F812
+        self.assertTrue(
+            all(plt.fignum_exists(figure.number) is True for figure in figures)
+        )  # noqa: F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != "3.3.0":
-            self.assertTrue(all(plt.fignum_exists(figure.number) is False for figure in figures))  # noqa: F812
+            self.assertTrue(
+                all(plt.fignum_exists(figure.number) is False for figure in figures)
+            )  # noqa: F812
         else:
             print(
                 "Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163"
@@ -812,13 +796,6 @@ class TestTensorBoardFigure(BaseTestCase):
 
 
 class TestTensorBoardNumpy(BaseTestCase):
-    @unittest.skipIf(
-        IS_WINDOWS,
-        "Skipping on windows, see https://github.com/pytorch/pytorch/pull/109349 ",
-    )
-    @unittest.skipIf(
-        IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 "
-    )
     def test_scalar(self):
         res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
@@ -826,8 +803,9 @@ class TestTensorBoardNumpy(BaseTestCase):
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
         res = make_np(np.float16(1.00000087))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
-        res = make_np(np.float128(1.00008 + 9))
-        self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
+        if not IS_MACOS and not IS_WINDOWS:
+            res = make_np(np.float128(1.00008 + 9))
+            self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
         res = make_np(np.int64(100000000000))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 

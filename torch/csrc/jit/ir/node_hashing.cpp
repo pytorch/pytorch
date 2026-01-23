@@ -1,15 +1,12 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <algorithm>
-#include <unordered_map>
 
-#include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
-#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
 namespace torch::jit {
 

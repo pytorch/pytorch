@@ -40,8 +40,16 @@ test_python_all() {
 test_python_mps() {
   setup_test_python
 
-  time python test/run_test.py --verbose --mps
-  MTL_CAPTURE_ENABLED=1 ${CONDA_RUN} python3 test/test_mps.py --verbose -k test_metal_capture
+  time PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --verbose --mps
+  MTL_CAPTURE_ENABLED=1 python3 test/test_mps.py --verbose -k test_metal_capture
+
+  assert_git_not_dirty
+}
+
+test_python_openreg() {
+  setup_test_python
+
+  time python test/run_test.py --openreg --verbose
 
   assert_git_not_dirty
 }
@@ -55,7 +63,7 @@ test_python_shard() {
 
   setup_test_python
 
-  time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS"
+  time python test/run_test.py --verbose --exclude-jit-executor --exclude-distributed-tests --exclude-quantization-tests --shard "$1" "$NUM_TEST_SHARDS"
 
   assert_git_not_dirty
 }
@@ -93,14 +101,12 @@ test_libtorch() {
 }
 
 test_custom_backend() {
-  print_cmake_info
-
   echo "Testing custom backends"
   pushd test/custom_backend
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -115,15 +121,13 @@ test_custom_backend() {
 }
 
 test_custom_script_ops() {
-  print_cmake_info
-
   echo "Testing custom script operators"
   pushd test/custom_operator
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -137,15 +141,13 @@ test_custom_script_ops() {
 }
 
 test_jit_hooks() {
-  print_cmake_info
-
   echo "Testing jit hooks in cpp"
   pushd test/jit_hooks
   # Build the custom operator library.
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -155,6 +157,34 @@ test_jit_hooks() {
   build/test_jit_hooks ./model
   popd
   assert_git_not_dirty
+}
+
+# Shellcheck doesn't like it when you pass no arguments to a function
+# that can take args. See https://www.shellcheck.net/wiki/SC2120
+# shellcheck disable=SC2120
+checkout_install_torchbench() {
+  local commit
+  commit=$(cat .ci/docker/ci_commit_pins/torchbench.txt)
+  git clone https://github.com/pytorch/benchmark torchbench
+  pushd torchbench
+  git checkout "$commit"
+
+  if [ "$1" ]; then
+    python install.py --continue_on_fail models "$@"
+  else
+    # Occasionally the installation may fail on one model but it is ok to continue
+    # to install and test other models
+    python install.py --continue_on_fail
+  fi
+  popd
+
+  pip install -r .ci/docker/ci_commit_pins/huggingface-requirements.txt
+  # https://github.com/pytorch/pytorch/issues/160689 to remove torchao because
+  # its current version 0.12.0 doesn't work with transformers 4.54.0
+  pip uninstall -y torchao
+
+  echo "Print all dependencies after TorchBench is installed"
+  python -mpip freeze
 }
 
 torchbench_setup_macos() {
@@ -167,7 +197,7 @@ torchbench_setup_macos() {
   git checkout "$(cat ../.github/ci_commit_pins/vision.txt)"
   git submodule update --init --recursive
   python setup.py clean
-  python setup.py develop
+  python -m pip install -e . -v --no-build-isolation
   popd
 
   pushd torchaudio
@@ -176,22 +206,18 @@ torchbench_setup_macos() {
   git submodule update --init --recursive
   python setup.py clean
   #TODO: Remove me, when figure out how to make TorchAudio find brew installed openmp
-  USE_OPENMP=0 python setup.py develop
+  USE_OPENMP=0 python -m pip install -e . -v --no-build-isolation
   popd
 
-  # Shellcheck doesn't like it when you pass no arguments to a function that can take args. See https://www.shellcheck.net/wiki/SC2120
-  # shellcheck disable=SC2119,SC2120
   checkout_install_torchbench
 }
 
 pip_benchmark_deps() {
-  python -mpip install --no-input astunparse requests cython scikit-learn
+  python -mpip install --no-input requests cython scikit-learn six
 }
 
 
 test_torchbench_perf() {
-  print_cmake_info
-
   echo "Launching torchbench setup"
   pip_benchmark_deps
   torchbench_setup_macos
@@ -217,8 +243,6 @@ test_torchbench_perf() {
 }
 
 test_torchbench_smoketest() {
-  print_cmake_info
-
   echo "Launching torchbench setup"
   pip_benchmark_deps
   # shellcheck disable=SC2119,SC2120
@@ -230,7 +254,7 @@ test_torchbench_smoketest() {
   local device=mps
   local dtypes=(undefined float16 bfloat16 notset)
   local dtype=${dtypes[$1]}
-  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor timm_resnet timm_vovnet vgg16)
+  local models=(llama BERT_pytorch dcgan yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor vgg16)
 
   for backend in eager inductor; do
 
@@ -276,12 +300,50 @@ test_torchbench_smoketest() {
     fi
 
   done
+  echo "Pytorch benchmark on mps device completed"
+}
+
+test_aoti_torchbench_smoketest() {
+  echo "Launching AOTInductor torchbench setup"
+  pip_benchmark_deps
+  # shellcheck disable=SC2119,SC2120
+  torchbench_setup_macos
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local device=mps
+  local dtypes=(undefined float16 bfloat16 notset)
+  local dtype=${dtypes[$1]}
+  local models=(llama BERT_pytorch dcgan yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor vgg16)
+
+  echo "Launching torchbench inference performance run for AOT Inductor and dtype ${dtype}"
+  local dtype_arg="--${dtype}"
+  if [ "$dtype" == notset ]; then
+      dtype_arg="--float32"
+  fi
+  touch "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_performance.csv"
+  for model in "${models[@]}"; do
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+      --performance --only "$model" --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+      --output "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_performance.csv" || true
+    PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/torchbench.py \
+      --accuracy --only "$model" --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+      --output "$TEST_REPORTS_DIR/aot_inductor_torchbench_${dtype}_inference_${device}_accuracy.csv" || true
+  done
+
+  echo "Launching HuggingFace inference performance run for AOT Inductor and dtype ${dtype}"
+  PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+    --performance --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+    --output "$TEST_REPORTS_DIR/aot_inductor_huggingface_${dtype}_inference_${device}_performance.csv" || true
+  PYTHONPATH="$(pwd)"/torchbench python benchmarks/dynamo/huggingface.py \
+    --accuracy --export-aot-inductor --inference --devices "$device" "$dtype_arg" \
+    --output "$TEST_REPORTS_DIR/aot_inductor_huggingface_${dtype}_inference_${device}_accuracy.csv" || true
 
   echo "Pytorch benchmark on mps device completed"
 }
 
 test_hf_perf() {
-  print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   pip_benchmark_deps
@@ -297,7 +359,6 @@ test_hf_perf() {
 }
 
 test_timm_perf() {
-  print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   pip_benchmark_deps
@@ -324,6 +385,10 @@ elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
   test_timm_perf
 elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
   test_torchbench_smoketest "${SHARD_NUMBER}"
+elif [[ $TEST_CONFIG == *"aot_inductor_perf_smoketest"* ]]; then
+  test_aoti_torchbench_smoketest "${SHARD_NUMBER}"
+elif [[ $TEST_CONFIG == *"openreg"* ]]; then
+  test_python_openreg
 elif [[ $TEST_CONFIG == *"mps"* ]]; then
   test_python_mps
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then

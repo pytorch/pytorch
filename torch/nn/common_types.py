@@ -1,5 +1,4 @@
-from typing import Optional, TypeVar, Union
-from typing_extensions import TypeAlias as _TypeAlias
+from typing import TypeAlias as _TypeAlias, TypeVar
 
 from torch import Tensor
 
@@ -12,13 +11,13 @@ from torch import Tensor
 # broadcast to a tuple.
 # Comes in several variants: A tuple of unknown size, and a fixed-size tuple for 1d, 2d, or 3d operations.
 T = TypeVar("T")
-_scalar_or_tuple_any_t: _TypeAlias = Union[T, tuple[T, ...]]
-_scalar_or_tuple_1_t: _TypeAlias = Union[T, tuple[T]]
-_scalar_or_tuple_2_t: _TypeAlias = Union[T, tuple[T, T]]
-_scalar_or_tuple_3_t: _TypeAlias = Union[T, tuple[T, T, T]]
-_scalar_or_tuple_4_t: _TypeAlias = Union[T, tuple[T, T, T, T]]
-_scalar_or_tuple_5_t: _TypeAlias = Union[T, tuple[T, T, T, T, T]]
-_scalar_or_tuple_6_t: _TypeAlias = Union[T, tuple[T, T, T, T, T, T]]
+_scalar_or_tuple_any_t: _TypeAlias = T | tuple[T, ...]
+_scalar_or_tuple_1_t: _TypeAlias = T | tuple[T]
+_scalar_or_tuple_2_t: _TypeAlias = T | tuple[T, T]
+_scalar_or_tuple_3_t: _TypeAlias = T | tuple[T, T, T]
+_scalar_or_tuple_4_t: _TypeAlias = T | tuple[T, T, T, T]
+_scalar_or_tuple_5_t: _TypeAlias = T | tuple[T, T, T, T, T]
+_scalar_or_tuple_6_t: _TypeAlias = T | tuple[T, T, T, T, T, T]
 
 # For arguments which represent size parameters (eg, kernel size, padding)
 _size_any_t: _TypeAlias = _scalar_or_tuple_any_t[int]
@@ -30,9 +29,9 @@ _size_5_t: _TypeAlias = _scalar_or_tuple_5_t[int]
 _size_6_t: _TypeAlias = _scalar_or_tuple_6_t[int]
 
 # For arguments which represent optional size parameters (eg, adaptive pool parameters)
-_size_any_opt_t: _TypeAlias = _scalar_or_tuple_any_t[Optional[int]]
-_size_2_opt_t: _TypeAlias = _scalar_or_tuple_2_t[Optional[int]]
-_size_3_opt_t: _TypeAlias = _scalar_or_tuple_3_t[Optional[int]]
+_size_any_opt_t: _TypeAlias = _scalar_or_tuple_any_t[int | None]
+_size_2_opt_t: _TypeAlias = _scalar_or_tuple_2_t[int | None]
+_size_3_opt_t: _TypeAlias = _scalar_or_tuple_3_t[int | None]
 
 # For arguments that represent a ratio to adjust each dimension of an input with (eg, upsampling parameters)
 _ratio_2_t: _TypeAlias = _scalar_or_tuple_2_t[float]

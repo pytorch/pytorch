@@ -76,15 +76,13 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
 
 #else // AT_CUDNN_ENABLED
 
-#include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 bool _use_cudnn_ctc_loss(
     const Tensor& log_probs,
@@ -284,9 +282,9 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
   checkBackend(c, {*targets}, Backend::CUDA);
   const auto batch_size = log_probs->size(1);
   int64_t input_lengths_size =
-      input_lengths_.sizes().size() ? input_lengths_.size(0) : 1;
+      !input_lengths_.sizes().empty() ? input_lengths_.size(0) : 1;
   int64_t target_lengths_size =
-      target_lengths_.sizes().size() ? target_lengths_.size(0) : 1;
+      !target_lengths_.sizes().empty() ? target_lengths_.size(0) : 1;
   TORCH_CHECK(
       input_lengths_size == batch_size,
       "input_lengths needs to have size to match batch_size");
@@ -347,7 +345,6 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
   return std::make_tuple(costs, grad);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif

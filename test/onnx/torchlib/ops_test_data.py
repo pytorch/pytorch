@@ -39,7 +39,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import Self
 
 import numpy as np
@@ -52,7 +52,7 @@ from torch.testing._internal.opinfo import definitions as opinfo_definitions
 
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Callable, Collection
 
 
 # Create a copy of the op_db to modify
@@ -275,7 +275,7 @@ def _empty_input_wrangler(
 def _grid_sample_input_wrangler(
     args: list[Any], kwargs: dict[str, Any]
 ) -> tuple[list[Any], dict[str, Any]]:
-    # Convert string attriute to int as input
+    # Convert string attribute to int as input
     inter_mode_options = {"bilinear": 0, "nearest": 1, "bicubic": 2}
     padding_mode_options = {"zeros": 0, "border": 1, "reflection": 2}
     args.append(inter_mode_options[kwargs["mode"]])
@@ -458,6 +458,18 @@ TESTED_TORCHLIB_OPS: tuple[TorchLibOpInfo, ...] = (
     TorchLibOpInfo("add", core_ops.aten_add, tolerance={torch.float16: (1e-3, 1e-3)}),
     TorchLibOpInfo("add", core_ops.aten_add_complex, complex=True),
     TorchLibOpInfo("gelu_op20", nn_ops.aten_gelu_opset20, opset_introduced=20),
+    TorchLibOpInfo(
+        "nn.functional.group_norm", nn_ops.aten_group_norm, opset_introduced=21
+    ).skip(
+        reason="ONNX Runtime does not support zero sized inputs for GroupNorm",
+        matcher=lambda sample: sample.input.numel() == 0,
+    ),
+    TorchLibOpInfo(
+        "nn.functional.rms_norm", nn_ops.aten_rms_norm, opset_introduced=23
+    ).skip(
+        reason="ONNX Runtime does not support <1d inputs or zero sized inputs for RMSNorm",
+        matcher=lambda sample: len(sample.input.shape) < 2 or sample.input.numel() == 0,
+    ),
 )
 
 

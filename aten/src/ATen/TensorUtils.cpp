@@ -1,8 +1,5 @@
-#include <ATen/ATen.h>
-#include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
-#include <c10/util/irange.h>
 
 #include <ostream>
 #include <sstream>
@@ -13,9 +10,9 @@ std::ostream& operator<<(std::ostream & out, const TensorGeometryArg& t) {
   if (t.pos == 0) {
     // 0 is distinguished; it usually indicates 'self' or the return
     // tensor
-    out << "'" << t.name << "'";
+    out << '\'' << t.name << '\'';
   } else {
-    out << "argument #" << t.pos << " '" << t.name << "'";
+    out << "argument #" << t.pos << " '" << t.name << '\'';
   }
   return out;
 }
@@ -154,7 +151,7 @@ void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
       oss << "Tensor for " << t2 << " is on CPU, ";
     }
     oss << "but expected " << ((!t1->is_cpu() && !t2->is_cpu()) ? "them" : "it")
-        << " to be on GPU (while checking arguments for " << c << ")";
+        << " to be on GPU (while checking arguments for " << c << ')';
     TORCH_CHECK(false, oss.str());
   }
   TORCH_CHECK(
@@ -199,7 +196,7 @@ void checkScalarTypes(CheckedFrom c, const TensorArg& t,
         i++;
       }
       oss << "; but got " << t->toString()
-          << " instead (while checking arguments for " << c << ")";
+          << " instead (while checking arguments for " << c << ')';
       TORCH_CHECK(false, oss.str());
     }
 }
@@ -273,11 +270,11 @@ void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout)
 }
 
 void * maybe_data_ptr(const Tensor& tensor) {
-  return tensor.defined() ? (void *)tensor.data_ptr() : nullptr;
+  return tensor.defined() ? tensor.data_ptr() : nullptr;
 }
 
 void * maybe_data_ptr(const TensorArg& tensor) {
-  return tensor->defined() ? (void *)tensor->data_ptr() : nullptr;
+  return tensor->defined() ? tensor->data_ptr() : nullptr;
 }
 
 void check_dim_size(
@@ -378,9 +375,9 @@ inline static std::optional<ResultVec> computeStride_impl(
         (TORCH_GUARD_OR_TRUE(sym_ne(oldshape[tensor_d - 1], 1)) &&
         TORCH_GUARD_OR_TRUE(sym_ne(oldstride[tensor_d - 1], tensor_numel * chunk_base_stride)))) {
      // We want to accumulate stuff in view_numel until view_numel == tensor_numel, if we do not
-     // know if that is satisfied we keep accumalating. For example if view_numel = 1 and tensor_numel = u1,
+     // know if that is satisfied we keep accumulating. For example if view_numel = 1 and tensor_numel = u1,
      // we want to take that path, view_numel will become u0. Next iteration if u0==u1 we want to stop.
-     // Thats why we use TORCH_GUARD_OR_TRUE below.
+     // That's why we use TORCH_GUARD_OR_TRUE below.
 
      // we use TORCH_GUARD_OR_FALSE and not TORCH_GUARD_OR_TRUE when comparing newshape[view_d] ==1 because
      // if we know view_numel < tensor_numel is false, we want to stop. Unless we know for sure newshape[view_d]==1

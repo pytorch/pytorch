@@ -202,6 +202,7 @@ supported:
   - select_backward
   - _trilinear
   - linalg_pinv.atol_rtol_tensor
+  - svd
   - logsumexp.out
 symint:
   - empty.memory_format

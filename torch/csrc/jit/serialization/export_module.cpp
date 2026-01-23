@@ -661,10 +661,10 @@ void ScriptModuleSerializer::writeByteCode(
   BackendDebugInfoRecorder debug_info_recorder;
   int64_t version_to_write = caffe2::serialize::kProducedBytecodeVersion;
 
-  elements.emplace_back(static_cast<int64_t>(version_to_write));
+  elements.emplace_back(version_to_write);
   std::vector<c10::IValue> debug_info_elements;
   // Always save debug handles
-  debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
+  debug_info_elements.emplace_back(version_to_write);
 
   mobile::Module mobile_module =
       jitModuleToMobile(module, getOptionsFromGlobal());
@@ -913,7 +913,7 @@ void save_jit_module_to_write_func(
     const std::function<size_t(const void*, size_t)>& writer_func) {
   (void)save_mobile_debug_info;
   auto buffer = save_jit_module_to_bytes(module, extra_files);
-  writer_func(reinterpret_cast<void*>(buffer->data()), buffer->size());
+  writer_func(buffer->data(), buffer->size());
 }
 
 void ExportModule(

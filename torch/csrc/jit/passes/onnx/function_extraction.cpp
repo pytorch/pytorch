@@ -43,7 +43,7 @@ struct FunctionExtractor {
 
     void PopulateInputsOutputs(
         const std::unordered_set<std::string>& param_names);
-    bool IsIdenticalFuncion(const ScopeContext& other_ctx) const;
+    bool IsIdenticalFunction(const ScopeContext& other_ctx) const;
   };
 
   using ScopeCtxPtr = ScopeContext*;
@@ -87,14 +87,14 @@ struct FunctionExtractor {
       const std::shared_ptr<Graph>& graph);
 
   static void HandleNoScopeNodes(
-      scope_ctx_map&,
+      scope_ctx_map& /*scope_ctxs*/,
       const node_list& no_scope_nlist);
   std::tuple<scope_ctx_map, node_list> PartitionNodesByScope(Block* b);
   scope_ctx_map PartitionNodesByScope(const std::shared_ptr<Graph>& graph);
   static std::unordered_map<ScopePtr, scope_list> PartitionIdenticalScopes(
       scope_ctx_map& scope_ctxs);
   static scope_list SortScopesByMaxDepth(
-      std::unordered_map<ScopePtr, scope_list>&);
+      std::unordered_map<ScopePtr, scope_list>& /*identical_scope_map*/);
   Node* CreateFunctionDefNode(
       FunctionContext& func_ctx,
       const std::shared_ptr<Graph>& graph,
@@ -107,7 +107,7 @@ struct FunctionExtractor {
       const std::string& domain_name,
       const std::string& func_name);
 
-  static void DebugPrintScopeContexts(const scope_ctx_map&);
+  static void DebugPrintScopeContexts(const scope_ctx_map& /*scope_ctxs*/);
   static void DebugPrintGraphWithFunction(const std::shared_ptr<Graph>& g);
   static void DebugPrintConstantDiff(const FunctionContext&);
 
@@ -216,7 +216,7 @@ void FunctionExtractor::FunctionContext::SetAttrName(
   TORCH_INTERNAL_ASSERT(
       v_it != scope_ctxs_[scope_key_]->env_to_subgraph_.end());
   auto* n_in_def = v_it->second->node();
-  auto n_attr_it = node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
+  node_attr_to_name_[n_in_def][attr.toUnqualString()] = name;
 }
 
 std::optional<std::string> FunctionExtractor::FunctionContext::FindAttrName(
@@ -250,7 +250,7 @@ void FunctionExtractor::DebugPrintScopeContexts(
     GRAPH_UPDATE("Children scopes: ", [&]() {
       std::stringstream ss;
       for (const auto& child_scope : it.second->children_) {
-        ss << child_scope->name().toDisplayString() << " ";
+        ss << child_scope->name().toDisplayString() << ' ';
       }
       return ss.str();
     }());
@@ -405,7 +405,7 @@ std::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
       auto common_ancestor = FindCommonAncestor(scopes);
       if (common_ancestor.has_value() &&
           IsValidScope(common_ancestor.value())) {
-        return common_ancestor.value();
+        return common_ancestor;
       }
     }
   }
@@ -738,7 +738,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   }
 }
 
-bool FunctionExtractor::ScopeContext::IsIdenticalFuncion(
+bool FunctionExtractor::ScopeContext::IsIdenticalFunction(
     const ScopeContext& other_ctx) const {
   // Differentiate same function under different inputs.
   // When constants are passed in place of inputs, it leads to different
@@ -931,7 +931,7 @@ std::unordered_map<ScopePtr, scope_list> FunctionExtractor::
       auto key_scope = kv_it.first;
       const auto& key_scope_ctx = scope_ctxs[key_scope];
       auto& key_scope_vec = kv_it.second;
-      if (key_scope_ctx->IsIdenticalFuncion(*scope_ctx)) {
+      if (key_scope_ctx->IsIdenticalFunction(*scope_ctx)) {
         key_scope_vec.emplace_back(scope);
         unique = false;
         break;

@@ -434,7 +434,7 @@ def powerSGD_hook(
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
-        input_tensor_cp = torch.clone(input_tensor).detach()
+        input_tensor_cp = input_tensor.detach().clone()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
     tensors = bucket.gradients()
@@ -757,7 +757,7 @@ def batched_powerSGD_hook(
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
-        input_tensor_cp = torch.clone(input_tensor).detach()
+        input_tensor_cp = input_tensor.detach().clone()
     matrix = input_tensor.view(square_side_length, square_side_length)
 
     # Reuse P and Q from the previous iteration if possible.

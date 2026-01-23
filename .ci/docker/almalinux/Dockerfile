@@ -7,13 +7,13 @@ ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
-ARG DEVTOOLSET_VERSION=11
+ARG DEVTOOLSET_VERSION=13
 
 RUN yum -y update
 RUN yum -y install epel-release
 # install glibc-langpack-en make sure en_US.UTF-8 locale is available
 RUN yum -y install glibc-langpack-en
-RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
+RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 # Just add everything as a safe.directory for git since these will be used in multiple places with git
 RUN git config --global --add safe.directory '*'
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
@@ -41,16 +41,18 @@ RUN bash ./install_conda.sh && rm install_conda.sh
 # Install CUDA
 FROM base as cuda
 ARG CUDA_VERSION=12.6
+ARG DEVTOOLSET_VERSION=13
 RUN rm -rf /usr/local/cuda-*
 ADD ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
-COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
 ENV CUDA_HOME=/usr/local/cuda-${CUDA_VERSION}
 # Preserve CUDA_VERSION for the builds
 ENV CUDA_VERSION=${CUDA_VERSION}
 # Make things in our path by default
-ENV PATH=/usr/local/cuda-${CUDA_VERSION}/bin:$PATH
+ENV PATH=/usr/local/cuda-${CUDA_VERSION}/bin:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+
 
 FROM cuda as cuda12.6
 RUN bash ./install_cuda.sh 12.6
@@ -64,8 +66,27 @@ FROM cuda as cuda12.9
 RUN bash ./install_cuda.sh 12.9
 ENV DESIRED_CUDA=12.9
 
-FROM ${ROCM_IMAGE} as rocm
-ENV PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201"
+FROM cuda as cuda13.0
+RUN bash ./install_cuda.sh 13.0
+ENV DESIRED_CUDA=13.0
+
+FROM ${ROCM_IMAGE} as rocm_base
+ARG DEVTOOLSET_VERSION=13
+ENV LC_ALL en_US.UTF-8
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US.UTF-8
+# Install devtoolset on ROCm base image
+RUN yum -y update && \
+    yum -y install epel-release && \
+    yum -y install glibc-langpack-en && \
+    yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel openssl-devel yum-utils autoconf automake make gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
+RUN git config --global --add safe.directory '*'
+ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+
+FROM rocm_base as rocm
+ARG PYTORCH_ROCM_ARCH
+ARG DEVTOOLSET_VERSION=13
+ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 ENV MKLROOT /opt/intel
@@ -76,13 +97,14 @@ ADD ./common/install_mnist.sh install_mnist.sh
 RUN bash ./install_mnist.sh
 
 FROM base as all_cuda
-COPY --from=cuda11.8  /usr/local/cuda-11.8 /usr/local/cuda-11.8
 COPY --from=cuda12.6  /usr/local/cuda-12.6 /usr/local/cuda-12.6
 COPY --from=cuda12.8  /usr/local/cuda-12.8 /usr/local/cuda-12.8
 COPY --from=cuda12.9  /usr/local/cuda-12.9 /usr/local/cuda-12.9
+COPY --from=cuda13.0  /usr/local/cuda-13.0 /usr/local/cuda-13.0
 
 # Final step
 FROM ${BASE_TARGET} as final
+ARG DEVTOOLSET_VERSION=13
 COPY --from=openssl            /opt/openssl           /opt/openssl
 COPY --from=patchelf           /patchelf              /usr/local/bin/patchelf
 COPY --from=conda              /opt/conda             /opt/conda

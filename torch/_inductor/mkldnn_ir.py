@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import sympy
 
@@ -22,7 +22,6 @@ from .ir import (
     MultiOutputLayout,
     MutationOutput,
     NoneLayout,
-    ShapeAsConstantBuffer,
     TensorBox,
 )
 from .utils import convert_shape_to_inductor, pad_listlike, SUPPORTED_MKLDNN_DEVICES
@@ -83,6 +82,7 @@ def _prepare_convolution_fusion_create(
         output_size.append(input_size[0])
         output_size.append(weight_size[0])
         for d in range(2, dim):
+            # pyrefly: ignore [unsupported-operation]
             dilation_ = dilation[d - 2] if has_dilation else 1
             kernel = dilation_ * (weight_size[d] - 1) + 1
             output_size_d = (input_size[d] + (2 * padding[d - 2]) - kernel) // stride[
@@ -409,6 +409,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
+        # pyrefly: ignore [bad-assignment]
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
         constant_args = constant_args + [
@@ -486,6 +487,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
+        # pyrefly: ignore [bad-assignment]
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
         constant_args = constant_args + [
@@ -513,17 +515,20 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._convolution_transpose_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu_mkldnn__convolution_transpose_pointwise",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}_mkldnn__convolution_transpose_pointwise",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
@@ -590,18 +595,21 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             - const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, o_scale, o_zp,
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
+        self.device_type = get_device_type(inputs[0])
         self.has_bias = len(inputs) == 5
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu__qconv_pointwise_tensor",
+            op_overload=torch.ops.onednn.qconv_pointwise.tensor,
+            cpp_kernel_name=f"aoti_torch_{self.device_type}__qconv_pointwise_tensor",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -610,11 +618,11 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def create(
         cls,
         qx: "TensorBox",
-        x_scale: Union["ShapeAsConstantBuffer", "TensorBox"],
-        x_zero_point: Union["ShapeAsConstantBuffer", "TensorBox"],
+        x_scale: "TensorBox",
+        x_zero_point: "TensorBox",
         qw: "TensorBox",  # qw
         w_scale: "TensorBox",
-        w_zero_point: "TensorBox",
+        w_zero_point,
         bias: "TensorBox",
         stride: list[int],
         padding: list[int],
@@ -694,6 +702,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             - const_args [b, stride, padding, dilation, groups, o_scale, o_zp,
              output_dtype, accum_scale, accum_zp, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         """
+        self.device_type = get_device_type(inputs[0])
         self.has_bias = len(inputs) == 8
         self.idx_for_inplace_sum = 6
         super().__init__(
@@ -701,12 +710,16 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
-            cpp_kernel_name=("aoti_torch_cpu__qconv2d_pointwise_binary_tensor"),
+            op_overload=torch.ops.onednn.qconv2d_pointwise.binary_tensor,
+            cpp_kernel_name=(
+                f"aoti_torch_{self.device_type}__qconv2d_pointwise_binary_tensor"
+            ),
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -850,17 +863,20 @@ class LinearUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.default,
-            cpp_kernel_name="aoti_torch_cpu__linear_pointwise",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}__linear_pointwise",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
@@ -906,17 +922,20 @@ class LinearBinary(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ) -> None:
+        self.device_type = get_device_type(inputs[0])
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
             op_overload=torch.ops.mkldnn._linear_pointwise.binary,
-            cpp_kernel_name="aoti_torch_cpu__linear_pointwise_binary",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}__linear_pointwise_binary",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
     @classmethod
@@ -971,6 +990,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             - const_args is: [bias, x_scale, x_zp, o_scale, o_zp,
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
+        self.device_type = get_device_type(inputs[0])
         self.has_bias = has_bias
         super().__init__(
             layout,
@@ -978,11 +998,15 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=(torch.ops.onednn.qlinear_pointwise.tensor),
-            cpp_kernel_name=("aoti_torch_cpu__qlinear_pointwise_tensor"),
+            cpp_kernel_name=(
+                f"aoti_torch_{self.device_type}__qlinear_pointwise_tensor"
+            ),
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
 
         if isinstance(self.layout, Layout):
@@ -1054,6 +1078,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             - const_args is: [bias, o_scale, o_zp,
               fp32_output, binary_attr, alpha, unary_attr, unary_scalars, unary_algorithm]
         """
+        self.device_type = get_device_type(inputs[0])
         self.has_bias = has_bias
         self.idx_for_inplace_sum = 6
         super().__init__(
@@ -1062,11 +1087,13 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             constant_args,
             None,
             op_overload=(torch.ops.onednn.qlinear_pointwise.binary_tensor),
-            cpp_kernel_name="aoti_torch_cpu__qlinear_pointwise_binary_tensor",
+            cpp_kernel_name=f"aoti_torch_{self.device_type}__qlinear_pointwise_binary_tensor",
         )
 
     def codegen(self, wrapper):
-        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
+        wrapper.include_extra_header(
+            f"torch/csrc/inductor/aoti_torch/c/shim_{self.device_type}.h"
+        )
         super().codegen(wrapper)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -1191,16 +1218,23 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         batch_first: bool,
         train: bool,
     ):
+        # pyrefly: ignore [bad-assignment]
         x = cls.require_stride1(cls.realize_input(x))
         # If batch_first, x has been permuted in lstm before entering the mkldnn_rnn_layer.
         # Make sure x is contiguous in batch_first case.
         x.freeze_layout()
+        # pyrefly: ignore [bad-assignment]
         w0 = cls.require_stride1(cls.realize_input(w0))
+        # pyrefly: ignore [bad-assignment]
         w1 = cls.require_stride1(cls.realize_input(w1))
+        # pyrefly: ignore [bad-assignment]
         w2 = cls.require_stride1(cls.realize_input(w2))
+        # pyrefly: ignore [bad-assignment]
         w3 = cls.require_stride1(cls.realize_input(w3))
+        # pyrefly: ignore [bad-assignment]
         hx = cls.require_stride1(cls.realize_input(hx))
         hx.freeze_layout()
+        # pyrefly: ignore [bad-assignment]
         cx = cls.require_stride1(cls.realize_input(cx))
         cx.freeze_layout()
 

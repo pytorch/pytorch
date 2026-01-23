@@ -55,6 +55,7 @@ def warn_deprecated():
         "torch._custom_op is deprecated and will be removed in PyTorch 2.6, please "
         "use the equivalent torch.library API instead.",
         DeprecationWarning,
+        stacklevel=2,
     )
 
 
@@ -101,7 +102,7 @@ def custom_op(
             lib, ns, function_schema, name, ophandle, _private_access=True
         )
 
-        result.__name__ = func.__name__
+        result.__name__ = func.__name__  # pyrefly: ignore [bad-assignment]
         result.__module__ = func.__module__
         result.__doc__ = func.__doc__
 
@@ -161,7 +162,8 @@ class CustomOp:
         global_registry[self._qualname] = self
 
     def _register_autograd_kernel_indirection(self):
-        assert not self._registered_autograd_kernel_indirection
+        if self._registered_autograd_kernel_indirection:
+            raise AssertionError("autograd kernel indirection already registered")
         self._lib.impl(
             self._opname, autograd_kernel_indirection(weakref.proxy(self)), "Autograd"
         )
@@ -173,7 +175,8 @@ class CustomOp:
     def _register_impl(self, kind, func, stacklevel=2):
         if self._has_impl(kind):
             func_and_location = self._impls[kind]
-            assert func_and_location is not None  # Pacify mypy
+            if func_and_location is None:
+                raise AssertionError("func_and_location is unexpectedly None")
             location = func_and_location.location
             raise RuntimeError(
                 f"Attempting to register a {kind} impl for operator {self._qualname} "
@@ -310,7 +313,8 @@ class CustomOp:
         if not schema.returns:
             error("operator with no returns")
 
-        assert len(rets) > 0
+        if len(rets) <= 0:
+            raise AssertionError(f"expected at least one return, got {len(rets)}")
         is_non_mutating_view = any(
             r.annotation is not None and not r.annotation.is_write for r in rets
         )
@@ -406,8 +410,10 @@ class CustomOp:
     # When both of these have been provided, then we automatically
     # construct the "autograd" kernel.
     def _register_autograd_kernel(self):
-        assert self._has_impl("backward")
-        assert self._has_impl("save_for_backward")
+        if not self._has_impl("backward"):
+            raise AssertionError("backward impl must be registered first")
+        if not self._has_impl("save_for_backward"):
+            raise AssertionError("save_for_backward impl must be registered first")
         kernel = construct_autograd_kernel(
             self._schema,
             self._output_differentiability,
@@ -648,7 +654,7 @@ def custom_op_from_existing(op):
     name = op.name().split("::")[-1]
     schema_str = str(op._schema)
     # CustomOp expects the schema string without the namespace
-    schema_str = schema_str.split("::")[-1]
+    schema_str = schema_str.rsplit("::", maxsplit=1)[-1]
     schema = FunctionSchema.parse(schema_str)
     return CustomOp(lib, ns, schema, name, op, _private_access=True)
 

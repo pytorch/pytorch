@@ -20,6 +20,8 @@ jobs:
       docker-image: python:3.11
       docker-build-dir: "skip-docker-build"
       script: |
+          # Install dependencies FIRST (before torch) as torch imports may need them
+          pip install 'numpy>=1.21.2' 'protobuf>=3.20' 'typing-extensions>=4.8.0'
           pushd .ci/pytorch/
           pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
           DESIRED_PYTHON=3.11 DESIRED_CUDA=cpu PACKAGE_TYPE=manywheel ./check_binary.sh
@@ -30,10 +32,12 @@ jobs:
     name: Test check_binary.sh for Linux CUDA
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
     with:
-      runner: linux.4xlarge.nvidia.gpu
+      runner: linux.g4dn.4xlarge.nvidia.gpu
       docker-image: python:3.11
       docker-build-dir: "skip-docker-build"
       script: |
+          # Install dependencies FIRST (before torch) as torch imports may need them
+          pip install 'numpy>=1.21.2' 'protobuf>=3.20' 'typing-extensions>=4.8.0'
           STABLE_CUDA_VERSION=$(python3 .github/scripts/get_ci_variable.py --cuda-stable-version)
           CUDA_VERSION_NODOT=$(echo ${STABLE_CUDA_VERSION} | tr -d '.')
           pushd .ci/pytorch/
