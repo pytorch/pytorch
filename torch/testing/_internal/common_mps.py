@@ -586,7 +586,6 @@ if torch.backends.mps.is_available():
             "stft": [torch.float16, torch.bfloat16],
             "svd_lowrank": None,
             "symeig": None,
-            "take": None,
             "to": None,
             "trunc": [torch.bool],
             "var_meanunbiased": [

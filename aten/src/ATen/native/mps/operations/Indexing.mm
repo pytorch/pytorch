@@ -36,6 +36,7 @@
 #include <ATen/ops/index_put.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
+#include <ATen/ops/take_native.h>
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_native.h>
 #include <ATen/ops/nonzero.h>
@@ -975,6 +976,115 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Te
 
 Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Scalar& source) {
   return self.index_fill_(dim, index, mps::wrapped_scalar_tensor_mps(source, self.device()));
+}
+
+Tensor& take_out_mps(const Tensor& self, const Tensor& index, Tensor& out) {
+  using namespace mps;
+
+  // Type and device checks
+  TORCH_CHECK(
+      index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int,
+      "take(): Expected a long or int tensor for index, but got ",
+      index.scalar_type());
+  TORCH_CHECK(
+      self.scalar_type() == out.scalar_type(),
+      "take(): self and out expected to have the same dtype, but got self.dtype = ",
+      self.scalar_type(),
+      " and out.dtype = ",
+      out.scalar_type());
+
+  // Index checks
+  TORCH_CHECK_INDEX(
+      !(self.numel() == 0 && index.numel() != 0),
+      "take(): tried to take from an empty tensor");
+
+  at::assert_no_internal_overlap(out);
+  at::assert_no_overlap(out, index);
+  at::assert_no_overlap(out, self);
+
+  // Resize output to match index shape
+  at::native::resize_output(out, index.sizes());
+
+  // Early return if index is empty
+  if (index.numel() == 0) {
+    return out;
+  }
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  // Flatten self to 1D for take operation
+  Tensor self_flat = self.reshape({-1});
+
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* indexTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  auto inputType = getMPSDataType(self_flat);
+  auto outputType = getMPSDataType(out);
+  if (inputType == MPSDataTypeUInt8) {
+    inputType = MPSDataTypeInt8;
+  }
+  if (outputType == MPSDataTypeUInt8) {
+    outputType = MPSDataTypeInt8;
+  }
+
+  @autoreleasepool {
+    std::string key = "take_out_mps" + getTensorsStringKey({self, index});
+    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
+      // Create placeholder for flattened input
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(self_flat));
+      MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
+
+      // Flatten index to 1D for gather operation
+      MPSGraphTensor* flatIndexTensor = [mpsGraph reshapeTensor:indexTensor
+                                                      withShape:@[@-1]
+                                                           name:nil];
+
+      // Gather elements from flattened input using flattened index
+      MPSGraphTensor* gatheredTensor = [mpsGraph gatherWithUpdatesTensor:inputTensor
+                                                           indicesTensor:flatIndexTensor
+                                                                    axis:0
+                                                         batchDimensions:0
+                                                                    name:nil];
+
+      // Reshape gathered tensor to match index shape
+      MPSGraphTensor* outputTensor = [mpsGraph reshapeTensor:gatheredTensor
+                                                   withShape:getMPSShape(index)
+                                                        name:nil];
+
+      newCachedGraph->inputTensor_ = inputTensor;
+      newCachedGraph->indexTensor_ = indexTensor;
+      newCachedGraph->outputTensor_ = outputTensor;
+    });
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_,
+                                              self_flat,
+                                              /*mpsShape=*/nullptr,
+                                              /*gatherTensorData=*/true,
+                                              /*dataType=*/inputType,
+                                              /*useStridedAPI=*/false);
+    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index, nil, true, MPSDataTypeInvalid, false);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
+                                                out,
+                                                /*mpsShape=*/nullptr,
+                                                /*gatherTensorData=*/false,
+                                                /*dataType=*/outputType,
+                                                /*useStridedAPI=*/false);
+
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder, indexPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  return out;
+}
+
+Tensor take_mps(const Tensor& self, const Tensor& index) {
+  auto out = at::empty(index.sizes(), self.options());
+  take_out_mps(self, index, out);
+  return out;
 }
 
 REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
