@@ -2501,15 +2501,14 @@ class AsyncAlltoallListWork : public ProcessGroupGloo::AsyncWork {
     const auto scalarType = inputTensors[0].scalar_type();
     gloo::AlltoallOptions opts(context_);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
 
     // Flatten input tensors into a single buffer
     at::Tensor flatInputTensor = flattenDenseTensors(inputTensors);
     GENERATE_ALL_TYPES(scalarType, setInput, opts, flatInputTensor);
 
     // Allocate flat output tensor with same total size
-    at::Tensor flatOutputTensor =
-        newLikeFlat(outputTensors, /*preserve_strides*/ false);
+    at::Tensor flatOutputTensor = newLikeFlat(outputTensors);
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
 
     // Perform the all-to-all operation
@@ -2564,6 +2563,7 @@ class AsyncAlltoallListCUDAWork : public AsyncAlltoallListWork {
 
     tmpOutputs.reserve(outputTensors.size());
     for (const auto i : c10::irange(outputTensors.size())) {
+      guard.reset_stream(outputStreams[i]);
       tmpOutputs.push_back(pinnedLike(outputTensors[i]));
     }
   }
@@ -2573,7 +2573,6 @@ class AsyncAlltoallListCUDAWork : public AsyncAlltoallListWork {
     for (const auto i : c10::irange(inputTensors.size())) {
       inputStreams[i].synchronize();
     }
-
     for (const auto i : c10::irange(outputTensors.size())) {
       outputStreams[i].synchronize();
     }
