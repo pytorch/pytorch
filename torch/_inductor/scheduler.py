@@ -305,28 +305,30 @@ class MixOrderReduction:
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
 
-        # the fused version has worse perf than non-fused version for
-        # small workload. When a workload is small enough, data can be
-        # fully cached by L2
-        size_thres = 5 * 2**20
+        # in non strict mode, we will skip the non-critical checks
+        if not config.triton.mix_order_reduction_non_strict_mode:
+            # the fused version has worse perf than non-fused version for
+            # small workload. When a workload is small enough, data can be
+            # fully cached by L2
+            size_thres = 5 * 2**20
 
-        # Call evaluate_expr rather than statically_known_geq since nrow can
-        # have dynamic shape in real models.
-        # Don't use hint directly since hint can be non-representative.
-        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
-            return False
+            # Call evaluate_expr rather than statically_known_geq since nrow can
+            # have dynamic shape in real models.
+            # Don't use hint directly since hint can be non-representative.
+            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
+                return False
 
-        # We require more more row than columns since
-        # 1, we prefer doing persistent reduction for each row
-        # 2, we will split the reduction across the rows
-        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
-            return False
+            # We require more more row than columns since
+            # 1, we prefer doing persistent reduction for each row
+            # 2, we will split the reduction across the rows
+            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
+                return False
 
-        # When nrow is small, ncol should also be small (due to the check
-        # above). Thus the entire tensor should be well cached in L2.
-        # Mix order reduction is less beneficial.
-        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
-            return False
+            # When nrow is small, ncol should also be small (due to the check
+            # above). Thus the entire tensor should be well cached in L2.
+            # Mix order reduction is less beneficial.
+            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
+                return False
 
         contiguous_node, other_node = (
             (node1, node2)
@@ -6012,10 +6014,11 @@ class Scheduler:
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
 
-        def is_none_layout(buf_name: str) -> bool:
+        def is_unallocated_buffer(buf_name: str) -> bool:
             """
-            Checks if buf_name is NoneLayout. Buffers with NoneLayout is not allocated
-            so graph partition should not take it as inputs or outputs.
+            Checks if buf_name resolves to a NoneLayout buffer (following mutation_real_name).
+            Buffers with NoneLayout are not allocated so graph partition should not
+            take them as inputs or outputs.
             """
             buf = self.name_to_buf.get(buf_name, None)
 
@@ -6023,10 +6026,11 @@ class Scheduler:
                 return False
 
             if isinstance(buf.node.layout, NoneLayout):
-                if isinstance(buf.node, ir.MutationOutput) and (
-                    real_name := self.mutation_real_name.get(buf_name, None)
-                ):
-                    return is_none_layout(real_name)
+                # If there's a mutation real name, check the underlying buffer
+                # This handles both MutationOutput and other mutation ops like
+                # IndexPutFallback that have NoneLayout but mutate real buffers
+                if real_name := self.mutation_real_name.get(buf_name, None):
+                    return is_unallocated_buffer(real_name)
 
                 return True
 
@@ -6055,7 +6059,7 @@ class Scheduler:
                     [
                         x.name
                         for x in read_writes.reads | read_writes.writes
-                        if not is_none_layout(x.name)
+                        if not isinstance(x, WeakDep)
                     ]
                 )
                 - output_names
@@ -6111,7 +6115,7 @@ class Scheduler:
             output_nodes = [
                 name_to_node[name]
                 for name in returned_output_names
-                if not is_none_layout(name)
+                if not is_unallocated_buffer(name)
             ]
 
             constant_names = [
@@ -6687,7 +6691,7 @@ class Scheduler:
         self.flush()
 
     def benchmark_combo_kernel(
-        self, node_list: Sequence[BaseSchedulerNode]
+        self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results
     ) -> tuple[float, float, list[Optional[str]]]:
         """
         Benchmark fused list of nodes and return the execution time
@@ -6698,7 +6702,7 @@ class Scheduler:
         self.current_device = device
         assert device is not None
         backend = self.get_backend(device)
-        return backend.benchmark_combo_kernel(node_list)
+        return backend.benchmark_combo_kernel(node_list, node_benchmark_results)
 
     def speedup_by_combo_kernel(self, nodes: list[BaseSchedulerNode]) -> bool:
         """
@@ -6719,6 +6723,7 @@ class Scheduler:
         from triton.compiler.errors import CompilationError
 
         ms1, path1_list = 0.0, []
+        node_benchmark_results = {}
         for i, snode in enumerate(subkernel_nodes):
             node_list = snode.get_nodes()
             # We can not accurately benchmark kernel using atomic_add
@@ -6730,6 +6735,7 @@ class Scheduler:
 
             try:
                 ms, path = self.benchmark_fused_nodes(node_list)
+                node_benchmark_results[snode] = (ms, path)
                 if math.isinf(ms):
                     fusion_log.debug(
                         "ComboKernel benchmark: register spilling of %d-th subkernel",
@@ -6749,7 +6755,9 @@ class Scheduler:
             path1_list.append(path)
 
         try:
-            ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
+            ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(
+                subkernel_nodes, node_benchmark_results
+            )
         except CompilationError as e:
             # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
             if "Loop-carried variable" in str(e):
@@ -6940,7 +6948,7 @@ class BaseScheduling:  # noqa: docstring_linter
         return 0
 
     def benchmark_combo_kernel(
-        self, node_list: Sequence[BaseSchedulerNode]
+        self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results
     ) -> tuple[float, float, list[Optional[str]]]:
         """
         Benchmark the list of nodes to combine and return the execution time
