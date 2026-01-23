@@ -21,8 +21,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
-def get_warp_size(device=torch.device("cuda")):
-    dev_props = DeviceProperties.create(device)
+def get_warp_size():
+    dev_props = DeviceProperties.create(torch.device(GPU_TYPE))
     return dev_props.warp_size
 
 
@@ -192,11 +192,7 @@ class MixOrderReductionTest(TestBase):
         def f(x):
             return x.sum(dim=-1), x.sum(dim=0)
 
-        M = (
-            32768 * 1024
-            if torch.version.hip is not None and get_warp_size() > 32
-            else 32768 * 256
-        )
+        M = 32768 * 1024 if get_warp_size() > 32 else 32768 * 256
         x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
         # We don't do mix order reduction for split redutions

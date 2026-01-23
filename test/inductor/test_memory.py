@@ -22,8 +22,8 @@ except ImportError:
     TRITON_AVAILABLE = False
 
 
-def get_warp_size(device=torch.device("cuda")):
-    dev_props = DeviceProperties.create(device)
+def get_warp_size():
+    dev_props = DeviceProperties.create(torch.device(GPU_TYPE))
     return dev_props.warp_size
 
 
@@ -66,7 +66,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
         super().setUp()
 
         self.model = Foo().to(GPU_TYPE)
-        M = 4096 if torch.version.hip is not None and get_warp_size() > 32 else 2048
+        M = 4096 if get_warp_size() > 32 else 2048
         self.inputs = torch.ones((M, 1), device=GPU_TYPE)
         self.orig_reorder_method = memory.reorder_for_peak_memory
 

@@ -86,8 +86,8 @@ TMA_TEST_XFAIL = dict.fromkeys(
 )
 
 
-def get_warp_size(device=torch.device("cuda")):
-    dev_props = DeviceProperties.create(device)
+def get_warp_size():
+    dev_props = DeviceProperties.create(torch.device(GPU_TYPE))
     return dev_props.warp_size
 
 
@@ -532,18 +532,10 @@ class CommonTemplate:
         """
         Tests a reduction kernel.
         """
-        if (
-            view_size == (2, 3 * max_block)
-            and torch.version.hip is not None
-            and get_warp_size() > 32
-        ):
+        if view_size == (2, 3 * max_block) and get_warp_size() > 32:
             view_size = (4, 6 * max_block)
 
-        if (
-            view_size == (128, 128)
-            and torch.version.hip is not None
-            and get_warp_size() > 32
-        ):
+        if view_size == (128, 128) and get_warp_size() > 32:
             view_size = (256, 256)
 
         if self.device == "cpu" and all(
@@ -822,11 +814,7 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
-        if (
-            reduction_op == torch.sum
-            and torch.version.hip is not None
-            and get_warp_size() > 32
-        ):
+        if reduction_op == torch.sum and get_warp_size() > 32:
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
 
@@ -867,11 +855,7 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
-        if (
-            torch.version.hip is not None
-            and get_warp_size() > 32
-            and expected_num_triton_kernels == 2
-        ):
+        if get_warp_size() > 32 and expected_num_triton_kernels == 2:
             size = (256, 256)
         view = self._discontiguous_tensor(size, self.device)
 
