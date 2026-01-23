@@ -16,7 +16,7 @@ Key features demonstrated:
 from collections.abc import Sequence
 
 import torch
-import torch_openreg  # noqa: F401  # Register the openreg device
+import torch_openreg  # noqa: F401
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
