@@ -1064,12 +1064,10 @@ def enumerate_all_placement_combos(
         (input_placements, output_placements) tuples
     """
     input_options = [
-        enumerate_placements(ndim, strided_shard_split_factor)
-        for ndim in input_ndims
+        enumerate_placements(ndim, strided_shard_split_factor) for ndim in input_ndims
     ]
     output_options = [
-        enumerate_placements(ndim, strided_shard_split_factor)
-        for ndim in output_ndims
+        enumerate_placements(ndim, strided_shard_split_factor) for ndim in output_ndims
     ]
 
     for input_combo in itertools.product(*input_options):
