@@ -527,6 +527,36 @@ class LazyConstantVariable(LazyVariableTracker):
             return realized.try_peek_constant()
         return (True, True, self.peek_value())
 
+    def is_python_hashable(self) -> bool:
+        """LazyConstantVariable wraps primitive types which are all hashable."""
+        # Primitive types (int, float, bool, str) are always hashable
+        return True
+
+    def get_python_hash(self) -> int:
+        """Get hash without triggering realization.
+
+        We can compute the hash from the peeked value. This installs a TYPE_MATCH
+        guard since the hash behavior depends on the type.
+        """
+        if self.is_realized():
+            return self.realize().get_python_hash()
+        self._ensure_type_guard()
+        return hash(self.peek_value())
+
+    def is_python_equal(self, other: object) -> bool:
+        """Check equality with proper guard handling.
+
+        Same cache (same source) means we can return True without guards.
+        Otherwise, we must realize to install guards for correctness.
+        """
+        if (
+            isinstance(other, LazyConstantVariable)
+            and not other.is_realized()
+            and self._cache is other._cache
+        ):
+            return True
+        return self.realize().is_python_equal(other)
+
 
 class ComputedLazyConstantVariable(LazyVariableTracker):
     """
