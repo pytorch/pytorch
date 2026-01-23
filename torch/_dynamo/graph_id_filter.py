@@ -27,17 +27,25 @@ def lookup_backend_with_mode(backend_str: str) -> Any:
     import torch
 
     from .backends.registry import lookup_backend
+    from .eval_frame import cached_backends
 
+    backend: Any = None
     if ":" in backend_str:
         parts = backend_str.split(":", 1)
         backend_name, mode = parts[0], parts[1]
 
         if backend_name == "inductor" and mode in _INDUCTOR_MODES:
-            return torch._TorchCompileInductorWrapper(
+            backend = torch._TorchCompileInductorWrapper(
                 mode=mode, options=None, dynamic=None
             )
 
-    return lookup_backend(backend_str)
+    if backend is None:
+        backend = lookup_backend(backend_str)
+
+    # Register the backend so its reset() is called during torch._dynamo.reset()
+    assert backend is not None, "Invalid override backend: " + backend_str
+    cached_backends.setdefault(id(backend), backend)
+    return backend
 
 
 class GraphIdFilter:
