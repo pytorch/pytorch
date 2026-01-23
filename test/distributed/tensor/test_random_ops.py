@@ -734,6 +734,62 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, self.rank)
 
 
+class DTensorThreadRNGTrackerTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_random_generation_repeating(self):
+        """
+        Test that sharding_spec in RNG state enables reproducible sharded random generation.
+        """
+        from torch.distributed.tensor._random import (
+            _RNGStateTracker,
+            set_use_thread_based_rng,
+        )
+
+        device = self.device_type
+        initial_state = torch.cuda.get_rng_state(device)
+        set_use_thread_based_rng(True, device=torch.device(self.device_type))
+
+        reference_32 = torch.empty(32, device=device).uniform_(0, 1)
+        reference_32_v2 = torch.empty(32, device=device).uniform_(0, 1)
+
+        # Naive chunked generation does NOT match reference
+        torch.cuda.set_rng_state(initial_state, device)
+        chunk_first = torch.empty(16, device=device).uniform_(0, 1)
+        chunk_second = torch.empty(16, device=device).uniform_(0, 1)
+        self.assertNotEqual(
+            torch.cat([chunk_first, chunk_second]),
+            reference_32,
+            "Naive chunked generation should NOT match reference",
+        )
+
+        def make_state(offset, local_shape, global_offset):
+            """Create RNG state with sharding_spec: (offset, local_shape, global_offset, global_shape, global_strides)"""
+            spec = (local_shape, global_offset, (32,), (1,))
+            spec_bytes = torch.tensor(sum(spec, (offset,))).view(torch.uint8)
+            return torch.cat([initial_state[0:8], spec_bytes])
+
+        tracker = _RNGStateTracker(torch.device("cuda"))
+        device_handle = tracker._device_handle
+
+        # With sharding_spec, two 16-element chunks match reference_32
+        device_handle.set_rng_state(make_state(0, (16,), (16,)))
+        chunk_second_sharded = torch.empty(16, device=device).uniform_(0, 1)
+        self.assertEqual(reference_32, torch.cat([chunk_first, chunk_second_sharded]))
+
+        # Four 8-element chunks match reference_32_v2 (offset=4 accounts for prior generation)
+        chunks = []
+        for off in [0, 8, 16, 24]:
+            device_handle.set_rng_state(make_state(4, (8,), (off,)))
+            chunks.append(torch.empty(8, device=device).uniform_(0, 1))
+        self.assertEqual(reference_32_v2, torch.cat(chunks))
+        set_use_thread_based_rng(False, device=torch.device(self.device_type))
+
+
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
 )

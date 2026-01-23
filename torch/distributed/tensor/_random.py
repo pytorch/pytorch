@@ -18,9 +18,30 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
+    "set_use_thread_based_rng",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
+
+# Config flag to select which RNG tracker to use
+# When True, use ThreadBasedRNGTracker (sharded kernel)
+# When False, use OffsetBasedRNGTracker (original kernel)
+_USE_THREAD_RNG_TRACKER: bool = False
+
+
+def set_use_thread_based_rng(
+    use_thread_based: bool, device: Optional[torch.device] = None
+) -> None:
+    """Sets whether to use ThreadBasedRNGTracker or OffsetBasedRNGTracker for random ops."""
+    global _USE_THREAD_RNG_TRACKER
+    _USE_THREAD_RNG_TRACKER = use_thread_based
+
+    # If device is provided and is CUDA, also set the flag on the generator
+    if device is not None and device.type == "cuda":
+        device_handle = _get_device_handle(device.type)
+        if device_handle is not None:
+            for generator in device_handle.default_generators:
+                generator.set_use_thread_based_rng(use_thread_based)
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -87,8 +108,8 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     # )
     # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
-    # instantiate a RNG tracker if haven't. By default DTensor uses an
-    # OffsetBasedRNGTracker to perform random operators.
+    # instantiate a RNG tracker if haven't. The tracker type is controlled
+    # by the global _USE_THREAD_RNG_TRACKER.
     global _rng_tracker
     if not _rng_tracker:
         _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
@@ -125,7 +146,7 @@ class _PhiloxState:
 
     @property
     def offset(self) -> int:
-        return int(self._state[8:].view(dtype=torch.int64).item())
+        return int(self._state[8:16].view(dtype=torch.int64).item())
 
     @offset.setter
     def offset(self, offset: int) -> None:

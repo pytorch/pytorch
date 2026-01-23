@@ -18,6 +18,7 @@
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <utility>
@@ -87,6 +88,54 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
   }
 }
 
+// grid stride loop kernel for sharded distributions (ThreadBasedRNGTracker)
+// This kernel computes virtual global indices based on sharding_spec to ensure
+// reproducible random number generation across sharded tensors.
+template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t, typename virtual_idx_t>
+C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
+__global__ void distribution_elementwise_grid_stride_kernel_sharded(int64_t numel,
+                                                            PhiloxCudaState philox_args,
+                                                            const dist_t dist_func,
+                                                            const transform_t transform_func,
+                                                            const virtual_idx_t virtual_idx_func,
+                                                            bool has_valid_sharding_spec = false) {
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+  curandStatePhilox4_32_10_t state;
+
+  int64_t rounded_size =
+      ((numel - 1) / (blockDim.x * gridDim.x * unroll_factor) + 1) * blockDim.x * gridDim.x * unroll_factor;
+  if (has_valid_sharding_spec) {
+    for (int linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
+#pragma unroll
+      for (int ii = 0; ii < unroll_factor; ii++) {
+        int li = linear_index + blockDim.x * gridDim.x * ii;
+        if (li < numel) {
+          auto [virtual_idx, virtual_offset, single_thread_n] = virtual_idx_func(li);
+          virtual_offset += offset;
+          curand_init(seed, virtual_idx, 4 * (virtual_offset / 4), &state);
+          auto rand = dist_func(&state);
+          transform_func(li, static_cast<accscalar_t>((&rand.x)[virtual_offset % unroll_factor]));
+        }
+      }
+      __syncthreads();
+    }
+  } else {
+    curand_init(seed, idx, offset, &state);
+    for (int linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
+      auto rand = dist_func(&state);
+#pragma unroll
+      for (int ii = 0; ii < unroll_factor; ii++) {
+        int li = linear_index + blockDim.x * gridDim.x * ii;
+        if (li < numel) {
+          transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
+        }
+      }
+      __syncthreads();
+    }
+  }
+}
+
 /**
  * distribution_nullary_kernel is analogous to gpu_kernel in
  * ATen/native/cuda/Loops.cuh. Like gpu_kernel, it uses
@@ -121,11 +170,19 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
   }
 
   auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
+  uint64_t tensor_ndim = 0;
+  std::array<uint64_t, MAX_DIMS> local_shape{};
+  std::array<uint64_t, MAX_DIMS> global_offset{};
+  std::array<uint64_t, MAX_DIMS> global_shape{};
+  std::array<uint64_t, MAX_DIMS> global_strides{};
   PhiloxCudaState rng_engine_inputs;
+  bool use_thread_based_rng = false;
   {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(counter_offset);
+    tensor_ndim = gen->get_sharding_spec(local_shape, global_offset, global_shape, global_strides);
+    use_thread_based_rng = gen->use_thread_based_rng();
   }
 
   if (!iter.can_use_32bit_indexing()) {
@@ -138,32 +195,94 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
 
   char* out_data = (char*)iter.data_ptr(0);
 
+  uint64_t global_numel = numel;
+  uint64_t single_thread_n = grid.x * block.x;
+  bool has_valid_sharding_spec = false;
+  if (tensor_ndim > 0) {
+    has_valid_sharding_spec = true;
+    global_numel = 1;
+    for (int i = 0; i < (int)tensor_ndim; ++i) {
+      global_numel *= global_shape[i];
+      if (local_shape[i] == 0)
+        has_valid_sharding_spec = false;
+    }
+    auto single_exec_policy = calc_execution_policy(global_numel, unroll_factor);
+    single_thread_n = std::get<1>(single_exec_policy).x * std::get<2>(single_exec_policy).x;
+  }
+  TORCH_CHECK(single_thread_n > 0, "single_thread_n is 0!!!");
+
+  auto virtual_idx_func = [=] __device__(uint64_t local_entry_linear_idx) {
+    if (tensor_ndim == 0) { // not a dtensor
+      return std::make_tuple(
+          local_entry_linear_idx % single_thread_n, local_entry_linear_idx / single_thread_n, single_thread_n);
+    }
+    uint64_t tmp_idx = local_entry_linear_idx;
+    uint64_t global_entry_linear_idx = 0;
+    for (int i = tensor_ndim - 1; i >= 0; --i) {
+      uint64_t global_idx_at_i = global_offset[i] + tmp_idx % local_shape[i];
+      tmp_idx /= local_shape[i];
+      global_entry_linear_idx += global_idx_at_i * global_strides[i];
+    }
+    uint64_t virtual_thread_idx = global_entry_linear_idx % single_thread_n;
+    uint64_t virtual_offset = global_entry_linear_idx / single_thread_n;
+    virtual_offset *= max_generator_offsets_per_curand_call / unroll_factor;
+    return std::make_tuple(virtual_thread_idx, virtual_offset, single_thread_n);
+  };
+
+
   auto stream = at::cuda::getCurrentCUDAStream();
   if (iter.is_trivial_1d()) {
     auto strides = iter.get_inner_strides();
     int stride0 = strides[0];
-    distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
-      numel,
-      rng_engine_inputs,
-      dist_func,
-      [=]__device__(int idx, accscalar_t rand) {
-        scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
-        *out = transform_func(rand);
-      }
-    );
+    // use_thread_based_rng controls kernel selection
+    if (use_thread_based_rng) {
+      distribution_elementwise_grid_stride_kernel_sharded<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        dist_func,
+        [=]__device__(int idx, accscalar_t rand) {
+          scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
+          *out = transform_func(rand);
+        },
+        virtual_idx_func,
+        has_valid_sharding_spec);
+    } else {
+      distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        dist_func,
+        [=]__device__(int idx, accscalar_t rand) {
+          scalar_t* out = (scalar_t*)&out_data[stride0 * idx];
+          *out = transform_func(rand);
+        });
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     auto offset_calc = make_offset_calculator<1>(iter);
-    distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
-      numel,
-      rng_engine_inputs,
-      dist_func,
-      [=]__device__(int idx, accscalar_t rand) {
-        auto offsets = offset_calc.get(idx);
-        scalar_t* out = (scalar_t*)&out_data[offsets[0]];
-        *out = transform_func(rand);
-      }
-    );
+    // use_thread_based_rng controls kernel selection
+    if (use_thread_based_rng) {
+      distribution_elementwise_grid_stride_kernel_sharded<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        dist_func,
+        [=]__device__(int idx, accscalar_t rand) {
+          auto offsets = offset_calc.get(idx);
+          scalar_t* out = (scalar_t*)&out_data[offsets[0]];
+          *out = transform_func(rand);
+        },
+        virtual_idx_func,
+        has_valid_sharding_spec);
+    } else {
+      distribution_elementwise_grid_stride_kernel<accscalar_t, unroll_factor><<<grid, block, 0, stream>>>(
+        numel,
+        rng_engine_inputs,
+        dist_func,
+        [=]__device__(int idx, accscalar_t rand) {
+          auto offsets = offset_calc.get(idx);
+          scalar_t* out = (scalar_t*)&out_data[offsets[0]];
+          *out = transform_func(rand);
+        });
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
