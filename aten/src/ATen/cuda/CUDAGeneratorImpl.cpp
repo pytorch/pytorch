@@ -307,11 +307,11 @@ uint64_t CUDAGeneratorImpl::get_sharding_spec(
     std::array<uint64_t, MAX_DIMS>& global_offset,
     std::array<uint64_t, MAX_DIMS>& global_shape,
     std::array<uint64_t, MAX_DIMS>& global_strides) const {
-  at::cuda::assertNotCapturing(
-      "Cannot call CUDAGeneratorImpl::get_sharding_spec");
   if (!use_thread_based_rng_) {
     return 0;
   }
+  at::cuda::assertNotCapturing(
+      "Cannot call CUDAGeneratorImpl::get_sharding_spec");
   local_shape = this->local_shape_;
   global_offset = this->global_offset_;
   global_shape = this->global_shape_;
