@@ -22,6 +22,7 @@ from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
 
+from . import config
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
     has_free_symbols,
@@ -740,7 +741,7 @@ class SizeVarAllocator:
 
         final_result = expr.subs(size_dict)
 
-        final_result = self._handle_special_expr_values(final_result, fallback)
+        final_result = self._maybe_realize_expr(final_result, fallback)
         assert final_result is not None, final_result
 
         return int(final_result)
@@ -1076,38 +1077,6 @@ class SizeVarAllocator:
         log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
         return expr
 
-<<<<<<< HEAD
-    def atomically_apply_size_hint(
-        self,
-        expr: Union[Expr, int],
-        *,
-        fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
-    ) -> Union[Expr, int]:
-        if isinstance(expr, (int, sympy.Integer)):
-            return int(expr)
-
-        if has_free_unbacked_symbols(expr):
-            # Make sure to substitute with the factored version
-            # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-            expr = self._sub_unbacked_exprs(sympy.factor(expr))
-
-        # For multiple expressions that depend on an unbacked symint,
-        # we want to compute them consistently for a size hint we have chosen.
-        # So, recursively compute expressions via size hints of contained symbols.
-        # For example: u1 * u2 - 10 ==> fallback * fallback - 10
-        assert isinstance(expr, Expr), type(expr)
-        free_symbols = expr.free_symbols
-        size_dict = {
-            symbol: V.graph.sizevars.size_hint(
-                symbol, fallback=fallback, hint_override=hint_override
-            )
-            for symbol in free_symbols
-        }
-        return expr.subs(size_dict)
-
-=======
->>>>>>> 569712ad3b3 (introduce optimization_hint)
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
