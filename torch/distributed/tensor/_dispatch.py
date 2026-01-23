@@ -21,7 +21,6 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     OutputSpecType,
 )
-from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor._tp_conv import (
@@ -277,10 +276,7 @@ class OpDispatcher:
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
-                if not random._rng_tracker and is_rng_supported_mesh(mesh):
-                    # Default to `OffsetBasedRNGTracker` if the parallelism API
-                    # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
+                random._get_rng_tracker(mesh)
 
                 first_arg, first_local_arg = (
                     cast(dtensor.DTensor, args[0]),
