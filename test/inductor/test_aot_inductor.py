@@ -7034,7 +7034,11 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
+            is_amd_gfx94x = torch.version.hip and (
+                "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            )
+
+            if GPU_TYPE == "xpu" or is_amd_gfx94x:
                 grid_0 = 32736
             else:
                 grid_0 = 1023
@@ -7084,7 +7088,11 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
+            is_amd_gfx94x = torch.version.hip and (
+                "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            )
+
+            if GPU_TYPE == "xpu" or is_amd_gfx94x:
                 grid_0 = 32736
             else:
                 grid_0 = 1023
@@ -7708,6 +7716,45 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, device=self.device),
         )
+        self.check_model(Model(), example_inputs, move_model_to_device=False)
+
+    @requires_gpu
+    def test_mixed_device_zero_size_constant(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Zero-size CUDA buffer
+                self.register_buffer(
+                    "empty_buffer",
+                    torch.empty(0, device=GPU_TYPE, dtype=torch.float32),
+                )
+                self.register_buffer(
+                    "cpu_indices",
+                    torch.tensor([0, 1, 2, 3], device="cpu", dtype=torch.int64),
+                )
+                self.register_buffer(
+                    "cuda_weights",
+                    torch.tensor(
+                        [1.0, 2.0, 3.0, 4.0], device=GPU_TYPE, dtype=torch.float32
+                    ),
+                )
+                # Another CUDA buffer to verify offset tracking is correct
+                self.register_buffer(
+                    "cuda_bias",
+                    torch.tensor(
+                        [0.5, 0.5, 0.5, 0.5], device=GPU_TYPE, dtype=torch.float32
+                    ),
+                )
+
+            def forward(self, x):
+                idx_cuda = self.cpu_indices.to(GPU_TYPE)
+                weights = self.cuda_weights[idx_cuda]
+                return x * weights + self.cuda_bias
+
+        example_inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu
