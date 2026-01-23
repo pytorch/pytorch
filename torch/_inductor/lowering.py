@@ -2995,6 +2995,7 @@ make_fallback(aten._cdist_backward)
 
 # 2) Medium
 make_fallback(aten._trilinear)
+make_fallback(torch.ops.higher_order.flat_apply)
 
 
 # 3) Difficult
