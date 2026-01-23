@@ -4061,8 +4061,6 @@ class TestAutograd(TestCase):
                 self.assertIsNone(ref())
 
     def test_checkpoint_compile_no_recompile(self):
-        from torch.overrides import _get_current_function_mode_stack
-
         # Check for ambient TorchFunctionMode, e.g. when PYTORCH_TEST_WITH_CROSSREF=1
         expect_fail = len(torch.overrides._get_current_function_mode_stack()) > 0
 
