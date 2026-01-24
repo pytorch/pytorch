@@ -654,6 +654,13 @@ class SequenceKey(Generic[T]):
     def __str__(self) -> str:
         return f"[{self.idx!r}]"
 
+    def __repr__(self) -> str:
+        try:
+            return f"SequenceKey(idx={self.idx!r})"
+        except AttributeError:
+            # During dynamo tracing, attributes might not be accessible
+            return "SequenceKey(...)"
+
     def get(self, sequence: Sequence[T]) -> T:
         return sequence[self.idx]
 
@@ -668,6 +675,13 @@ class MappingKey(Generic[K, T]):
     def __str__(self) -> str:
         return f"[{self.key!r}]"
 
+    def __repr__(self) -> str:
+        try:
+            return f"MappingKey(key={self.key!r})"
+        except AttributeError:
+            # During dynamo tracing, attributes might not be accessible
+            return "MappingKey(...)"
+
     def get(self, mapping: Mapping[K, T]) -> T:
         return mapping[self.key]
 
@@ -678,6 +692,13 @@ class GetAttrKey:
 
     def __str__(self) -> str:
         return f".{self.name}"
+
+    def __repr__(self) -> str:
+        try:
+            return f"GetAttrKey(name={self.name!r})"
+        except AttributeError:
+            # During dynamo tracing, attributes might not be accessible
+            return "GetAttrKey(...)"
 
     def get(self, obj: Any) -> Any:
         return getattr(obj, self.name)
