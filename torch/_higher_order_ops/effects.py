@@ -4,6 +4,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._functorch.pyfunctorch import TransformType
 from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
@@ -11,6 +12,7 @@ from torch._library.effects import EffectType
 from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -186,6 +188,77 @@ def with_effects_proxy(
     )
     result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     return result
+
+
+@with_effects.py_impl(FunctionalTensorMode)
+def with_effects_functional(
+    mode,
+    token: torch.Tensor,
+    op: torch._ops.OpOverload,
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
+    # When with_effects is called under FunctionalTensorMode (e.g., when executing
+    # a pre-compiled FX graph that contains explicit with_effects calls), we need
+    # to unwrap the functional tensors, execute the op, and wrap the results.
+    from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
+
+    ctx = PythonFunctionalizeAPI()
+
+    unwrapped_token = ctx.unwrap_tensors([token])[0]
+    unwrapped_args = ctx.unwrap_tensors(args)
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
+
+    with ctx.redispatch_to_next():
+        result = with_effects(unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs)
+
+    return ctx.wrap_tensors(result)
+
+
+@with_effects.py_impl(TransformType.Functionalize)
+def with_effects_functionalize(
+    interpreter,
+    token: torch.Tensor,
+    op: torch._ops.OpOverload,
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
+    # When with_effects is called under the functorch Functionalize transform
+    # (e.g., via torch.func.functionalize), we need to unwrap the functorch
+    # functional tensors, execute with_effects, and wrap the results.
+    #
+    # We use the C-level _unwrap_functional_tensor and _wrap_functional_tensor
+    # functions to handle the functorch-level wrappers. This is different from
+    # PythonFunctionalizeAPI which handles FunctionalTensorMode (a dispatch mode).
+    from torch._C._functorch import (
+        _unwrap_functional_tensor,
+        _wrap_functional_tensor,
+    )
+
+    reapply_views = interpreter.functionalize_add_back_views()
+    func_level = interpreter.level()
+
+    def unwrap(t):
+        if isinstance(t, torch.Tensor) and torch._is_functional_tensor(t):
+            torch._sync(t)
+            return _unwrap_functional_tensor(t, reapply_views)
+        return t
+
+    def wrap(t):
+        if isinstance(t, torch.Tensor) and not torch._is_functional_tensor(t):
+            return _wrap_functional_tensor(t, func_level)
+        return t
+
+    unwrapped_token = unwrap(token)
+    unwrapped_args = pytree.tree_map(unwrap, args)
+    unwrapped_kwargs = pytree.tree_map(unwrap, kwargs)
+
+    with interpreter.lower():
+        result = with_effects(
+            unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs
+        )
+
+    return pytree.tree_map(wrap, result)
 
 
 with_effects.fallthrough(DispatchKey.AutogradCPU)
