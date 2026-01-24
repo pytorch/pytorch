@@ -18,13 +18,8 @@ inline void call_c10_accelerator_check_implementation(
     const char* function_name,
     uint32_t line_number,
     bool include_device_assertions) {
-#ifdef USE_ROCM
-  c10::hip::c10_hip_check_implementation(
-      err, filename, function_name, line_number, include_device_assertions);
-#else
   c10::cuda::c10_cuda_check_implementation(
       err, filename, function_name, line_number, include_device_assertions);
-#endif
 }
 } // namespace
 

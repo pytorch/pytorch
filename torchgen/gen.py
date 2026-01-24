@@ -2227,7 +2227,7 @@ def gen_source_files(
 #include <ATen/cuda/CUDAContext.h>"""
     if rocm:
         extra_cuda_headers = """\
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
+#include <c10/hip/HIPGuard.h>
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>"""
