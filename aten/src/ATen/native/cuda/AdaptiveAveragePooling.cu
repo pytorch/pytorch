@@ -149,9 +149,9 @@ namespace {
 
         int oh, ow;
         for(oh = ostartH; oh < oendH; ++oh) {
-          int kH = START_IND(oh, osizeH, isizeH) - END_IND(oh, osizeH, isizeH);
+          int kH = END_IND(oh, osizeH, isizeH) - START_IND(oh, osizeH, isizeH);
           for(ow = ostartW; ow < oendW; ++ow) {
-            int kW = START_IND(ow, osizeW, isizeW) - END_IND(ow, osizeW, isizeW);
+            int kW = END_IND(ow, osizeW, isizeW) - START_IND(ow, osizeW, isizeW);
             T grad_delta = gradOutput[ow + oh*osizeW] / kH / kW;
             *ptr_gradInput += grad_delta;
           }
