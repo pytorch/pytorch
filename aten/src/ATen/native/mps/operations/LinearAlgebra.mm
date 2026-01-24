@@ -36,6 +36,7 @@
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/matmul.h>
 #include <ATen/ops/mm_native.h>
+#include <ATen/ops/_compute_linear_combination_native.h>
 #include <ATen/ops/orgqr_native.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/stack.h>
@@ -1659,6 +1660,43 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 
 TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   mps::linalg_inv_ex_out_mps_impl(A, check_errors, result, info);
+}
+
+// MPS implementation of _compute_linear_combination without einsum
+// Computes: output[i, ...] = sum_j(coefficients[i, j] * input[j, ...])
+// This is used internally by linalg.matrix_exp for computing Taylor series
+Tensor _compute_linear_combination_mps(const Tensor& input, const Tensor& coefficients) {
+  // Match CPU/CUDA validation from FunctionOfAMatrixUtils.cpp
+  TORCH_CHECK(input.dim() >= 1, "_compute_linear_combination_mps: input must have at least 1 dimension");
+  TORCH_CHECK(coefficients.dim() == 2, "_compute_linear_combination_mps: coefficients must be 2D (I, J)");
+
+  const auto J = input.size(0);
+  TORCH_CHECK(coefficients.size(1) == J,
+              "_compute_linear_combination_mps: coefficients.size(1) must match input.size(0), but got ",
+              coefficients.size(1), " and ", J);
+
+  const auto I = coefficients.size(0);
+
+  // Flatten all non-leading dimensions of input into a single dimension N
+  auto input_2d = input.reshape({J, -1});
+
+  // Allocate output in the same dtype/device as input to avoid autocast side effects.
+  auto output_2d = at::empty({I, input_2d.size(1)}, input.options());
+
+  // Use matmul_out to avoid AutocastMPS behavior associated with einsum.
+  at::matmul_out(output_2d, coefficients, input_2d);
+
+  // Restore the original "..." shape, replacing the leading dimension with I.
+  auto output_sizes = input.sizes().vec();
+  output_sizes[0] = I;
+  return output_2d.reshape(output_sizes);
+}
+
+Tensor& _compute_linear_combination_out_mps(const Tensor& input, const Tensor& coefficients, Tensor& output) {
+  auto result = _compute_linear_combination_mps(input, coefficients);
+  output.resize_(result.sizes());
+  output.copy_(result);
+  return output;
 }
 
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)

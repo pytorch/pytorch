@@ -3893,10 +3893,12 @@
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
     CPU, CUDA: _compute_linear_combination
+    MPS: _compute_linear_combination_mps
 
 - func: _compute_linear_combination.out(Tensor input, Tensor coefficients, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: _compute_linear_combination_out
+    MPS: _compute_linear_combination_out_mps
 
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   device_check: NoCheck   # TensorIterator
@@ -14364,7 +14366,7 @@
   python_module: linalg
   variants: function
   dispatch:
-    CPU, CUDA: linalg_matrix_exp
+    CPU, CUDA, MPS: linalg_matrix_exp
   autogen: linalg_matrix_exp.out
 
 - func: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)

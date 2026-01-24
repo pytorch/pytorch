@@ -2158,6 +2158,66 @@ class TestMPS(TestCaseMPS):
         run_det_test(32, 10, 10)
         run_det_test(32, 2, 2, 10, 10)
 
+    def test_linalg_matrix_exp(self):
+        """Test linalg.matrix_exp on MPS.
+
+        This operation computes the matrix exponential of a square matrix.
+        It's commonly used in differential equations, control theory, and
+        neural networks (e.g., neural ODEs).
+
+        Requested by users in issue #141287 (18 votes).
+        """
+        def run_test(size, *batch_dims, dtype=torch.float32):
+            shape = (*batch_dims, size, size) if batch_dims else (size, size)
+            input_cpu = torch.randn(shape, device='cpu', dtype=dtype)
+            input_mps = input_cpu.to('mps')
+
+            out_cpu = torch.linalg.matrix_exp(input_cpu)
+            out_mps = torch.linalg.matrix_exp(input_mps)
+
+            # Verify output is on MPS device (not silently falling back to CPU)
+            self.assertEqual(out_mps.device.type, 'mps')
+            # Verify dtype is preserved
+            self.assertEqual(out_mps.dtype, input_mps.dtype)
+            # Verify shape is correct
+            self.assertEqual(out_mps.shape, input_mps.shape)
+            # Verify result matches CPU (use relaxed tolerance for numerical stability)
+            self.assertEqual(out_cpu, out_mps.cpu(), atol=1e-4, rtol=1e-4)
+
+        # Test various matrix sizes
+        for size in [1, 2, 3, 4, 5, 8]:
+            run_test(size)
+
+        # Test batched matrices
+        run_test(3, 2)
+        run_test(4, 3, 2)
+        run_test(3, 2, 2, 2)
+
+        # Test empty matrix (edge case)
+        empty_cpu = torch.randn(0, 0, device='cpu')
+        empty_mps = empty_cpu.to('mps')
+        out_empty_mps = torch.linalg.matrix_exp(empty_mps)
+        self.assertEqual(out_empty_mps.shape, torch.Size([0, 0]))
+        self.assertEqual(out_empty_mps.device.type, 'mps')
+
+        # Test 1x1 matrix (uses exp directly)
+        x_cpu = torch.randn(1, 1, device='cpu')
+        x_mps = x_cpu.to('mps')
+        out_1x1_mps = torch.linalg.matrix_exp(x_mps)
+        self.assertEqual(out_1x1_mps.device.type, 'mps')
+        self.assertEqual(torch.linalg.matrix_exp(x_cpu), out_1x1_mps.cpu())
+
+        # Test with non-contiguous input
+        x_cpu = torch.randn(4, 4, device='cpu').T
+        x_mps = x_cpu.to('mps')
+        out_nc_mps = torch.linalg.matrix_exp(x_mps)
+        self.assertEqual(out_nc_mps.device.type, 'mps')
+        self.assertEqual(
+            torch.linalg.matrix_exp(x_cpu),
+            out_nc_mps.cpu(),
+            atol=1e-4, rtol=1e-4
+        )
+
     def test_layer_norm(self):
         def helper(input_shape, normalized_shape, eps=1e-05, elementwise_affine=True, dtype=torch.float32, non_contiguous=False):
             cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype, requires_grad=True)

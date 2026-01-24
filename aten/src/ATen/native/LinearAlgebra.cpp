@@ -32,6 +32,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_addmm_activation_native.h>
+#include <ATen/ops/_compute_linear_combination.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
 #include <ATen/ops/_convert_weight_to_int4pack_for_cpu_native.h>
 #include <ATen/ops/_dyn_quant_matmul_4bit_native.h>
@@ -2300,13 +2301,23 @@ void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
   }
 }
 
+// Move memory to the same device as `in` if `in` is on a non-CPU device
+// (CUDA, MPS, etc.)
+inline Tensor _move_memory_if_device_input(
+  const Tensor& mem,
+  const Tensor& in
+) {
+  return (in.device().type() != at::kCPU)
+    ? mem.to(at::device_of(in).value())
+    : mem;
+}
+
+// Backwards compatibility alias
 inline Tensor _move_memory_if_cuda_input(
   const Tensor& mem,
   const Tensor& in
 ) {
-  return (in.device().type() == at::kCUDA)
-    ? mem.to(at::device_of(in).value())
-    : mem;
+  return _move_memory_if_device_input(mem, in);
 }
 
 // convert a 1D blob to a 2D Tensor of size [1, blob.size()]
@@ -2335,7 +2346,7 @@ inline Tensor _linear_combination(
   // If this tensor is of shape (1, *), the result of _compute_linear_combination
   // is going to be of shape (1, *t.shape) so we squeeze(0) so that
   // for any t with t.dim() >= 1: t.dim() == _compute_linear_combination(t, ...).dim().
-  return at::native::_compute_linear_combination(
+  return at::_compute_linear_combination(
       t, _blob_to_Tensor<scalar_t>(blob, t))
     .squeeze(0);
 }
@@ -2478,7 +2489,7 @@ Tensor compute_T12(const Tensor& A) {
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
 
-  auto Bs = at::native::_compute_linear_combination(As, bs);
+  auto Bs = at::_compute_linear_combination(As, bs);
 
   // output for A6
   auto view_out = As.select(0, 0);
@@ -2550,7 +2561,7 @@ Tensor compute_T18(const Tensor& A) {
   auto As = _allocate_buffer(A, num_prods);
   _fill_matrix_powers(As, A, num_prods);
 
-  auto Bs = at::native::_compute_linear_combination(As, bs);
+  auto Bs = at::_compute_linear_combination(As, bs);
 
   // tmp buffer for this matrix product
   auto view_out = As.select(0, 0);
@@ -2583,7 +2594,7 @@ Tensor compute_T18_scale_square(
   const auto s = (at::ceil(at::log2(norm / theta))).clamp(/*min=*/0);
   const auto pow2s = at::pow(2, -s);
   const auto a_scaled = a * pow2s.view({-1, 1, 1});
-  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
+  auto mexp_scaled = compute_T18<scalar_t>(a_scaled);
 
   // Sort:
   // Consider inputs are square matrix, so if we first power `matrix 0,1,2`, then
@@ -2658,10 +2669,10 @@ Tensor mexp_impl(
                              at::MemoryFormat::Contiguous);
     // `norm_cpu` is used to decide which Tensors require which approximation
     // based on their norm. This decision takes place on CPU.
-    // It requires moving data back and forth between devices when `a` is on CUDA,
-    // but at the cost of only one single CPU-CUDA synchronization (instead of 6),
-    // and better performance overall (benchmarked).
-    const auto norm_cpu = (a.device().type() == at::kCUDA)
+    // It requires moving data back and forth between devices when `a` is on a
+    // non-CPU device (CUDA, MPS), but at the cost of only one single CPU-device
+    // synchronization (instead of 6), and better performance overall (benchmarked).
+    const auto norm_cpu = (a.device().type() != at::kCPU)
       ? norm.to(at::kCPU) : norm;
 
     constexpr std::array<
