@@ -640,23 +640,37 @@ Tensor _s_dirichlet_mps(const Tensor& alpha, std::optional<Generator> gen) {
   // dirichlet = gamma / sum(gamma, dim=-1, keepdim=True)
   Tensor gamma_sum = gamma_samples.sum(/*dim=*/-1, /*keepdim=*/true);
 
-  // Handle edge case where sum might be zero (shouldn't happen with valid alpha > 0)
   // Use dtype-appropriate minimum to avoid underflow for float16/bfloat16
+  // Match CUDA/CPU behavior: clamp gamma_sum and final output
   double dtype_min;
+  double dtype_eps;
   switch (alpha.scalar_type()) {
     case ScalarType::Half:
-      dtype_min = 6.103515625e-05;  // FLT16_MIN (smallest positive normal half)
+      // float16: min positive normal ~6.1e-5, epsilon ~9.77e-4
+      dtype_min = 6.103515625e-05;
+      dtype_eps = 9.765625e-04;
       break;
     case ScalarType::BFloat16:
-      dtype_min = 1.175494350822287508e-38;  // bfloat16 min is similar to float min
+      // bfloat16: min positive normal ~1.175e-38, epsilon ~7.8e-3
+      dtype_min = 1.175494350822287508e-38;
+      dtype_eps = 7.8125e-03;
       break;
     default:  // Float
       dtype_min = std::numeric_limits<float>::min();
+      dtype_eps = std::numeric_limits<float>::epsilon();
       break;
   }
+  
+  // Clamp gamma_sum to avoid division by zero
   gamma_sum = gamma_sum.clamp_min(dtype_min);
+  
+  Tensor result = gamma_samples / gamma_sum;
+  
+  // Clamp final Dirichlet output to [dtype_min, 1 - epsilon] to match CUDA/CPU
+  // This avoids exact 0/1 values due to rounding in low-precision types
+  result = result.clamp(dtype_min, 1.0 - dtype_eps);
 
-  return gamma_samples / gamma_sum;
+  return result;
 }
 
 // Binomial distribution using BTRD algorithm (Hörmann 1993)
