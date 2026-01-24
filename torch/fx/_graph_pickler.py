@@ -27,6 +27,19 @@ from torch.utils._mode_utils import no_dispatch
 _SymNodeT = TypeVar("_SymNodeT", torch.SymInt, torch.SymFloat)
 
 
+def _is_process_group(obj: object) -> bool:
+    """
+    Check if an object is a ProcessGroup instance. This uses a deferred import
+    to avoid importing distributed modules when they're not needed.
+    """
+    try:
+        from torch._C._distributed_c10d import ProcessGroup
+
+        return isinstance(obj, ProcessGroup)
+    except ImportError:
+        return False
+
+
 def _ops_filter_safe(name: str) -> bool:
     """
     An ops filter which allows pickle-safe ops. Pickle-safe ops are built-in
@@ -39,6 +52,8 @@ def _ops_filter_safe(name: str) -> bool:
             "torch.ops.fbgemm",
             "torch.ops.c10d",
             "torch.ops.device_mesh",
+            "torch.ops.profiler",
+            "torch.ops.higher_order",
         )
     )
 
@@ -70,6 +85,7 @@ class GraphPickler(pickle.Pickler):
     def __init__(self, file: io.BytesIO, options: Optional[Options] = None) -> None:
         super().__init__(file)
         self.options = options or Options()
+        self._debug_pickled_types: set[type] = set()
 
         # This abomination is so we can pass external decoding state to the
         # unpickler functions. We serialize _unpickle_state as a persistent
@@ -117,13 +133,34 @@ class GraphPickler(pickle.Pickler):
             return _TracingContextPickleData.reduce_helper(self, obj)
         elif isinstance(obj, FakeScriptObject):
             return _FakeScriptObjectPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, torch.ScriptObject):
+            # Handle real ScriptObject instances (like _RecordFunction) that
+            # end up in the graph during tracing. These cannot be pickled with
+            # standard pickle since their C++ __getstate__ may not be implemented.
+            return _ScriptObjectPickleData.reduce_helper(self, obj)
+        elif _is_process_group(obj):
+            # Handle ProcessGroup instances before the generic opaque type check.
+            # ProcessGroups are stored by group name and resolved at load time.
+            return _ProcessGroupPickleData.reduce_helper(self, obj)
         elif is_opaque_type(type(obj)):
             return _OpaqueObjectPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, torch._C.FunctionSchema):
+            return _FunctionSchemaPickleData.reduce_helper(self, obj)
         else:
             # We should never get a raw Node!
             assert not isinstance(obj, torch.fx.Node)
             if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
                 return reduce
+
+            # DEBUG: Log unknown types for debugging serialization issues
+            obj_type = type(obj)
+            if obj_type not in self._debug_pickled_types:
+                self._debug_pickled_types.add(obj_type)
+                import logging
+                logging.debug(
+                    f"[GraphPickler] Falling back to default pickle for type: "
+                    f"{obj_type.__module__}.{obj_type.__name__}, obj repr: {repr(obj)[:200]}"
+                )
 
             # returning `NotImplemented` causes pickle to revert to the default
             # behavior for this object.
@@ -154,7 +191,16 @@ class GraphPickler(pickle.Pickler):
         state = _UnpickleState(fake_mode)
         with io.BytesIO(data) as stream:
             unpickler = _GraphUnpickler(stream, state)
-            return unpickler.load()
+            try:
+                return unpickler.load()
+            except Exception as e:
+                import traceback
+                print(f"[GraphPickler.loads] Exception type: {type(e).__name__}")
+                print(f"[GraphPickler.loads] Exception message: {e}")
+                print(f"[GraphPickler.loads] Exception args: {e.args}")
+                print(f"[GraphPickler.loads] Full traceback:")
+                traceback.print_exc()
+                raise
 
 
 class _UnpickleState:
@@ -710,12 +756,115 @@ class _FakeScriptObjectPickleData:
         return fake_obj
 
 
+class _ScriptObjectPickleData:
+    """
+    Handles pickling of torch.ScriptObject instances that end up in FX graphs.
+
+    ScriptObjects like _RecordFunction (from profiler) are C++ pybind11 objects
+    that may not implement __getstate__. When these objects end up in the graph
+    during tracing (e.g., profiler record functions), we need to handle them
+    gracefully during serialization.
+
+    On unpickle, we return None since these objects represent runtime-only state
+    (like active profiler regions) that will be recreated during execution.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: torch.ScriptObject
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], None],
+        tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
+    def __init__(self, script_obj: torch.ScriptObject) -> None:
+        # Store identifying information about the ScriptObject for debugging
+        # We can't access most attributes since they may trigger the same
+        # serialization error, so just store the type name.
+        self.type_name = type(script_obj).__name__
+        self.qualified_name = str(script_obj._type().qualified_name())
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> None:
+        # Return None since ScriptObjects like _RecordFunction represent
+        # runtime-only state that will be recreated during graph execution.
+        # The profiler _record_function_exit call will handle None gracefully.
+        return None
+
+
+class _ProcessGroupPickleData:
+    """
+    Handles pickling of ProcessGroup instances. ProcessGroups are C++ pybind11
+    objects that cannot be directly pickled. During precompilation with fake
+    distributed mode, ProcessGroups may be captured in the graph. On unpickle,
+    we resolve the group name to a real ProcessGroup using the c10d registry.
+
+    This enables AOT precompilation to serialize graphs containing ProcessGroups
+    and then load them in a real distributed environment where the ProcessGroups
+    have been initialized.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls,
+        pickler: GraphPickler,
+        obj: "torch.distributed.ProcessGroup",  # type: ignore[name-defined]
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], Any],
+        tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
+    def __init__(
+        self, pg: "torch.distributed.ProcessGroup"  # type: ignore[name-defined]
+    ) -> None:
+        # Store the group name which can be used to resolve the ProcessGroup
+        # at load time. The group_name is a unique identifier for the group
+        # that is registered in the c10d ProcessGroup registry.
+        self.group_name = pg.group_name
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> Any:
+        # Resolve the group name to a real ProcessGroup using the c10d registry.
+        # This will return the ProcessGroup that was initialized in the current
+        # distributed environment with the same group name.
+        from torch._C._distributed_c10d import _resolve_process_group
+
+        try:
+            return _resolve_process_group(self.group_name)
+        except Exception as e:
+            # If resolution fails (e.g., distributed not initialized or group
+            # not found), log a warning and return None. This allows the graph
+            # to still be loaded, though collective ops will fail at runtime.
+            import logging
+
+            logging.warning(
+                f"[_ProcessGroupPickleData] Failed to resolve ProcessGroup "
+                f"with name '{self.group_name}': {e}. Returning None."
+            )
+            return None
+
+
 class _OpaqueObjectPickleData:
     """
-    Handles pickling of opaque objects like ProcessGroup. These objects are
-    C++ pybind11 objects that cannot be directly pickled. We store just the
-    type name, and on unpickle return None since the actual object will be
-    provided at runtime as a graph input.
+    Handles pickling of opaque objects. These objects are C++ pybind11 objects
+    that cannot be directly pickled. We store just the type name, and on
+    unpickle return None since the actual object will be provided at runtime
+    as a graph input.
+
+    Note: ProcessGroups are handled separately by _ProcessGroupPickleData which
+    resolves them by group name at load time.
     """
 
     @classmethod
@@ -739,3 +888,191 @@ class _OpaqueObjectPickleData:
 
     def unpickle(self, unpickle_state: _UnpickleState) -> None:
         return None
+
+
+class _FunctionSchemaPickleData:
+    """
+    Handles pickling of torch._C.FunctionSchema and HopSchema instances.
+
+    FunctionSchema's default pickle behavior uses __getstate__ which returns
+    the schema as a string, and __setstate__ which parses that string.
+    However, the C++ schema parser cannot handle all type specifiers
+    (e.g., PyObject, NoneType) that may appear in HopSchema for
+    HigherOrderOperators.
+
+    This class serializes the schema by storing its individual components
+    (arguments, returns, etc.) and reconstructs them on unpickle, avoiding
+    the string parsing entirely.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: torch._C.FunctionSchema
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], torch._C.FunctionSchema],
+        tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
+    def __init__(self, schema: torch._C.FunctionSchema) -> None:
+        self.name = schema.name
+        self.overload_name = schema.overload_name
+
+        # Serialize arguments - store the type as a string representation
+        # along with other argument properties
+        self.arguments = [self._serialize_argument(arg) for arg in schema.arguments]
+        self.returns = [self._serialize_argument(ret) for ret in schema.returns]
+
+        # Handle HopSchema's additional attributes
+        # Note: torch._C.FunctionSchema doesn't expose is_vararg/is_varret as
+        # readable attributes, but HopSchema stores them as instance attributes
+        self.is_vararg = getattr(schema, "is_vararg", False)
+        self.is_varret = getattr(schema, "is_varret", False)
+        self.tree_spec = getattr(schema, "tree_spec", None)
+        self.is_hop_schema = hasattr(schema, "tree_spec")
+
+    def _serialize_argument(self, arg: torch._C.Argument) -> dict[str, Any]:
+        """
+        Serialize a torch._C.Argument to a dictionary.
+        We store the type as a string that can be reconstructed.
+        """
+        return {
+            "name": arg.name,
+            "type_str": str(arg.type),
+            "type_kind": arg.type.kind() if hasattr(arg.type, "kind") else None,
+            "default_value": arg.default_value,
+            "kwarg_only": arg.kwarg_only,
+            "alias_info": self._serialize_alias_info(arg.alias_info),
+        }
+
+    def _serialize_alias_info(
+        self, alias_info: Optional[torch._C._AliasInfo]
+    ) -> Optional[dict[str, Any]]:
+        """Serialize alias info if present."""
+        if alias_info is None:
+            return None
+        return {
+            "is_write": alias_info.is_write,
+            "before_set": set(alias_info.before_set),
+            "after_set": set(alias_info.after_set),
+        }
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> torch._C.FunctionSchema:
+        args = [self._deserialize_argument(arg_data) for arg_data in self.arguments]
+        rets = [self._deserialize_argument(ret_data) for ret_data in self.returns]
+
+        if self.is_hop_schema:
+            from torch._higher_order_ops.schema import HopSchema
+
+            return HopSchema(
+                self.name,
+                self.overload_name,
+                args,
+                rets,
+                self.is_vararg,
+                self.is_varret,
+                self.tree_spec,
+            )
+        else:
+            return torch._C.FunctionSchema(
+                self.name,
+                self.overload_name,
+                args,
+                rets,
+                self.is_vararg,
+                self.is_varret,
+            )
+
+    def _deserialize_argument(self, arg_data: dict[str, Any]) -> torch._C.Argument:
+        """Deserialize a torch._C.Argument from a dictionary."""
+        ty = self._string_to_type(arg_data["type_str"])
+        alias_info = self._deserialize_alias_info(arg_data["alias_info"])
+
+        return torch._C.Argument(
+            arg_data["name"],
+            ty,
+            None,  # N (dimension)
+            arg_data["default_value"],
+            arg_data["kwarg_only"],
+            alias_info,
+        )
+
+    def _deserialize_alias_info(
+        self, alias_data: Optional[dict[str, Any]]
+    ) -> Optional[torch._C._AliasInfo]:
+        """Deserialize alias info from a dictionary."""
+        if alias_data is None:
+            return None
+
+        # The C++ _AliasInfo strips the "alias::" namespace prefix when exposing
+        # before_set and after_set as Python properties, but requires it when
+        # constructing. We need to add the prefix back for reconstruction.
+        def add_namespace(symbol_set: set[str]) -> set[str]:
+            return {f"alias::{s}" if "::" not in s else s for s in symbol_set}
+
+        # pyrefly: ignore [attr-defined]
+        return torch._C._AliasInfo(
+            alias_data["is_write"],
+            add_namespace(alias_data["before_set"]),
+            add_namespace(alias_data["after_set"]),
+        )
+
+    def _string_to_type(self, type_str: str) -> Any:
+        """
+        Convert a type string back to a JIT type object.
+        This handles both standard types and special ones like PyObject, NoneType.
+        """
+        # Handle simple well-known types
+        type_map = {
+            "int": torch._C.IntType.get(),
+            "float": torch._C.FloatType.get(),
+            "str": torch._C.StringType.get(),
+            "bool": torch._C.BoolType.get(),
+            "SymInt": torch._C.SymIntType.get(),
+            "SymBool": torch._C.SymBoolType.get(),
+            "Tensor": torch._C.TensorType.get(),
+            "Any": torch._C.AnyType.get(),
+            "None": torch._C.NoneType.get(),
+            "NoneType": torch._C.NoneType.get(),
+            "Device": torch._C.DeviceObjType.get(),
+            "PyObject": torch._C.PyObjectType.get(),
+        }
+
+        if type_str in type_map:
+            return type_map[type_str]
+
+        # Handle optional types like "int?"
+        if type_str.endswith("?"):
+            inner = self._string_to_type(type_str[:-1])
+            return torch._C.OptionalType(inner)
+
+        # Handle list types like "int[]" or "Tensor[]"
+        if type_str.endswith("[]"):
+            inner = self._string_to_type(type_str[:-2])
+            return torch._C.ListType(inner)
+
+        # Handle tuple types like "(Tensor, Tensor)"
+        if type_str.startswith("(") and type_str.endswith(")"):
+            inner_str = type_str[1:-1]
+            if not inner_str:
+                return torch._C.TupleType([])
+            inner_types = [
+                self._string_to_type(t.strip()) for t in inner_str.split(",")
+            ]
+            return torch._C.TupleType(inner_types)
+
+        # For unknown types, fall back to AnyType (this is a safe fallback
+        # since these schemas are primarily used for metadata/debugging)
+        import logging
+
+        logging.debug(
+            f"[_FunctionSchemaPickleData] Unknown type '{type_str}', "
+            f"falling back to AnyType"
+        )
+        return torch._C.AnyType.get()

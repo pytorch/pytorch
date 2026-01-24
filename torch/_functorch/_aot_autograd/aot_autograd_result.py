@@ -296,13 +296,54 @@ class BundledCompiledBackward(
 
 @dataclass
 class SerializedGraphModule:
-    fn: Callable[[dict[Any, Any], str], torch.nn.Module]
-    args: tuple[Any, ...]
+    """
+    A serialized representation of a GraphModule.
+
+    Uses GraphPickler for serialization to properly handle HigherOrderOperators
+    (like triton_kernel_wrapper_functional) that cannot be symbolically traced.
+    The original implementation used gm.__reduce__() which relies on symbolic
+    tracing for deserialization, causing failures with HigherOrderOperators.
+    """
+
+    serialized_bytes: bytes
+    # Keep fn/args for backward compatibility with previously serialized artifacts.
+    # New artifacts will have serialized_bytes set and fn/args will be None.
+    fn: Optional[Callable[[dict[Any, Any], str], torch.nn.Module]] = None
+    args: Optional[tuple[Any, ...]] = None
 
     def __init__(self, gm: torch.fx.GraphModule):
-        self.fn, self.args = gm.__reduce__()
+        from torch.fx._graph_pickler import GraphPickler, Options
+
+        # Use GraphPickler to serialize the graph module.
+        # This preserves the actual graph structure and handles HigherOrderOperators
+        # properly, unlike __reduce__ which uses symbolic tracing on deserialize.
+        # Use ops_filter=None to allow all ops (including custom ops like msl_ops).
+        options = Options(ops_filter=None, node_metadata_key_filter=None)
+        self.serialized_bytes = GraphPickler.dumps(gm, options)
+        self.fn = None
+        self.args = None
 
     def deserialize(self) -> torch.fx.GraphModule:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # Check if this is a new-style artifact with serialized_bytes
+        if self.serialized_bytes is not None:
+            # Get the fake mode from the current tracing context if available,
+            # otherwise create a new one for deserialization.
+            context = torch._guards.TracingContext.try_get()
+            if context is not None and hasattr(context, "fake_mode"):
+                fake_mode = context.fake_mode
+            else:
+                fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+            gm = GraphPickler.loads(self.serialized_bytes, fake_mode)
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
+
+        # Backward compatibility: old-style artifacts use fn/args
+        assert self.fn is not None and self.args is not None
         gm = self.fn(*self.args)
         assert isinstance(gm, torch.fx.GraphModule)
         return gm
