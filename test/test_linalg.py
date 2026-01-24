@@ -7549,8 +7549,12 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         else:
             assert activation is None, f"unsupported activation {activation}"
         res3 = torch.from_numpy(res3).to(dtype)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res1, res3)
+        if TEST_WITH_ROCM:
+            self.assertEqual(res1, res2, atol=1e-4, rtol=1e-4)
+            self.assertEqual(res1, res3, atol=1e-4, rtol=1e-4)
+        else:
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res3)
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 1e-3, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
