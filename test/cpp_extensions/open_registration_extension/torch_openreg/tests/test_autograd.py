@@ -19,7 +19,6 @@ class TestAutograd(TestCase):
     @skipIfWindows()
     @skipIfTorchDynamo()
     def test_autograd_init(self):
-        """Test autograd initialization and thread creation"""
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
 
