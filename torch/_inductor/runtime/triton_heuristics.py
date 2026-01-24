@@ -3351,7 +3351,13 @@ def cooperative_reduction(
     # the GPU, we want to create as many CTAs as possible, while keeping things
     # in powers of 2.
     target = last_power_of_2(triton_meta["device"].multi_processor_count)
-    split = max(1, min(target // xnumel, TRITON_MAX_RSPLIT))
+    split = max(
+        1,
+        min(
+            target // xnumel if xnumel > 1 else last_power_of_2(rnumel),
+            TRITON_MAX_RSPLIT,
+        ),
+    )
     assert rnumel >= split
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
