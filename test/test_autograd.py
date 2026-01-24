@@ -417,6 +417,59 @@ class TestAutograd(TestCase):
         self.assertFalse(g[0].requires_grad)
         self.assertFalse(g[1].requires_grad)
 
+    def test_undefined_grad_with_tensor_subclass(self):
+        """
+        Test that gradients for unused outputs preserve tensor subclass types.
+        When an operator has multiple outputs but only some are used downstream,
+        the gradients for unused outputs are materialized as zeros.
+        These zeros should be the same tensor subclass type as the original outputs.
+        """
+        from torch.testing._internal.subclasses import WrapperSubclass
+
+        grads = {}
+
+        class MultiOutputFunc(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                return x * 2, y * 3
+
+            @staticmethod
+            def backward(ctx, grad_out1, grad_out2):
+                grads["grad_out1"] = grad_out1
+                grads["grad_out2"] = grad_out2
+                return grad_out1 * 2, grad_out2 * 3
+
+        x_inner = torch.randn(4, 4, requires_grad=True)
+        y_inner = torch.randn(4, 4, requires_grad=True)
+        x = WrapperSubclass(x_inner)
+        y = WrapperSubclass(y_inner)
+        out1, out2 = MultiOutputFunc.apply(x, y)
+        self.assertIsInstance(out1, WrapperSubclass)
+        self.assertIsInstance(out2, WrapperSubclass)
+
+        # Only use out1, so out2's gradient should be zeros.
+        loss = out1.sum()
+        loss.backward()
+
+        # grad_out2 should be a WrapperSubclass, not a torch.Tensor.
+        # Before the fix, grad_out2 would be a plain torch.Tensor
+        self.assertIsInstance(
+            grads["grad_out1"],
+            WrapperSubclass,
+            "grad_out1 should be a WrapperSubclass",
+        )
+        self.assertIsInstance(
+            grads["grad_out2"],
+            WrapperSubclass,
+            "grad_out2 should be a WrapperSubclass, not a plain Tensor",
+        )
+
+        # Verify grad_out2 is zeros (since out2 was not used)
+        self.assertTrue(
+            torch.all(grads["grad_out2"] == 0),
+            "grad_out2 should be all zeros since out2 was not used",
+        )
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
