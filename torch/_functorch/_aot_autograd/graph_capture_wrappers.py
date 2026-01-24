@@ -11,6 +11,7 @@ It does so by:
 4. dispatching subclasses
 """
 
+import typing
 import warnings
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
@@ -1198,6 +1199,15 @@ def aot_dispatch_subclass(
     # directly on the joint, but this would hurt compile time (adding yet another pass through the joint).
     subclass_meta = SubclassMeta()
 
+    if is_joint_structure:
+        primals_wrapped: list[FxValue] = typing.cast(list[FxValue], args[0])
+        primals_wrapped_descs: list[AOTInput] = typing.cast(
+            list[AOTInput], args_descs[0]
+        )
+    else:
+        primals_wrapped: list[FxValue] = typing.cast(list[FxValue], args)
+        primals_wrapped_descs: list[AOTInput] = typing.cast(list[AOTInput], args_descs)
+
     # NB: doesn't take descs, this is going from the NEW flat_args to the
     # subclasses, we don't need to do bookkeeping here
     def inner_fn(fn, args, *, use_trace_joint: bool):
@@ -1219,16 +1229,23 @@ def aot_dispatch_subclass(
             )
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]
+            # Don't count ProcessGroups for gradients - they use the same PGs as forward inputs
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
             # Add extra symints as outputs to the forward/backward graphs
             # ignore nested ints here
             forward_outs, forward_outs_descs = unwrap_tensor_subclasses(
-                wrapped_outs[0], wrapped_outs_descs[0], append_symints=True
+                wrapped_outs[0],
+                wrapped_outs_descs[0],
+                append_symints=True,
+                append_opaques=True,
             )
             # ignore nested ints here
             backward_outs, backward_outs_descs = unwrap_tensor_subclasses(
-                wrapped_outs[1], wrapped_outs_descs[1], append_symints=True
+                wrapped_outs[1],
+                wrapped_outs_descs[1],
+                append_symints=True,
+                append_opaques=True,
             )
             return (
                 (forward_outs, backward_outs),
@@ -1237,7 +1254,7 @@ def aot_dispatch_subclass(
 
         # Step 3: Unwrap any subclass outputs back into dense tensors
         return unwrap_tensor_subclasses(
-            wrapped_outs, wrapped_outs_descs, append_symints=True
+            wrapped_outs, wrapped_outs_descs, append_symints=True, append_opaques=True
         )
 
     def joint_fn(
@@ -1264,9 +1281,10 @@ def aot_dispatch_subclass(
     if is_joint_structure:
         # Add extra symints (size/strides) as input to the forward graph
         primals_unwrapped_pair = unwrap_tensor_subclasses(
-            args[0],  # type: ignore[arg-type]
-            args_descs[0],  # type: ignore[arg-type]
+            primals_wrapped,
+            primals_wrapped_descs,
             append_symints=True,
+            append_opaques=True,
         )
         # We pass append_symints=False here because the partitioner will
         # capture and add any extra argument
@@ -1274,21 +1292,23 @@ def aot_dispatch_subclass(
             args[1],  # type: ignore[arg-type]
             args_descs[1],  # type: ignore[arg-type]
             append_symints=False,
+            append_opaques=False,
         )
 
         args_unwrapped = (primals_unwrapped_pair[0], tangents_unwrapped_pair[0])
         args_descs_unwrapped = (primals_unwrapped_pair[1], tangents_unwrapped_pair[1])
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
-            args[0], meta.static_input_indices
+            primals_wrapped, meta.static_input_indices
         )
     else:
         args_unwrapped, args_descs_unwrapped = unwrap_tensor_subclasses(  # type: ignore[assignment]
-            args,  # type: ignore[arg-type]
-            args_descs,  # type: ignore[arg-type]
+            primals_wrapped,
+            primals_wrapped_descs,
             append_symints=True,
+            append_opaques=True,
         )
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
-            args, meta.static_input_indices
+            primals_wrapped, meta.static_input_indices
         )
 
     if is_joint_structure:
