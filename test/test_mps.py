@@ -12332,11 +12332,11 @@ class TestAdvancedIndexing(TestCaseMPS):
         for dtype in [torch.int16, torch.int32, torch.int64]:
             a = torch.tensor([12, 15, 100, -24, 0], device=device, dtype=dtype)
             b = torch.tensor([8, 25, 35, 18, 5], device=device, dtype=dtype)
-            
+
             gcd_result = torch.gcd(a, b)
             gcd_expected = torch.gcd(a.cpu(), b.cpu())
             self.assertEqual(gcd_result.cpu(), gcd_expected)
-            
+
             lcm_result = torch.lcm(a, b)
             lcm_expected = torch.lcm(a.cpu(), b.cpu())
             self.assertEqual(lcm_result.cpu(), lcm_expected)
@@ -12344,12 +12344,12 @@ class TestAdvancedIndexing(TestCaseMPS):
         # Test specific known values
         a = torch.tensor([12, 0, 1, 100], device=device, dtype=torch.int32)
         b = torch.tensor([18, 5, 17, 100], device=device, dtype=torch.int32)
-        
+
         gcd_result = torch.gcd(a, b)
         # Expected: gcd(12,18)=6, gcd(0,5)=5, gcd(1,17)=1, gcd(100,100)=100
         gcd_expected = torch.tensor([6, 5, 1, 100], dtype=torch.int32)
         self.assertEqual(gcd_result.cpu(), gcd_expected)
-        
+
         lcm_result = torch.lcm(a, b)
         # Expected: lcm(12,18)=36, lcm(0,5)=0, lcm(1,17)=17, lcm(100,100)=100
         lcm_expected = torch.tensor([36, 0, 17, 100], dtype=torch.int32)
@@ -12362,13 +12362,13 @@ class TestAdvancedIndexing(TestCaseMPS):
             # NCHW format: batch=2, channels=6, height=4, width=4
             x = torch.randn(2, 6, 4, 4, device=device, dtype=dtype)
             groups = 2
-            
+
             result = torch.channel_shuffle(x, groups)
             expected = torch.channel_shuffle(x.cpu(), groups)
-            
+
             self.assertEqual(result.shape, expected.shape)
             self.assertEqual(result.cpu(), expected)
-            
+
         # Test with different group sizes
         x = torch.randn(1, 12, 8, 8, device=device)
         for groups in [2, 3, 4, 6]:
@@ -12381,6 +12381,39 @@ class TestAdvancedIndexing(TestCaseMPS):
         result = torch.channel_shuffle(x, 3)
         expected = torch.channel_shuffle(x.cpu(), 3)
         self.assertEqual(result.cpu(), expected)
+
+    def test_geometric(self, device="mps"):
+        """Test geometric distribution sampling on MPS."""
+        torch.manual_seed(42)
+
+        # Test basic functionality - samples should be positive integers >= 1
+        for dtype in [torch.float16, torch.float32]:
+            t = torch.empty(1000, device=device, dtype=dtype)
+            t.geometric_(0.5)
+
+            # All values should be >= 1 (geometric distribution support)
+            self.assertTrue((t >= 1).all())
+
+            # Mean of geometric(p) is 1/p
+            # For p=0.5, mean should be ~2.0
+            mean_val = t.float().mean().item()
+            self.assertGreater(mean_val, 1.5)
+            self.assertLess(mean_val, 2.5)
+
+        # Test with different probabilities
+        for p in [0.1, 0.3, 0.7, 0.9]:
+            t = torch.empty(10000, device=device)
+            t.geometric_(p)
+
+            # All values should be positive integers
+            self.assertTrue((t >= 1).all())
+
+            # Mean should be approximately 1/p
+            expected_mean = 1.0 / p
+            actual_mean = t.mean().item()
+            # Allow 10% tolerance for statistical variation
+            self.assertGreater(actual_mean, expected_mean * 0.8)
+            self.assertLess(actual_mean, expected_mean * 1.2)
 
 
 class TestRNNMPS(TestCaseMPS):

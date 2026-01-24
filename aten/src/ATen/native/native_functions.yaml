@@ -9066,6 +9066,7 @@
   variants: method
   dispatch:
     CPU, CUDA: geometric_
+    MPS: geometric_mps_
 
   # wrappers for TH functions
   autogen: geometric, geometric.out

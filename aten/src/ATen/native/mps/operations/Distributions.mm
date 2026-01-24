@@ -17,6 +17,7 @@
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/geometric_native.h>
 #include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
@@ -458,6 +459,39 @@ Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Gen
                                       MPSGraphRandomDistributionNormal,
                                       gen,
                                       "log_normal_mps_:" + std::to_string(mean) + ":" + std::to_string(std),
+                                      random_op_block);
+}
+
+// Geometric distribution using inverse transform sampling
+// X = ceil(log(U) / log(1-p)) where U ~ Uniform(0,1)
+Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
+  TORCH_CHECK(p > 0.0 && p < 1.0, "geometric_ expects p to be in (0, 1), but found p=", p);
+
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    // Compute log(1-p) as a constant
+    double log1mp = std::log1p(-p);
+    MPSGraphTensor* log1mpTensor = [mpsGraph constantWithScalar:log1mp dataType:randomTensor.dataType];
+    // Compute log(U) where U is uniform random
+    MPSGraphTensor* logTensor = [mpsGraph logarithmWithTensor:randomTensor name:nil];
+    // Compute log(U) / log(1-p)
+    MPSGraphTensor* divTensor = [mpsGraph divisionWithPrimaryTensor:logTensor
+                                                    secondaryTensor:log1mpTensor
+                                                               name:nil];
+    // Compute ceil to get the geometric random variable
+    return [mpsGraph ceilWithTensor:divTensor name:nil];
+  };
+
+  // Use uniform distribution in (0, 1) - exclude 0 to avoid log(0)
+  auto eps = std::numeric_limits<float>::epsilon();
+  return mps::random_mps_impl<double>(self,
+                                      eps,
+                                      1.0,
+                                      std::nullopt,
+                                      std::nullopt,
+                                      MPSGraphRandomDistributionUniform,
+                                      gen,
+                                      "geometric_mps_:" + std::to_string(p),
                                       random_op_block);
 }
 
