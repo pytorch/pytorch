@@ -121,6 +121,8 @@ class KernelNamespace:
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
 
+WORKSPACE_ARG_PLACEHOLDER = "ws_placeholder"
+
 
 @dataclasses.dataclass
 class BenchmarkTensors:
@@ -2059,22 +2061,18 @@ class TritonTemplate(KernelTemplate):
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
+        # Extract workspace metadata for async autotuning (don't create tensor here
+        # as it can't be pickled for subprocess communication)
+        workspace_size_bytes: Optional[int] = None
+        workspace_zero_fill = False
         workspace_args = []
         if workspace_arg is not None:
-            # Create workspace tensor
-            workspace_size = workspace_arg.count
-            workspace_tensor = torch.empty_strided(
-                (workspace_size,),
-                (1,),
-                dtype=torch.uint8,
-                device=layout.device.type,
+            workspace_size_bytes = workspace_arg.count
+            workspace_zero_fill = (
+                workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED
             )
 
-            # Handle zero initialization if needed
-            if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:
-                workspace_tensor.zero_()
-
-            workspace_args.append(workspace_tensor)
+            workspace_args.append(WORKSPACE_ARG_PLACEHOLDER)
 
         options = result.kernel_options
 
@@ -2124,6 +2122,8 @@ class TritonTemplate(KernelTemplate):
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             waves_per_eu=kwargs.get("waves_per_eu", 0),
             kpack=kwargs.get("kpack", 2),
+            workspace_size=workspace_size_bytes,
+            workspace_zero_fill=workspace_zero_fill,
             input_tensor_meta=TensorMeta.from_irnodes(kernel_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
@@ -4340,21 +4340,9 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            *tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    stride,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for stride in node.get_stride()
-            ),
-            sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
+            *sizevars.optimization_hints(node.get_size()),
+            *V.graph.sizevars.optimization_hints(node.get_stride()),
+            sizevars.optimization_hint(node.get_layout().offset),
         )
 
     def add_feedback_saver(self, fn: FeedbackFunction):
@@ -4501,12 +4489,7 @@ def _autotune_metadata(input_nodes):
         # argument, and extracting those out there directly
         "autotune_strides_hinted": ", ".join(
             [
-                str(
-                    V.graph.sizevars.size_hints(
-                        n.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                    )
-                )
+                str(V.graph.sizevars.optimization_hints(n.get_stride()))
                 for n in input_nodes
             ]
         ),
@@ -4515,10 +4498,7 @@ def _autotune_metadata(input_nodes):
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.size_hints(
-                            n.get_size(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
+                        V.graph.sizevars.optimization_hints(n.get_size()),
                     )
                 )
                 for n in input_nodes

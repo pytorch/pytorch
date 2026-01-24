@@ -1197,6 +1197,8 @@ def _get_cudnn_enabled() -> _bool: ...  # THPModule_userEnabledCuDNN
 def _set_cudnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledCuDNN
 def _get_flash_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFusedSDP
 def _set_sdp_use_flash(arg: _bool) -> None: ...  # THPModule_setSDPUseFlash
+def _get_fa3_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFA3SDP
+def _set_sdp_use_fa3(arg: _bool) -> None: ...  # THPModule_setSDPUseFA3
 def _get_mem_efficient_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_mem_efficient(
     arg: _bool,
@@ -2839,7 +2841,7 @@ class _NodeIter(Iterator[FxNode]):
     def __iter__(self) -> Self: ...
     def __next__(self) -> FxNode: ...
 
-# Defined in torch/csrc/inductor/static_cuda_launcher.cpp
+# Defined in torch/csrc/inductor/static_launcher/cuda.cpp
 class _StaticCudaLauncher:
     @staticmethod
     def _load_kernel(
