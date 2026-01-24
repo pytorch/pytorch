@@ -1111,6 +1111,11 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             # pyrefly: ignore [missing-attribute]
             resolved_forward = resolved_forward.__func__
 
+        resolved_call = mod.__call__
+        if hasattr(resolved_call, "__self__"):
+            # pyrefly: ignore [missing-attribute]
+            resolved_call = resolved_call.__func__
+
         # Mirrored from NNModuleVariable.call_function:
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
         if (
@@ -1122,7 +1127,8 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             and len(mod._backward_hooks) == 0
             and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
             and len(torch.nn.modules.module._global_backward_hooks) == 0
-            and resolved_forward != torch.nn.Module.forward
+            and resolved_forward != torch.nn.Module.forward  # has forward impl
+            and resolved_call == torch.nn.Module.__call__  # no custom __call__ impl
         ):
             # We cannot trace __call__ by default because it will break
             # the legacy dynamo export. If we want to revisit this,

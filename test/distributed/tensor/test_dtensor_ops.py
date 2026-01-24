@@ -773,6 +773,11 @@ class TestLocalDTensorOps(TestDTensorOps):
 
     def tearDown(self):
         super().tearDown()
+        # Clear sharding propagation cache to avoid stale mesh references
+        # between tests that destroy and recreate process groups
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
         try:
             dist.destroy_process_group()
         except AssertionError:
