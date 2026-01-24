@@ -234,7 +234,6 @@ def preprocess_test_in(
         "torch",
         "torchvision",
         "torchaudio",
-        "mamba_ssm",
     ] + additional_package_to_move
     # Read current requirements
     target_path = Path(target_file)
