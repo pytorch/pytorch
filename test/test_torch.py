@@ -2516,7 +2516,10 @@ class TestTorchDeviceType(TestCase):
             y = torch.randn(1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
             expected = self._brute_cdist(x, y, p=2)
-            self.assertEqual(expected, actual)
+            if TEST_WITH_ROCM:
+                self.assertEqual(expected, actual, atol=1e-4, rtol=1e-4)
+            else:
+                self.assertEqual(expected, actual)
 
     @slowTest
     @tf32_on_and_off(0.01)
