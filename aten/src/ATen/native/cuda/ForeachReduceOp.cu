@@ -402,6 +402,21 @@ inline void check_foreach_norm_dtype(
                   AT_PRIVATE_CASE_TYPE_USING_HINT(          \
                       at::ScalarType::BFloat16, out_t, __VA_ARGS__))
 
+// Traits struct for dispatch function names - MSVC requires this pattern
+// instead of constexpr ternary for string literals used in AT_DISPATCH macros
+template <bool apply_root>
+struct ForeachNormDispatchName;
+
+template <>
+struct ForeachNormDispatchName<true> {
+  static constexpr const char* value = "foreach_tensor_norm_cuda";
+};
+
+template <>
+struct ForeachNormDispatchName<false> {
+  static constexpr const char* value = "foreach_tensor_powsum_cuda";
+};
+
 // Internal implementation for foreach_tensor_norm_cuda and
 // foreach_tensor_powsum_cuda apply_root: if true, applies sqrt for L2 norm; if
 // false, returns raw sum support_infinity: if true, includes L-infinity norm
@@ -411,10 +426,6 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
     TensorList tensors,
     double p,
     std::optional<ScalarType> dtype) {
-  // Dispatch name must be a compile-time constant for AT_DISPATCH macros
-  constexpr const char* func_name =
-      apply_root ? "foreach_tensor_norm_cuda" : "foreach_tensor_powsum_cuda";
-
   const size_t ntensors = tensors.size();
   int max_chunks_per_tensor = -1;
 
@@ -452,76 +463,83 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
       kHalf,
       c10::kBFloat16,
       tensor_lists[0][0].scalar_type(),
-      func_name,
+      ForeachNormDispatchName<apply_root>::value,
       [&]() {
-        AT_DISPATCH_OUT_DTYPES(output_dtype, func_name, [&]() {
-          using out_opmath_t = typename at::opmath_type<out_t>;
-          if (p == static_cast<double>(1)) {
-            multi_tensor_apply<1>(
-                tensor_lists,
-                LpNormFunctor<scalar_t, NormType::L1, out_t>(),
-                output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                max_chunks_per_tensor);
-          } else if (p == static_cast<double>(2)) {
-            multi_tensor_apply<1>(
-                tensor_lists,
-                LpNormFunctor<scalar_t, NormType::L2, out_t>(),
-                output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                max_chunks_per_tensor);
-          } else if constexpr (support_infinity) {
-            if (p == std::numeric_limits<double>::infinity()) {
-              multi_tensor_apply<1>(
-                  tensor_lists,
-                  LpNormFunctor<scalar_t, NormType::LInf, out_t>(),
-                  output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                  max_chunks_per_tensor);
-            }
-          }
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-          const at::cuda::OptionalCUDAGuard device_guard(
-              device_of(output_per_tensor));
-          auto stream = at::cuda::getCurrentCUDAStream();
-
-          const size_t num_kernels = ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
-          for (const auto i : c10::irange(num_kernels)) {
-            const size_t num_tensors_this_kernel =
-                (i < num_kernels - 1 || ntensors % MAX_TENSORS_PER_KERNEL == 0)
-                ? MAX_TENSORS_PER_KERNEL
-                : (ntensors % MAX_TENSORS_PER_KERNEL);
-
-            TensorListAddresses addr_struct;
-            for (const auto j : c10::irange(num_tensors_this_kernel)) {
-              addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j]
-                                             .mutable_data_ptr<out_t>();
-            }
-
-            if (p == static_cast<double>(1)) {
-              lpnorm_cleanup<scalar_t, NormType::L1, out_t, apply_root>
-                  <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                      output_per_tensor.const_data_ptr<out_opmath_t>() +
-                          i * MAX_TENSORS_PER_KERNEL * max_chunks_per_tensor,
-                      addr_struct,
+        AT_DISPATCH_OUT_DTYPES(
+            output_dtype, ForeachNormDispatchName<apply_root>::value, [&]() {
+              using out_opmath_t = typename at::opmath_type<out_t>;
+              if (p == static_cast<double>(1)) {
+                multi_tensor_apply<1>(
+                    tensor_lists,
+                    LpNormFunctor<scalar_t, NormType::L1, out_t>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
+                    max_chunks_per_tensor);
+              } else if (p == static_cast<double>(2)) {
+                multi_tensor_apply<1>(
+                    tensor_lists,
+                    LpNormFunctor<scalar_t, NormType::L2, out_t>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
+                    max_chunks_per_tensor);
+              } else if constexpr (support_infinity) {
+                if (p == std::numeric_limits<double>::infinity()) {
+                  multi_tensor_apply<1>(
+                      tensor_lists,
+                      LpNormFunctor<scalar_t, NormType::LInf, out_t>(),
+                      output_per_tensor.mutable_data_ptr<out_opmath_t>(),
                       max_chunks_per_tensor);
-            } else if (p == static_cast<double>(2)) {
-              lpnorm_cleanup<scalar_t, NormType::L2, out_t, apply_root>
-                  <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                      output_per_tensor.const_data_ptr<out_opmath_t>() +
-                          i * MAX_TENSORS_PER_KERNEL * max_chunks_per_tensor,
-                      addr_struct,
-                      max_chunks_per_tensor);
-            } else if constexpr (support_infinity) {
-              if (p == std::numeric_limits<double>::infinity()) {
-                lpnorm_cleanup<scalar_t, NormType::LInf, out_t, apply_root>
-                    <<<num_tensors_this_kernel, 512, 0, stream>>>(
-                        output_per_tensor.const_data_ptr<out_opmath_t>() +
-                            i * MAX_TENSORS_PER_KERNEL * max_chunks_per_tensor,
-                        addr_struct,
-                        max_chunks_per_tensor);
+                }
               }
-            }
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-          }
-        });
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              const at::cuda::OptionalCUDAGuard device_guard(
+                  device_of(output_per_tensor));
+              auto stream = at::cuda::getCurrentCUDAStream();
+
+              const size_t num_kernels =
+                  ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
+              for (const auto i : c10::irange(num_kernels)) {
+                const size_t num_tensors_this_kernel =
+                    (i < num_kernels - 1 ||
+                     ntensors % MAX_TENSORS_PER_KERNEL == 0)
+                    ? MAX_TENSORS_PER_KERNEL
+                    : (ntensors % MAX_TENSORS_PER_KERNEL);
+
+                TensorListAddresses addr_struct;
+                for (const auto j : c10::irange(num_tensors_this_kernel)) {
+                  addr_struct.addresses[j] =
+                      vec_res[i * MAX_TENSORS_PER_KERNEL + j]
+                          .mutable_data_ptr<out_t>();
+                }
+
+                if (p == static_cast<double>(1)) {
+                  lpnorm_cleanup<scalar_t, NormType::L1, out_t, apply_root>
+                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
+                          output_per_tensor.const_data_ptr<out_opmath_t>() +
+                              i * MAX_TENSORS_PER_KERNEL *
+                                  max_chunks_per_tensor,
+                          addr_struct,
+                          max_chunks_per_tensor);
+                } else if (p == static_cast<double>(2)) {
+                  lpnorm_cleanup<scalar_t, NormType::L2, out_t, apply_root>
+                      <<<num_tensors_this_kernel, 512, 0, stream>>>(
+                          output_per_tensor.const_data_ptr<out_opmath_t>() +
+                              i * MAX_TENSORS_PER_KERNEL *
+                                  max_chunks_per_tensor,
+                          addr_struct,
+                          max_chunks_per_tensor);
+                } else if constexpr (support_infinity) {
+                  if (p == std::numeric_limits<double>::infinity()) {
+                    lpnorm_cleanup<scalar_t, NormType::LInf, out_t, apply_root>
+                        <<<num_tensors_this_kernel, 512, 0, stream>>>(
+                            output_per_tensor.const_data_ptr<out_opmath_t>() +
+                                i * MAX_TENSORS_PER_KERNEL *
+                                    max_chunks_per_tensor,
+                            addr_struct,
+                            max_chunks_per_tensor);
+                  }
+                }
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              }
+            });
       });
 
   // correctly assign values to only non-empty slots, as the empty slots should
