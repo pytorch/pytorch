@@ -290,6 +290,26 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(pickle_data.script_class_name, "DeviceMesh")
         self.assertEqual(pickle_data.wrapped_obj, device_mesh)
 
+    def test_with_effects_functional_tensor_mode(self):
+        """
+        Test that with_effects works correctly under FunctionalTensorMode.
+        This is needed when executing pre-compiled FX graphs that contain
+        explicit with_effects calls.
+        """
+        from torch._higher_order_ops.effects import with_effects, new_token_tensor
+        from torch._subclasses.functional_tensor import FunctionalTensorMode
+
+        token = new_token_tensor()
+        x = torch.randn(4, 4)
+
+        with FunctionalTensorMode():
+            result = with_effects(
+                token, torch.ops.aten._print.default, "test message"
+            )
+
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+
 
 instantiate_parametrized_tests(TestFakeDistributed)
 
