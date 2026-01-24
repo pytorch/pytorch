@@ -20,10 +20,12 @@ checks and proper tracking of distributed state and operations across processes.
 
 import functools
 import inspect
+import re
 from collections.abc import Sequence
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Literal, Optional, TYPE_CHECKING
 
 import torch
+from torch._guards import Source
 from torch.fx.experimental._backward_state import BackwardState
 
 from .. import compiled_autograd, variables
@@ -32,7 +34,7 @@ from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, MethodCallSource
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable, EnumVariable
@@ -139,7 +141,7 @@ class WorldMetaClassVariable(DistributedVariable):
             assert self.source
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return ProcessGroupVariable(self.value.WORLD)
+            return ProcessGroupVariable.create(tx, self.value.WORLD, source=source)
         elif name == "NON_GROUP_MEMBER":
             assert self.source
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
@@ -345,13 +347,25 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ProcessGroupVariable(
-                self.value.get_group(*const_args, **const_kwargs)
+            source = None
+            if self.source:
+                source = MethodCallSource(
+                    base=self.source, method_name="get_group", args=tuple(const_args)
+                )
+            return ProcessGroupVariable.create(
+                tx, self.value.get_group(*const_args, **const_kwargs), source=source
             )
         if name == "_is_current_rank_part_of_mesh":
             return ConstantVariable.create(self.value._is_current_rank_part_of_mesh())
         if name == "_get_or_create_default_group":
-            return ProcessGroupVariable(self.value._get_or_create_default_group())
+            source = None
+            if self.source:
+                source = MethodCallSource(
+                    base=self.source, method_name="_get_or_create_default_group"
+                )
+            return ProcessGroupVariable.create(
+                tx, self.value._get_or_create_default_group(), source=source
+            )
         if name == "_flatten":
             from .builder import SourcelessBuilder
 
@@ -371,24 +385,33 @@ class DeviceMeshVariable(DistributedVariable):
 
 class ProcessGroupVariable(DistributedVariable):
     """
-    We don't want a ProcessGroup object to end up in our output graph.
+    Variable tracker for ProcessGroup objects in Dynamo.
 
-    But it's common for dynamo to intercept a PG that is then used to get info like
-    rank() or world_size(), as well as passed to utility functions in distributed_c10d
-    which desugar it into plain types like a ranklist and tag.
+    ProcessGroup objects are lifted as graph inputs (placeholders) rather than
+    being embedded as constants. This is necessary because repr() of ProcessGroup
+    produces invalid Python syntax (e.g., "<ProcessGroup object at 0x...>"),
+    which would cause syntax errors when FX generates Python code.
 
-    For convenience and proper guarding, we construct a variable type.
+    When a ProcessGroup is encountered, the builder creates a graph input for it
+    and passes the resulting proxy to this variable. The as_proxy() method returns
+    this proxy, allowing the ProcessGroup to be properly referenced in traced
+    operations (e.g., funcol.all_reduce inside autograd.Function).
 
-    TODO: make it possible to use ProcessGroupVariable as input to simple functions
-          like _expand_group without dynamo complaining about making a proxy for it.
-          It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
-          torch library functions are dealing with tensor-like types and would have proxies
-          for their args.
-    TODO: should we make this inherit VT instead of UDOV? Do we want any of the default behaviors
-          or just graph-break whenever one of our special cases is not hit?
+    TODO: should we make this inherit VT instead of UDOV? Do we want any of the
+          default behaviors or just graph-break whenever one of our special cases
+          is not hit?
     """
 
+    def __init__(self, value: Any, proxy: torch.fx.Proxy | None = None, **kwargs: Any) -> None:
+        super().__init__(value, **kwargs)
+        self.proxy = proxy
+
     def as_python_constant(self) -> Any:
+        return self.value
+
+    def as_proxy(self) -> Any:
+        if self.proxy is not None:
+            return self.proxy
         return self.value
 
     def call_method(
@@ -416,6 +439,39 @@ class ProcessGroupVariable(DistributedVariable):
             )
         # TODO should this just raise unimplemented?
         return super().var_getattr(tx, name)
+
+    @classmethod
+    def create(
+        cls,
+        tx: "InstructionTranslator",
+        value: Any,
+        source: Optional[Source] = None,
+    ) -> "ProcessGroupVariable":
+        """
+        Creates a ProcessGroupVariable with a proper proxy that can be used in
+        subgraphs (e.g., inside autograd.Function forward/backward).
+
+        ProcessGroup objects are stored as module attributes and accessed via
+        get_attr nodes rather than as graph inputs (placeholders). This is
+        because:
+        1. repr() of ProcessGroup produces invalid Python syntax
+        2. ProcessGroups should not require passing as arguments when running
+           the graph (e.g., during AOT export)
+
+        A source is required because ProcessGroups need proper guards installed.
+        If source is None, this means the ProcessGroup was obtained from an
+        object without proper source tracking.
+        """
+        if source is None:
+            unimplemented(
+                "ProcessGroup requires a source for proper guard installation. "
+                "The ProcessGroup was obtained from an object without source tracking."
+            )
+
+        name = source.name
+        attr_name = re.sub(r"[^a-zA-Z0-9]+", "_", name)
+        proxy = tx.output.register_static_attr_and_return_proxy(attr_name, value)
+        return cls(value, proxy=proxy, source=source)
 
     @staticmethod
     def is_process_group(value: object) -> bool:
