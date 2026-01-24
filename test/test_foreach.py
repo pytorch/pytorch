@@ -1112,6 +1112,37 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(
+        [o for o in foreach_reduce_op_db if o.name == "_foreach_norm"],
+        allowed_dtypes=floating_types(),
+    )
+    def test_foreach_norm_empty_tensor_inf_error(self, device, dtype, op):
+        """Test that _foreach_norm errors on empty tensors with ord=infinity"""
+        import math
+
+        # Test with single empty tensor
+        empty_tensor = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity",
+        ):
+            torch._foreach_norm([empty_tensor], ord=math.inf)
+
+        # Test with mixed empty and non-empty tensors
+        non_empty_tensor = torch.randn(4, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity",
+        ):
+            torch._foreach_norm([empty_tensor, non_empty_tensor], ord=math.inf)
+
+        # Test that L1 and L2 norms work with empty tensors (should return 0)
+        result_l1 = torch._foreach_norm([empty_tensor], ord=1)
+        result_l2 = torch._foreach_norm([empty_tensor], ord=2)
+        self.assertEqual(result_l1[0].item(), 0.0)
+        self.assertEqual(result_l2[0].item(), 0.0)
+
+    @onlyCUDA
+    @ops(
         foreach_unary_op_db
         + foreach_binary_op_db
         + foreach_pointwise_op_db

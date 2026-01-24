@@ -442,6 +442,17 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
       max_chunks_per_tensor = max_chunks_this_tensor;
     }
   }
+
+  // If the tensor is empty and norm == infty, we cannot compute the norm
+  // because the operation does not have an identity
+  if (p == std::numeric_limits<double>::infinity()) {
+    for (const auto& t : tensors) {
+      TORCH_CHECK(
+          t.numel() > 0,
+          "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity");
+    }
+  }
+
   const auto options = tensors[0].options();
   const ScalarType output_dtype =
       dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
