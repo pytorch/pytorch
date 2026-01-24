@@ -512,7 +512,6 @@ class ViewAndMutationMeta:
     # help users identify where to add .detach() in their code
     tangent_source_stack_traces: Optional[list[Optional[str]]] = None
 
-
     def __post_init__(self) -> None:
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
