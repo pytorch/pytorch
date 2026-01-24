@@ -10075,6 +10075,122 @@ class TestGatherScatter(TestCaseMPS):
         a_cpu[:, 0] = a_cpu[:, 0] + b_cpu[:, 0]
         self.assertEqual(a_cpu, a_mps)
 
+
+class TestSegmentReduceMPS(TestCaseMPS):
+    """Test segment_reduce operations on MPS backend."""
+
+    def _test_segment_reduce(self, reduce_op, dtype=torch.float32):
+        """Helper to test segment_reduce with different reduction operations."""
+        # Test with lengths
+        data = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=dtype, device="mps")
+        lengths = torch.tensor([2, 3, 1], dtype=torch.int64, device="mps")
+
+        result_mps = torch.segment_reduce(data, reduce_op, lengths=lengths)
+
+        # Compare with CPU
+        data_cpu = data.to("cpu")
+        lengths_cpu = lengths.to("cpu")
+        result_cpu = torch.segment_reduce(data_cpu, reduce_op, lengths=lengths_cpu)
+
+        self.assertEqual(result_mps.cpu(), result_cpu, rtol=1e-4, atol=1e-4)
+
+    def _test_segment_reduce_with_offsets(self, reduce_op, dtype=torch.float32):
+        """Helper to test segment_reduce with offsets."""
+        data = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=dtype, device="mps")
+        offsets = torch.tensor([0, 2, 5, 6], dtype=torch.int64, device="mps")
+
+        result_mps = torch.segment_reduce(data, reduce_op, offsets=offsets)
+
+        # Compare with CPU
+        data_cpu = data.to("cpu")
+        offsets_cpu = offsets.to("cpu")
+        result_cpu = torch.segment_reduce(data_cpu, reduce_op, offsets=offsets_cpu)
+
+        self.assertEqual(result_mps.cpu(), result_cpu, rtol=1e-4, atol=1e-4)
+
+    def test_segment_reduce_sum(self):
+        """Test segment_reduce with sum reduction."""
+        self._test_segment_reduce("sum")
+
+    def test_segment_reduce_mean(self):
+        """Test segment_reduce with mean reduction."""
+        self._test_segment_reduce("mean")
+
+    def test_segment_reduce_max(self):
+        """Test segment_reduce with max reduction."""
+        self._test_segment_reduce("max")
+
+    def test_segment_reduce_min(self):
+        """Test segment_reduce with min reduction."""
+        self._test_segment_reduce("min")
+
+    def test_segment_reduce_prod(self):
+        """Test segment_reduce with prod reduction."""
+        self._test_segment_reduce("prod")
+
+    def test_segment_reduce_sum_offsets(self):
+        """Test segment_reduce with sum reduction using offsets."""
+        self._test_segment_reduce_with_offsets("sum")
+
+    def test_segment_reduce_mean_offsets(self):
+        """Test segment_reduce with mean reduction using offsets."""
+        self._test_segment_reduce_with_offsets("mean")
+
+    def test_segment_reduce_half(self):
+        """Test segment_reduce with float16."""
+        self._test_segment_reduce("sum", dtype=torch.float16)
+
+    def test_segment_reduce_bfloat16(self):
+        """Test segment_reduce with bfloat16."""
+        self._test_segment_reduce("sum", dtype=torch.bfloat16)
+
+    def test_segment_reduce_2d(self):
+        """Test segment_reduce on 2D tensor."""
+        data = torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]], device="mps")
+        lengths = torch.tensor([2, 2], dtype=torch.int64, device="mps")
+
+        result_mps = torch.segment_reduce(data, "sum", lengths=lengths, axis=0)
+
+        data_cpu = data.to("cpu")
+        lengths_cpu = lengths.to("cpu")
+        result_cpu = torch.segment_reduce(data_cpu, "sum", lengths=lengths_cpu, axis=0)
+
+        self.assertEqual(result_mps.cpu(), result_cpu)
+
+    def test_segment_reduce_empty_segment(self):
+        """Test segment_reduce with empty segments."""
+        data = torch.tensor([1.0, 2.0, 3.0], device="mps")
+        lengths = torch.tensor([1, 0, 2], dtype=torch.int64, device="mps")
+
+        result_mps = torch.segment_reduce(data, "sum", lengths=lengths, initial=0.0)
+
+        data_cpu = data.to("cpu")
+        lengths_cpu = lengths.to("cpu")
+        result_cpu = torch.segment_reduce(data_cpu, "sum", lengths=lengths_cpu, initial=0.0)
+
+        self.assertEqual(result_mps.cpu(), result_cpu)
+
+    def test_segment_reduce_backward(self):
+        """Test segment_reduce backward pass."""
+        data = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], device="mps", requires_grad=True)
+        lengths = torch.tensor([2, 3, 1], dtype=torch.int64, device="mps")
+
+        result_mps = torch.segment_reduce(data, "sum", lengths=lengths)
+        loss_mps = result_mps.sum()
+        loss_mps.backward()
+        grad_mps = data.grad.clone()
+
+        data_cpu = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], device="cpu", requires_grad=True)
+        lengths_cpu = lengths.to("cpu")
+
+        result_cpu = torch.segment_reduce(data_cpu, "sum", lengths=lengths_cpu)
+        loss_cpu = result_cpu.sum()
+        loss_cpu.backward()
+        grad_cpu = data_cpu.grad.clone()
+
+        self.assertEqual(grad_mps.cpu(), grad_cpu)
+
+
 # These tests were taken from test/test_view_ops.py
 # They are subset of those tests as currently only this subset is working.
 # This whole `class` will be removed when we add generic device testing. There
