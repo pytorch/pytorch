@@ -284,7 +284,27 @@ class DeviceMeshVariable(DistributedVariable):
 
         from torch.distributed.device_mesh import DeviceMesh
 
-        return istype(value, DeviceMesh)
+        if istype(value, DeviceMesh):
+            return True
+
+        # Also check if value is a FakeScriptObject wrapping a DeviceMesh. This
+        # happens when tracing with fake distributed mode. We want DeviceMeshVariable
+        # to handle these as well so attribute access and method calls work properly.
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        if isinstance(value, FakeScriptObject):
+            if istype(value.real_obj, DeviceMesh):
+                return True
+
+        return False
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        # Extract the real DeviceMesh if wrapped in FakeScriptObject
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        if isinstance(value, FakeScriptObject):
+            value = value.real_obj
+        super().__init__(value, **kwargs)
 
     def as_python_constant(self) -> Any:
         return self.value

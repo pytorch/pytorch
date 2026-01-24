@@ -365,9 +365,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         )
 
     def as_python_constant(self) -> Any:
-        if is_opaque_value_type(
-            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
-        ):
+        real_obj_type = type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+        # Allow both value types and reference types (like DeviceMesh) to be used
+        # as python constants. Reference types are typically immutable objects
+        # that can be safely baked into the traced graph.
+        if is_opaque_value_type(real_obj_type) or is_opaque_reference_type(real_obj_type):
             return self.value.real_obj  # pyrefly: ignore[missing-attribute]
         return super().as_python_constant()
 
