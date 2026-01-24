@@ -10,10 +10,7 @@ import typing
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Optional, TypeVar, Union
 
-import onnx
-
-import onnxscript
-from onnxscript import ir
+from torch.onnx._internal._lazy_import import onnx, onnx_ir as ir, onnxscript
 
 
 logger = logging.getLogger(__name__)

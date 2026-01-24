@@ -20,7 +20,7 @@ pip_install \
 
 pip_install coloredlogs packaging
 pip_install onnxruntime==1.23.1
-pip_install onnx-ir==0.1.12
+pip_install onnx-ir==0.1.15
 pip_install onnxscript==0.5.4
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers

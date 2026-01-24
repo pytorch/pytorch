@@ -897,7 +897,6 @@ kernel void ternary_strided(
     constant long* other1_strides [[buffer(7)]],
     constant long* other2_strides [[buffer(8)]],
     constant uint& ndim [[buffer(9)]],
-    constant uint4& types [[buffer(10)]],
     uint index [[thread_position_in_grid]]) {
   F f;
   using res_t = result_of<F, T, T, T>;
@@ -996,7 +995,6 @@ kernel void ternary_dense_cast(
           constant long* other1_strides,                                       \
           constant long* other2_strides,                                       \
           constant uint& ndim,                                                 \
-          constant uint4& types,                                               \
           uint tid);                                                           \
   template [[host_name(#NAME "_strided_cast_" #DTYPEI)]] kernel void ::c10::   \
       metal::ternary_strided_cast<DTYPEI, NAME##_functor, OMT>(                \

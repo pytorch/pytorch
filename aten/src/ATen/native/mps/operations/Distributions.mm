@@ -13,6 +13,7 @@
 #else
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
+#include <ATen/ops/cauchy_native.h>
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
@@ -454,6 +455,45 @@ Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Gen
                                       MPSGraphRandomDistributionNormal,
                                       gen,
                                       "log_normal_mps_:" + std::to_string(mean) + ":" + std::to_string(std),
+                                      random_op_block);
+}
+
+Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Generator> gen) {
+  TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
+
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    auto mpsGraph = cachedGraph->graph();
+    // cauchy distwith inverse CDF: median + sigma * tan(pi * (U - 0.5))
+    const auto halfTensor = [mpsGraph constantWithScalar:0.5 dataType:randomTensor.dataType];
+    const auto piTensor = [mpsGraph constantWithScalar:M_PI dataType:randomTensor.dataType];
+    const auto medianTensor = [mpsGraph constantWithScalar:median dataType:randomTensor.dataType];
+    const auto sigmaTensor = [mpsGraph constantWithScalar:sigma dataType:randomTensor.dataType];
+
+    // (U - 0.5)
+    const auto shiftedTensor = [mpsGraph subtractionWithPrimaryTensor:randomTensor secondaryTensor:halfTensor name:nil];
+    // pi * (U - 0.5)
+    const auto scaledTensor = [mpsGraph multiplicationWithPrimaryTensor:piTensor
+                                                        secondaryTensor:shiftedTensor
+                                                                   name:nil];
+    // tan(pi * (U - 0.5))
+    const auto tanTensor = [mpsGraph tanWithTensor:scaledTensor name:nil];
+
+    // sigma * tan(pi * (U - 0.5))
+    const auto multipliedTensor = [mpsGraph multiplicationWithPrimaryTensor:sigmaTensor
+                                                            secondaryTensor:tanTensor
+                                                                       name:nil];
+    // median + sigma * tan(pi * (U - 0.5))
+    return [mpsGraph additionWithPrimaryTensor:medianTensor secondaryTensor:multipliedTensor name:nil];
+  };
+  auto eps = std::numeric_limits<float>::epsilon();
+  return mps::random_mps_impl<double>(self,
+                                      eps,
+                                      1.0 - eps,
+                                      std::nullopt,
+                                      std::nullopt,
+                                      MPSGraphRandomDistributionUniform,
+                                      gen,
+                                      "cauchy_mps_:" + std::to_string(median) + ":" + std::to_string(sigma),
                                       random_op_block);
 }
 

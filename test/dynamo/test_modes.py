@@ -1110,6 +1110,68 @@ class outer_fn(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_with_requires_grad(self):
+        """Test AOTAutograd tracing over a torch.compile'd function with requires_grad inputs.
+
+        This tests the scenario where:
+        1. An outer aot_function traces a function with requires_grad inputs
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. AOTAutograd partitions into forward/backward graphs
+        4. The inner Dynamo region should only be compiled once
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._functorch.aot_autograd import aot_function
+        from torch._functorch.compilers import nop
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        def inner_fn(x):
+            return x * 2 + 1
+
+        compiled_fn = torch.compile(inner_fn, backend=compile_counter)
+
+        def outer_fn(x):
+            y = x + 1
+            z = compiled_fn(y)
+            return z.sum()
+
+        x = torch.randn(3, 3, requires_grad=True)
+
+        # Track forward graph to verify invoke_subgraph appears
+        fw_graph = None
+
+        def fw_compiler(gm, example_inputs):
+            nonlocal fw_graph
+            fw_graph = gm
+            return gm
+
+        aot_fn = aot_function(
+            outer_fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            _disable_torch_fn_metadata_mode=True,
+        )
+
+        # Run forward and backward
+        result = aot_fn(x)
+        result.backward()
+
+        # Check that we got a forward graph with invoke_subgraph
+        self.assertIsNotNone(fw_graph, "Expected a forward graph")
+        fw_graph_code = fw_graph.print_readable(print_output=False)
+        self.assertIn("invoke_subgraph", fw_graph_code)
+
+        # Check compile count - should be 1 (compiled once during tracing)
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
+        )
+
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
     def test_default_device_restored_after_mode_tests(self):

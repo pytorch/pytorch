@@ -644,15 +644,21 @@ class AOTInductorModelBase {
               bytes_read,
               data_size,
               /* skip_copy = */ false);
-          main_blob_idx++;
         } else {
           auto* secondary_cpu_constants_ptr =
               static_cast<uint8_t*>(secondary_cpu_constant_blob_.get());
           internal_ptr = secondary_cpu_constants_ptr +
               secondary_cpu_constants_internal_offset[secondary_cpu_blob_idx];
           memcpy(internal_ptr, _get_constants_start() + bytes_read, data_size);
-          secondary_cpu_blob_idx++;
         }
+      }
+
+      // Always increment blob indices to stay in sync with
+      // compute_constant_blob(), even for zero-size constants.
+      if (device_type_matches) {
+        main_blob_idx++;
+      } else {
+        secondary_cpu_blob_idx++;
       }
 
       bytes_read += data_size;

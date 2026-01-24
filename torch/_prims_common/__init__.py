@@ -2057,11 +2057,9 @@ def are_strides_like_channels_last_or_false(
         if d == 0 and min == strides[1]:
             return False
         min = strides[d]
-        # Assume stride is not 1, the consequence is min could be larger than needed,
-        # which would result in returning False for this function but not vice versa,
-        # so it's ok.
-        if guard_or_true(strides[d] > 1):
-            min *= shape[d]
+        # Only multiply by shape[d] when size >= 1, matching C++ logic
+        # shape[d]!=0 hence we know its >=1 here
+        min *= shape[d]
     return True
 
 

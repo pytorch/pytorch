@@ -7,7 +7,7 @@ from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 # Define a simple opaque type for testing
-class OpaqueCounter:
+class OpaqueCounter(torch._opaque_base.OpaqueBase):
     """A simple opaque object that holds a counter."""
 
     def __init__(self, value: int):

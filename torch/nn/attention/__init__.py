@@ -194,4 +194,4 @@ current_flash_attention_impl.__module__ = __name__
 restore_flash_attention_impl.__module__ = __name__
 
 # Import built-in implementations to trigger self-registration
-from . import _fa4  # noqa: F401
+from . import _fa3, _fa4  # noqa: F401  # noqa: F401

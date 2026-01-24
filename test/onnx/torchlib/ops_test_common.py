@@ -19,12 +19,12 @@ import error_reproduction
 import numpy as np
 
 import onnx
+import onnx_ir as ir
 import onnxruntime as ort
 import onnxruntime.capi.onnxruntime_pybind11_state
 import onnxscript
 import onnxscript.evaluator
 import pytest
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _building, _ir_passes, _tensors

@@ -6,6 +6,7 @@ import math
 import torch
 import torch._inductor.config
 import torch.utils.checkpoint
+from torch._C import FileCheck
 from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
@@ -33,6 +34,15 @@ def checkpoint_wrapper(fn):
 class TestSDPAPatternRewriterTemplate(TestCase):
     use_static_shapes = True
 
+    def setUp(self):
+        self.prev_tf32 = torch.backends.cuda.matmul.allow_tf32
+        torch.backends.cuda.matmul.allow_tf32 = True
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        torch.backends.cuda.matmul.allow_tf32 = self.prev_tf32
+
     def _clone_inputs(self, inputs):
         def clone(x):
             if not isinstance(x, torch.Tensor):
@@ -46,13 +56,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         dot_prod_attention,
         args1=None,
         contains=True,
-        atol=1e-5,
+        atol=1e-3,
         has_fuse_pattern=True,
         has_dropout=False,
         check_train=True,
         override_check_equal=False,
         dtype=torch.float,
-        rtol=1.3e-6,
+        rtol=0.2,
     ):
         if args1 is None:
             tensor_shape = (4, 2, 16, 32)
@@ -101,7 +111,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
             # some tests configured with very low dropout where we still want to check equality
             if not has_dropout or override_check_equal:
-                self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
+                self.assertEqual(result1, result2, atol=atol, rtol=rtol)
 
             if training:
                 result1.sum().backward()
@@ -131,6 +141,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             rtol = 1.3e-6 if dtype == torch.float else 0.7
             if self.device in ["cpu", "xpu"] and dtype == torch.half:
                 atol = 2e-3
+                rtol = 1e-2
+            if TEST_WITH_ROCM and dtype == torch.float:
+                atol = 3e-3
                 rtol = 1e-2
             self._check_common(dot_prod_attention, dtype=dtype, atol=atol, rtol=rtol)
             self._check_common(
@@ -1002,6 +1015,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             attn_weights = scores.float().softmax(dim=-1).type(value.dtype)
             return attn_weights.matmul(value)
 
+        atol = 1e-3
+        rtol = 0.2
+        if TEST_WITH_ROCM:
+            atol = 3e-3
+            rtol = 1e-2
+
         tensor_shapes = [(4, 2, 16, 32), (1, 2, 16, 32)]
         for tensor_shape in tensor_shapes:
             attn_mask = torch.randn((1, 1, 1, 2), dtype=torch.float, device=self.device)
@@ -1016,6 +1035,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 args1=args,
                 has_dropout=False,
                 check_train=False,
+                atol=atol,
+                rtol=rtol,
             )
 
     def _test_sdpa_rewriter_22(self):
@@ -1208,6 +1229,42 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         test_sdpa_rewriter_24_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
         )
+
+        def test_skip_non_tf32(self):
+            try:
+                orig = torch.backends.cuda.matmul.allow_tf32
+                torch.backends.cuda.matmul.allow_tf32 = False
+
+                class Model(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.inv_scale = 1.0 / 8**0.5
+                        self.query = torch.nn.Linear(64, 64)
+                        self.key = torch.nn.Linear(64, 64)
+                        self.value = torch.nn.Linear(64, 64)
+
+                    def forward(self, x1, attn_mask):
+                        q = self.query(x1).permute([0, 2, 1, 3])
+                        k = self.key(x1).permute([0, 2, 1, 3])
+                        v = self.value(x1).permute([0, 2, 1, 3])
+                        t1 = torch.matmul(q, k.transpose(-2, -1))
+                        t2 = t1.div(self.inv_scale)
+                        t3 = t2 + attn_mask
+                        t4 = t3.softmax(dim=-1)
+                        t5 = t4.matmul(v)
+                        return t5
+
+                func = Model().to("cuda")
+                x1 = torch.randn(1, 16, 64, 64, device="cuda")
+                attn_mask = torch.zeros(1, 1, 16, 16, device="cuda")
+                test_inputs = [x1, attn_mask]
+
+                out, code = run_and_get_code(torch.compile(func), *test_inputs)
+                FileCheck().check_not("scaled_dot_product").run(code[0])
+                self.assertEqual(out, func(*test_inputs))
+
+            finally:
+                torch.backends.cuda.matmul.allow_tf32 = orig
 
     class SDPAPatternRewriterGpuDynamicTests(SDPAPatternRewriterGpuTests):
         use_static_shapes = False

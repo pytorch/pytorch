@@ -784,8 +784,8 @@ class DistTensorOpsTest(DTensorTestBase):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
-        local_tenor = torch.randn(2, 8, dtype=torch.bfloat16)
-        bf16_sharded_dtensor = DTensor.from_local(local_tenor, device_mesh, shard_spec)
+        local_tensor = torch.randn(2, 8, dtype=torch.bfloat16)
+        bf16_sharded_dtensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
         self.assertEqual(bf16_sharded_dtensor.dtype, torch.bfloat16)
         self.assertEqual(bf16_sharded_dtensor.to_local().dtype, torch.bfloat16)
 

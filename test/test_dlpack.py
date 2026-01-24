@@ -468,8 +468,9 @@ class TestTorchDlPack(TestCase):
             # DLPack support only available from NumPy 1.22 onwards.
             # Here, we test having another framework (NumPy) calling our
             # Tensor.__dlpack__ implementation.
-            arr = np.from_dlpack(t)
-            self.assertEqual(t, arr)
+            np_from_dlpack = np.from_dlpack(t)
+            np_from_copy = t.numpy()
+            self.assertEqual(np_from_dlpack, np_from_copy)
 
         # We can't use the array created above as input to from_dlpack.
         # That's because DLPack imported NumPy arrays are read-only.

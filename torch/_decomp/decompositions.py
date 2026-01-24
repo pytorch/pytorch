@@ -3129,7 +3129,13 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         # Same as Pillow and Scikit-Image/Scipy ndi.zoom
         osize = output_size[d]
         isize = input.shape[-num_spatial_dims + d]
-        scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
+
+        # check for scales[d] > 0 is in compute_scales_value in aten/src/ATen/native/UpSample.h
+        scale = (
+            isize / (isize * scales[d])
+            if scales[d] is not None and scales[d] > 0
+            else isize / osize
+        )
 
         output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
         input_indices = ((output_indices + offset) * scale).to(torch.int64)
@@ -5400,6 +5406,9 @@ def bernoulli(
 def isin_default(elements, test_elements, *, invert=False):
     if elements.numel() == 0:
         return torch.empty_like(elements, dtype=torch.bool)
+    if test_elements.ndim == 0:
+        res = elements == test_elements
+        return ~res if invert else res
     expanded_elem_shape = elements.shape + (1,) * test_elements.ndim
     x = elements.view(expanded_elem_shape)
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))

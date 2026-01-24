@@ -726,6 +726,7 @@ def aot_function(
     dynamic=False,
     enable_log=True,
     disable_functionalization=False,
+    _disable_torch_fn_metadata_mode=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -794,6 +795,7 @@ def aot_function(
         no_tangents=False,
         enable_log=enable_log,
         disable_functionalization=disable_functionalization,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
     cached_res = None
 
@@ -1007,7 +1009,7 @@ def prepare_aot_module_simplified(
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
-        disable_functionalization=False,
+        disable_functionalization=disable_functionalization,
         _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)

@@ -44,11 +44,11 @@ jobs:
       torch_cuda_arch_list: '8.0 8.9 9.0 10.0'
       build_environment: linux-jammy-cuda12.9-py3.12-gcc11
     steps:
-      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+      - uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
-          python-version: 3.12
-          activate-environment: true
-          ignore-empty-workdir: true
+          python-version: "3.12"
+          activate-environment: "true"
+          ignore-empty-workdir: "true"
 
       - name: Checkout pytorch-integration-testing repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

@@ -21,31 +21,12 @@ project-includes = [
     "test/test_utils.py",
 ]
 project-excludes = [
-  # ==== below will be enabled directory by directory ====
-  # ==== to test Pyrefly on a specific directory, simply comment it out ====
   "torch/_inductor/runtime/triton_heuristics.py",
   "torch/_inductor/runtime/triton_helpers.py",
   "torch/_inductor/runtime/halide_helpers.py",
   "torch/utils/data/typing.ipynb",
   "torch/utils/data/dataframes_pipes.ipynb",
   "torch/utils/data/standard_pipes.ipynb",
-  # formatting issues, will turn on after adjusting where suppressions can be
-  # in import statements
-  "torch/distributed/flight_recorder/components/types.py",
-  "torch/linalg/__init__.py",
-  "torch/package/importer.py",
-  "torch/package/_package_pickler.py",
-  "torch/jit/annotations.py",
-  "torch/utils/data/datapipes/_typing.py",
-  "torch/nn/functional.py",
-  "torch/_export/utils.py",
-  "torch/fx/experimental/unification/multipledispatch/__init__.py",
-  "torch/nn/modules/__init__.py",
-  "torch/nn/modules/rnn.py", # only remove when parsing errors are fixed
-  "torch/_inductor/codecache.py",
-  "torch/distributed/elastic/metrics/__init__.py",
-  "torch/_inductor/fx_passes/bucketing.py",
-  # ====
   "torch/onnx/_internal/exporter/_torchlib/ops/nn.py",
   "torch/include/**",
   "torch/csrc/**",
@@ -159,6 +140,12 @@ implicit-any = true
 
 [[sub-config]]
 matches = "torch/_subclasses/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/schemas.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true

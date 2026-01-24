@@ -60,7 +60,8 @@ class TestOperatorReorderForPeakMemory(TestCase):
         super().setUp()
 
         self.model = Foo().to(GPU_TYPE)
-        self.inputs = torch.ones((2048, 1), device=GPU_TYPE)
+        M = 4096 if torch.version.hip is not None else 2048
+        self.inputs = torch.ones((M, 1), device=GPU_TYPE)
         self.orig_reorder_method = memory.reorder_for_peak_memory
 
     @mock.patch.object(config, "reorder_for_peak_memory", True)

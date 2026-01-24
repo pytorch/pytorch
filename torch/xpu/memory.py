@@ -1,8 +1,9 @@
 import collections
+import contextlib
 import ctypes
 import pickle
 import sys
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import torch
 from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type
@@ -263,6 +264,7 @@ def memory_snapshot(
     """
     if not is_initialized():
         return []
+    # pyrefly: ignore [missing-attribute]
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
@@ -349,6 +351,7 @@ def _snapshot(device: Device = None, augment_with_fx_traces: bool = False):
     Returns:
         The Snapshot dictionary object
     """
+    # pyrefly: ignore [missing-attribute]
     s = torch._C._xpu_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
@@ -457,6 +460,7 @@ def _record_memory_history(
 
             Defaults to ``None`` (record all actions).
     """
+    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_recordMemoryHistory(
         enabled,
         context,
@@ -479,32 +483,31 @@ class _XPUAllocator:
 
 
 class XPUPluggableAllocator(_XPUAllocator):
-    r"""XPU memory allocator loaded from a shared library."""
+    r"""
+    XPU memory allocator loaded dynamically from a shared library.
+
+    This lets users provide custom allocation and free functions implemented
+    in a separate shared library. The allocator is registered and could become
+    available for use via :func:`~torch.xpu.memory.change_current_allocator`.
+
+    Arguments:
+        path_to_lib_file (str):
+            Filesystem path to the shared library file containing the allocation
+            and free functions.
+        alloc_fn_name (str):
+            Name of the allocation function exported from the shared library.
+            The function must have the signature:
+
+                ``void* alloc_fn(size_t size, int device, sycl::queue* queue);``
+
+        free_fn_name (str):
+            Name of the free function exported from the shared library.
+            The function must have the signature:
+
+                ``void free_fn(void* ptr, size_t size, int device, sycl::queue* queue);``
+    """
 
     def __init__(self, path_to_lib_file: str, alloc_fn_name: str, free_fn_name: str):
-        r"""XPU memory allocator loaded dynamically from a shared library.
-
-        This lets users provide custom allocation and free functions implemented
-        in a separate shared library. The allocator is registered through
-        ``torch._C._xpu_customAllocator`` and becomes available for use via
-        ``torch.memory.xpu.change_current_allocator``.
-
-        Arguments:
-            path_to_lib_file (str):
-                Filesystem path to the shared library file containing the allocation
-                and free functions.
-            alloc_fn_name (str):
-                Name of the allocation function exported from the shared library.
-                The function must have the signature:
-
-                    ``void* alloc_fn(size_t size, int device, sycl::queue* queue);``
-
-            free_fn_name (str):
-                Name of the free function exported from the shared library.
-                The function must have the signature:
-
-                    ``void free_fn(void* ptr, size_t size, sycl::queue* queue);``
-        """
         allocator_lib = ctypes.CDLL(path_to_lib_file)
 
         alloc_fn_ptr = getattr(allocator_lib, alloc_fn_name)
@@ -561,4 +564,100 @@ __all__ = [
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
     "set_per_process_memory_fraction",
+    "MemPool",
+    "use_mem_pool",
 ]
+
+if not hasattr(torch._C, "_XPUMemPool"):
+    # Define dummy base classes
+    torch._C.__dict__["_XPUMemPool"] = _dummy_type("_XPUMemPool")
+    torch._C.__dict__["_xpu_beginAllocateCurrentThreadToPool"] = _dummy_type(
+        "_xpu_beginAllocateCurrentThreadToPool"
+    )
+    torch._C.__dict__["_xpu_endAllocateToPool"] = _dummy_type("_xpu_endAllocateToPool")
+    torch._C.__dict__["_xpu_releasePool"] = _dummy_type("_xpu_releasePool")
+
+from torch._C import (  # noqa: F401;
+    _xpu_beginAllocateCurrentThreadToPool,
+    _xpu_endAllocateToPool,
+    _xpu_releasePool,
+    _xpu_XPUAllocator,
+    _XPUMemPool,
+)
+
+
+class MemPool(_XPUMemPool):
+    r"""MemPool represents a pool of memory in a caching allocator. Currently,
+    it's just the ID of the pool object maintained in the XPUCachingAllocator.
+
+    Args:
+        allocator(torch._C._xpu_XPUAllocator, optional): a
+            torch._C._xpu_XPUAllocator object that can be used to
+            define how memory gets allocated in the pool. If :attr:`allocator`
+            is ``None`` (default), memory allocation follows the default/
+            current configuration of the XPUCachingAllocator.
+        use_on_oom(bool): a bool that indicates if this pool can be used
+            as a last resort if a memory allocation outside of the pool fails due
+            to Out Of Memory. This is False by default.
+
+    """
+
+    def __init__(
+        self,
+        allocator: Optional[_xpu_XPUAllocator] = None,
+        use_on_oom: bool = False,
+    ):
+        super().__init__(allocator, True, use_on_oom)
+
+    @property
+    def id(self) -> tuple[int, int]:
+        r"""Returns the ID of this pool as a tuple of two ints."""
+        return super().id
+
+    @property
+    def allocator(self) -> Optional[_xpu_XPUAllocator]:
+        r"""Returns the allocator this MemPool routes allocations to."""
+        return super().allocator
+
+    def use_count(self) -> int:
+        r"""Returns the reference count of this pool."""
+        return super().use_count()
+
+    def snapshot(self):
+        r"""Return a snapshot of the XPU memory allocator pool state across all
+        devices.
+
+        Interpreting the output of this function requires familiarity with the
+        memory allocator internals.
+
+        """
+        snapshot = torch.xpu.memory_snapshot(self.id)
+        return snapshot
+
+
+@contextlib.contextmanager
+def use_mem_pool(pool: MemPool, device: "Device" = None):
+    r"""A context manager that routes allocations to a given pool.
+
+    Args:
+        pool(torch.xpu.MemPool): a MemPool object to be made active so that
+            allocations route to this pool.
+        device (torch.device or int, optional): selected device. Uses MemPool on
+            the current device, given by :func:`~torch.xpu.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    .. note::
+        This context manager makes only current thread's allocations route to
+        the given pool. If a new thread is spawned inside the context manager
+        (e.g. by calling backward) the allocations in that thread will not
+        route to the given pool.
+    """
+    device_index = (
+        torch.xpu.current_device() if device is None else _get_device_index(device)
+    )
+    _xpu_beginAllocateCurrentThreadToPool(device_index, pool.id)
+    try:
+        yield
+    finally:
+        _xpu_endAllocateToPool(device_index, pool.id)
+        _xpu_releasePool(device_index, pool.id)

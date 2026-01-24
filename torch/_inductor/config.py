@@ -91,7 +91,9 @@ worker_log_path = (
 )
 
 # precompilation timeout
-precompilation_timeout_seconds: int = 60 * 60
+precompilation_timeout_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_PRECOMPILATION_TIMEOUT_SECONDS", 60 * 5)
+)
 
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
@@ -903,6 +905,15 @@ optimize_scatter_upon_const_tensor = (
 add_pre_grad_passes: Optional[str] = None
 remove_pre_grad_passes: Optional[str] = None
 
+# Comma-separated list of pass names to disable. Passes disabled via this config
+# will be skipped when they go through GraphTransformObserver.
+# Can be set via TORCHINDUCTOR_DISABLED_PASSES env var.
+# Use uppercase pass names (e.g., "PASS1,PASS2").
+disabled_passes: str = Config(
+    env_name_force="TORCHINDUCTOR_DISABLED_PASSES",
+    default="",
+)
+
 
 # The multiprocessing start method to use for inductor workers in the codecache.
 def decide_worker_start_method() -> str:
@@ -961,6 +972,22 @@ _fuse_ddp_communication_passes: list[Union[Callable[..., None], str]] = [
 ]
 
 _micro_pipeline_tp: bool = False
+
+
+# Enable/disable partitioned scatter optimization for atomic add kernels
+# this will improve kernel performance at cost of memory usage.
+partitioned_scatter_enabled = (
+    os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_ENABLED", "0") == "1"
+)
+
+# Min partitions for scatter optimization
+partitioned_scatter_min_partitions: int = 2
+
+# Max partitions for scatter optimization
+partitioned_scatter_max_partitions: int = 128
+
+# Memory budget fraction for scatter buffers
+partitioned_scatter_memory_budget: float = 0.10
 
 
 class _collective:
@@ -2390,8 +2417,15 @@ class test_configs:
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
-    autotune_choice_name_regex: Optional[str] = None
-    autotune_choice_desc_regex: Optional[str] = None
+    # Can be set via TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX and
+    # TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX environment variables
+
+    autotune_choice_name_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX"
+    )
+    autotune_choice_desc_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX"
+    )
 
     graphsafe_rng_func_ignores_fallback_random = False
 

@@ -11063,7 +11063,7 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("64GB", "cpu")
     def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
-            x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
+            x = torch.randn(shape, device=device, dtype=torch.float16, requires_grad=True)
             y = F.log_softmax(x, dim=-1, dtype=dtype)
             y.backward(y)
             with torch.no_grad():
@@ -12574,7 +12574,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(grad_long, grad_byte)
 
     @onlyCUDA
-    @skipIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_cross_entropy_loss_2d_out_of_bounds_class_index(self, device, dtype):
         # Test for issue #117532
@@ -12610,7 +12609,11 @@ class TestThatContainsCUDAAssert(TestCase):
 if __name__ == '__main__':
     run_tests()
         """)
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        self.assertTrue(has_cuda_assert or has_hip_assert,
+                        f"Expected device assert error in stderr, got: {stderr}")
 
 
 

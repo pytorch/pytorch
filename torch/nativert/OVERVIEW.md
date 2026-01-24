@@ -264,7 +264,6 @@ REGISTER_CPU_KERNEL("torch.ops.aten.relu.default", aten_relu, {
     KernelOutput(0) = create_empty_from(in0_t);
   }
   auto& out_t = KernelOutput(0).toTensor();
-  fastResizeToZero(out_t);
   at::cpu::threshold_out(out_t, in0_t, 0, 0);
 });
 ```

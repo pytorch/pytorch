@@ -26,9 +26,9 @@ runs:
     # Always set up uv and zip files first (needed for S3, reusable for GHA fallback)
     - name: Setup uv
       if: runner.os != 'Windows'
-      uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+      uses: pytorch/test-infra/.github/actions/setup-uv@main
       with:
-        python-version: 3.12
+        python-version: "3.12"
 
     - name: Zip artifacts for upload
       if: runner.os != 'Windows'

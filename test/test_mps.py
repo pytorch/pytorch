@@ -848,6 +848,17 @@ class TestMPS(TestCaseMPS):
                          f"  (up to {allowed_uncertainty:.3e} allowed)")
             raise AssertionError(error_msg)
 
+    def _helper_kl_divergence(self, cpu_tensor, mps_tensor):
+        """Helper for checking whether 2 distributions match or not"""
+        mps_tensor = mps_tensor.cpu()
+        all_vals = torch.cat([cpu_tensor, mps_tensor])
+        min_val, max_val = all_vals.min().item(), all_vals.max().item()
+        cpu_hist = torch.histc(cpu_tensor, bins=50, min=min_val, max=max_val) + 1e-10
+        mps_hist = torch.histc(mps_tensor, bins=50, min=min_val, max=max_val) + 1e-10
+        p = cpu_hist / cpu_hist.sum()
+        q = mps_hist / mps_hist.sum()
+        kl_div = F.kl_div(q.log(), p, reduction='sum').item()
+        self.assertLess(kl_div, 0.03)
 
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
@@ -7982,6 +7993,7 @@ class TestMPS(TestCaseMPS):
             ("random_with_to", lambda t: t.random_(10)),
             ("random_with_range", lambda t: t.random_(0, 10)),
             ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
+            ("cauchy_", lambda t: t.cauchy_()),
         ]
 
         for name, op_func in ops:
@@ -8006,23 +8018,6 @@ class TestMPS(TestCaseMPS):
         self.assertFalse(result.is_contiguous(), "rand_like result should be non-contiguous")
         self.assertNotEqual(result.max().item(), 0.0, "rand_like should generate non-zero values")
 
-    # Test exponential
-    @unittest.skip("This does not test anything")
-    def test_exponential(self):
-        def helper(shape, lambda_, dtype=torch.float32):
-
-            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
-            mps_out.exponential_(lambda_)
-
-            print(mps_out.to('cpu').float().mean(), 1 / lambda_)
-            print(mps_out.to('cpu').float().std() ** 2, 1 / (lambda_**2))
-
-        for dtype in [torch.float32, torch.float16]:
-            helper([100, 100], 2, dtype)
-            helper([100, 100], 1, dtype)
-            helper([100, 100], 3, dtype)
-            helper([100, 100], 0.5, dtype)
-
     def test_exponential_1(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -8039,20 +8034,23 @@ class TestMPS(TestCaseMPS):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
 
-    def test_log_normal(self):
-        # test with kl divergence
-        cpu_a = torch.zeros(50, 50).log_normal_(mean=1.0, std=2.0).flatten()
-        mps_a = torch.zeros(50, 50, device="mps").log_normal_(mean=1.0, std=2.0).cpu().flatten()
-
-        all_vals = torch.cat([cpu_a, mps_a])
-        min_val, max_val = all_vals.min().item(), all_vals.max().item()
-
-        cpu_hist = torch.histc(cpu_a, bins=50, min=min_val, max=max_val) + 1e-10
-        mps_hist = torch.histc(mps_a, bins=50, min=min_val, max=max_val) + 1e-10
-
-        p, q = cpu_hist / cpu_hist.sum(), mps_hist / mps_hist.sum()
-        kl_div = (p * (p / q).log()).sum().item()
-        self.assertLess(kl_div, 0.05)
+    def test_distributions(self):
+        ops = [
+            ("normal_", lambda t: t.normal_(0, 1)),
+            ("uniform_", lambda t: t.uniform_(0, 1)),
+            ("exponential_", lambda t: t.exponential_(1.0)),
+            ("bernoulli_", lambda t: t.bernoulli_(0.5)),
+            ("random_", lambda t: t.random_()),
+            ("random_with_to", lambda t: t.random_(10)),
+            ("random_with_range", lambda t: t.random_(0, 10)),
+            ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
+            ("cauchy_", lambda t: t.cauchy_()),
+        ]
+        for name, op_func in ops:
+            with self.subTest(operation=name):
+                cpu_tensor = op_func(torch.zeros(100, 100)).flatten()
+                mps_tensor = op_func(torch.zeros(100, 100)).flatten()
+                self._helper_kl_divergence(cpu_tensor, mps_tensor)
 
     # Test add
     def test_add_sub(self):

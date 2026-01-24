@@ -32,23 +32,6 @@ void reset_buffers() {
   }
 }
 
-#if defined(USE_ROCM) && !defined(_WIN32)
-TEST(TestLoops, HasSameArgTypes) {
-  // This is a compile-time unit test. If this file compiles without error,
-  // then the test passes and during runtime, we just need to return.
-  using namespace at::native::modern::detail;
-  using func1_t = int (*)(float, float);
-  using func2_t = int (*)(bool, float, float);
-  using func3_t = int (*)(float);
-  using func4_t = int (*)();
-  static_assert(has_same_arg_types<func1_t>::value, "func1_t has the same argument types");
-  static_assert(!has_same_arg_types<func2_t>::value, "func2_t does not have the same argument types");
-  static_assert(has_same_arg_types<func3_t>::value, "func3_t has the same argument types");
-  static_assert(has_same_arg_types<func4_t>::value, "func4_t has the same argument types");
-  return;
-}
-#endif
-
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 

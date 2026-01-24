@@ -21,7 +21,6 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensor
-from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.amp.autocast_mode import _cast as _autocast_cast
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
@@ -73,6 +72,16 @@ def _permute_strides(out: torch.Tensor, query_strides: tuple[int, ...]) -> torch
     fill_order = get_fill_order(query_strides)
     assert out.storage_offset() == 0, "Only support storage_offset == 0"
     out_strides = _construct_strides(out.shape, fill_order)
+
+    # Attention kernels require stride[-1]=1 for efficient memory access.
+    # Ensure this by moving last dim to front of fill_order if needed.
+    if out_strides[-1] != 1:
+        last_dim = len(out.shape) - 1
+        fill_order = list(fill_order)
+        fill_order.remove(last_dim)
+        fill_order = [last_dim] + fill_order
+        out_strides = _construct_strides(out.shape, fill_order)
+
     new_out = out.new_empty(out.shape).as_strided(out.shape, out_strides)
     new_out.copy_(out)
     return new_out
@@ -512,22 +521,6 @@ def flex_attention_functionalize(
     are free variables.
     """
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
-
-    if has_user_subclass(
-        (
-            query,
-            key,
-            value,
-            score_mod,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        ),
-        allowed_subclasses=(FakeTensor, FunctionalTensor),
-    ):
-        return NotImplemented
 
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
@@ -1265,24 +1258,6 @@ def flex_attention_backward_functionalize(
     to the other_buffers, we skip that mutate check and go straight to redispatching.
     """
 
-    if has_user_subclass(
-        (
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            grad_logsumexp,
-            block_mask,
-            scale,
-            kernel_options,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        ),
-        allowed_subclasses=(FakeTensor, FunctionalTensor),
-    ):
-        return NotImplemented
     query_unwrapped = ctx.unwrap_tensors(query)
     key_unwrapped = ctx.unwrap_tensors(key)
     value_unwrapped = ctx.unwrap_tensors(value)
@@ -1377,7 +1352,8 @@ def flex_attention_backward_fake_tensor_mode(
     Bq, _, _, qk_head_dim = query.shape
     Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
-    grad_query = torch.empty_like(query)
+    grad_query = query.new_empty(query.shape)
+    grad_query = _permute_strides(grad_query, query.stride())
     # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
     grad_score_mod_captured = tuple(
         (

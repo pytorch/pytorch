@@ -1300,7 +1300,9 @@ static at::Tensor linear_int8_with_onednn_weight(
     QlinearForwardParams params;
     params.primitive = primitive;
     params.packed_weight = expected_weight;
-    params.weight_scales = wei_scales_t;
+    // keep a copy rather than a view of weight scales
+    params.weight_scales = tensor(wei_scales_t.get_desc());
+    memcpy(params.weight_scales.get_data_handle(), wei_scales_t.get_data_handle(), wei_scales_t.get_desc().get_size());
     params.src_scale = input_scale != 1.0f ? std::make_optional<tensor>(src_scales_t) : std::nullopt;
     params.dst_scale = output_scale != 1.0f ? std::make_optional<tensor>(dst_scales_t) : std::nullopt;
     params.src_zero_point = input_zero_point != 0 ? std::make_optional<tensor>(src_zp_t) : std::nullopt;

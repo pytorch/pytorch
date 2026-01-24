@@ -120,15 +120,7 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   // When hipBLASLt is not supported on the architecture, return true
   #ifdef USE_ROCM
-  static const std::vector<std::string> archs = {
-        "gfx90a", "gfx942",
-    #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
-    #endif
-    #if ROCM_VERSION >= 70000
-        "gfx950", "gfx1150", "gfx1151"
-    #endif
-  };
+  const auto& archs = at::detail::getCUDAHooks().getHipblasltSupportedArchs();
   const auto is_hipblas_lt_arch_supported = at::detail::getCUDAHooks().isGPUArch(archs, device.index());
   if (!is_hipblas_lt_arch_supported) {
     return true;
@@ -719,11 +711,11 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-if (self._is_zerotensor() || other._is_zerotensor()) {
-  return at::_efficientzerotensor({}, self.options());
-}
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
 
-return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
       [&] {
