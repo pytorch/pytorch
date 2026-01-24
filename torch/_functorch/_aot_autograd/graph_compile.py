@@ -103,6 +103,27 @@ from .utils import (
 )
 
 
+def _is_process_group(val: Any) -> bool:
+    """
+    Check if val is a ProcessGroup or FakeProcessGroup.
+    These non-tensor objects can be safely passed between forward and backward.
+    """
+    if not torch.distributed.is_available():
+        return False
+    from torch._C._distributed_c10d import ProcessGroup
+
+    if isinstance(val, ProcessGroup):
+        return True
+    try:
+        from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
+
+        if isinstance(val, FakeProcessGroup):
+            return True
+    except ImportError:
+        pass
+    return False
+
+
 def is_opaque_node(node: Any) -> bool:
     """Check if a node contains an opaque or non-tensor value (e.g., ProcessGroup)."""
     if not isinstance(node, torch.fx.Node):
@@ -115,6 +136,9 @@ def is_opaque_node(node: Any) -> bool:
         return True
     # Check for other ScriptObjects
     if isinstance(val, torch.ScriptObject):
+        return True
+    # Check for ProcessGroup objects (used in distributed collective ops)
+    if _is_process_group(val):
         return True
     return False
 
