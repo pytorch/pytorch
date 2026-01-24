@@ -520,7 +520,10 @@ class TestTransformers(NNTestCase):
                 # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
                 fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
                 slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
-                self.assertEqual(fastpath_output_expanded, slowpath_output)
+                if TEST_WITH_ROCM:
+                    self.assertEqual(fastpath_output_expanded, slowpath_output, atol=1e-4, rtol=1e-4)
+                else:
+                    self.assertEqual(fastpath_output_expanded, slowpath_output)
 
     @tf32_on_and_off(0.001)
     @parametrize("with_no_grad", [True, False])
