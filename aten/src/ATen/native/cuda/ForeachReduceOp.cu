@@ -21,6 +21,7 @@
 #include <ATen/ops/_foreach_norm_native.h>
 
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/full.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -154,9 +155,10 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
     }
   }
   const auto options = tensors[0].options();
-  auto output_per_tensor = at::zeros(
-      {static_cast<int64_t>(ntensors) * max_chunks_per_tensor}, options);
-
+  
+  // Initialize output_per_tensor with lowest value
+  Tensor output_per_tensor;
+  
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
   for (const auto i : c10::irange(ntensors)) {
@@ -178,6 +180,12 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
       tensor_lists[0][0].scalar_type(),
       "foreach_tensor_max_cuda_scalar_type",
       [&]() {
+        // Initialize intermediate buffer with lowest()
+        output_per_tensor = at::full(
+            {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
+            std::numeric_limits<scalar_t>::lowest(),
+            options);
+        
         multi_tensor_apply<1>(
             tensor_lists,
             LpMaxFunctor<scalar_t>(),

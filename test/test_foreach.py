@@ -1023,6 +1023,23 @@ class TestForeach(TestCase):
         self.assertEqual(expect, actual, equal_nan=False)
 
     @onlyCUDA
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_foreach_max_with_different_tensor_sizes_and_negative_values(self, device, dtype):
+        # Small tensor with all negative values
+        x = torch.rand(4, device=device, dtype=dtype) * (-5)
+        # Large tensor with positive values
+        y = torch.rand(1024, 1024, device=device, dtype=dtype)
+        
+        result = torch._foreach_max([x, y])
+        
+        # Verify x's max is the actual max of x (a negative number)
+        expected_x_max = x.max()
+        expected_y_max = y.max()
+        
+        self.assertEqual(result[0], expected_x_max)
+        self.assertEqual(result[1], expected_y_max)
+
+    @onlyCUDA
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
     @parametrize("use_cuda_graph", (False, True))
     @parametrize("w_empty", (False, True))
