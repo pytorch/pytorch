@@ -1643,7 +1643,7 @@ const auto bessel_y0_string = bessel_j0_string + jiterator_stringify(
             }
 
             if (x < T(0.0)) {
-                NAN;
+                return NAN;
             }
 
             T yp = 0.0;
