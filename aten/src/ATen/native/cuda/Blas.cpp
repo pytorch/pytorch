@@ -120,15 +120,7 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   // When hipBLASLt is not supported on the architecture, return true
   #ifdef USE_ROCM
-  static const std::vector<std::string> archs = {
-        "gfx90a", "gfx942",
-    #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
-    #endif
-    #if ROCM_VERSION >= 70000
-        "gfx950", "gfx1150", "gfx1151"
-    #endif
-  };
+  const auto& archs = at::detail::getCUDAHooks().getHipblasltSupportedArchs();
   const auto is_hipblas_lt_arch_supported = at::detail::getCUDAHooks().isGPUArch(archs, device.index());
   if (!is_hipblas_lt_arch_supported) {
     return true;
@@ -359,12 +351,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // if lt path fails, we recurse back into this function here and force the lt path to off
   // we cannot update variable disable_addmm_cuda_lt from above since it is static and would be permanent
   bool disable_addmm_cuda_lt = persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;
-  // NOTE: See https://github.com/pytorch/pytorch/issues/172231
-  const auto preferred_cublas_backend = at::globalContext().blasPreferredBackend();
-  disable_addmm_cuda_lt = !(
-      preferred_cublas_backend == BlasBackend::Cublaslt
-      || preferred_cublas_backend == BlasBackend::Default // Lt is default
-  ) || disable_addmm_cuda_lt;
   #ifdef USE_ROCM
   // Conditioned on the device index, which is not persistent
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
@@ -725,11 +711,11 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-if (self._is_zerotensor() || other._is_zerotensor()) {
-  return at::_efficientzerotensor({}, self.options());
-}
+  if (self._is_zerotensor() || other._is_zerotensor()) {
+    return at::_efficientzerotensor({}, self.options());
+  }
 
-return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
       [&] {

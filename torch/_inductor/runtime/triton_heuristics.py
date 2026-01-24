@@ -30,7 +30,6 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
-    GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
     triton_version_uses_attrs_dict,
@@ -69,7 +68,6 @@ from .runtime_utils import (
 from .static_triton_launcher import (
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
-    StaticallyLaunchedXpuKernel,
 )
 from .triton_compat import (
     ASTSource,
@@ -107,9 +105,7 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
-_KernelType = Union[
-    CompiledKernel, StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel
-]
+_KernelType = Union[CompiledKernel, StaticallyLaunchedCudaKernel]
 _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
@@ -809,11 +805,10 @@ class CachingAutotuner(KernelInterface):
                     "launch_pdl": compile_meta.get("launch_pdl", False),  # True
                 }
             )
-            if compile_meta.get("disable_ftz", False):
-                options["enable_reflect_ftz"] = False
             for k in tlx_only_cuda_options():
                 if v := getattr(cfg, k, None):
                     options[k] = v
+
         if self.device_props.type == "hip":
             if "waves_per_eu" in compile_meta:
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
@@ -1674,7 +1669,7 @@ class CannotStaticallyLaunchKernel(Exception):
     pass
 
 
-class StaticTritonCompileResult(CompileResult[_T]):
+class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
     """
     TritonCompileResult that uses StaticCudaLauncher,
     which vastly simplifies the setup and metadata needed to be kept.
@@ -1686,18 +1681,14 @@ class StaticTritonCompileResult(CompileResult[_T]):
         inductor_meta: dict[str, Any],
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
-    ) -> _KernelType | None:
+    ) -> StaticallyLaunchedCudaKernel | None:
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
-        def check_can_launch() -> _KernelType:
-            if triton_meta.get("device_type") not in ("cuda", "xpu", "hip"):
-                raise CannotStaticallyLaunchKernel("Non-cuda/XPU/ROCm device")
-
-            if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
-                raise CannotStaticallyLaunchKernel(
-                    "Static XPU Triton kernel launch does not support SPIR-V kernel."
-                )
+        def check_can_launch() -> StaticallyLaunchedCudaKernel:
+            if triton_meta.get("device_type") != "cuda":
+                # Only cuda kernels
+                raise CannotStaticallyLaunchKernel("Non-cuda device")
 
             if torch._inductor.config.cpp_wrapper:
                 # If we're running with cpp wrapper, it doesn't
@@ -1723,13 +1714,10 @@ class StaticTritonCompileResult(CompileResult[_T]):
                     "static launch does not support launch attributes"
                 )
 
-            binary_ext = GPU_KERNEL_BIN_EXTS.get(
-                triton_meta.get("device_type"), ".cubin"
-            )
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
                 triton_hash_to_path_key(kernel.hash),
-                f"{kernel.src.fn.__name__}{binary_ext}",
+                f"{kernel.src.fn.__name__}.cubin",
             )
 
             if not os.path.exists(cubin_location):
@@ -1763,14 +1751,10 @@ class StaticTritonCompileResult(CompileResult[_T]):
         When loading from cache on disk, we want to reload cubin
         files from their appropriate location on disc.
         """
-        device_type = (
-            "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
-        )
-        binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
         cubin_location = os.path.join(
             triton_cache_dir(self.compile_meta.get("device", 0)),
             triton_hash_to_path_key(self.kernel.hash),
-            f"{self.kernel.name}{binary_ext}",
+            f"{self.kernel.name}.cubin",
         )
         if not os.path.exists(cubin_location):
             if self.kernel.cubin_raw is not None:
@@ -3367,7 +3351,13 @@ def cooperative_reduction(
     # the GPU, we want to create as many CTAs as possible, while keeping things
     # in powers of 2.
     target = last_power_of_2(triton_meta["device"].multi_processor_count)
-    split = max(1, min(target // xnumel, TRITON_MAX_RSPLIT))
+    split = max(
+        1,
+        min(
+            target // xnumel if xnumel > 1 else last_power_of_2(rnumel),
+            TRITON_MAX_RSPLIT,
+        ),
+    )
     assert rnumel >= split
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
