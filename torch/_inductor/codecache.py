@@ -94,6 +94,7 @@ from torch._inductor.utils import (
     is_windows,
     XPU_KERNEL_FORMAT,
 )
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -771,6 +772,11 @@ class BypassFxGraphCache(Exception):
     """
 
 
+@dataclasses.dataclass
+class HashableOpaqueValue:
+    ordinal: int
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -790,6 +796,20 @@ class FxGraphHashDetails:
         self.gm = gm
         self.example_inputs = example_inputs
         self.cache_key_tag = cconfig.cache_key_tag
+
+        # Process the example_inputs. If there's an opaque reference in the example_inputs
+        # then we need to replace it with a hashable value. What's important is that if the
+        # same reference appears twice then it's the same hash value for each.
+        processed_inputs = []
+        seen_opaques = {}
+        for input in example_inputs:
+            if is_opaque_reference_type(type(input)):
+                if id(input) not in seen_opaques:
+                    seen_opaques[id(input)] = HashableOpaqueValue(len(seen_opaques))
+                processed_inputs.append(seen_opaques[id(input)])
+            else:
+                processed_inputs.append(input)
+        self.example_inputs = processed_inputs
 
         # Order kwargs so hashing is stable to changes in kwarg order. Although
         # it's technically a _CompileFxKwargs we don't actually need it typed as
