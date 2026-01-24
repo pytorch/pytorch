@@ -74,11 +74,9 @@ vllm_multi_model_processor_test:
   package_install:
     - git+https://github.com/TIGER-AI-Lab/Mantis.git
   steps:
-    - pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py --ignore models/multimodal/processing/test_common.py --ignore models/multimodal/processing/test_glm4_1v.py
+    - pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py --ignore models/multimodal/processing/test_common.py
     - pytest -v -s models/multimodal/processing/test_common.py -k 'not mistralai'
     - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_common.py -k mistralai
-    - pytest -v -s models/multimodal/processing/test_glm4_1v.py -k 'not zai-org'
-    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_glm4_1v.py -k zai-org
 
 vllm_multi_model_test_28_failure_test:
   title: Multi-Model Test (Failed 2.8 release)
