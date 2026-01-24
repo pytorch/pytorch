@@ -3188,12 +3188,10 @@ class View(GenericView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
-        unbacked_symbols_in_sizes = False
-        if (
+        unbacked_symbols_in_sizes = (
             len(free_unbacked_symbols(old_size)) > 0
             or len(free_unbacked_symbols(new_size)) > 0
-        ):
-            unbacked_symbols_in_sizes = True
+        )
         is_contiguous = is_contiguous_storage_and_layout(x)
 
         def create_reinterpret_view(
@@ -3210,12 +3208,33 @@ class View(GenericView):
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
+        def handle_unbacked_or_dynamic_reshape(
+            x: IRNode,
+        ) -> IRNode:
+            """
+            Handle the case where view is not possible with current strides.
+            For unbacked symbols, make contiguous; otherwise use dynamic_reshape_indexer.
+            """
+            nonlocal old_size, new_size, unbacked_symbols_in_sizes
+            if unbacked_symbols_in_sizes:
+                # For unbacked symbols, we must require contiguous
+                # dynamic_reshape_indexer cannot handle unbacked SymInts
+                # https://github.com/pytorch/pytorch/issues/145561
+                x = ExternKernel.require_contiguous(x)
+                return create_reinterpret_view(
+                    x, new_size, FlexibleLayout.contiguous_strides(new_size)
+                )
+            # For backed symbols, fall back to dynamic_reshape_indexer
+            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
+            return cls(data=x, size=list(new_size), reindex=reindex)
+
         if 0 in new_size:
 
             def fake_reindex(index: Any) -> tuple[int, ...]:
                 return tuple([0] * len(old_size))
 
             return cls(data=x, size=list(new_size), reindex=fake_reindex)
+
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous:
             # Input is contiguous, output can use contiguous strides
@@ -3225,10 +3244,8 @@ class View(GenericView):
 
         # Input is non-contiguous. Check if we can get storage/layout.
         if not is_storage_and_layout(x):
-            # Can't get storage/layout (e.g., for Pointwise nodes),
-            # fall back to dynamic_reshape_indexer
-            reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-            return cls(data=x, size=list(new_size), reindex=reindex)
+            # Can't get storage/layout (e.g., for Pointwise nodes)
+            return handle_unbacked_or_dynamic_reshape(x)
 
         # Try to compute valid output strides.
         storage, old_layout = as_storage_and_layout(x, freeze=False)
@@ -3263,18 +3280,8 @@ class View(GenericView):
             )
             return ReinterpretView(data=storage, layout=new_layout)
 
-        # View not possible with current strides, need to make contiguous copy
-        if unbacked_symbols_in_sizes:
-            # For unbacked symbols, we must require contiguous
-            # https://github.com/pytorch/pytorch/issues/145561
-            x = ExternKernel.require_contiguous(x)
-            return create_reinterpret_view(
-                x, new_size, FlexibleLayout.contiguous_strides(new_size)
-            )
-
-        # For backed symbols, fall back to dynamic_reshape_indexer
-        reindex = cls.dynamic_reshape_indexer(old_size, new_size)
-        return cls(data=x, size=list(new_size), reindex=reindex)
+        # View not possible with current strides
+        return handle_unbacked_or_dynamic_reshape(x)
 
     @staticmethod
     def resolve_negative_size(
