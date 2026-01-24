@@ -76,7 +76,6 @@ class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
         import sympy
 
         from torch._subclasses import FakeTensorMode
-        from torch.fx._graph_pickler import Options
 
         state = fn.__dict__.copy()
         graph_reducer_override = GraphPickler.reducer_override
@@ -93,7 +92,7 @@ class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
             return graph_reducer_override(self, obj)
 
         with patch.object(GraphPickler, "reducer_override", _graph_reducer_override):
-            state["gm"] = GraphPickler.dumps(state["gm"], Options(ops_filter=None))
+            state["gm"] = GraphPickler.dumps(state["gm"])
         return pickle.dumps(state)
 
     @classmethod
