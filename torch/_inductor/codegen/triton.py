@@ -1212,7 +1212,7 @@ class TritonOverrides(OpOverrides):
         if (
             x_dtype == torch.float32
             and y_dtype == torch.float32
-            and config.eager_numerics.division_rounding
+            and config.emulate_divison_rounding
         ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
@@ -3674,13 +3674,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # With broadcast:
             # tl.store(out_ptr0 + (tl.full([1, 1], 0, tl.int32).broadcast_to((XBLOCK,1)), tmp4, xmask)
             indexing_str = indexing.index_str
-            if (
-                is_sympy_integer_like(index)
-                and value.shape is not None
-                and not all(str(x) == "1" for x in value.shape)
-            ):
-                value_shape = ", ".join(map(str, value.shape))
-                indexing_str += f".broadcast_to({value_shape})"
+            if is_sympy_integer_like(index):
+                if self.is_combo_kernel:
+                    # In combo kernels, broadcast pointer to match mask shape
+                    indexing_str += f".broadcast_to({self.dense_size_str()})"
+                elif value.shape is not None and not all(
+                    str(x) == "1" for x in value.shape
+                ):
+                    value_shape = ", ".join(map(str, value.shape))
+                    indexing_str += f".broadcast_to({value_shape})"
             line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
             self.atomic_add_found = True
@@ -5492,7 +5494,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for arg_num in equal_1_arg_indices(signature):  # type: ignore[index]
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
         triton_meta["enable_fp_fusion"] = not config.emulate_precision_casts
-        triton_meta["disable_ftz"] = config.eager_numerics.disable_ftz
 
         self.triton_meta = triton_meta
 
@@ -6244,7 +6245,16 @@ class TritonScheduling(SIMDScheduling):
             kernels.sort(key=lambda k: k.persistent_reduction)
         return kernels
 
-    def benchmark_combo_kernel(self, node_list):
+    def benchmark_combo_kernel(self, node_list, node_benchmark_results):
+        """
+        Benchmark combo kernel partitions and return total execution time.
+
+        Generates kernel code for each partition and benchmarks them.
+        Single-node partitions use benchmark_fused_nodes(), while multi-node
+        partitions use the combo kernel benchmarking path.
+
+        Returns (total_ms, total_clone_ms, file_list).
+        """
         mod: ModuleType
         ms: float
         ms_clone: float
@@ -6281,10 +6291,20 @@ class TritonScheduling(SIMDScheduling):
         )
 
         # pyrefly: ignore [bad-assignment]
-        for src_code, _, node_group in kernel_code_list:
+        for src_code, kernel, node_group in kernel_code_list:
             fused_node_lists = [node.get_nodes() for node in node_group]
             names = [n.get_name() for nodes in fused_node_lists for n in nodes]
 
+            if len(node_group) == 1:
+                # Single-node partition: use cached benchmark results from speedup_by_combo_kernel
+                node_ms, path = node_benchmark_results[node_group[0]]
+                # Regular kernels have negligible clone overhead
+                total_ms += node_ms
+                total_clone_ms += 0
+                file_list.append(path)
+                continue
+
+            assert src_code is not None
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
             mod = PyCodeCache.load(src_code)
 
