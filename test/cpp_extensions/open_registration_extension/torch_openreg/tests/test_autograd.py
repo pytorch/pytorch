@@ -146,8 +146,11 @@ class TestAutograd(TestCase):
 
         m = MyModule()
         hook_called_on_device = []
-        m.register_full_backward_hook(lambda _module, _grad_in, grad_out:
-                                      hook_called_on_device.append(grad_out[0].device.type))
+        m.register_full_backward_hook(
+            lambda _module, _grad_in, grad_out: hook_called_on_device.append(
+                grad_out[0].device.type
+            )
+        )
         result = m(x=a, y=b)
         result.backward()
         self.assertEqual(result, a * b)
