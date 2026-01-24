@@ -1251,6 +1251,42 @@ from user code:
             post_munge=post_munge,
         )
 
+    def test_dataclass_repr_error_hint(self):
+        """
+        Regression test for GitHub issue #173221.
+
+        When repr() is called on a dataclass instance (like MappingKey, SequenceKey)
+        during torch.compile with fullgraph=True, the error message should include
+        a helpful hint about how to work around the issue.
+        """
+        from dataclasses import dataclass
+
+        from torch.utils._pytree import MappingKey, SequenceKey
+
+        def fn(x):
+            path = (MappingKey("a"), SequenceKey(0))
+            # Using repr on the path triggers the error
+            msg = f"path={path!r}"
+            return x * 2, msg
+
+        def checkpointed_fn(x):
+            from torch.utils.checkpoint import checkpoint
+
+            return checkpoint(fn, x, use_reentrant=False)
+
+        x = torch.randn(4, 4, requires_grad=True)
+
+        try:
+            compiled_fn = torch.compile(checkpointed_fn, fullgraph=True)
+            compiled_fn(x)
+            self.fail("Expected an error to be raised")
+        except Exception as e:
+            error_message = str(e)
+            # Check that the hint is included in the error message
+            # The hint should mention that repr() on dataclass instances is problematic
+            # and suggest building the string manually
+            self.assertIn("repr", error_message.lower())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

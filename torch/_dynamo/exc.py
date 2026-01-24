@@ -535,6 +535,63 @@ class KeyErrorMsg:
         return self.__str__()
 
 
+def _is_dataclass_repr_error(exc: Exception) -> bool:
+    """
+    Detect if the exception is an AttributeError from a dataclass __repr__.
+
+    This happens when torch.compile tries to trace repr() on a dataclass instance
+    where the auto-generated __repr__ accesses attributes that aren't accessible
+    during tracing (e.g., MappingKey, SequenceKey from pytree).
+    """
+    import traceback
+
+    if not isinstance(exc, AttributeError):
+        return False
+
+    # Check the traceback for the pattern: dataclasses.py -> __repr__
+    tb = getattr(exc, "__traceback__", None)
+    if tb is None:
+        return False
+
+    # Look for dataclasses.py and __repr__ in the traceback
+    found_dataclasses = False
+    found_repr = False
+
+    for frame_info in traceback.extract_tb(tb):
+        if "dataclasses" in frame_info.filename:
+            found_dataclasses = True
+        if frame_info.name == "__repr__":
+            found_repr = True
+
+    return found_dataclasses and found_repr
+
+
+def _get_dataclass_repr_hint() -> str:
+    """Return a helpful hint for dataclass __repr__ errors."""
+    return """
+Hint: Cannot trace `repr()` on dataclass instances (e.g., MappingKey, SequenceKey) during compilation.
+  The auto-generated `__repr__` method accesses attributes that aren't available during tracing.
+
+  Instead of using `f"{obj!r}"` or `repr(obj)`, build the string manually:
+
+    # Instead of:
+    #   msg = f"path={path!r}"  # where path is a tuple of MappingKey/SequenceKey
+
+    # Use:
+    def path_to_str(path):
+        parts = []
+        for p in path:
+            if hasattr(p, 'key'):  # MappingKey
+                parts.append(f"MappingKey(key={p.key!r})")
+            elif hasattr(p, 'idx'):  # SequenceKey
+                parts.append(f"SequenceKey(idx={p.idx})")
+            else:
+                parts.append(str(p))
+        return "(" + ", ".join(parts) + ")"
+    msg = f"path={path_to_str(path)}"
+"""
+
+
 def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -> None:
     import traceback
 
@@ -544,6 +601,10 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
     if real_stack is not None and len(real_stack) > 0:
         exc.innermost_user_frame_summary = real_stack[-1]  # type: ignore[attr-defined]
         msg += f"\nfrom user code:\n {''.join(traceback.format_list(real_stack))}"
+
+    # Add helpful hint for dataclass __repr__ errors
+    if _is_dataclass_repr_error(exc):
+        msg += _get_dataclass_repr_hint()
 
     if config.replay_record_enabled and hasattr(exc, "record_filename"):
         msg += (
