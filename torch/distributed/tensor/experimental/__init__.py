@@ -3,9 +3,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from torch.distributed.tensor._api import DTensor
-from torch.distributed.tensor.experimental._attention import context_parallel
-from torch.distributed.tensor.experimental._func_map import local_map
-from torch.distributed.tensor.experimental._register_sharding import register_sharding
+from torch.distributed.tensor.experimental._attention import (
+    context_parallel as _context_parallel_impl,
+)
+from torch.distributed.tensor.experimental._func_map import local_map as _local_map_impl
+from torch.distributed.tensor.experimental._register_sharding import (
+    register_sharding as _register_sharding_impl,
+)
 
 
 __all__ = ["context_parallel", "implicit_replication", "local_map", "register_sharding"]
@@ -27,8 +31,25 @@ def implicit_replication() -> Iterator[None]:
         DTensor._op_dispatcher._allow_implicit_replication = False
 
 
-# Set namespace for exposed private names
-context_parallel.__module__ = "torch.distributed.tensor.experimental"
-implicit_replication.__module__ = "torch.distributed.tensor.experimental"
-local_map.__module__ = "torch.distributed.tensor.experimental"
-register_sharding.__module__ = "torch.distributed.tensor.experimental"
+def context_parallel(*args, **kwargs):
+    """
+    Wrapper for :func:`torch.distributed.tensor.experimental._attention.context_parallel`
+    to expose it in the experimental namespace.
+    """
+    return _context_parallel_impl(*args, **kwargs)
+
+
+def local_map(*args, **kwargs):
+    """
+    Wrapper for :func:`torch.distributed.tensor.experimental.local_map`
+    to expose it in the experimental namespace.
+    """
+    return _local_map_impl(*args, **kwargs)
+
+
+def register_sharding(*args, **kwargs):
+    """
+    Wrapper for :func:`torch.distributed.tensor.experimental.register_sharding`
+    to expose it in the experimental namespace.
+    """
+    return _register_sharding_impl(*args, **kwargs)
