@@ -362,6 +362,10 @@ def _optimize_transform_infos(
         # Flattened meshes only exist for ascending dim order, so if transforms
         # are in different order, we can't flatten reduce_scatter correctly.
         # (For all_gather and all_reduce, order doesn't affect the final result.)
+        # TODO: if DeviceMesh supports flattening meshes in non-ascending order, we should make 2 changes here
+        # (1) ordered reduce scatter can be flattened if an appropriate mesh is found
+        # (2) all_gather, all_reduce do not care about order, and can use any flattened mesh that includes
+        # the right set of dims, not just the one with the same sorting as their transform_infos
         sorted_mesh_dims = tuple(sorted(mesh_dims))
         if comm_type == "reduce_scatter" and mesh_dims != sorted_mesh_dims:
             return None, "non_ascending_mesh_dims"
