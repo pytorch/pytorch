@@ -313,6 +313,14 @@ class DTensor(torch.Tensor):
         # TODO: consider all_gather the local tensors for better debugging
         return f"DTensor(local_tensor={self._local_tensor}, device_mesh={self._spec.mesh}, placements={self._spec.placements})"
 
+    def _flatten_process_groups(self):
+        pgs = {}
+        device_mesh = self.device_mesh
+        for mesh_dim in range(device_mesh.ndim):
+            pg = device_mesh.get_group(mesh_dim)
+            pgs[mesh_dim] = pg
+        return pgs
+
     def __tensor_flatten__(self):
         """
         protocol to inform how to flatten a DTensor to local tensor

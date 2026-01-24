@@ -8,10 +8,10 @@ import dataclasses
 import logging
 import operator
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -45,17 +45,44 @@ original_zip = zip
 aot_graphs_effects_log = getArtifactLogger(__name__, "aot_graphs_effects")
 annotation_log = getArtifactLogger(__name__, "annotation")
 
+_T0 = TypeVar("_T0")
+_T1 = TypeVar("_T1")
+_T2 = TypeVar("_T2")
 
-def strict_zip(*iterables, strict=True, **kwargs):
-    if not strict:
-        return original_zip(*iterables, **kwargs)
 
-    length = len(iterables[0])
-    for iterable in iterables[1:]:
-        if len(iterable) != length:
-            raise ValueError(
-                "The iterables have different lengths and strict mode is enabled."
-            )
+@overload
+def strict_zip(
+    v0: Sequence[_T0], *, strict: bool = True, **kwargs: Any
+) -> Iterable[tuple[_T0]]: ...
+
+
+@overload
+def strict_zip(
+    v0: Sequence[_T0], v1: Sequence[_T1], *, strict: bool = True, **kwargs: Any
+) -> Iterable[tuple[_T0, _T1]]: ...
+
+
+@overload
+def strict_zip(
+    v0: Sequence[_T0],
+    v1: Sequence[_T1],
+    v2: Sequence[_T2],
+    *,
+    strict: bool = True,
+    **kwargs: Any,
+) -> Iterable[tuple[_T0, _T1, _T2]]: ...
+
+
+def strict_zip(
+    *iterables: Sequence[Any], strict: bool = True, **kwargs: Any
+) -> Iterable[Any]:
+    if strict:
+        length = len(iterables[0])
+        for iterable in iterables[1:]:
+            if len(iterable) != length:
+                raise ValueError(
+                    "The iterables have different lengths and strict mode is enabled."
+                )
 
     return original_zip(*iterables, **kwargs)
 
