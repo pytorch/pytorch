@@ -68,8 +68,13 @@ TORCH_META_FUNC(topk)
   if (!topKSize.empty()) {
     topKSize[dim] = k;
   }
+
+  const auto indices_dtype = maybe_get_output(1).defined()
+      ? maybe_get_output(1).scalar_type()
+      : at::kLong;
+
   set_output_raw_strided(0, topKSize, {}, self.options());
-  set_output_raw_strided(1, topKSize, {}, self.options().dtype(at::kLong));
+  set_output_raw_strided(1, topKSize, {}, self.options().dtype(indices_dtype));
 }
 
 TORCH_META_FUNC2(sort, stable)
@@ -85,8 +90,12 @@ TORCH_META_FUNC2(sort, stable)
       ? self.strides().vec()
       : at::infer_dense_strides(self.sizes(), self.strides());
 
+  const auto indices_dtype = maybe_get_output(1).defined()
+      ? maybe_get_output(1).scalar_type()
+      : at::kLong;
+
   set_output_raw_strided(0, self.sizes(), strides, self.options(), {});
-  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(kLong), {});
+  set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(indices_dtype), {});
 }
 
 } // namespace at::meta
@@ -953,20 +962,23 @@ TORCH_IMPL_FUNC(sort_stable_out)
     dim = maybe_wrap_dim(dim, self.dim());
 
     c10::MaybeOwned<Tensor> indices_tmp;
-    auto dtype_indices = at::ScalarType::Long;
+    auto indices_dtype = at::kLong; // default kLong is set in meta function, if functional is used.
+
     const auto sort_size = self.dim() > 0 ? self.size(dim) : 1;
     if (sort_size - 1 <= std::numeric_limits<uint8_t>::max()) {
-      dtype_indices = at::ScalarType::Byte;
+      indices_dtype = at::kByte;
     } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
-      dtype_indices = at::ScalarType::UInt16;
+      indices_dtype = at::kUInt16;
     } else if (sort_size - 1 <= std::numeric_limits<uint32_t>::max()) {
-      dtype_indices = at::ScalarType::UInt32;
+      indices_dtype = at::kUInt32;
+    } else {
+      indices_dtype = at::kLong;
     }
 
-    if (dtype_indices == at::ScalarType::Long) {
+    if (indices_dtype == indices.scalar_type()) {
       indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
     } else {
-      indices_tmp = c10::MaybeOwned<Tensor>::owned(indices.to(dtype_indices));
+      indices_tmp = c10::MaybeOwned<Tensor>::owned(indices.to(indices_dtype));
     }
 
     sort_stub(self.device().type(), self, values, *indices_tmp, dim, descending, stable.value_or(false));
