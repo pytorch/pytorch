@@ -155,6 +155,216 @@ class GraphModule(torch.nn.Module):
         res = fn(x)
         self.assertEqual(res, (x + 1, [0]))
 
+    def test_device_mesh_as_fake_script_object(self):
+        """
+        Test that DeviceMeshVariable correctly handles DeviceMesh wrapped in
+        FakeScriptObject during fake distributed tracing.
+        """
+        from torch._library.fake_class_registry import FakeScriptObject
+
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("dp",),
+        )
+
+        fake_mesh = FakeScriptObject(
+            wrapped_obj=device_mesh,
+            script_class_name="DeviceMesh",
+            x=device_mesh,
+        )
+
+        from torch._dynamo.variables.distributed import DeviceMeshVariable
+        from torch._dynamo.source import ConstantSource
+
+        self.assertTrue(DeviceMeshVariable.is_device_mesh(fake_mesh))
+
+        var = DeviceMeshVariable(
+            fake_mesh, source=ConstantSource("fake_mesh")
+        )
+        self.assertEqual(var.value, device_mesh)
+        self.assertEqual(var.value.ndim, device_mesh.ndim)
+        self.assertEqual(var.value.device_type, device_mesh.device_type)
+
+    def test_process_group_as_graph_input(self):
+        """
+        Test that ProcessGroupVariable correctly handles proxy tracking.
+        ProcessGroup objects should be lifted as graph inputs rather than
+        being embedded as constants (since repr() produces invalid Python syntax).
+        """
+        from torch._dynamo.variables.distributed import ProcessGroupVariable
+        from torch._dynamo.source import ConstantSource
+        import torch.fx as fx
+
+        pg = dist.group.WORLD
+        graph = fx.Graph()
+        proxy = graph.placeholder("process_group")
+
+        pg_var = ProcessGroupVariable(
+            pg, proxy=proxy, source=ConstantSource("pg")
+        )
+
+        self.assertEqual(pg_var.value, pg)
+        self.assertEqual(pg_var.as_python_constant(), pg)
+        self.assertEqual(pg_var.as_proxy(), proxy)
+
+    def test_is_process_group_detection(self):
+        """
+        Test _is_process_group correctly identifies ProcessGroup and FakeProcessGroup.
+        This helper is used by both the partitioner and graph compiler to properly
+        handle ProcessGroup objects in AOT Autograd.
+        """
+        from torch._functorch.partitioners import _is_process_group
+
+        pg = dist.group.WORLD
+        self.assertTrue(_is_process_group(pg))
+
+        self.assertFalse(_is_process_group(torch.tensor([1, 2, 3])))
+        self.assertFalse(_is_process_group("not_a_pg"))
+        self.assertFalse(_is_process_group(None))
+
+    def test_extract_runtime_device_meshes(self):
+        """
+        Test extract_runtime_device_meshes correctly extracts DeviceMesh from DTensor.
+        This is used in the 'device mesh in, device mesh out' pattern for
+        precompilation: when loading a precompiled artifact, the output DTensors
+        should use the live DeviceMesh from the runtime inputs.
+        """
+        from torch._functorch._aot_autograd.subclass_utils import (
+            extract_runtime_device_meshes,
+        )
+        from torch.distributed.tensor import DTensor
+
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("dp",),
+        )
+
+        local_tensor = torch.randn(4, 4)
+        dtensor = DTensor.from_local(local_tensor, device_mesh, [])
+
+        extracted_mesh = extract_runtime_device_meshes([dtensor])
+        self.assertEqual(extracted_mesh, device_mesh)
+
+        no_mesh = extract_runtime_device_meshes([torch.randn(4, 4)])
+        self.assertIsNone(no_mesh)
+
+        no_mesh_empty = extract_runtime_device_meshes([])
+        self.assertIsNone(no_mesh_empty)
+
+    def test_process_group_pickle_handler(self):
+        """
+        Test _ProcessGroupPickleData correctly handles ProcessGroup pickling.
+        ProcessGroups are C++ pybind11 objects that cannot be directly pickled.
+        The handler stores the group name and resolves it on unpickle.
+        """
+        from torch.fx._graph_pickler import _ProcessGroupPickleData
+
+        pg = dist.group.WORLD
+        pickle_data = _ProcessGroupPickleData(pg)
+        self.assertEqual(pickle_data.group_name, pg.group_name)
+
+    def test_fake_script_object_pickle_handler(self):
+        """
+        Test _FakeScriptObjectPickleData correctly handles FakeScriptObject pickling.
+        FakeScriptObjects wrap opaque objects like ProcessGroup that cannot be
+        directly pickled.
+        """
+        from torch._library.fake_class_registry import FakeScriptObject
+        from torch.fx._graph_pickler import _FakeScriptObjectPickleData
+
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("dp",),
+        )
+
+        fake_obj = FakeScriptObject(
+            wrapped_obj=device_mesh,
+            script_class_name="DeviceMesh",
+            x=device_mesh,
+        )
+
+        pickle_data = _FakeScriptObjectPickleData(fake_obj)
+        self.assertEqual(pickle_data.script_class_name, "DeviceMesh")
+        self.assertEqual(pickle_data.wrapped_obj, device_mesh)
+
+    def test_with_effects_functional_tensor_mode(self):
+        """
+        Test that with_effects works correctly under FunctionalTensorMode.
+        This is needed when executing pre-compiled FX graphs that contain
+        explicit with_effects calls.
+        """
+        from torch._higher_order_ops.effects import with_effects, new_token_tensor
+        from torch._subclasses.functional_tensor import FunctionalTensorMode
+
+        token = new_token_tensor()
+        x = torch.randn(4, 4)
+
+        with FunctionalTensorMode():
+            result = with_effects(
+                token, torch.ops.aten._print.default, "test message"
+            )
+
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+
+    def test_device_mesh_opaque_member_access(self):
+        """
+        Test that DeviceMesh members registered with MemberType.USE_REAL
+        are accessible when DeviceMesh is treated as an opaque reference type.
+        This tests the member configuration added in torch/__init__.py.
+        """
+        from torch._library.opaque_object import get_opaque_obj_info
+
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("dp",),
+        )
+
+        info = get_opaque_obj_info(type(device_mesh))
+        self.assertIsNotNone(info)
+        self.assertEqual(info.opaque_typ, "reference")
+
+        self.assertIn("ndim", info.members)
+        self.assertIn("device_type", info.members)
+        self.assertIn("mesh_dim_names", info.members)
+        self.assertIn("get_coordinate", info.members)
+        self.assertIn("get_rank", info.members)
+        self.assertIn("get_local_rank", info.members)
+        self.assertIn("_flatten", info.members)
+
+        self.assertEqual(device_mesh.ndim, 1)
+        self.assertEqual(device_mesh.device_type, "cpu")
+        self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
+        self.assertEqual(device_mesh.get_coordinate(), [0])
+        self.assertEqual(device_mesh.get_rank(), 0)
+        self.assertEqual(device_mesh.get_local_rank(), 0)
+
+    def test_faketensor_alignment_skip(self):
+        """
+        Test that alignment-checking functions in inductor utils correctly
+        skip FakeTensors. FakeTensors don't have real memory addresses,
+        so data_ptr() is meaningless for alignment purposes.
+        """
+        from torch._inductor.utils import (
+            copy_misaligned_inputs,
+            remove_unaligned_input_idxs,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode() as mode:
+            fake_tensor = mode.from_tensor(torch.randn(4, 4))
+
+            inputs = [fake_tensor]
+            copy_misaligned_inputs(inputs, [0])
+            self.assertIs(inputs[0], fake_tensor)
+
+            aligned_idxs = remove_unaligned_input_idxs([fake_tensor], [0])
+            self.assertEqual(list(aligned_idxs), [0])
+
 
 instantiate_parametrized_tests(TestFakeDistributed)
 

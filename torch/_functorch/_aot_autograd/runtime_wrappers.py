@@ -87,6 +87,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .subclass_utils import (
+    extract_runtime_device_meshes,
     requires_subclass_dispatch,
     runtime_unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
@@ -892,6 +893,11 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
             if aot_graphs_log.isEnabledFor(logging.DEBUG):
                 _log_args_list(unwrapped_args, "After unwrapping, unwrapped_args")
 
+            # Extract live DeviceMesh from input DTensors BEFORE clearing args.
+            # This is used for "device mesh in, device mesh out" - output DTensors should
+            # use the live mesh from inputs, not stale mesh from precompilation.
+            runtime_mesh = extract_runtime_device_meshes(args)
+
             args.clear()
             # expectation: runtime_fn is a boxed fn
             unwrapped_outs = compiled_fn(unwrapped_args)
@@ -907,6 +913,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
                 included_subclass_symints=True,
+                runtime_mesh=runtime_mesh,
             )
 
             if aot_graphs_log.isEnabledFor(logging.DEBUG):
@@ -2067,7 +2074,7 @@ def initialize_rng_states(
 
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_epilogue_functional(
-    metadata, maybe_subclass_metadata, out, *, make_subclass_override=None
+    metadata, maybe_subclass_metadata, out, *, make_subclass_override=None, runtime_mesh=None
 ):
     # Toss out the backward output tokens
     num_bw_tokens = metadata.num_backward_tokens
@@ -2089,6 +2096,7 @@ def _backward_epilogue_functional(
             included_subclass_symints=True,
             is_runtime=True,
             make_subclass_override=make_subclass_override,
+            runtime_mesh=runtime_mesh,
         )
         return outs_wrapped
     return out
@@ -2536,6 +2544,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     *flat_args,
                 )
 
+                # Extract runtime mesh from incoming gradients (flat_args) for
+                # "device mesh in, device mesh out" principle. The incoming gradients
+                # are DTensors with the live runtime mesh, and we need to use that
+                # mesh when wrapping the backward outputs (grad inputs).
+                runtime_mesh = extract_runtime_device_meshes(flat_args)
+
                 if num_rng:
                     nonlocal backward_state_position, bwd_rng_states
                     curr_backward_iter = ctx._curr_iter
@@ -2581,6 +2595,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         CompiledFunction.metadata,
                         CompiledFunction.maybe_subclass_metadata,
                         out,
+                        runtime_mesh=runtime_mesh,
                     )
 
                 needs_grad = torch.is_grad_enabled() and any(

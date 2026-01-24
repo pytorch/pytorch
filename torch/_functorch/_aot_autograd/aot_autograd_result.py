@@ -42,6 +42,7 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
+    EffectTokensWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
     RuntimeWrapper,
@@ -295,13 +296,54 @@ class BundledCompiledBackward(
 
 @dataclass
 class SerializedGraphModule:
-    fn: Callable[[dict[Any, Any], str], torch.nn.Module]
-    args: tuple[Any, ...]
+    """
+    A serialized representation of a GraphModule.
+
+    Uses GraphPickler for serialization to properly handle HigherOrderOperators
+    (like triton_kernel_wrapper_functional) that cannot be symbolically traced.
+    The original implementation used gm.__reduce__() which relies on symbolic
+    tracing for deserialization, causing failures with HigherOrderOperators.
+    """
+
+    serialized_bytes: bytes
+    # Keep fn/args for backward compatibility with previously serialized artifacts.
+    # New artifacts will have serialized_bytes set and fn/args will be None.
+    fn: Optional[Callable[[dict[Any, Any], str], torch.nn.Module]] = None
+    args: Optional[tuple[Any, ...]] = None
 
     def __init__(self, gm: torch.fx.GraphModule):
-        self.fn, self.args = gm.__reduce__()
+        from torch.fx._graph_pickler import GraphPickler, Options
+
+        # Use GraphPickler to serialize the graph module.
+        # This preserves the actual graph structure and handles HigherOrderOperators
+        # properly, unlike __reduce__ which uses symbolic tracing on deserialize.
+        # Use ops_filter=None to allow all ops (including custom ops like msl_ops).
+        options = Options(ops_filter=None, node_metadata_key_filter=None)
+        self.serialized_bytes = GraphPickler.dumps(gm, options)
+        self.fn = None
+        self.args = None
 
     def deserialize(self) -> torch.fx.GraphModule:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        # Check if this is a new-style artifact with serialized_bytes
+        if self.serialized_bytes is not None:
+            # Get the fake mode from the current tracing context if available,
+            # otherwise create a new one for deserialization.
+            context = torch._guards.TracingContext.try_get()
+            if context is not None and hasattr(context, "fake_mode"):
+                fake_mode = context.fake_mode
+            else:
+                fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+            gm = GraphPickler.loads(self.serialized_bytes, fake_mode)
+            assert isinstance(gm, torch.fx.GraphModule)
+            return gm
+
+        # Backward compatibility: old-style artifacts use fn/args
+        assert self.fn is not None and self.args is not None
         gm = self.fn(*self.args)
         assert isinstance(gm, torch.fx.GraphModule)
         return gm
@@ -378,6 +420,33 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         self.compiled_fw.pre_save()
         if self.compiled_bw is not None:
             self.compiled_bw.pre_save()
+
+        # Convert FunctionalTensor tokens to regular tensors before serialization.
+        # During tracing with FunctionalTensorMode, tokens are created as
+        # FunctionalTensor objects. If we serialize these and later deserialize
+        # them, deepcopy will fail because FunctionalTensor.clone() requires an
+        # active FunctionalTensorMode context. Converting to regular tensors
+        # avoids this issue since tokens are just used for ordering and don't
+        # need the FunctionalTensor wrapper at runtime.
+        self._convert_functional_tensor_tokens(self.runtime_metadata)
+        if self.maybe_subclass_meta is not None:
+            self._convert_functional_tensor_tokens(self.maybe_subclass_meta.fw_metadata)
+
+    def _convert_functional_tensor_tokens(self, metadata) -> None:
+        """Convert FunctionalTensor tokens to regular tensors in ViewAndMutationMeta."""
+        from torch._subclasses.functional_tensor import FunctionalTensor
+
+        if not hasattr(metadata, "tokens") or not metadata.tokens:
+            return
+
+        converted_tokens = {}
+        for key, token in metadata.tokens.items():
+            if isinstance(token, FunctionalTensor):
+                # Extract the underlying tensor from the FunctionalTensor
+                converted_tokens[key] = token.elem.clone().detach()
+            else:
+                converted_tokens[key] = token
+        metadata.tokens = converted_tokens
 
     # Turn result into the original callable
     def wrap_post_compile(
@@ -490,6 +559,13 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 )
 
         # Wrap the forward function in post compile wrappers
+        # Apply EffectTokensWrapper first to handle effect tokens that were
+        # traced during AOT compilation. This prepends None tokens to args
+        # and strips them from outputs. See Note [Side-Effectful Tokens in AOTAutograd]
+        compiled_fw_func = EffectTokensWrapper().post_compile(
+            compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
+        )
+
         compiled_fw_func = AOTDispatchSubclassWrapper(
             trace_joint=needs_autograd,
             fw_only=None,
