@@ -3023,5 +3023,133 @@ float erfcx(T x) {
   }
 }
 
+/*
+ * ndtri - Inverse of the standard normal cumulative distribution function.
+ *
+ * Computes the argument, x, for which the area under the Gaussian probability
+ * density function (integrated from minus infinity to x) is equal to y.
+ *
+ * For small arguments 0 < y < exp(-2), the program computes
+ * z = sqrt( -2.0 * log(y) );  then the approximation is
+ * x = z - log(z)/z  -  (1/z) P(1/z) / Q(1/z).
+ * There are two rational functions P/Q, one for 0 < y < exp(-32)
+ * and the other for y up to exp(-2). For larger arguments,
+ * w = y - 0.5, and x/sqrt(2pi) = w + w**3 R(w**2)/S(w**2).
+ *
+ * Ported from ATen/native/Math.h calc_ndtri
+ */
+template <typename T>
+inline float ndtri(T y0) {
+  /* sqrt(2pi) */
+  constexpr float s2pi = 2.50662827463100050242f;
+  constexpr float one = 1.0f;
+  constexpr float zero = 0.0f;
+
+  float y = static_cast<float>(y0);
+
+  if (y == zero) {
+    return -::metal::numeric_limits<float>::infinity();
+  }
+  if (y == one) {
+    return ::metal::numeric_limits<float>::infinity();
+  }
+  if (y < zero || y > one) {
+    return NAN;
+  }
+
+  bool code = true;
+  if (y > one - 0.13533528323661269189f) { /* 0.135... = exp(-2) */
+    y = one - y;
+    code = false;
+  }
+
+  if (y > 0.13533528323661269189f) {
+    y = y - 0.5f;
+    const float y2 = y * y;
+    
+    // Evaluate P0 polynomial: coefficients in reverse order
+    // P0 = {-59.9633501..., 98.001..., -56.676..., 13.931..., -1.239...}
+    float p0_result = -5.99633501014107895267e1f;
+    p0_result = p0_result * y2 + 9.80010754185999661536e1f;
+    p0_result = p0_result * y2 + (-5.66762857469070293439e1f);
+    p0_result = p0_result * y2 + 1.39312609387279679503e1f;
+    p0_result = p0_result * y2 + (-1.23916583867381258016e0f);
+    
+    // Evaluate Q0 polynomial
+    float q0_result = 1.00000000000000000000e0f;
+    q0_result = q0_result * y2 + 1.95448858338141759834e0f;
+    q0_result = q0_result * y2 + 4.67627912898881538453e0f;
+    q0_result = q0_result * y2 + 8.63602421390890590575e1f;
+    q0_result = q0_result * y2 + (-2.25462687854119370527e2f);
+    q0_result = q0_result * y2 + 2.00260212380060660359e2f;
+    q0_result = q0_result * y2 + (-8.20372256168333339912e1f);
+    q0_result = q0_result * y2 + 1.59056225126211695515e1f;
+    q0_result = q0_result * y2 + (-1.18331621121330003142e0f);
+    
+    float x = y + y * (y2 * p0_result / q0_result);
+    return (x * s2pi);
+  }
+
+  float x = ::metal::sqrt(-2.0f * ::metal::log(y));
+  const float x0 = x - ::metal::log(x) / x;
+
+  const float z = one / x;
+  float x1;
+  if (x < 8.0f) { /* y > exp(-32) = 1.2664165549e-14 */
+    // Evaluate P1 polynomial
+    float p1_result = 4.05544892305962419923e0f;
+    p1_result = p1_result * z + 3.15251094599893866154e1f;
+    p1_result = p1_result * z + 5.71628192246421288162e1f;
+    p1_result = p1_result * z + 4.40805073893200834700e1f;
+    p1_result = p1_result * z + 1.46849561928858024014e1f;
+    p1_result = p1_result * z + 2.18663306850790267539e0f;
+    p1_result = p1_result * z + (-1.40256079171354495875e-1f);
+    p1_result = p1_result * z + (-3.50424626827848203418e-2f);
+    p1_result = p1_result * z + (-8.57456785154685413611e-4f);
+    
+    // Evaluate Q1 polynomial
+    float q1_result = 1.00000000000000000000e0f;
+    q1_result = q1_result * z + 1.57799883256466749731e1f;
+    q1_result = q1_result * z + 4.53907635128879210584e1f;
+    q1_result = q1_result * z + 4.13172038254672030440e1f;
+    q1_result = q1_result * z + 1.50425385692907503408e1f;
+    q1_result = q1_result * z + 2.50464946208309415979e0f;
+    q1_result = q1_result * z + (-1.42182922854787788574e-1f);
+    q1_result = q1_result * z + (-3.80806407691578277194e-2f);
+    q1_result = q1_result * z + (-9.33259480895457427372e-4f);
+    
+    x1 = z * p1_result / q1_result;
+  } else {
+    // Evaluate P2 polynomial
+    float p2_result = 3.23774891776946035970e0f;
+    p2_result = p2_result * z + 6.91522889068984211695e0f;
+    p2_result = p2_result * z + 3.93881025292474443415e0f;
+    p2_result = p2_result * z + 1.33303460815807542389e0f;
+    p2_result = p2_result * z + 2.01485389549179081538e-1f;
+    p2_result = p2_result * z + 1.23716634817820021358e-2f;
+    p2_result = p2_result * z + 3.01581553508235416007e-4f;
+    p2_result = p2_result * z + 2.65806974686737550832e-6f;
+    p2_result = p2_result * z + 6.23974539184983293730e-9f;
+    
+    // Evaluate Q2 polynomial
+    float q2_result = 1.00000000000000000000e0f;
+    q2_result = q2_result * z + 6.02427039364742014255e0f;
+    q2_result = q2_result * z + 3.67983563856160859403e0f;
+    q2_result = q2_result * z + 1.37702099489081330271e0f;
+    q2_result = q2_result * z + 2.16236993594496635890e-1f;
+    q2_result = q2_result * z + 1.34204006088543189037e-2f;
+    q2_result = q2_result * z + 3.28014464682127739104e-4f;
+    q2_result = q2_result * z + 2.89247864745380683936e-6f;
+    q2_result = q2_result * z + 6.79019408009981274425e-9f;
+    
+    x1 = z * p2_result / q2_result;
+  }
+  x = x0 - x1;
+  if (code) {
+    x = -x;
+  }
+  return x;
+}
+
 } // namespace metal
 } // namespace c10
