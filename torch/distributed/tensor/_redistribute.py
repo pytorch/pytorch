@@ -152,6 +152,16 @@ class _FlattenedTransformInfo(_TransformInfo):
     mesh: DeviceMesh
     # The mesh dimensions from the original mesh that are being flattened (for debugging)
     original_mesh_dims: tuple[int, ...]
+    # Scale factor for merged sum/avg partials (product of avg mesh dim sizes)
+    # When merging sum/avg partials, we use sum for the collective and divide by this afterward
+    avg_scale: int | None = None
+
+    def __post_init__(self) -> None:
+        _TransformInfo.__post_init__(self)
+        if self.avg_scale is not None:
+            assert self.avg_scale > 1, (
+                f"avg_scale must be > 1 if set, got {self.avg_scale}"
+            )
 
 
 def _get_flattened_mesh_by_layout(
@@ -291,6 +301,38 @@ def _optimize_transform_infos(
         """Check if a comm type key represents a mergeable operation."""
         return key in MERGEABLE_COMM_TYPES
 
+    def are_placements_mergeable(
+        p1: tuple[Placement, Placement], p2: tuple[Placement, Placement]
+    ) -> bool:
+        """
+        Check if two src_dst_placements can be merged.
+
+        Allows merging of Partial("sum") and Partial("avg") since they can be
+        combined: perform sum reduction, then scale by avg mesh dims afterward.
+        """
+        if p1 == p2:
+            return True
+
+        src1, dst1 = p1
+        src2, dst2 = p2
+
+        # Destinations must match exactly
+        if dst1 != dst2:
+            return False
+
+        # Both sources must be partial
+        if not (src1.is_partial() and src2.is_partial()):
+            return False
+
+        # Only sum and avg can be merged (both use sum reduction, avg just scales)
+        partial1 = cast(Partial, src1)
+        partial2 = cast(Partial, src2)
+        mergeable_reduce_ops = {"sum", "avg"}
+        return (
+            partial1.reduce_op in mergeable_reduce_ops
+            and partial2.reduce_op in mergeable_reduce_ops
+        )
+
     def try_create_flattened(
         infos: list[_TransformInfo],
     ) -> tuple[_FlattenedTransformInfo | None, str | None]:
@@ -307,11 +349,14 @@ def _optimize_transform_infos(
         if len(infos) < 2:
             return None, "too_few_transforms"
 
-        # All transforms must have the same src_dst_placements to be merged
+        # All transforms must have mergeable src_dst_placements
         # (e.g., can't merge Partial->Shard(0) with Partial->Shard(1))
         first_placements = infos[0].src_dst_placements
         comm_type = infos[0]._comm_type_key()
-        assert all(info.src_dst_placements == first_placements for info in infos)
+        assert all(
+            are_placements_mergeable(info.src_dst_placements, first_placements)
+            for info in infos
+        )
         mesh_dims = tuple(sorted(info.mesh_dim for info in infos))
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
         if flattened_mesh is None:
@@ -349,13 +394,29 @@ def _optimize_transform_infos(
                 f"Unsupported comm type for try_create_flattened: {comm_type}"
             )
 
+        # For mixed sum/avg partials: use sum for the collective, compute avg scale
+        avg_scale = None
+        merged_src = src
+        if src.is_partial():
+            scale = math.prod(
+                device_mesh.size(info.mesh_dim)
+                for info in infos
+                if cast(Partial, info.src_dst_placements[0]).reduce_op == "avg"
+            )
+            if scale > 1:
+                avg_scale = scale
+                merged_src = Partial("sum")
+
+        merged_placements = (merged_src, dst)
+
         return (
             _FlattenedTransformInfo(
                 mesh_dim=0,
-                src_dst_placements=first_placements,
+                src_dst_placements=merged_placements,
                 logical_shape=outermost_info.logical_shape,
                 mesh=flattened_mesh,
                 original_mesh_dims=mesh_dims,
+                avg_scale=avg_scale,
             ),
             None,
         )
@@ -374,15 +435,18 @@ def _optimize_transform_infos(
             i += 1
             continue
 
-        # Collect consecutive transforms with same src_dst_placements
+        # Collect consecutive transforms with mergeable src_dst_placements
         # (not just same comm type - e.g., Partial->Shard(0) vs Partial->Shard(1) can't merge)
+        # Note: sum/avg partials can be merged since they use the same reduction
         current_placements = info.src_dst_placements
         group: list[_TransformInfo] = [info]
         j = i + 1
         while (
             j < len(transform_infos)
             and is_mergeable(transform_infos[j]._comm_type_key())
-            and transform_infos[j].src_dst_placements == current_placements
+            and are_placements_mergeable(
+                transform_infos[j].src_dst_placements, current_placements
+            )
         ):
             group.append(transform_infos[j])
             j += 1
@@ -1339,6 +1403,12 @@ def redistribute_local_tensor(
                     new_local_tensor = partial_spec._reduce_value(
                         local_tensor, mesh_to_use, i
                     )
+                    # For merged sum/avg partials, apply avg scaling
+                    if (
+                        isinstance(transform_info, _FlattenedTransformInfo)
+                        and transform_info.avg_scale is not None
+                    ):
+                        new_local_tensor = new_local_tensor / transform_info.avg_scale
                 elif current.is_shard():
                     current_placement = cast(Shard, current)
                     new_local_tensor = current_placement._to_replicate_tensor(
@@ -1361,6 +1431,12 @@ def redistribute_local_tensor(
                     new_local_tensor = partial_spec._reduce_shard_value(
                         local_tensor, mesh_to_use, i, target_placement
                     )
+                    # For merged sum/avg partials, apply avg scaling
+                    if (
+                        isinstance(transform_info, _FlattenedTransformInfo)
+                        and transform_info.avg_scale is not None
+                    ):
+                        new_local_tensor = new_local_tensor / transform_info.avg_scale
                 elif current.is_replicate():
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
