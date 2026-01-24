@@ -7735,6 +7735,29 @@ class TestMPS(TestCaseMPS):
             uniq = mps_out.unique()
             self.assertEqual(uniq, torch.arange(2, device='mps', dtype=dtype))
 
+    def test_poisson_dirichlet_standard_gamma(self):
+        torch.manual_seed(123)
+        dtypes = [torch.float16, torch.bfloat16, torch.float32]
+        for dtype in dtypes:
+            with self.subTest(dtype=dtype):
+                alpha = torch.tensor([[1.0, 2.0, 3.0], [0.5, 0.5, 0.5]], device="mps", dtype=dtype)
+                gamma = torch._standard_gamma(alpha)
+                self.assertEqual(gamma.shape, alpha.shape)
+                self.assertTrue((gamma > 0).all())
+
+                dirichlet = torch._sample_dirichlet(alpha)
+                self.assertEqual(dirichlet.shape, alpha.shape)
+                sums = dirichlet.sum(dim=-1)
+                tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
+                self.assertTrue(((sums - 1.0).abs() < tol).all())
+                self.assertTrue((dirichlet >= 0).all())
+
+                rate = torch.full((128, 128), 5.0, device="mps", dtype=dtype)
+                samples = torch.poisson(rate)
+                self.assertEqual(samples.shape, rate.shape)
+                self.assertTrue((samples >= 0).all())
+                self.assertTrue((samples == samples.floor()).all())
+
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_dropout(self, dtype):
         shapes = [
