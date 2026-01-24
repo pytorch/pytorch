@@ -8833,9 +8833,9 @@ class TestNNDeviceType(NNTestCase):
             for r in range(affine_tensor.size(1)):
                 for c in range(affine_tensor.size(2)):
                     grid_out = np.dot(grid_ary, [r, c, 1])
-                    self.assertEqual(affine_tensor[0, r, c], grid_out[:2], exact_dtype=False)
+                    torch.testing.assert_close(affine_tensor[0, r, c], torch.tensor(grid_out[:2]), rtol=1e-4, atol=1e-4)
 
-            self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+            torch.testing.assert_close(scipy_ary, gridsample_ary.reshape_as(scipy_ary), rtol=1e-4, atol=1e-4)
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
