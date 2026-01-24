@@ -12,7 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx import _constants as onnx_constants
-from torch.onnx._internal._lazy_import import onnx, onnx_ir as ir, onnxscript_apis
+from torch.onnx._internal._lazy_import import onnx, onnxscript_apis
 from torch.onnx._internal.exporter import (
     _constants,
     _core,
@@ -68,9 +68,6 @@ def export_compat(
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
-    fallback: bool = False,
-    # Legacy export parameters for fallback
-    legacy_export_kwargs: dict[str, Any] | None = None,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
         opset_version = onnx_constants.ONNX_DEFAULT_OPSET
@@ -162,67 +159,22 @@ def export_compat(
                 # register_op places the op in the front of all onnx variants,
                 # so we reverse the list to maintain the order of the custom ops provided
                 registry.register_op(torch_op, op, is_complex=False)
-    try:
-        onnx_program = _core.export(
-            model,
-            args,
-            kwargs,
-            registry=registry,
-            dynamic_shapes=dynamic_shapes_with_export_dim,
-            input_names=input_names,
-            output_names=output_names,
-            profile=profile,
-            report=report,
-            verify=verify,
-            dump_exported_program=dump_exported_program,
-            artifacts_dir=artifacts_dir,
-            verbose=verbose,
-        )
 
-    except Exception as e:
-        if fallback:
-            if verbose is not False:
-                print(
-                    "[torch.onnx] Falling back to legacy torch.onnx.export due "
-                    f"to the following error: {e}",
-                )
-            if f is None:
-                raise TypeError("f must be provided when fallback is enabled") from e
-            if dynamic_shapes is not None and dynamic_axes is None:
-                if input_names is None:
-                    raise ValueError(
-                        "Failed to convert dynamic_shapes to dynamic_axes. "
-                        "Either input_names or dynamic_axes must be provided "
-                        "when dynamic is requested in fallback"
-                    ) from e
-                dynamic_axes = _dynamic_shapes.from_dynamic_shapes_to_dynamic_axes(
-                    dynamic_shapes=dynamic_shapes, input_names=input_names, exception=e
-                )
-            # Use the legacy export kwargs prepared in __init__.py
-            if legacy_export_kwargs is None:
-                legacy_export_kwargs = {}
-
-            torch.onnx.utils.export(
-                model,  # type: ignore[arg-type]
-                args,
-                f,  # type: ignore[arg-type]
-                kwargs=kwargs,
-                export_params=export_params,
-                input_names=input_names,
-                output_names=output_names,
-                opset_version=opset_version,
-                dynamic_axes=dynamic_axes,
-                keep_initializers_as_inputs=keep_initializers_as_inputs,
-                **legacy_export_kwargs,
-            )
-            onnx_program = _onnx_program.ONNXProgram(ir.load(f), None)
-
-            # NOTE: It it's falling back to the legacy exporter, we don't need to
-            # optimize the model, so we return it here. Users can still optimize
-            # the model using the optimize() if they want.
-            return onnx_program
-        else:
-            raise
+    onnx_program = _core.export(
+        model,
+        args,
+        kwargs,
+        registry=registry,
+        dynamic_shapes=dynamic_shapes_with_export_dim,
+        input_names=input_names,
+        output_names=output_names,
+        profile=profile,
+        report=report,
+        verify=verify,
+        dump_exported_program=dump_exported_program,
+        artifacts_dir=artifacts_dir,
+        verbose=verbose,
+    )
 
     if need_axis_mapping and dynamic_shapes is not None:
         onnx_program._rename_dynamic_axes(dynamic_shapes)
