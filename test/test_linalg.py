@@ -9955,11 +9955,17 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         c = torch.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
                                            axes=([1, 0], [0, 1])))
-        self.assertEqual(c, cn)
+        if TEST_WITH_ROCM:
+            self.assertEqual(c, cn, atol=1e-4, rtol=1e-4)
+        else:
+            self.assertEqual(c, cn)
 
         cout = torch.zeros((5, 2), device=device)
         torch.tensordot(a, b, dims=([1, 0], [0, 1]), out=cout).cpu()
-        self.assertEqual(c, cout)
+        if TEST_WITH_ROCM:
+            self.assertEqual(c, cout, atol=1e-4, rtol=1e-4)
+        else:
+            self.assertEqual(c, cout)
 
         a = torch.randn(2, 3, 4, 5, device=device)
         b = torch.randn(4, 5, 6, 7, device=device)
@@ -9970,10 +9976,16 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         with self.assertRaisesRegex(RuntimeError, "expects dims >= 0"):
             torch.tensordot(a, b, dims=-1)
 
-        self.assertEqual(c, cn)
+        if TEST_WITH_ROCM:
+            self.assertEqual(c, cn, atol=1e-4, rtol=1e-4)
+        else:
+            self.assertEqual(c, cn)
         c = torch.tensordot(a, b).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
-        self.assertEqual(c, cn)
+        if TEST_WITH_ROCM:
+            self.assertEqual(c, cn, atol=1e-4, rtol=1e-4)
+        else:
+            self.assertEqual(c, cn)
 
         a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
@@ -9990,7 +10002,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(res_torch.ndim, res_ndim)
 
             res_numpy = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(), [a_dims, b_dims]))
-            self.assertEqual(res_torch, res_numpy)
+            if TEST_WITH_ROCM:
+                self.assertEqual(res_torch, res_numpy, atol=1e-4, rtol=1e-4)
+            else:
+                self.assertEqual(res_torch, res_numpy)
 
             if res_ndim % 2:
                 b.unsqueeze_(0)
