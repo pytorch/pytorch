@@ -410,8 +410,11 @@ template <bool apply_root, bool support_infinity>
 std::vector<Tensor> foreach_tensor_norm_cuda_internal(
     TensorList tensors,
     double p,
-    std::optional<ScalarType> dtype,
-    const char* func_name) {
+    std::optional<ScalarType> dtype) {
+  // Dispatch name must be a compile-time constant for AT_DISPATCH macros
+  constexpr const char* func_name =
+      apply_root ? "foreach_tensor_norm_cuda" : "foreach_tensor_powsum_cuda";
+
   const size_t ntensors = tensors.size();
   int max_chunks_per_tensor = -1;
 
@@ -572,7 +575,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
 
   return foreach_tensor_norm_cuda_internal<
       /*apply_root=*/true,
-      /*support_infinity=*/true>(tensors, p, dtype, "foreach_tensor_norm_cuda");
+      /*support_infinity=*/true>(tensors, p, dtype);
 }
 
 // _foreach_powsum: like _foreach_norm but returns sum(|x|^p) without the root
@@ -609,8 +612,7 @@ std::vector<Tensor> foreach_tensor_powsum_cuda(
 
   return foreach_tensor_norm_cuda_internal<
       /*apply_root=*/false,
-      /*support_infinity=*/false>(
-      tensors, p, dtype, "foreach_tensor_powsum_cuda");
+      /*support_infinity=*/false>(tensors, p, dtype);
 }
 
 #undef AT_DISPATCH_OUT_DTYPES
