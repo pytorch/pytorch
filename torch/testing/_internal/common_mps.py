@@ -339,7 +339,6 @@ if torch.backends.mps.is_available():
             "linalg.qr": None,
             "linalg.svdvals": None,
             "masked.median": None,
-            "matrix_exp": None,
             "max_pool2d_with_indices_backward": [
                 torch.int8,
                 torch.int16,
