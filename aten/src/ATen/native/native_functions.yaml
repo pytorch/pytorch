@@ -6857,6 +6857,7 @@
   dispatch:
     CPU: _s_binomial_cpu
     CUDA: _s_binomial_cuda
+    MPS: _s_binomial_mps
   tags: nondeterministic_seeded
   autogen: binomial.out
 

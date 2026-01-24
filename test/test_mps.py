@@ -7758,6 +7758,42 @@ class TestMPS(TestCaseMPS):
                 self.assertTrue((samples >= 0).all())
                 self.assertTrue((samples == samples.floor()).all())
 
+    def test_binomial(self):
+        torch.manual_seed(456)
+        dtypes = [torch.float16, torch.bfloat16, torch.float32]
+        for dtype in dtypes:
+            with self.subTest(dtype=dtype):
+                # Test basic binomial sampling
+                n = torch.tensor([10.0, 20.0, 30.0], device="mps", dtype=dtype)
+                p = torch.tensor([0.5, 0.3, 0.7], device="mps", dtype=dtype)
+                samples = torch.binomial(n, p)
+                self.assertEqual(samples.shape, n.shape)
+                # Samples should be non-negative integers <= n
+                self.assertTrue((samples >= 0).all())
+                self.assertTrue((samples <= n).all())
+                self.assertTrue((samples == samples.floor()).all())
+
+                # Test batch sampling
+                n_batch = torch.full((64, 64), 100.0, device="mps", dtype=dtype)
+                p_batch = torch.full((64, 64), 0.5, device="mps", dtype=dtype)
+                batch_samples = torch.binomial(n_batch, p_batch)
+                self.assertEqual(batch_samples.shape, n_batch.shape)
+                # Mean should be close to n*p = 50 for large samples
+                mean_val = batch_samples.float().mean().item()
+                self.assertTrue(40 < mean_val < 60, f"Mean {mean_val} not in expected range")
+
+                # Test edge cases
+                n_zero = torch.tensor([0.0], device="mps", dtype=dtype)
+                p_any = torch.tensor([0.5], device="mps", dtype=dtype)
+                self.assertEqual(torch.binomial(n_zero, p_any).item(), 0.0)
+
+                n_any = torch.tensor([10.0], device="mps", dtype=dtype)
+                p_zero = torch.tensor([0.0], device="mps", dtype=dtype)
+                self.assertEqual(torch.binomial(n_any, p_zero).item(), 0.0)
+
+                p_one = torch.tensor([1.0], device="mps", dtype=dtype)
+                self.assertEqual(torch.binomial(n_any, p_one).item(), 10.0)
+
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_dropout(self, dtype):
         shapes = [

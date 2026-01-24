@@ -13,6 +13,7 @@
 #else
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
+#include <ATen/ops/binomial_native.h>
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
@@ -497,16 +498,20 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
     std::string func_name = "standard_gamma_" + scalarToMetalTypeString(alpha_contig);
     id<MTLComputePipelineState> cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
 
-    std::array<uint32_t, 5> rng_state;
+    // RNG state: [seed_lo, seed_hi, offset_lo, offset_hi]
+    std::array<uint32_t, 4> rng_state;
     {
       std::lock_guard<std::mutex> lock(mps_gen->mutex_);
-      mps_gen->update_philox_counters();
-      const uint32_t* state_data = mps_gen->state_data();
-      rng_state[0] = state_data[0];
-      rng_state[1] = state_data[1];
-      rng_state[2] = state_data[2];
-      rng_state[3] = state_data[5];
-      rng_state[4] = state_data[6];
+      uint64_t seed = mps_gen->current_seed();
+      uint64_t offset = mps_gen->get_offset();
+      // Reserve counter blocks for this kernel - each thread may consume multiple randoms
+      uint64_t numel = static_cast<uint64_t>(result.numel());
+      mps_gen->set_offset(offset + numel);
+
+      rng_state[0] = static_cast<uint32_t>(seed);
+      rng_state[1] = static_cast<uint32_t>(seed >> 32);
+      rng_state[2] = static_cast<uint32_t>(offset);
+      rng_state[3] = static_cast<uint32_t>(offset >> 32);
     }
 
     MPSStream* mpsStream = getCurrentMPSStream();
@@ -533,6 +538,9 @@ Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
               lambda.scalar_type() == ScalarType::BFloat16,
               "MPS poisson only supports Float, Half, and BFloat16, got: ",
               lambda.scalar_type());
+  // Validate that lambda >= 0 (matching CPU/CUDA behavior)
+  TORCH_CHECK((lambda >= 0).all().item<bool>(),
+              "poisson rate (lambda) must be non-negative");
 
   Tensor result = at::empty(lambda.sizes(), lambda.options());
   if (result.numel() == 0) {
@@ -548,16 +556,20 @@ Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
     std::string func_name = "poisson_" + scalarToMetalTypeString(lambda_contig);
     id<MTLComputePipelineState> cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
 
-    std::array<uint32_t, 5> rng_state;
+    // RNG state: [seed_lo, seed_hi, offset_lo, offset_hi]
+    std::array<uint32_t, 4> rng_state;
     {
       std::lock_guard<std::mutex> lock(mps_gen->mutex_);
-      mps_gen->update_philox_counters();
-      const uint32_t* state_data = mps_gen->state_data();
-      rng_state[0] = state_data[0];
-      rng_state[1] = state_data[1];
-      rng_state[2] = state_data[2];
-      rng_state[3] = state_data[5];
-      rng_state[4] = state_data[6];
+      uint64_t seed = mps_gen->current_seed();
+      uint64_t offset = mps_gen->get_offset();
+      // Reserve counter blocks for this kernel - each thread may consume multiple randoms
+      uint64_t numel = static_cast<uint64_t>(result.numel());
+      mps_gen->set_offset(offset + numel);
+
+      rng_state[0] = static_cast<uint32_t>(seed);
+      rng_state[1] = static_cast<uint32_t>(seed >> 32);
+      rng_state[2] = static_cast<uint32_t>(offset);
+      rng_state[3] = static_cast<uint32_t>(offset >> 32);
     }
 
     MPSStream* mpsStream = getCurrentMPSStream();
@@ -595,10 +607,80 @@ Tensor _s_dirichlet_mps(const Tensor& alpha, std::optional<Generator> gen) {
   Tensor gamma_sum = gamma_samples.sum(/*dim=*/-1, /*keepdim=*/true);
 
   // Handle edge case where sum might be zero (shouldn't happen with valid alpha > 0)
-  // Clamp to avoid division by zero
-  gamma_sum = gamma_sum.clamp_min(std::numeric_limits<float>::min());
+  // Use dtype-appropriate minimum to avoid underflow for float16/bfloat16
+  double dtype_min;
+  switch (alpha.scalar_type()) {
+    case ScalarType::Half:
+      dtype_min = 6.103515625e-05;  // FLT16_MIN (smallest positive normal half)
+      break;
+    case ScalarType::BFloat16:
+      dtype_min = 1.175494350822287508e-38;  // bfloat16 min is similar to float min
+      break;
+    default:  // Float
+      dtype_min = std::numeric_limits<float>::min();
+      break;
+  }
+  gamma_sum = gamma_sum.clamp_min(dtype_min);
 
   return gamma_samples / gamma_sum;
+}
+
+// Binomial distribution using BTRD algorithm (Hörmann 1993)
+Tensor _s_binomial_mps(const Tensor& count, const Tensor& prob, std::optional<Generator> gen) {
+  TORCH_CHECK(count.scalar_type() != ScalarType::Double,
+              "MPS does not support binomial with scalar type: Double");
+  TORCH_CHECK(count.scalar_type() == ScalarType::Float ||
+              count.scalar_type() == ScalarType::Half ||
+              count.scalar_type() == ScalarType::BFloat16,
+              "MPS binomial only supports Float, Half, and BFloat16, got: ",
+              count.scalar_type());
+  TORCH_CHECK(count.scalar_type() == prob.scalar_type(),
+              "count and prob must have the same dtype");
+
+  Tensor result = at::empty(count.sizes(), count.options());
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  Tensor count_contig = count.contiguous();
+  Tensor prob_contig = prob.expand_as(count).contiguous();
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+
+  using namespace mps;
+
+  @autoreleasepool {
+    std::string func_name = "binomial_" + scalarToMetalTypeString(count_contig);
+    id<MTLComputePipelineState> cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
+
+    // RNG state: [seed_lo, seed_hi, offset_lo, offset_hi]
+    std::array<uint32_t, 4> rng_state;
+    {
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      uint64_t seed = mps_gen->current_seed();
+      uint64_t offset = mps_gen->get_offset();
+      // Reserve counter blocks for this kernel - each thread may consume multiple randoms
+      uint64_t numel = static_cast<uint64_t>(result.numel());
+      mps_gen->set_offset(offset + numel);
+
+      rng_state[0] = static_cast<uint32_t>(seed);
+      rng_state[1] = static_cast<uint32_t>(seed >> 32);
+      rng_state[2] = static_cast<uint32_t>(offset);
+      rng_state[3] = static_cast<uint32_t>(offset >> 32);
+    }
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      getMPSProfiler().beginProfileKernel(cplState, "_s_binomial_mps", {count_contig, prob_contig});
+      [computeEncoder setComputePipelineState:cplState];
+      mtl_setArgs(computeEncoder, count_contig, prob_contig, result);
+      [computeEncoder setBytes:rng_state.data() length:rng_state.size() * sizeof(uint32_t) atIndex:3];
+      mtl_dispatch1DJob(computeEncoder, cplState, result.numel());
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+
+  return result;
 }
 
 Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {
