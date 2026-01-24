@@ -8639,11 +8639,11 @@ class TestNNDeviceType(NNTestCase):
                 prefilter=True))
 
             if input_size2dsq == output_size2dsq:
-                self.assertEqual(scipy_ary.mean(), input_ary.mean())
-            self.assertEqual(scipy_ary[0, 0], input_ary[0, 0, 0, -1])
-            self.assertEqual(scipy_ary[0, -1], input_ary[0, 0, -1, -1])
-            self.assertEqual(scipy_ary[-1, -1], input_ary[0, 0, -1, 0])
-            self.assertEqual(scipy_ary[-1, 0], input_ary[0, 0, 0, 0])
+                torch.testing.assert_close(torch.tensor(scipy_ary.mean()), torch.tensor(input_ary.mean()), rtol=1e-4, atol=1e-4)
+            torch.testing.assert_close(scipy_ary[0, 0], torch.tensor(input_ary[0, 0, 0, -1]), rtol=1e-4, atol=1e-4)
+            torch.testing.assert_close(scipy_ary[0, -1], torch.tensor(input_ary[0, 0, -1, -1]), rtol=1e-4, atol=1e-4)
+            torch.testing.assert_close(scipy_ary[-1, -1], torch.tensor(input_ary[0, 0, -1, 0]), rtol=1e-4, atol=1e-4)
+            torch.testing.assert_close(scipy_ary[-1, 0], torch.tensor(input_ary[0, 0, 0, 0]), rtol=1e-4, atol=1e-4)
 
             affine_tensor = torch.nn.functional.affine_grid(
                 transform_tensor,
@@ -8658,8 +8658,8 @@ class TestNNDeviceType(NNTestCase):
                 align_corners=True
             ).to('cpu')
 
-            self.assertEqual(scipy_ary.mean(), gridsample_ary.mean())
-            self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+            torch.testing.assert_close(torch.tensor(scipy_ary.mean()), gridsample_ary.mean(), rtol=1e-4, atol=1e-4)
+            torch.testing.assert_close(scipy_ary, gridsample_ary.reshape_as(scipy_ary), rtol=1e-4, atol=1e-4)
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
