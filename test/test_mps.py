@@ -12301,6 +12301,31 @@ class TestAdvancedIndexing(TestCaseMPS):
             na_ge_x_cpu = na_cpu > x.cpu()
             self.assertEqual(na_ge_x_mps, na_ge_x_cpu)
 
+    def test_heaviside(self, device="mps"):
+        """Test Heaviside step function on MPS."""
+        # Test with float types
+        for dtype in [torch.float16, torch.float32]:
+            x = torch.tensor([-1.5, 0.0, 2.0, 0.0, -0.5], device=device, dtype=dtype)
+            values = torch.tensor([0.5, 0.5, 0.5, 1.0, 0.25], device=device, dtype=dtype)
+            result = torch.heaviside(x, values)
+            expected = torch.heaviside(x.cpu(), values.cpu())
+            self.assertEqual(result.cpu(), expected)
+
+        # Test with integer types
+        for dtype in [torch.int16, torch.int32, torch.int64]:
+            x = torch.tensor([-2, -1, 0, 1, 2], device=device, dtype=dtype)
+            values = torch.tensor([5, 5, 5, 5, 5], device=device, dtype=dtype)
+            result = torch.heaviside(x, values)
+            expected = torch.heaviside(x.cpu(), values.cpu())
+            self.assertEqual(result.cpu(), expected)
+
+        # Test with bool
+        x_bool = torch.tensor([False, True, False], device=device, dtype=torch.bool)
+        values_bool = torch.tensor([True, False, True], device=device, dtype=torch.bool)
+        result_bool = torch.heaviside(x_bool, values_bool)
+        expected_bool = torch.heaviside(x_bool.cpu(), values_bool.cpu())
+        self.assertEqual(result_bool.cpu(), expected_bool)
+
 
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,

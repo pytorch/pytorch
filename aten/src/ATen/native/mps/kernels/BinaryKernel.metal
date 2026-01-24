@@ -258,6 +258,13 @@ struct nextafter_functor {
   }
 };
 
+struct heaviside_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return a == static_cast<T>(0) ? b : static_cast<T>(a > static_cast<T>(0));
+  }
+};
+
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -415,6 +422,8 @@ REGISTER_INTEGER_BINARY_OP(maximum);
 REGISTER_FLOAT_BINARY_OP(minimum);
 REGISTER_INTEGER_BINARY_OP(minimum);
 REGISTER_FLOAT_BINARY_OP(nextafter);
+REGISTER_FLOAT_BINARY_OP(heaviside);
+REGISTER_INTEGER_BINARY_OP(heaviside);
 REGISTER_FLOAT_BINARY_OP(zeta);
 REGISTER_INT2FLOAT_BINARY_OP(zeta);
 REGISTER_FLOAT_BINARY_OP(logaddexp);
