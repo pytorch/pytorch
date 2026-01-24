@@ -10362,6 +10362,51 @@ def ___make_guard_fn():
 
                 self.assertEqual(actual, expected)
 
+    def test_pytree_tree_map_custom_type_fullgraph(self):
+        """
+        Regression test for GitHub issue #173240.
+
+        tree_map with multiple custom pytree types failed with fullgraph=True due to
+        incorrect handling of type object comparisons in the dynamo polyfills.
+        The issue was in flatten_up_to where `node_type != treespec.type` would
+        fail because cmp_eq/cmp_ne polyfills incorrectly called __eq__ on type objects.
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class MyContainer:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        # Register as pytree node
+        python_pytree.register_pytree_node(
+            MyContainer,
+            lambda c: ([c.x, c.y], None),
+            lambda children, _: MyContainer(children[0], children[1]),
+        )
+
+        try:
+            # Create instances
+            c1 = MyContainer(x=torch.zeros(2, 3), y=torch.ones(2, 3))
+            c2 = MyContainer(x=torch.ones(2, 3), y=torch.zeros(2, 3))
+
+            def add_containers(a, b):
+                return python_pytree.tree_map(lambda x, y: x + y, a, b)
+
+            # Test without fullgraph (should work)
+            expected = add_containers(c1, c2)
+
+            # Test with fullgraph=True (this was failing before the fix)
+            add_containers_compiled = torch.compile(add_containers, fullgraph=True)
+            actual = add_containers_compiled(c1, c2)
+
+            self.assertEqual(actual.x, expected.x)
+            self.assertEqual(actual.y, expected.y)
+        finally:
+            # Unregister the custom pytree node to avoid affecting other tests
+            if MyContainer in python_pytree.SUPPORTED_NODES:
+                del python_pytree.SUPPORTED_NODES[MyContainer]
+
     def test_shape_env_no_recording(self):
         main = ShapeEnv(should_record_events=False)
 
