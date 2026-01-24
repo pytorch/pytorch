@@ -567,14 +567,6 @@ if torch.backends.mps.is_available():
             if MACOS_VERSION < 15.0
             else [torch.int64],
             "scatter_reducemean": [torch.bool],
-            "segment_reduce": None,
-            "_segment.reduce": None,
-            "segment.reduce": None,
-            "segment_reduce_offsets": None,
-            "_segment_reduce_offsets": None,
-            "_segment_reduce_lengths": None,
-            "_segment_reducelengths": None,
-            "_segment_reduceoffsets": None,
             "sparse.mm": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
@@ -605,7 +597,6 @@ if torch.backends.mps.is_available():
                 torch.int16,
                 torch.bool,
             ],
-            "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
             "geometric": None,
@@ -909,7 +900,6 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
-            "_segment_reduce": [torch.float16, torch.float32],
             "_chunk_cat": [torch.float16, torch.float32],
             "_upsample_bilinear2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
             "_upsample_bicubic2d_aa": None,  # `_upsample_bilinear2d_aa_backward_out` not implemented for MPS
