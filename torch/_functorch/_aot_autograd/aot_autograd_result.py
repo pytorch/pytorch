@@ -42,6 +42,7 @@ from .runtime_wrappers import (
     AOTDispatchSubclassWrapper,
     CachedAutogradLazyBackwardCompileInfo,
     CompilerWrapper,
+    EffectTokensWrapper,
     FunctionalizedRngRuntimeWrapper,
     post_compile,
     RuntimeWrapper,
@@ -379,6 +380,33 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
         if self.compiled_bw is not None:
             self.compiled_bw.pre_save()
 
+        # Convert FunctionalTensor tokens to regular tensors before serialization.
+        # During tracing with FunctionalTensorMode, tokens are created as
+        # FunctionalTensor objects. If we serialize these and later deserialize
+        # them, deepcopy will fail because FunctionalTensor.clone() requires an
+        # active FunctionalTensorMode context. Converting to regular tensors
+        # avoids this issue since tokens are just used for ordering and don't
+        # need the FunctionalTensor wrapper at runtime.
+        self._convert_functional_tensor_tokens(self.runtime_metadata)
+        if self.maybe_subclass_meta is not None:
+            self._convert_functional_tensor_tokens(self.maybe_subclass_meta.fw_metadata)
+
+    def _convert_functional_tensor_tokens(self, metadata) -> None:
+        """Convert FunctionalTensor tokens to regular tensors in ViewAndMutationMeta."""
+        from torch._subclasses.functional_tensor import FunctionalTensor
+
+        if not hasattr(metadata, "tokens") or not metadata.tokens:
+            return
+
+        converted_tokens = {}
+        for key, token in metadata.tokens.items():
+            if isinstance(token, FunctionalTensor):
+                # Extract the underlying tensor from the FunctionalTensor
+                converted_tokens[key] = token.elem.clone().detach()
+            else:
+                converted_tokens[key] = token
+        metadata.tokens = converted_tokens
+
     # Turn result into the original callable
     def wrap_post_compile(
         self,
@@ -490,6 +518,13 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 )
 
         # Wrap the forward function in post compile wrappers
+        # Apply EffectTokensWrapper first to handle effect tokens that were
+        # traced during AOT compilation. This prepends None tokens to args
+        # and strips them from outputs. See Note [Side-Effectful Tokens in AOTAutograd]
+        compiled_fw_func = EffectTokensWrapper().post_compile(
+            compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
+        )
+
         compiled_fw_func = AOTDispatchSubclassWrapper(
             trace_joint=needs_autograd,
             fw_only=None,

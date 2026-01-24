@@ -937,22 +937,28 @@ class EffectTokensWrapper(CompilerWrapper):
         runtime_metadata: ViewAndMutationMeta,
     ):
         num_tokens = len(runtime_metadata.tokens)
+        print(f"DEBUG EffectTokensWrapper: num_tokens={num_tokens}, tokens={runtime_metadata.tokens}")
 
         @wraps(compiled_fn)
         def inner_fn(args: list[Any]):
+            print(f"DEBUG EffectTokensWrapper.inner_fn: num_tokens={num_tokens}, len(args)={len(args)}")
             if num_tokens > 0:
                 # Pass in forward effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
                 old_args = args
                 args = [*([None] * num_tokens), *args]
                 old_args.clear()
+                print(f"DEBUG EffectTokensWrapper.inner_fn: after prepending, len(args)={len(args)}")
 
             outs = compiled_fn(args)
 
             # Inductor cache DummyModule can return None
             if outs is None:
                 return None
+            print(f"DEBUG EffectTokensWrapper.inner_fn: len(outs)={len(outs) if hasattr(outs, '__len__') else 'N/A'}, type(outs)={type(outs)}")
             # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            return outs[num_tokens:] if num_tokens != 0 else outs
+            result = outs[num_tokens:] if num_tokens != 0 else outs
+            print(f"DEBUG EffectTokensWrapper.inner_fn: after stripping, len(result)={len(result) if hasattr(result, '__len__') else 'N/A'}")
+            return result
 
         # box it
         inner_fn._boxed_call = True  # type: ignore[attr-defined]

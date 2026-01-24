@@ -712,8 +712,15 @@ def get_args_parser() -> ArgumentParser:
 
 
 def parse_args(args):
+    import sys
+    print(f"[DEBUG parse_args] input args={args!r}")
+    print(f"[DEBUG parse_args] sys.argv={sys.argv!r}")
     parser = get_args_parser()
-    return parser.parse_args(args)
+    parsed = parser.parse_args(args)
+    print(f"[DEBUG parse_args] parsed.training_script={parsed.training_script!r}")
+    print(f"[DEBUG parse_args] parsed.module={parsed.module!r}")
+    print(f"[DEBUG parse_args] parsed.training_script_args={parsed.training_script_args!r}")
+    return parsed
 
 
 def parse_min_max_nnodes(nnodes: str):
@@ -940,6 +947,9 @@ def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
             cmd = args.training_script
     if not use_env:
         cmd_args.append(f"--local-rank={macros.local_rank}")
+    print(f"[DEBUG config_from_args] training_script_args={args.training_script_args!r}")
+    print(f"[DEBUG config_from_args] training_script={args.training_script!r}")
+    print(f"[DEBUG config_from_args] module={args.module!r}")
     cmd_args.extend(args.training_script_args)
 
     return config, cmd, cmd_args
