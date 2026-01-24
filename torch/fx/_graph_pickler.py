@@ -11,6 +11,8 @@ import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
 from torch._inductor.standalone_compile import AOTCompiledArtifact
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
 from torch._subclasses.meta_utils import (
     MetaConverter,
@@ -35,6 +37,8 @@ def _ops_filter_safe(name: str) -> bool:
         (
             "torch.ops.aten",
             "torch.ops.fbgemm",
+            "torch.ops.c10d",
+            "torch.ops.device_mesh",
         )
     )
 
@@ -111,6 +115,10 @@ class GraphPickler(pickle.Pickler):
             return _SymNodePickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, FakeScriptObject):
+            return _FakeScriptObjectPickleData.reduce_helper(self, obj)
+        elif is_opaque_type(type(obj)):
+            return _OpaqueObjectPickleData.reduce_helper(self, obj)
         else:
             # We should never get a raw Node!
             assert not isinstance(obj, torch.fx.Node)
@@ -665,3 +673,69 @@ class _TracingContextPickleData:
             self.force_unspec_int_unbacked_size_like
         )
         return context
+
+
+class _FakeScriptObjectPickleData:
+    """
+    Handles pickling of FakeScriptObject instances. FakeScriptObjects wrap opaque
+    objects like ProcessGroup that cannot be directly pickled. We store the
+    script_class_name and wrapped_obj, but NOT the real_obj since that will be
+    provided at runtime as a graph input.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: FakeScriptObject
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], FakeScriptObject],
+        tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
+    def __init__(self, fake_obj: FakeScriptObject) -> None:
+        self.script_class_name = fake_obj.script_class_name
+        self.wrapped_obj = fake_obj.wrapped_obj
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> FakeScriptObject:
+        fake_obj = object.__new__(FakeScriptObject)
+        object.__setattr__(fake_obj, "script_class_name", self.script_class_name)
+        object.__setattr__(fake_obj, "wrapped_obj", self.wrapped_obj)
+        object.__setattr__(fake_obj, "real_obj", None)
+        return fake_obj
+
+
+class _OpaqueObjectPickleData:
+    """
+    Handles pickling of opaque objects like ProcessGroup. These objects are
+    C++ pybind11 objects that cannot be directly pickled. We store just the
+    type name, and on unpickle return None since the actual object will be
+    provided at runtime as a graph input.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: object
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], None],
+        tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
+    def __init__(self, opaque_obj: object) -> None:
+        self.type_name = type(opaque_obj).__name__
+        self.module_name = type(opaque_obj).__module__
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> None:
+        return None
