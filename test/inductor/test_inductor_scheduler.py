@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyCUDA,
     skipCUDAIf,
 )
 from torch.testing._internal.common_utils import (
@@ -218,6 +219,7 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
+    @onlyCUDA
     def test_index_add_fusion_prevented(self):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
@@ -237,7 +239,7 @@ class TestScheduler(TestCase):
             F_u_at_atom = F_u_mol[batch] + 1e-6
             return f_u / F_u_at_atom
         
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda"
         f = torch.ones(1024, 1, device=device)
         batch = torch.zeros(1024, dtype=torch.long, device=device)
         
@@ -256,6 +258,7 @@ class TestScheduler(TestCase):
                 f"compiled={compiled_result.mean().item():.6f}"
         )
 
+    @onlyCUDA
     def test_atomic_add_no_fusion_correctness(self):
         """
         Test that atomic_add operations produce correct results.
@@ -265,7 +268,7 @@ class TestScheduler(TestCase):
             out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
             return out[idx] + 1.0      # read from same buffer: requires sync
         
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = "cuda"
         x = torch.ones(5, device=device)
         idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
         
