@@ -1895,12 +1895,12 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(len(result), 2)
         self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
 
-    def test_mixed_partial_types_not_grouped_allreduce(self):
-        """Mixed Partial types (sum vs max) should NOT be grouped for allreduce.
+    def test_mixed_sum_avg_partial_types_merged_allreduce(self):
+        """Mixed Partial types (sum vs avg) SHOULD be grouped for allreduce.
 
-        When redistributing (Partial("sum"), Partial("max")) -> (Replicate, Replicate),
-        the all-reduce operations must remain separate because they have different
-        reduce operations that cannot be merged.
+        When redistributing (Partial("sum"), Partial("avg")) -> (Replicate, Replicate),
+        the all-reduce operations can be merged since both use sum reduction internally
+        (avg applies scaling after the sum).
         """
         mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("A", "B"))
         mesh["A", "B"]._flatten("A_B")
@@ -1913,7 +1913,7 @@ class OptimizeFlattenedReductionsTest(TestCase):
             ),
             _TransformInfo(
                 mesh_dim=1,
-                src_dst_placements=(Partial("max"), Replicate()),
+                src_dst_placements=(Partial("avg"), Replicate()),
                 logical_shape=[8, 8],
             ),
         ]
@@ -1921,20 +1921,20 @@ class OptimizeFlattenedReductionsTest(TestCase):
         result = _optimize_transform_infos(
             transform_infos,
             mesh,
-            (Partial("sum"), Partial("max")),
+            (Partial("sum"), Partial("avg")),
             (Replicate(), Replicate()),
         )
 
-        # Should remain as 2 separate transforms since reduce_op types differ
-        self.assertEqual(len(result), 2)
-        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+        # Should be merged into 1 flattened transform since sum/avg can be combined
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
 
-    def test_mixed_partial_types_not_grouped_reduce_scatter(self):
-        """Mixed Partial types (sum vs max) should NOT be grouped for reduce_scatter.
+    def test_mixed_sum_avg_partial_types_merged_reduce_scatter(self):
+        """Mixed Partial types (sum vs avg) SHOULD be grouped for reduce_scatter.
 
-        When redistributing (Partial("sum"), Partial("max")) -> (Shard(0), Shard(0)),
-        the reduce-scatter operations must remain separate because they have different
-        reduce operations that cannot be merged.
+        When redistributing (Partial("sum"), Partial("avg")) -> (Shard(0), Shard(0)),
+        the reduce-scatter operations can be merged since both use sum reduction internally
+        (avg applies scaling after the sum).
         """
         mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("A", "B"))
         mesh["A", "B"]._flatten("A_B")
@@ -1947,7 +1947,7 @@ class OptimizeFlattenedReductionsTest(TestCase):
             ),
             _TransformInfo(
                 mesh_dim=1,
-                src_dst_placements=(Partial("max"), Shard(0)),
+                src_dst_placements=(Partial("avg"), Shard(0)),
                 logical_shape=[8, 8],
             ),
         ]
@@ -1955,13 +1955,13 @@ class OptimizeFlattenedReductionsTest(TestCase):
         result = _optimize_transform_infos(
             transform_infos,
             mesh,
-            (Partial("sum"), Partial("max")),
+            (Partial("sum"), Partial("avg")),
             (Shard(0), Shard(0)),
         )
 
-        # Should remain as 2 separate transforms since reduce_op types differ
-        self.assertEqual(len(result), 2)
-        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+        # Should be merged into 1 flattened transform since sum/avg can be combined
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
 
 
 class MultiDimRedistributeOptimizationTest(DTensorTestBase):
@@ -1970,6 +1970,10 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
     These tests verify numerical correctness of various redistribute patterns
     on multi-dimensional meshes, including the flattened mesh optimization.
     """
+
+    @property
+    def world_size(self):
+        return 8
 
     @with_comms
     def test_multi_dim_redistribute(self):
@@ -2124,6 +2128,90 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
                 result_full = result.full_tensor()
                 expected_full = global_tensor * num_partial_sums
                 self.assertEqual(result_full, expected_full)
+
+    @with_comms
+    def test_mixed_sum_avg_partial_numerics(self):
+        """Test numerical correctness for mixed Partial("sum") and Partial("avg").
+
+        This test verifies that when merging mixed sum/avg partials:
+        1. The merged collective uses 1 comm op (not separate ops per partial)
+        2. The scaling is correct: only avg dims contribute to the divisor
+
+        Example: (Partial("avg"), Partial("avg"), Partial("sum")) on mesh (2, 2, 2)
+        - All 8 ranks have the same local tensor value V
+        - After all-reduce sum: V * 8 (sum across all 8 ranks)
+        - Avg scaling: divide by 4 (product of avg mesh dims: 2 * 2)
+        - Final result: V * 8 / 4 = V * 2
+
+        The scaling should be 4 (only avg dims), NOT 8 (total mesh size).
+        """
+        mesh = init_device_mesh(self.device_type, (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "B", "C"]._flatten("A_B_C")
+
+        # Global tensor
+        global_tensor = torch.arange(16, dtype=torch.float32, device=self.device_type)
+
+        # src: (Partial("avg"), Partial("avg"), Partial("sum"))
+        # dst: (Replicate, Replicate, Replicate) for allreduce
+        src_placements_allreduce = (Partial("avg"), Partial("avg"), Partial("sum"))
+        dst_placements_allreduce = (Replicate(), Replicate(), Replicate())
+
+        # Create source DTensor - replicate first then reinterpret as Partial
+        base_dt = distribute_tensor(
+            global_tensor, mesh, [Replicate(), Replicate(), Replicate()]
+        )
+        local = base_dt.to_local()
+
+        # Test allreduce case
+        dt_allreduce = DTensor.from_local(
+            local.clone(), mesh, list(src_placements_allreduce), run_check=False
+        )
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result_allreduce = dt_allreduce.redistribute(
+                mesh, list(dst_placements_allreduce)
+            )
+
+        # Should be 1 merged allreduce
+        self.assertEqual(
+            comm_mode.get_comm_counts().get(funcol.all_reduce, 0),
+            1,
+            "mixed sum/avg allreduce should merge to 1 collective",
+        )
+
+        # Numerical correctness:
+        # All 8 ranks contribute value V via sum -> V * 8
+        # Then scale by product of avg dims only: 2 * 2 = 4
+        # Final = V * 8 / 4 = V * 2
+        total_mesh_size = mesh.size(0) * mesh.size(1) * mesh.size(2)  # 8
+        avg_scale_factor = mesh.size(0) * mesh.size(1)  # 4 (avg dims only)
+        expected_allreduce = global_tensor * total_mesh_size / avg_scale_factor
+        self.assertEqual(make_full_tensor(result_allreduce), expected_allreduce)
+
+        # Test reduce_scatter case
+        # src: (Partial("avg"), Partial("avg"), Partial("sum"))
+        # dst: (Shard(0), Shard(0), Shard(0))
+        dst_placements_reduce_scatter = (Shard(0), Shard(0), Shard(0))
+
+        dt_reduce_scatter = DTensor.from_local(
+            local.clone(), mesh, list(src_placements_allreduce), run_check=False
+        )
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result_reduce_scatter = dt_reduce_scatter.redistribute(
+                mesh, list(dst_placements_reduce_scatter)
+            )
+
+        # Should be 1 merged reduce_scatter
+        self.assertEqual(
+            comm_mode.get_comm_counts().get(funcol.reduce_scatter_tensor, 0),
+            1,
+            "mixed sum/avg reduce_scatter should merge to 1 collective",
+        )
+
+        # Numerical correctness: same scaling logic
+        expected_reduce_scatter = global_tensor * total_mesh_size / avg_scale_factor
+        self.assertEqual(make_full_tensor(result_reduce_scatter), expected_reduce_scatter)
 
 
 class FlattenedReductionIntegrationTest(DTensorTestBase):
