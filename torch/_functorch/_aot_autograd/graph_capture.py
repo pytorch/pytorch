@@ -54,6 +54,46 @@ from .utils import (
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
+def _extract_tangent_source_stack_traces(
+    fx_g: torch.fx.GraphModule,
+    fw_metadata: ViewAndMutationMeta,
+) -> None:
+    from .descriptors import PlainAOTOutput, TangentAOTInput
+
+    if not fw_metadata.traced_tangents_descs:
+        return
+
+    output_node = list(fx_g.graph.nodes)[-1]
+    if output_node.op != "output":
+        return
+
+    all_outputs = output_node.args[0]
+    if not all_outputs:
+        return
+
+    stack_traces: list[Optional[str]] = []
+
+    for desc in fw_metadata.traced_tangents_descs:
+        stack_trace = None
+
+        if isinstance(desc, TangentAOTInput):
+            output_desc = desc.output
+            output_idx = None
+
+            if isinstance(output_desc, PlainAOTOutput):
+                output_idx = output_desc.idx
+
+            if output_idx is not None and output_idx < len(all_outputs):
+                output_arg = all_outputs[output_idx]
+                if isinstance(output_arg, torch.fx.Node):
+                    stack_trace = output_arg.meta.get("stack_trace", None)
+
+        stack_traces.append(stack_trace)
+
+    if any(st is not None for st in stack_traces):
+        fw_metadata.tangent_source_stack_traces = stack_traces
+
+
 def _create_graph(
     f,
     args: list[torch.Tensor],
@@ -502,6 +542,9 @@ def aot_dispatch_autograd_graph(
     # Populate fw_metadata with stream indices from the compiled graph
     # NB: This needs to be done after the above stream assignments
     populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
+
+    # this helps users identify which forward output to call .detach() on.
+    _extract_tangent_source_stack_traces(fx_g, fw_metadata)
 
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:
