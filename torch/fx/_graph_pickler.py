@@ -85,6 +85,7 @@ class GraphPickler(pickle.Pickler):
     def __init__(self, file: io.BytesIO, options: Optional[Options] = None) -> None:
         super().__init__(file)
         self.options = options or Options()
+        self._debug_pickled_types: set[type] = set()
 
         # This abomination is so we can pass external decoding state to the
         # unpickler functions. We serialize _unpickle_state as a persistent
@@ -146,6 +147,16 @@ class GraphPickler(pickle.Pickler):
             if reduce := _TorchNumpyPickleData.reduce_helper(self, obj):
                 return reduce
 
+            obj_type = type(obj)
+            if obj_type not in self._debug_pickled_types:
+                self._debug_pickled_types.add(obj_type)
+                import logging
+
+                logging.debug(
+                    f"[GraphPickler] Falling back to default pickle for type: "
+                    f"{obj_type.__module__}.{obj_type.__name__}, obj repr: {repr(obj)[:200]}"
+                )
+
             # returning `NotImplemented` causes pickle to revert to the default
             # behavior for this object.
             return NotImplemented
@@ -175,7 +186,17 @@ class GraphPickler(pickle.Pickler):
         state = _UnpickleState(fake_mode)
         with io.BytesIO(data) as stream:
             unpickler = _GraphUnpickler(stream, state)
-            return unpickler.load()
+            try:
+                return unpickler.load()
+            except Exception as e:
+                import traceback
+
+                print(f"[GraphPickler.loads] Exception type: {type(e).__name__}")
+                print(f"[GraphPickler.loads] Exception message: {e}")
+                print(f"[GraphPickler.loads] Exception args: {e.args}")
+                print(f"[GraphPickler.loads] Full traceback:")
+                traceback.print_exc()
+                raise
 
 
 class _UnpickleState:
