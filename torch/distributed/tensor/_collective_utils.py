@@ -16,10 +16,10 @@ from torch.distributed._local_tensor import (
 )
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
-    _get_group_size_by_name,
     broadcast,
     get_group_rank,
     get_rank,
+    GroupName,
     ProcessGroup,
     scatter,
     Work,
@@ -30,11 +30,15 @@ logger = logging.getLogger(__name__)
 
 
 @torch.library.register_fake("_dtensor::shard_dim_alltoall")
-def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
-    group_size = _get_group_size_by_name(group_name)
+def _shard_dim_alltoall_meta(
+    input, gather_dim, shard_dim, group_name: GroupName | ProcessGroup
+):
+    if isinstance(group_name, str):
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
+        group_name = _resolve_process_group(group_name)
+    group_size = group_name.size()
     stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-    group = _resolve_process_group(group_name)
-    group_rank = get_group_rank(group, get_rank())
+    group_rank = get_group_rank(group_name, get_rank())
 
     return (
         torch.cat(stacked_list, dim=gather_dim)
@@ -59,10 +63,10 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         ]
         return out.contiguous()
 
-    group_name = funcol._resolve_group_name((mesh, mesh_dim))
+    group = funcol._resolve_group((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
     return torch.ops._dtensor.shard_dim_alltoall(
-        input, gather_dim, shard_dim, group_name
+        input, gather_dim, shard_dim, group.group_name
     )
 
 

@@ -6015,24 +6015,86 @@ class ExternKernel(InputsKernel):
         Callable[[Any, Any], Any],
         Optional[dict[sympy.Symbol, pytree.KeyPath]],
     ]:
+        r"""Process kernel arguments for external kernel execution.
+
+        Separates tensor and non-tensor arguments, realizes tensor inputs, freezes
+        their layouts, and runs fake tensor propagation to determine output
+        properties. This is necessary because Inductor may have changed the strides
+        of inputs and we need to accurately determine the output stride.
+
+        The processing steps are:
+
+        1. Flatten the argument tree using pytree
+        2. Separate :class:`IRNode` (tensor) arguments from non-tensor arguments,
+           handling special types like :class:`~sympy.core.expr.Expr`,
+           :class:`GeneratorState`, and :class:`OpaqueObjectState`
+        3. Realize tensor inputs via :meth:`realize_input`
+        4. Freeze tensor layouts to prevent stride changes
+        5. Convert IR nodes to example tensors (preserving constants from
+           :attr:`V.graph.constants`)
+        6. Run the kernel to propagate shapes and strides
+        7. Compute unbacked symbolic bindings for dynamic shapes
+
+        Args:
+            kernel (_OpOverloads): The kernel operation to execute
+            *args: Positional arguments to pass to the kernel
+            **kwargs: Keyword arguments to pass to the kernel
+
+        Returns:
+            tuple: A 5-tuple containing:
+
+                - **example_output**: Result from running fake tensor propagation
+                - **tensor_args** (list): Realized tensor arguments (IRNodes)
+                - **non_tensor_args** (list): Non-tensor arguments
+                - **unflatten_args** (Callable): Function that takes
+                  ``(new_tensor_args, new_non_tensor_args)`` and reconstructs the
+                  original ``(args, kwargs)`` structure
+                - **unbacked_bindings** (Optional[dict]): Mapping from unbacked
+                  :class:`~sympy.core.symbol.Symbol` to :class:`~torch.utils._pytree.KeyPath`,
+                  or ``None`` if no shape environment is available
+        """
         binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
 
-        is_arg_tensor = []
+        args_flat_is_tensor: list[bool] = []
         # tensor_args can be either tensor or torchbind objects
-        tensor_args = []
-        non_tensor_args: list[Any] = []
+        tensor_args: list[IRNode] = []
+        non_tensor_args: list[object] = []
+        real_non_tensor_args: list[
+            FakeScriptObject | torch._C.Generator | torch._C.ScriptObject | torch.Tensor
+        ] = []
         for arg in args_flat:
-            is_arg_tensor.append(
-                isinstance(arg, IRNode) and not isinstance(arg, GeneratorState)
-            )
-            if is_arg_tensor[-1]:
-                tensor_args.append(arg)
-            else:
-                if isinstance(arg, Expr):
-                    arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
-                non_tensor_args.append(arg)
+            match arg:
+                case Expr():
+                    node = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
+                    args_flat_is_tensor.append(False)
+                    non_tensor_args.append(node)
+                    real_non_tensor_args.append(node)
+
+                case GeneratorState():
+                    args_flat_is_tensor.append(False)
+                    non_tensor_args.append(arg)
+                    device_index = arg.device.index
+                    assert arg.device.type == "cuda" and device_index is not None
+                    real_non_tensor_args.append(
+                        torch.cuda.default_generators[device_index].clone_state()
+                    )
+
+                case OpaqueObjectState():
+                    args_flat_is_tensor.append(False)
+                    non_tensor_args.append(arg)
+                    # Use the original opaque object value
+                    real_non_tensor_args.append(arg.value)
+
+                case IRNode():
+                    args_flat_is_tensor.append(True)
+                    tensor_args.append(arg)
+
+                case _:
+                    args_flat_is_tensor.append(False)
+                    non_tensor_args.append(arg)
+                    real_non_tensor_args.append(arg)
 
         def unflatten_args(
             new_tensor_args: Sequence[_T], new_non_tensor_args: Sequence[_T]
@@ -6040,7 +6102,7 @@ class ExternKernel(InputsKernel):
             result = []
             it_tensors = iter(new_tensor_args)
             it_non_tensors = iter(new_non_tensor_args)
-            for is_tensor in is_arg_tensor:
+            for is_tensor in args_flat_is_tensor:
                 if is_tensor:
                     result.append(next(it_tensors))
                 else:
@@ -6060,9 +6122,7 @@ class ExternKernel(InputsKernel):
         # strides of inputs and we need to determine accurately what the
         # output stride will be.
         example_args: list[
-            Union[
-                torch.Tensor, torch._C.ScriptObject, FakeScriptObject, torch.Generator
-            ]
+            torch.Tensor | torch._C.ScriptObject | FakeScriptObject | torch.Generator
         ] = []
 
         # We need to retain the constant values of fake tensors that we originally
@@ -6080,16 +6140,22 @@ class ExternKernel(InputsKernel):
                 example_args.append(V.graph.torchbind_constants[x.get_name()])
             elif isinstance(x, TorchBindObject):
                 example_args.append(x.get_value())
-            elif isinstance(x, torch._inductor.ir.GeneratorState):
+            elif isinstance(x, GeneratorState):
+                # TODO: Is this even reachable? The original tensor_args never
+                # has them so they'd have to come from realize_input().
                 device_index = x.device.index
                 assert x.device.type == "cuda" and device_index is not None
                 example_args.append(
                     torch.cuda.default_generators[device_index].clone_state()
                 )
+            elif isinstance(x, OpaqueObjectState):
+                # TODO: Same Q as GeneratorState
+                # Use the original opaque object value
+                example_args.append(x.value)
             else:
                 example_args.append(ir_node_to_tensor(x, guard_shape=True))
 
-        new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
+        new_args, new_kwargs = unflatten_args(example_args, real_non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None
@@ -8771,7 +8837,9 @@ class InvokeSubgraph(ExternKernel):
         new_operands: list[IRNode] = []
 
         for idx, operand in enumerate(operands):
-            if isinstance(operand, (ShapeAsConstantBuffer, GeneratorState)):
+            if isinstance(
+                operand, (ShapeAsConstantBuffer, GeneratorState, OpaqueObjectState)
+            ):
                 new_operands.append(operand)
             else:
                 new_operands.append(
@@ -9459,6 +9527,24 @@ class TorchBindObject(NonTensorObj):
 class GeneratorState(NonTensorObj):
     name: str
     device: torch.device
+
+    def get_name(self) -> str:
+        return self.name
+
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
+        return self.name
+
+
+@ir_dataclass
+class OpaqueObjectState(NonTensorObj):
+    """
+    Represents an opaque object (e.g., ProcessGroup) that is passed through
+    as a graph input. Similar to GeneratorState, this wraps the object with
+    its placeholder name so codegen can reference it properly.
+    """
+
+    name: str
+    value: Any  # The actual opaque object (for reference, not used in codegen)
 
     def get_name(self) -> str:
         return self.name
