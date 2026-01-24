@@ -310,6 +310,61 @@ class GraphModule(torch.nn.Module):
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 2)
 
+    def test_device_mesh_opaque_member_access(self):
+        """
+        Test that DeviceMesh members registered with MemberType.USE_REAL
+        are accessible when DeviceMesh is treated as an opaque reference type.
+        This tests the member configuration added in torch/__init__.py.
+        """
+        from torch._library.opaque_object import get_opaque_obj_info
+
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("dp",),
+        )
+
+        info = get_opaque_obj_info(type(device_mesh))
+        self.assertIsNotNone(info)
+        self.assertEqual(info.opaque_typ, "reference")
+
+        self.assertIn("ndim", info.members)
+        self.assertIn("device_type", info.members)
+        self.assertIn("mesh_dim_names", info.members)
+        self.assertIn("get_coordinate", info.members)
+        self.assertIn("get_rank", info.members)
+        self.assertIn("get_local_rank", info.members)
+        self.assertIn("_flatten", info.members)
+
+        self.assertEqual(device_mesh.ndim, 1)
+        self.assertEqual(device_mesh.device_type, "cpu")
+        self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
+        self.assertEqual(device_mesh.get_coordinate(), [0])
+        self.assertEqual(device_mesh.get_rank(), 0)
+        self.assertEqual(device_mesh.get_local_rank(), 0)
+
+    def test_faketensor_alignment_skip(self):
+        """
+        Test that alignment-checking functions in inductor utils correctly
+        skip FakeTensors. FakeTensors don't have real memory addresses,
+        so data_ptr() is meaningless for alignment purposes.
+        """
+        from torch._inductor.utils import (
+            copy_misaligned_inputs,
+            remove_unaligned_input_idxs,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode() as mode:
+            fake_tensor = mode.from_tensor(torch.randn(4, 4))
+
+            inputs = [fake_tensor]
+            copy_misaligned_inputs(inputs, [0])
+            self.assertIs(inputs[0], fake_tensor)
+
+            aligned_idxs = remove_unaligned_input_idxs([fake_tensor], [0])
+            self.assertEqual(list(aligned_idxs), [0])
+
 
 instantiate_parametrized_tests(TestFakeDistributed)
 
