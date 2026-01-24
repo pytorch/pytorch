@@ -108,6 +108,12 @@ class _TransformInfo(NamedTuple):
     # logical_shape on this mesh dimension
     logical_shape: list[int]
 
+    def __post_init__(self):
+        assert self.mesh_dim >= 0
+        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
+            "TransformInfo should only be created if it is an op with some effect, not a no-op"
+        )
+
 
 # Global cache for DTensorRedistributePlanner instances
 _planner_cache: dict[
@@ -789,14 +795,18 @@ class DTensorRedistributePlanner:
         transform_infos: list[_TransformInfo] = []
         if self.device_mesh.ndim == 1:
             # if device_mesh is 1D, redistribute is a simple direct
-            # transformation
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=0,
-                    src_dst_placements=(src_spec.placements[0], dst_spec.placements[0]),
-                    logical_shape=initial_logical_shape,
+            # transformation (skip if src == dst)
+            if src_spec.placements[0] != dst_spec.placements[0]:
+                transform_infos.append(
+                    _TransformInfo(
+                        mesh_dim=0,
+                        src_dst_placements=(
+                            src_spec.placements[0],
+                            dst_spec.placements[0],
+                        ),
+                        logical_shape=initial_logical_shape,
+                    )
                 )
-            )
             return transform_infos
 
         # Handle multi-dim device mesh placement redistribution First, we need
