@@ -10190,6 +10190,66 @@ class TestSegmentReduceMPS(TestCaseMPS):
 
         self.assertEqual(grad_mps.cpu(), grad_cpu)
 
+    def test_segment_reduce_backward_max_tied_values(self):
+        """Test segment_reduce backward with tied max values.
+
+        When multiple elements in a segment have the same max value,
+        the gradient should be distributed evenly among them.
+        """
+        # Segment 1: [1.0, 3.0, 3.0] - two values tied at max (3.0)
+        # Segment 2: [2.0] - single element
+        data = torch.tensor([1.0, 3.0, 3.0, 2.0], device="mps", requires_grad=True)
+        lengths = torch.tensor([3, 1], dtype=torch.int64, device="mps")
+
+        result_mps = torch.segment_reduce(data, "max", lengths=lengths)
+        loss_mps = result_mps.sum()
+        loss_mps.backward()
+        grad_mps = data.grad.clone()
+
+        data_cpu = torch.tensor([1.0, 3.0, 3.0, 2.0], device="cpu", requires_grad=True)
+        lengths_cpu = lengths.to("cpu")
+
+        result_cpu = torch.segment_reduce(data_cpu, "max", lengths=lengths_cpu)
+        loss_cpu = result_cpu.sum()
+        loss_cpu.backward()
+        grad_cpu = data_cpu.grad.clone()
+
+        # Verify gradients match CPU
+        self.assertEqual(grad_mps.cpu(), grad_cpu)
+        # For the tied max values (indices 1 and 2), gradient should be 0.5 each
+        self.assertEqual(grad_mps[1].cpu().item(), 0.5)
+        self.assertEqual(grad_mps[2].cpu().item(), 0.5)
+
+    def test_segment_reduce_backward_min_tied_values(self):
+        """Test segment_reduce backward with tied min values.
+
+        When multiple elements in a segment have the same min value,
+        the gradient should be distributed evenly among them.
+        """
+        # Segment 1: [1.0, 1.0, 3.0] - two values tied at min (1.0)
+        # Segment 2: [2.0] - single element
+        data = torch.tensor([1.0, 1.0, 3.0, 2.0], device="mps", requires_grad=True)
+        lengths = torch.tensor([3, 1], dtype=torch.int64, device="mps")
+
+        result_mps = torch.segment_reduce(data, "min", lengths=lengths)
+        loss_mps = result_mps.sum()
+        loss_mps.backward()
+        grad_mps = data.grad.clone()
+
+        data_cpu = torch.tensor([1.0, 1.0, 3.0, 2.0], device="cpu", requires_grad=True)
+        lengths_cpu = lengths.to("cpu")
+
+        result_cpu = torch.segment_reduce(data_cpu, "min", lengths=lengths_cpu)
+        loss_cpu = result_cpu.sum()
+        loss_cpu.backward()
+        grad_cpu = data_cpu.grad.clone()
+
+        # Verify gradients match CPU
+        self.assertEqual(grad_mps.cpu(), grad_cpu)
+        # For the tied min values (indices 0 and 1), gradient should be 0.5 each
+        self.assertEqual(grad_mps[0].cpu().item(), 0.5)
+        self.assertEqual(grad_mps[1].cpu().item(), 0.5)
+
 
 # These tests were taken from test/test_view_ops.py
 # They are subset of those tests as currently only this subset is working.
