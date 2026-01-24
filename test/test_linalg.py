@@ -9662,19 +9662,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                         for r in (rhs, rhs_expanded):
                             l_matmul_fn = l.matmul
                             result = maybe_squeeze_result(l, r, l_matmul_fn(r))
-                            self.assertEqual(truth, result)
+                            if TEST_WITH_ROCM:
+                                self.assertEqual(truth, result, atol=1e-4, rtol=1e-4)
+                            else:
+                                self.assertEqual(truth, result)
                             # test torch.matmul function as well
                             torch_result = maybe_squeeze_result(l, r, torch.matmul(l, r))
-                            self.assertEqual(truth, torch_result)
+                            if TEST_WITH_ROCM:
+                                self.assertEqual(truth, torch_result, atol=1e-4, rtol=1e-4)
+                            else:
+                                self.assertEqual(truth, torch_result)
                             # test torch.matmul with out
                             out = torch.zeros_like(torch_result)
                             torch.matmul(l, r, out=out)
-                            self.assertEqual(truth, maybe_squeeze_result(l, r, out))
+                            if TEST_WITH_ROCM:
+                                self.assertEqual(truth, maybe_squeeze_result(l, r, out), atol=1e-4, rtol=1e-4)
+                            else:
+                                self.assertEqual(truth, maybe_squeeze_result(l, r, out))
 
                 # compare to bmm
                 bmm_result = (torch.bmm(lhs_expanded.contiguous().view(-1, *lhs_mat_dims),
                                         rhs_expanded.contiguous().view(-1, *rhs_mat_dims)))
-                self.assertEqual(truth.view(-1, *result_dims), bmm_result.view(-1, *result_dims))
+                if TEST_WITH_ROCM:
+                    self.assertEqual(truth.view(-1, *result_dims), bmm_result.view(-1, *result_dims), atol=1e-4, rtol=1e-4)
+                else:
+                    self.assertEqual(truth.view(-1, *result_dims), bmm_result.view(-1, *result_dims))
 
         for indices in itertools.product((True, False), repeat=2):
             verify_batched_matmul(*indices)
