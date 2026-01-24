@@ -529,7 +529,6 @@ if torch.backends.mps.is_available():
             "nn.functional.padreflect": [torch.bool],
             "nn.functional.padreplicate": [torch.bool],
             "nn.functional.padreplicate_negative": [torch.bool],
-            "nn.functional.pdist": None,
             "nn.functional.relu": [torch.bool],
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
