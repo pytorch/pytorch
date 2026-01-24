@@ -4094,13 +4094,6 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
         "test_template_bad_epilogue_fusion": "Benchmarking path is different",
-        # XPU specific skips due to lack of multiprocess tensor reduction support (issue #170636)
-        "test_max_autotune_addmm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
-        "test_max_autotune_regular_mm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
-        "test_max_autotune_regular_mm_persistent_tma_strided": "No XPU implementation for multiprocess tensor reduction",
-        "test_max_autotune_addmm_tma_dynamic_outer_dim": "No XPU implementation for multiprocess tensor reduction",
-        "test_max_autotune_regular_mm_tma_dynamic_outer_dim": "No XPU implementation for multiprocess tensor reduction",
-        # END XPU specific skips
     }
 
     @classmethod

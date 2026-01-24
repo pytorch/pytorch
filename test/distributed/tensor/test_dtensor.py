@@ -1321,15 +1321,23 @@ class TestMixedPartialTypes(TestCase):
     def test_mixed_partial_types_rejected(self):
         mesh = DeviceMesh("cpu", torch.arange(8).reshape(2, 4))
         tensor = torch.randn(8, 8)
-        mixed = [Partial("sum"), Partial("max")]
+        banned_mixed = [Partial("sum"), Partial("max")]
+        allowed_mixed = [Partial("sum"), Partial("avg")]
 
         # Test distribute_tensor and from_local APIs
         for api in [
-            lambda: distribute_tensor(tensor, mesh, mixed),
-            lambda: DTensor.from_local(tensor, mesh, mixed),
+            lambda: distribute_tensor(tensor, mesh, banned_mixed),
+            lambda: DTensor.from_local(tensor, mesh, banned_mixed),
         ]:
             with self.assertRaisesRegex(ValueError, "Mixed Partial reduce types"):
                 api()
+
+        for api in [
+            lambda: distribute_tensor(tensor, mesh, allowed_mixed),
+            lambda: DTensor.from_local(tensor, mesh, allowed_mixed),
+        ]:
+            # no error
+            api()
 
         # Test redistribute_local_tensor separately (different call pattern)
         # Note: public DTensor.redistribute() doesn't allow Partial targets at all,
@@ -1341,11 +1349,19 @@ class TestMixedPartialTypes(TestCase):
         )
         target_spec = DTensorSpec(
             mesh,
-            tuple(mixed),
+            tuple(banned_mixed),
             tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
         )
         with self.assertRaisesRegex(ValueError, "Mixed Partial reduce types"):
             redistribute_local_tensor(tensor, current_spec, target_spec)
+
+        target_spec = DTensorSpec(
+            mesh,
+            tuple(allowed_mixed),
+            tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
+        )
+        # no error
+        redistribute_local_tensor(tensor, current_spec, target_spec)
 
 
 if __name__ == "__main__":
