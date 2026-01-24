@@ -25,6 +25,7 @@
 #include <ATen/ops/topk.h>
 #include <ATen/ops/uniform_native.h>
 #include <ATen/ops/view_as_real.h>
+#include <ATen/ops/_standard_gamma_native.h>
 #endif
 
 namespace at::native {
@@ -455,6 +456,78 @@ Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Gen
                                       gen,
                                       "log_normal_mps_:" + std::to_string(mean) + ":" + std::to_string(std),
                                       random_op_block);
+}
+
+// Standard gamma distribution using Marsaglia-Tsang method (2000)
+// "A Simple Method for Generating Gamma Variables"
+// This enables bioinformatics tools like CellBender (scRNA-seq analysis)
+// to run natively on Apple Silicon GPUs without CPU fallback.
+namespace mps {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& distributionsLib = MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/Distributions_metallib.h>
+static auto& distributionsLib = lib;
+#endif
+} // namespace mps
+
+Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
+  TORCH_CHECK(alpha.scalar_type() != ScalarType::Double,
+              "MPS does not support _standard_gamma with scalar type: Double");
+  TORCH_CHECK(alpha.scalar_type() == ScalarType::Float ||
+              alpha.scalar_type() == ScalarType::Half ||
+              alpha.scalar_type() == ScalarType::BFloat16,
+              "MPS _standard_gamma only supports Float, Half, and BFloat16, got: ",
+              alpha.scalar_type());
+
+  Tensor result = at::empty(alpha.sizes(), alpha.options());
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  // Make inputs contiguous
+  Tensor alpha_contig = alpha.contiguous();
+
+  auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
+
+  using namespace mps;
+
+  @autoreleasepool {
+    std::string func_name = "standard_gamma_" + scalarToMetalTypeString(alpha_contig);
+    id<MTLComputePipelineState> cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
+
+    // Prepare RNG state: [counter, seed0, seed1, key0, key1]
+    std::array<uint32_t, 5> rng_state;
+    {
+      std::lock_guard<std::mutex> lock(mps_gen->mutex_);
+      mps_gen->update_philox_counters();
+      const uint32_t* state_data = mps_gen->state_data();
+      // counter from state
+      rng_state[0] = state_data[0];
+      // seeds (state[1] to state[4])
+      rng_state[1] = state_data[1];
+      rng_state[2] = state_data[2];
+      // keys (state[5] and state[6])
+      rng_state[3] = state_data[5];
+      rng_state[4] = state_data[6];
+    }
+
+    MPSStream* mpsStream = getCurrentMPSStream();
+    dispatch_sync(mpsStream->queue(), ^() {
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+
+      getMPSProfiler().beginProfileKernel(cplState, "_s_gamma_mps", {alpha_contig});
+
+      [computeEncoder setComputePipelineState:cplState];
+      mtl_setArgs(computeEncoder, alpha_contig, result);
+      [computeEncoder setBytes:rng_state.data() length:rng_state.size() * sizeof(uint32_t) atIndex:2];
+      mtl_dispatch1DJob(computeEncoder, cplState, result.numel());
+
+      getMPSProfiler().endProfileKernel(cplState);
+    });
+  }
+
+  return result;
 }
 
 Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {

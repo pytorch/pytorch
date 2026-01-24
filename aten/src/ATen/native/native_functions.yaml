@@ -6824,6 +6824,7 @@
   dispatch:
     CPU: _s_gamma_cpu
     CUDA: _s_gamma_cuda
+    MPS: _s_gamma_mps
   tags: nondeterministic_seeded
   autogen: _standard_gamma.out
 
