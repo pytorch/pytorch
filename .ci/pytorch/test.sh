@@ -178,6 +178,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
+  # disable timeout due to shard not balance for xpu
+  export NO_TEST_TIMEOUT=True
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -215,8 +217,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
-  # JIT C++ extensions require ninja.
-  pip_install "ninja==1.10.2"
+  # JIT C++ extensions require ninja (installed from requirements-ci.txt).
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
