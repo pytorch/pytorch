@@ -2018,7 +2018,7 @@ class OptimizeFlattenedReductionsTest(TestCase):
             # Verify warning message content
             self.assertEqual(len(log_context.output), 1)
             warning_msg = log_context.output[0]
-            self.assertIn("non-ascending-order", warning_msg)
+            self.assertIn("non-ascending order", warning_msg)
             self.assertIn("reduce_scatter", warning_msg)
 
 

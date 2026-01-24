@@ -254,6 +254,8 @@ def _warn_flatten_optimization_not_possible(
             " Unfortunately, because the tensor dimension is not evenly divisible by the product of "
             "the mesh dim sizes that would need to be flattened for the optimization to work, it can not be optimized.",
         )
+    elif reason == "non_ascending_mesh_dims":
+        reason_msg = "it is not possible to merge non-ascending order reduce_scatters."
     else:
         raise AssertionError(f"Unexpected reason: {reason}")
 
@@ -471,7 +473,11 @@ def _optimize_transform_infos(
             # Can't flatten - add individually and warn once if applicable
             result.extend(group)
             # Warn for reasons that indicate a real optimization opportunity was missed
-            if failure_reason in ("no_flattened_mesh", "uneven_tensor_shape"):
+            if failure_reason in (
+                "no_flattened_mesh",
+                "uneven_tensor_shape",
+                "non_ascending_mesh_dims",
+            ):
                 mesh_dims = tuple(sorted(g.mesh_dim for g in group))
                 _warn_flatten_optimization_not_possible(
                     device_mesh,
