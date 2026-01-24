@@ -637,7 +637,7 @@ def _compute_stride(
 
 
 def _view_has_unbacked_input(
-    a: FakeTensor | torch.Tensor, shape: ShapeType | tuple[ShapeType]
+    a: torch.Tensor, shape: ShapeType | tuple[ShapeType]
 ) -> bool:
     from torch.fx.experimental.symbolic_shapes import has_hint
 
@@ -740,13 +740,12 @@ def _reshape_copy(
         )
     else:
         # clone return type is Tensor, but it will be FakeTensor here.
-        result = _view_meta(
+        return _view_meta(
             fake_mode,
             func,
             typing_cast(FakeTensor, a.clone(memory_format=torch.contiguous_format)),
             *shape,
         )
-        return result
 
 
 @register_op_impl(aten.view.default)
