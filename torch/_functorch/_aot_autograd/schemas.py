@@ -297,6 +297,7 @@ class SubclassCreationMeta:
         all_args: Sequence[torch.Tensor | IntLikeType],
         *,
         is_runtime: bool,
+        runtime_mesh: Optional["torch.distributed.DeviceMesh"] = None,
     ) -> torch.Tensor:
         inner_tensors = {}
 
@@ -309,6 +310,7 @@ class SubclassCreationMeta:
                 subclass = creation_meta.creation_fn(
                     all_args,
                     is_runtime=is_runtime,
+                    runtime_mesh=runtime_mesh,
                 )
                 curr_start_idx += creation_meta.arg_count
             inner_tensors[attr] = subclass
@@ -327,8 +329,31 @@ class SubclassCreationMeta:
         else:
             outer_size, outer_stride = self.outer_size, self.outer_stride
 
+        # For DTensors at runtime, replace the stale mesh with the live runtime mesh.
+        # This implements the "device mesh in, device mesh out" principle: output DTensors
+        # should use the same live DeviceMesh as the input DTensors, rather than the stale
+        # mesh that was serialized during precompilation.
+        meta = self.meta
+        if is_runtime and runtime_mesh is not None and self.meta is not None:
+            from torch.distributed.tensor import DTensor
+            from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+            if original_subclass_type is DTensor:
+                spec, requires_grad = self.meta
+                if isinstance(spec, DTensorSpec):
+                    # Create a new DTensorSpec with the runtime mesh but same placements.
+                    # Placements are compile-time properties and can be reused from the
+                    # serialized spec. The mesh is a runtime property that must come from
+                    # the live inputs.
+                    updated_spec = DTensorSpec(
+                        runtime_mesh,
+                        spec.placements,
+                        tensor_meta=spec.tensor_meta,
+                    )
+                    meta = (updated_spec, requires_grad)
+
         rebuilt = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
-            inner_tensors, self.meta, outer_size, outer_stride
+            inner_tensors, meta, outer_size, outer_stride
         )
 
         if not is_runtime:

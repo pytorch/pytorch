@@ -208,6 +208,51 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(pg_var.as_python_constant(), pg)
         self.assertEqual(pg_var.as_proxy(), proxy)
 
+    def test_is_process_group_detection(self):
+        """
+        Test _is_process_group correctly identifies ProcessGroup and FakeProcessGroup.
+        This helper is used by both the partitioner and graph compiler to properly
+        handle ProcessGroup objects in AOT Autograd.
+        """
+        from torch._functorch.partitioners import _is_process_group
+
+        pg = dist.group.WORLD
+        self.assertTrue(_is_process_group(pg))
+
+        self.assertFalse(_is_process_group(torch.tensor([1, 2, 3])))
+        self.assertFalse(_is_process_group("not_a_pg"))
+        self.assertFalse(_is_process_group(None))
+
+    def test_extract_runtime_device_meshes(self):
+        """
+        Test extract_runtime_device_meshes correctly extracts DeviceMesh from DTensor.
+        This is used in the 'device mesh in, device mesh out' pattern for
+        precompilation: when loading a precompiled artifact, the output DTensors
+        should use the live DeviceMesh from the runtime inputs.
+        """
+        from torch._functorch._aot_autograd.subclass_utils import (
+            extract_runtime_device_meshes,
+        )
+        from torch.distributed.tensor import DTensor
+
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("dp",),
+        )
+
+        local_tensor = torch.randn(4, 4)
+        dtensor = DTensor.from_local(local_tensor, device_mesh, [])
+
+        extracted_mesh = extract_runtime_device_meshes([dtensor])
+        self.assertEqual(extracted_mesh, device_mesh)
+
+        no_mesh = extract_runtime_device_meshes([torch.randn(4, 4)])
+        self.assertIsNone(no_mesh)
+
+        no_mesh_empty = extract_runtime_device_meshes([])
+        self.assertIsNone(no_mesh_empty)
+
 
 instantiate_parametrized_tests(TestFakeDistributed)
 

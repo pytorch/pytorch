@@ -33,6 +33,27 @@ from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+
+
+def _is_process_group(val: Any) -> bool:
+    """
+    Check if val is a ProcessGroup or FakeProcessGroup.
+    These non-tensor objects can be safely passed between forward and backward.
+    """
+    if not torch.distributed.is_available():
+        return False
+    from torch._C._distributed_c10d import ProcessGroup
+
+    if isinstance(val, ProcessGroup):
+        return True
+    try:
+        from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
+
+        if isinstance(val, FakeProcessGroup):
+            return True
+    except ImportError:
+        pass
+    return False
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     find_symbol_binding_fx_nodes,
@@ -246,12 +267,12 @@ def _extract_graph_with_inputs_outputs(
             env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
-            all_args = [
-                isinstance(env[x], InvalidNodeBase)
+            invalid_args = [
+                x
                 for x in all_args
-                if isinstance(x, fx.Node)
+                if isinstance(x, fx.Node) and isinstance(env[x], InvalidNodeBase)
             ]
-            if any(all_args):
+            if invalid_args:
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             # pyrefly: ignore [unsupported-operation, bad-argument-type]
@@ -933,7 +954,13 @@ def _extract_fwd_bwd_modules(
         if not node.users:
             _remove_by_name(saved_values, node.name)
             _remove_by_name(saved_sym_nodes, node.name)
-            _remove_by_name(saved_opaque_nodes, node.name)
+            # NOTE: We intentionally do NOT remove from saved_opaque_nodes here.
+            # Opaque nodes (like ProcessGroup) are non-tensor objects that must
+            # be preserved for the backward pass even if they appear to have no
+            # users in the partially extracted backward graph. The operations
+            # that use them (like reduce_scatter_tensor) may have been marked
+            # as InvalidNode during partial extraction but will be valid in
+            # the final backward graph.
         # wait_tensor is a bit special: if we have a "dead activation" that is not used in the bw,
         # but this dead activation is actually a collective,
         # then the collective will generally by followed by a wait_tensor() call.
@@ -945,7 +972,8 @@ def _extract_fwd_bwd_modules(
         ):
             _remove_by_name(saved_values, node.name)
             _remove_by_name(saved_sym_nodes, node.name)
-            _remove_by_name(saved_opaque_nodes, node.name)
+            # NOTE: We intentionally do NOT remove from saved_opaque_nodes here.
+            # See comment above.
         elif _is_backward_state(node):
             # BackwardState is saved directly
             _remove_by_name(saved_values, node.name)
@@ -1027,6 +1055,7 @@ def _extract_fwd_bwd_modules(
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
     # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, opaque_objects, symints)
+
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
@@ -2143,7 +2172,9 @@ def solve_min_cut(
         elif is_non_tensor_node:
             # FakeScriptObjects (opaque objects) should have weight 0.0 so they can be
             # properly partitioned between forward and backward, like BackwardState.
-            if isinstance(node.meta.get("val"), (BackwardState, FakeScriptObject)):
+            # ProcessGroups are also safely passable between forward and backward.
+            val = node.meta.get("val")
+            if isinstance(val, (BackwardState, FakeScriptObject)) or _is_process_group(val):
                 weight = 0.0
                 cannot_save_reason = None
             else:
@@ -3400,6 +3431,7 @@ def min_cut_rematerialization_partition(
     # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
+
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_opaque_nodes = list(filter(is_opaque_node, saved_values))
