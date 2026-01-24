@@ -4698,6 +4698,7 @@
   dispatch:
     CPU, CUDA: channel_shuffle
     QuantizedCPU: channel_shuffle_quantized_cpu
+    CompositeExplicitAutogradNonFunctional: math_channel_shuffle
   autogen: channel_shuffle.out
 
 - func: native_channel_shuffle(Tensor self, SymInt groups) -> Tensor

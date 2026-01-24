@@ -12355,6 +12355,33 @@ class TestAdvancedIndexing(TestCaseMPS):
         lcm_expected = torch.tensor([36, 0, 17, 100], dtype=torch.int32)
         self.assertEqual(lcm_result.cpu(), lcm_expected)
 
+    def test_channel_shuffle(self, device="mps"):
+        """Test channel_shuffle on MPS (used by ShuffleNet architectures)."""
+        # Test basic channel shuffle
+        for dtype in [torch.float16, torch.float32]:
+            # NCHW format: batch=2, channels=6, height=4, width=4
+            x = torch.randn(2, 6, 4, 4, device=device, dtype=dtype)
+            groups = 2
+            
+            result = torch.channel_shuffle(x, groups)
+            expected = torch.channel_shuffle(x.cpu(), groups)
+            
+            self.assertEqual(result.shape, expected.shape)
+            self.assertEqual(result.cpu(), expected)
+            
+        # Test with different group sizes
+        x = torch.randn(1, 12, 8, 8, device=device)
+        for groups in [2, 3, 4, 6]:
+            result = torch.channel_shuffle(x, groups)
+            expected = torch.channel_shuffle(x.cpu(), groups)
+            self.assertEqual(result.cpu(), expected)
+
+        # Test with 3 groups (common in ShuffleNet)
+        x = torch.randn(4, 9, 16, 16, device=device)
+        result = torch.channel_shuffle(x, 3)
+        expected = torch.channel_shuffle(x.cpu(), 3)
+        self.assertEqual(result.cpu(), expected)
+
 
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
