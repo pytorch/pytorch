@@ -226,10 +226,12 @@ class DTensorTest(DTensorTestBase):
     def test_from_local_backward(self):
         """Test that from_local backward gives the correct gradient placements.
 
-        Verifies the gradient placement guarantees documented in from_local:
-        - Shard forward -> Shard gradient
-        - Replicate forward -> Replicate gradient
-        - Partial forward -> Replicate gradient
+        Verifies the gradient placements meet the following guarantees:
+        - Shard(fwd) - Shard(grad_output) - Shard(grad_input)
+        - Replicate(fwd) - Replicate(grad_output) - Replicate(grad_input)
+        - Replicate(fwd) - Partial(grad_output) - Replicate(grad_input)
+        - Partial(fwd) - Partial(grad_output) - Replicate(grad_input)
+        - Partial(fwd) - Replicate(grad_output) - Replicate(grad_input)
         """
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
@@ -306,7 +308,6 @@ class DTensorTest(DTensorTestBase):
             # Then multiplied by 2 from the backward of (dt * 2)
             expected_grad = torch.ones(3, 3) * 2 * self.world_size
             self.assertEqual(local_tensor.grad, expected_grad)
-
         # Verify that an all-reduce happened for the Partial -> Replicate case
         self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
 
