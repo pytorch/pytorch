@@ -50,7 +50,6 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
-from torch.fx._graph_pickler import _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -942,19 +941,13 @@ class RegionalOutputCode(OutputCode):
     # The actual graph module (cleared during serialization)
     _graph_module: Optional[torch.nn.Module] = None
 
-    # Optional filter for ops during serialization
-    _ops_filter: Callable[[str], bool] | None = None
-
     def __init__(
         self,
         graph_module: torch.fx.GraphModule,
-        ops_filter: Callable[[str], bool] = _ops_filter_safe,
     ):
         """
         Args:
             graph_module: The torch.fx.GraphModule returned by regional_inductor
-            ops_filter: Optional filter function for op names during serialization.
-                If provided, only ops whose name passes the filter will be serialized.
         """
         super().__init__()
         self._graph_module = graph_module
@@ -965,7 +958,6 @@ class RegionalOutputCode(OutputCode):
         self._inner_boxed_call = isinstance(
             module.graph._codegen, torch.fx.graph._BoxedCodeGen
         )
-        self._ops_filter = ops_filter
 
     def __call__(self, inputs: list[Any]) -> Any:
         """
@@ -1057,16 +1049,11 @@ class RegionalOutputCode(OutputCode):
         custom pickling.
         """
         if self._graph_module is not None:
-            from torch.fx._graph_pickler import GraphPickler, Options
+            from torch.fx._graph_pickler import GraphPickler
 
             self._serialized_graph_module = None
             self._serialized_wrappers, graph_module = self._unwrap_graph_module()
 
-            self._serialized_graph_module = GraphPickler.dumps(
-                graph_module,
-                options=Options(
-                    ops_filter=self._ops_filter,
-                ),
-            )
+            self._serialized_graph_module = GraphPickler.dumps(graph_module)
             # Clear the graph module to avoid pickling it with standard pickle
             self._graph_module = None
