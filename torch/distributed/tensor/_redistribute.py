@@ -111,6 +111,12 @@ class _TransformInfo:
     # logical_shape on this mesh dimension
     logical_shape: list[int]
 
+    def __post_init__(self):
+        assert self.mesh_dim >= 0
+        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
+            "TransformInfo should only be created if it is an op with some effect, not a no-op"
+        )
+
     def _comm_type_key(self) -> str | None:
         """
         Return a key for grouping transforms by communication type.
@@ -351,8 +357,16 @@ def _optimize_transform_infos(
             are_placements_mergeable(info.src_dst_placements, first_placements)
             for info in infos
         )
-        mesh_dims = tuple(sorted(info.mesh_dim for info in infos))
-        flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
+        mesh_dims = tuple(info.mesh_dim for info in infos)
+        # For reduce_scatter, the order of mesh dims matters for correctness.
+        # Flattened meshes only exist for ascending dim order, so if transforms
+        # are in different order, we can't flatten reduce_scatter correctly.
+        # (For all_gather and all_reduce, order doesn't affect the final result.)
+        sorted_mesh_dims = tuple(sorted(mesh_dims))
+        if comm_type == "reduce_scatter" and mesh_dims != sorted_mesh_dims:
+            return None, "non_ascending_mesh_dims"
+        # Use sorted dims for mesh lookup (required by DeviceMesh API)
+        flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, sorted_mesh_dims)
         if flattened_mesh is None:
             return None, "no_flattened_mesh"
 
@@ -409,7 +423,7 @@ def _optimize_transform_infos(
                 src_dst_placements=merged_placements,
                 logical_shape=outermost_info.logical_shape,
                 mesh=flattened_mesh,
-                original_mesh_dims=mesh_dims,
+                original_mesh_dims=sorted_mesh_dims,
                 avg_scale=avg_scale,
             ),
             None,
@@ -1150,14 +1164,18 @@ class DTensorRedistributePlanner:
         transform_infos: list[_TransformInfo] = []
         if self.device_mesh.ndim == 1:
             # if device_mesh is 1D, redistribute is a simple direct
-            # transformation
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=0,
-                    src_dst_placements=(src_spec.placements[0], dst_spec.placements[0]),
-                    logical_shape=initial_logical_shape,
+            # transformation (skip if src == dst)
+            if src_spec.placements[0] != dst_spec.placements[0]:
+                transform_infos.append(
+                    _TransformInfo(
+                        mesh_dim=0,
+                        src_dst_placements=(
+                            src_spec.placements[0],
+                            dst_spec.placements[0],
+                        ),
+                        logical_shape=initial_logical_shape,
+                    )
                 )
-            )
             return transform_infos
 
         # Handle multi-dim device mesh placement redistribution First, we need

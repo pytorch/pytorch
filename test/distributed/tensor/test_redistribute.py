@@ -1963,6 +1963,64 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], _FlattenedTransformInfo)
 
+    def test_reduce_scatter_ordering_uses_transform_order(self):
+        """Flattened mesh order must match transform_infos order for reduce_scatter.
+
+        When transform_infos are in order (1, 0) - i.e., mesh_dim=1 first, then
+        mesh_dim=0 - the flattened mesh must use the same ordering. Otherwise,
+        elements end up on wrong ranks.
+
+        With mesh (2, 4):
+        - Transforms in order (0, 1): Row-major distribution
+        - Transforms in order (1, 0): Column-major distribution
+
+        Currently, the code SORTS mesh dims, so (1, 0) transforms get flattened
+        using (0, 1) mesh - which is INCORRECT. This test exposes the bug.
+        """
+        mesh = init_device_mesh("cpu", (2, 4), mesh_dim_names=("A", "B"))
+        mesh["A", "B"]._flatten("A_B")  # Only (0, 1) order available
+
+        # Transform infos in REVERSED order: mesh_dim=1 first, then mesh_dim=0
+        transform_infos_reversed = [
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[16],
+            ),
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[4],  # After first reduce_scatter: 16/4=4
+            ),
+        ]
+
+        # Use a fresh warning cache to avoid global side effects
+        with patch(
+            "torch.distributed.tensor._redistribute._warned_flatten_issues",
+            new=set(),
+        ):
+            with self.assertLogs(
+                "torch.distributed.tensor._redistribute", level=logging.WARNING
+            ) as log_context:
+                result = _optimize_transform_infos(
+                    transform_infos_reversed,
+                    mesh,
+                    (Partial("sum"), Partial("sum")),
+                    (Shard(0), Shard(0)),
+                )
+
+            # BUG: Currently the code sorts dims to (0, 1) and INCORRECTLY flattens.
+            # The correct behavior should be: since transforms are (1, 0) order but
+            # only (0, 1) flattened mesh exists, we should NOT flatten.
+            # This test exposes the bug by asserting the CORRECT behavior.
+            self.assertEqual(len(result), 2)  # Should NOT be flattened
+
+            # Verify warning message content
+            self.assertEqual(len(log_context.output), 1)
+            warning_msg = log_context.output[0]
+            self.assertIn("non-ascending-order", warning_msg)
+            self.assertIn("reduce_scatter", warning_msg)
+
 
 class MultiDimRedistributeOptimizationTest(DTensorTestBase):
     """Integration tests for multi-dimensional redistribute correctness and optimization.
@@ -2145,7 +2203,9 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
 
         The scaling should be 4 (only avg dims), NOT 8 (total mesh size).
         """
-        mesh = init_device_mesh(self.device_type, (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("A", "B", "C")
+        )
         mesh["A", "B", "C"]._flatten("A_B_C")
 
         # Global tensor
@@ -2211,7 +2271,9 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
 
         # Numerical correctness: same scaling logic
         expected_reduce_scatter = global_tensor * total_mesh_size / avg_scale_factor
-        self.assertEqual(make_full_tensor(result_reduce_scatter), expected_reduce_scatter)
+        self.assertEqual(
+            make_full_tensor(result_reduce_scatter), expected_reduce_scatter
+        )
 
 
 class FlattenedReductionIntegrationTest(DTensorTestBase):
