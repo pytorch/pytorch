@@ -27,6 +27,19 @@ from torch.utils._mode_utils import no_dispatch
 _SymNodeT = TypeVar("_SymNodeT", torch.SymInt, torch.SymFloat)
 
 
+def _is_process_group(obj: object) -> bool:
+    """
+    Check if an object is a ProcessGroup instance. This uses a deferred import
+    to avoid importing distributed modules when they're not needed.
+    """
+    try:
+        from torch._C._distributed_c10d import ProcessGroup
+
+        return isinstance(obj, ProcessGroup)
+    except ImportError:
+        return False
+
+
 def _ops_filter_safe(name: str) -> bool:
     """
     An ops filter which allows pickle-safe ops. Pickle-safe ops are built-in
@@ -119,6 +132,10 @@ class GraphPickler(pickle.Pickler):
             return _TracingContextPickleData.reduce_helper(self, obj)
         elif isinstance(obj, FakeScriptObject):
             return _FakeScriptObjectPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, torch.ScriptObject):
+            return _ScriptObjectPickleData.reduce_helper(self, obj)
+        elif _is_process_group(obj):
+            return _ProcessGroupPickleData.reduce_helper(self, obj)
         elif is_opaque_type(type(obj)):
             return _OpaqueObjectPickleData.reduce_helper(self, obj)
         else:
@@ -712,12 +729,100 @@ class _FakeScriptObjectPickleData:
         return fake_obj
 
 
+class _ScriptObjectPickleData:
+    """
+    Handles pickling of torch.ScriptObject instances that end up in FX graphs.
+
+    ScriptObjects like _RecordFunction (from profiler) are C++ pybind11 objects
+    that may not implement __getstate__. When these objects end up in the graph
+    during tracing (e.g., profiler record functions), we need to handle them
+    gracefully during serialization.
+
+    On unpickle, we return None since these objects represent runtime-only state
+    (like active profiler regions) that will be recreated during execution.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: torch.ScriptObject
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], None],
+        tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
+    def __init__(self, script_obj: torch.ScriptObject) -> None:
+        self.type_name = type(script_obj).__name__
+        self.qualified_name = str(script_obj._type().qualified_name())
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> None:
+        return None
+
+
+class _ProcessGroupPickleData:
+    """
+    Handles pickling of ProcessGroup instances. ProcessGroups are C++ pybind11
+    objects that cannot be directly pickled. During precompilation with fake
+    distributed mode, ProcessGroups may be captured in the graph. On unpickle,
+    we resolve the group name to a real ProcessGroup using the c10d registry.
+
+    This enables AOT precompilation to serialize graphs containing ProcessGroups
+    and then load them in a real distributed environment where the ProcessGroups
+    have been initialized.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls,
+        pickler: GraphPickler,
+        obj: "torch.distributed.ProcessGroup",  # type: ignore[name-defined]
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], Any],
+        tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
+    def __init__(
+        self, pg: "torch.distributed.ProcessGroup"  # type: ignore[name-defined]
+    ) -> None:
+        self.group_name = pg.group_name
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> Any:
+        from torch._C._distributed_c10d import _resolve_process_group
+
+        try:
+            return _resolve_process_group(self.group_name)
+        except Exception as e:
+            import logging
+
+            logging.warning(
+                f"[_ProcessGroupPickleData] Failed to resolve ProcessGroup "
+                f"with name '{self.group_name}': {e}. Returning None."
+            )
+            return None
+
+
 class _OpaqueObjectPickleData:
     """
-    Handles pickling of opaque objects like ProcessGroup. These objects are
-    C++ pybind11 objects that cannot be directly pickled. We store just the
-    type name, and on unpickle return None since the actual object will be
-    provided at runtime as a graph input.
+    Handles pickling of opaque objects. These objects are C++ pybind11 objects
+    that cannot be directly pickled. We store just the type name, and on
+    unpickle return None since the actual object will be provided at runtime
+    as a graph input.
+
+    Note: ProcessGroups are handled separately by _ProcessGroupPickleData which
+    resolves them by group name at load time.
     """
 
     @classmethod
