@@ -39,6 +39,8 @@ def _ops_filter_safe(name: str) -> bool:
             "torch.ops.fbgemm",
             "torch.ops.c10d",
             "torch.ops.device_mesh",
+            "torch.ops.profiler",
+            "torch.ops.higher_order",
         )
     )
 
