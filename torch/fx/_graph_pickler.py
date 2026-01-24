@@ -138,6 +138,8 @@ class GraphPickler(pickle.Pickler):
             return _ProcessGroupPickleData.reduce_helper(self, obj)
         elif is_opaque_type(type(obj)):
             return _OpaqueObjectPickleData.reduce_helper(self, obj)
+        elif isinstance(obj, torch._C.FunctionSchema):
+            return _FunctionSchemaPickleData.reduce_helper(self, obj)
         else:
             # We should never get a raw Node!
             assert not isinstance(obj, torch.fx.Node)
@@ -846,3 +848,169 @@ class _OpaqueObjectPickleData:
 
     def unpickle(self, unpickle_state: _UnpickleState) -> None:
         return None
+
+
+class _FunctionSchemaPickleData:
+    """
+    Handles pickling of torch._C.FunctionSchema and HopSchema instances.
+
+    FunctionSchema's default pickle behavior uses __getstate__ which returns
+    the schema as a string, and __setstate__ which parses that string.
+    However, the C++ schema parser cannot handle all type specifiers
+    (e.g., PyObject, NoneType) that may appear in HopSchema for
+    HigherOrderOperators.
+
+    This class serializes the schema by storing its individual components
+    (arguments, returns, etc.) and reconstructs them on unpickle, avoiding
+    the string parsing entirely.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: torch._C.FunctionSchema
+    ) -> tuple[
+        Callable[[Self, _UnpickleState], torch._C.FunctionSchema],
+        tuple[Self, _UnpickleStateToken],
+    ]:
+        return (
+            cls.unpickle,
+            (
+                cls(obj),
+                pickler._unpickle_state,
+            ),
+        )
+
+    def __init__(self, schema: torch._C.FunctionSchema) -> None:
+        self.name = schema.name
+        self.overload_name = schema.overload_name
+        self.arguments = [self._serialize_argument(arg) for arg in schema.arguments]
+        self.returns = [self._serialize_argument(ret) for ret in schema.returns]
+        self.is_vararg = getattr(schema, "is_vararg", False)
+        self.is_varret = getattr(schema, "is_varret", False)
+        self.tree_spec = getattr(schema, "tree_spec", None)
+        self.is_hop_schema = hasattr(schema, "tree_spec")
+
+    def _serialize_argument(self, arg: torch._C.Argument) -> dict[str, Any]:
+        """Serialize a torch._C.Argument to a dictionary."""
+        return {
+            "name": arg.name,
+            "type_str": str(arg.type),
+            "type_kind": arg.type.kind() if hasattr(arg.type, "kind") else None,
+            "default_value": arg.default_value,
+            "kwarg_only": arg.kwarg_only,
+            "alias_info": self._serialize_alias_info(arg.alias_info),
+        }
+
+    def _serialize_alias_info(
+        self, alias_info: Optional[torch._C._AliasInfo]
+    ) -> Optional[dict[str, Any]]:
+        """Serialize alias info if present."""
+        if alias_info is None:
+            return None
+        return {
+            "is_write": alias_info.is_write,
+            "before_set": set(alias_info.before_set),
+            "after_set": set(alias_info.after_set),
+        }
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> torch._C.FunctionSchema:
+        args = [self._deserialize_argument(arg_data) for arg_data in self.arguments]
+        rets = [self._deserialize_argument(ret_data) for ret_data in self.returns]
+
+        if self.is_hop_schema:
+            from torch._higher_order_ops.schema import HopSchema
+
+            return HopSchema(
+                self.name,
+                self.overload_name,
+                args,
+                rets,
+                self.is_vararg,
+                self.is_varret,
+                self.tree_spec,
+            )
+        else:
+            return torch._C.FunctionSchema(
+                self.name,
+                self.overload_name,
+                args,
+                rets,
+                self.is_vararg,
+                self.is_varret,
+            )
+
+    def _deserialize_argument(self, arg_data: dict[str, Any]) -> torch._C.Argument:
+        """Deserialize a torch._C.Argument from a dictionary."""
+        ty = self._string_to_type(arg_data["type_str"])
+        alias_info = self._deserialize_alias_info(arg_data["alias_info"])
+
+        return torch._C.Argument(
+            arg_data["name"],
+            ty,
+            None,  # N (dimension)
+            arg_data["default_value"],
+            arg_data["kwarg_only"],
+            alias_info,
+        )
+
+    def _deserialize_alias_info(
+        self, alias_data: Optional[dict[str, Any]]
+    ) -> Optional[torch._C._AliasInfo]:
+        """Deserialize alias info from a dictionary."""
+        if alias_data is None:
+            return None
+
+        def add_namespace(symbol_set: set[str]) -> set[str]:
+            return {f"alias::{s}" if "::" not in s else s for s in symbol_set}
+
+        # pyrefly: ignore [attr-defined]
+        return torch._C._AliasInfo(
+            alias_data["is_write"],
+            add_namespace(alias_data["before_set"]),
+            add_namespace(alias_data["after_set"]),
+        )
+
+    def _string_to_type(self, type_str: str) -> Any:
+        """Convert a type string back to a JIT type object."""
+        type_map = {
+            "int": torch._C.IntType.get(),
+            "float": torch._C.FloatType.get(),
+            "str": torch._C.StringType.get(),
+            "bool": torch._C.BoolType.get(),
+            "SymInt": torch._C.SymIntType.get(),
+            "SymBool": torch._C.SymBoolType.get(),
+            "Tensor": torch._C.TensorType.get(),
+            "Any": torch._C.AnyType.get(),
+            "None": torch._C.NoneType.get(),
+            "NoneType": torch._C.NoneType.get(),
+            "Device": torch._C.DeviceObjType.get(),
+            "PyObject": torch._C.PyObjectType.get(),
+        }
+
+        if type_str in type_map:
+            return type_map[type_str]
+
+        if type_str.endswith("?"):
+            inner = self._string_to_type(type_str[:-1])
+            return torch._C.OptionalType(inner)
+
+        if type_str.endswith("[]"):
+            inner = self._string_to_type(type_str[:-2])
+            return torch._C.ListType(inner)
+
+        if type_str.startswith("(") and type_str.endswith(")"):
+            inner_str = type_str[1:-1]
+            if not inner_str:
+                return torch._C.TupleType([])
+            inner_types = [
+                self._string_to_type(t.strip()) for t in inner_str.split(",")
+            ]
+            return torch._C.TupleType(inner_types)
+
+        import logging
+
+        logging.debug(
+            f"[_FunctionSchemaPickleData] Unknown type '{type_str}', "
+            f"falling back to AnyType"
+        )
+        return torch._C.AnyType.get()
