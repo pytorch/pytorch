@@ -1337,6 +1337,117 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
 
 
+class DistributeWithStridedShardTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    def _extract_redistribute_trace_from_debug_mode(self, s: str) -> str:
+        import re
+
+        match = re.search(r"trace:\s*(.*)\)", s)
+        if match:
+            trace_str = match.group(1)
+            return trace_str
+        else:
+            return ""
+
+    @with_comms
+    def test_strided_shard_redistribution(self):
+        torch.manual_seed(21)
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_data = torch.randn((31, 13, 11), device=self.device_type)
+        sharding_src_dst_pairs_with_expected_trace = [
+            (
+                (
+                    [Shard(0), Shard(0), _StridedShard(0, split_factor=3)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), _StridedShard(0, split_factor=3)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), _StridedShard(0, split_factor=3), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [_StridedShard(0, split_factor=3), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+                (
+                    [Replicate(), _StridedShard(1, split_factor=5), Shard(0)],
+                    (
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1,)),
+                    ),
+                ),
+            ),
+        ]
+        for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
+            sharding_src_dst_pairs_with_expected_trace
+        ):
+            sharded_dt = _distribute_tensor(
+                input_data.clone(),
+                mesh,
+                src_placement,
+                shard_order=src_order,
+                src_data_rank=None,
+            )
+            with DebugMode(record_torchfunction=False) as debug_mode:
+                sharded_dt = redistribute(sharded_dt, mesh, dst_placement, dst_order)
+            trace_str = self._extract_redistribute_trace_from_debug_mode(
+                debug_mode.debug_string()
+            )
+            if idx == 0:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]_S(0, 3)->S(0)[0]S(0)[1]R->S(0)[0]RR->RRR->RS(0)[1]R->RS(0)[1]S(0)[2]""",  # noqa: B950
+                )
+            elif idx == 1:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->RS(0)R->RS(0)_S(0, 3)""",
+                )
+            elif idx == 2:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1]_S(0, 3)S(0)[2]->S(0)[1]_S(0, 3)R->S(0)[1]RR->RRR->_S(0, 3)RR->_S(0, 3)S(0)[0]R""",
+                )
+            elif idx == 3:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)_S(1, 5)R->R_S(1, 5)R->R_S(1, 5)S(0)""",
+                )
+            expected_dt = _distribute_tensor(
+                input_data.clone(),
+                mesh,
+                dst_placement,
+                shard_order=dst_order,
+                src_data_rank=None,
+            )
+            self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
+
+
 class TransformInfoTest(TestCase):
     """Tests for _TransformInfo._comm_type_key method."""
 
@@ -1784,6 +1895,74 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(len(result), 2)
         self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
 
+    def test_mixed_partial_types_not_grouped_allreduce(self):
+        """Mixed Partial types (sum vs max) should NOT be grouped for allreduce.
+
+        When redistributing (Partial("sum"), Partial("max")) -> (Replicate, Replicate),
+        the all-reduce operations must remain separate because they have different
+        reduce operations that cannot be merged.
+        """
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("A", "B"))
+        mesh["A", "B"]._flatten("A_B")
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("max"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        result = _optimize_transform_infos(
+            transform_infos,
+            mesh,
+            (Partial("sum"), Partial("max")),
+            (Replicate(), Replicate()),
+        )
+
+        # Should remain as 2 separate transforms since reduce_op types differ
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
+    def test_mixed_partial_types_not_grouped_reduce_scatter(self):
+        """Mixed Partial types (sum vs max) should NOT be grouped for reduce_scatter.
+
+        When redistributing (Partial("sum"), Partial("max")) -> (Shard(0), Shard(0)),
+        the reduce-scatter operations must remain separate because they have different
+        reduce operations that cannot be merged.
+        """
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("A", "B"))
+        mesh["A", "B"]._flatten("A_B")
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Shard(0)),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("max"), Shard(0)),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        result = _optimize_transform_infos(
+            transform_infos,
+            mesh,
+            (Partial("sum"), Partial("max")),
+            (Shard(0), Shard(0)),
+        )
+
+        # Should remain as 2 separate transforms since reduce_op types differ
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
 
 class MultiDimRedistributeOptimizationTest(DTensorTestBase):
     """Integration tests for multi-dimensional redistribute correctness and optimization.
@@ -1791,10 +1970,6 @@ class MultiDimRedistributeOptimizationTest(DTensorTestBase):
     These tests verify numerical correctness of various redistribute patterns
     on multi-dimensional meshes, including the flattened mesh optimization.
     """
-
-    @property
-    def world_size(self) -> int:
-        return 8
 
     @with_comms
     def test_multi_dim_redistribute(self):
