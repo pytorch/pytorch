@@ -226,6 +226,14 @@ static void heaviside_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "heaviside");
 }
 
+static void gcd_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "gcd");
+}
+
+static void lcm_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "lcm");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(maximum_stub, &maximum_mps_kernel)
@@ -233,6 +241,8 @@ REGISTER_DISPATCH(minimum_stub, &minimum_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
 REGISTER_DISPATCH(heaviside_stub, &heaviside_mps_kernel)
+REGISTER_DISPATCH(gcd_stub, &gcd_mps_kernel)
+REGISTER_DISPATCH(lcm_stub, &lcm_mps_kernel)
 REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_mps_kernel);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_mps_kernel);

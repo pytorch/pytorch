@@ -265,6 +265,40 @@ struct heaviside_functor {
   }
 };
 
+struct gcd_functor {
+  template <typename T>
+  inline T operator()(const T a_in, const T b_in) {
+    // Euclidean algorithm for GCD
+    T a = a_in < static_cast<T>(0) ? -a_in : a_in;
+    T b = b_in < static_cast<T>(0) ? -b_in : b_in;
+    while (a != static_cast<T>(0)) {
+      T c = a;
+      a = b % a;
+      b = c;
+    }
+    return b;
+  }
+};
+
+struct lcm_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    // LCM = |a * b| / GCD(a, b)
+    T abs_a = a < static_cast<T>(0) ? -a : a;
+    T abs_b = b < static_cast<T>(0) ? -b : b;
+    // Calculate GCD using Euclidean algorithm
+    T ga = abs_a;
+    T gb = abs_b;
+    while (ga != static_cast<T>(0)) {
+      T c = ga;
+      ga = gb % ga;
+      gb = c;
+    }
+    T g = gb;
+    return (g == static_cast<T>(0)) ? static_cast<T>(0) : abs_a / g * abs_b;
+  }
+};
+
 struct hypot_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -424,6 +458,8 @@ REGISTER_INTEGER_BINARY_OP(minimum);
 REGISTER_FLOAT_BINARY_OP(nextafter);
 REGISTER_FLOAT_BINARY_OP(heaviside);
 REGISTER_INTEGER_BINARY_OP(heaviside);
+REGISTER_INTEGER_BINARY_OP(gcd);
+REGISTER_INTEGER_BINARY_OP(lcm);
 REGISTER_FLOAT_BINARY_OP(zeta);
 REGISTER_INT2FLOAT_BINARY_OP(zeta);
 REGISTER_FLOAT_BINARY_OP(logaddexp);

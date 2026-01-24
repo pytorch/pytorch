@@ -12326,6 +12326,35 @@ class TestAdvancedIndexing(TestCaseMPS):
         expected_bool = torch.heaviside(x_bool.cpu(), values_bool.cpu())
         self.assertEqual(result_bool.cpu(), expected_bool)
 
+    def test_gcd_lcm(self, device="mps"):
+        """Test GCD and LCM functions on MPS."""
+        # Test GCD with various integer types
+        for dtype in [torch.int16, torch.int32, torch.int64]:
+            a = torch.tensor([12, 15, 100, -24, 0], device=device, dtype=dtype)
+            b = torch.tensor([8, 25, 35, 18, 5], device=device, dtype=dtype)
+            
+            gcd_result = torch.gcd(a, b)
+            gcd_expected = torch.gcd(a.cpu(), b.cpu())
+            self.assertEqual(gcd_result.cpu(), gcd_expected)
+            
+            lcm_result = torch.lcm(a, b)
+            lcm_expected = torch.lcm(a.cpu(), b.cpu())
+            self.assertEqual(lcm_result.cpu(), lcm_expected)
+
+        # Test specific known values
+        a = torch.tensor([12, 0, 1, 100], device=device, dtype=torch.int32)
+        b = torch.tensor([18, 5, 17, 100], device=device, dtype=torch.int32)
+        
+        gcd_result = torch.gcd(a, b)
+        # Expected: gcd(12,18)=6, gcd(0,5)=5, gcd(1,17)=1, gcd(100,100)=100
+        gcd_expected = torch.tensor([6, 5, 1, 100], dtype=torch.int32)
+        self.assertEqual(gcd_result.cpu(), gcd_expected)
+        
+        lcm_result = torch.lcm(a, b)
+        # Expected: lcm(12,18)=36, lcm(0,5)=0, lcm(1,17)=17, lcm(100,100)=100
+        lcm_expected = torch.tensor([36, 0, 17, 100], dtype=torch.int32)
+        self.assertEqual(lcm_result.cpu(), lcm_expected)
+
 
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
