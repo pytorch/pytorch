@@ -187,15 +187,9 @@ class TestExportableModule(common_utils.TestCase):
 
         # This test verifies that to_onnx returns an ONNXProgram
         # The actual export functionality is tested elsewhere
-        try:
-            onnx_program = model.to_onnx(dynamo=True, fallback=False)
-            self.assertIsNotNone(onnx_program)
-            self.assertIsInstance(onnx_program, torch.onnx.ONNXProgram)
-        except Exception as e:
-            # If export fails for environmental reasons, skip this test
-            # The important part is that the method exists and calls export
-            if "dynamo" not in str(e).lower():
-                raise
+        onnx_program = model.to_onnx()
+        self.assertIsNotNone(onnx_program)
+        self.assertIsInstance(onnx_program, torch.onnx.ONNXProgram)
 
     def test_exportable_module_is_nn_module(self):
         """Test that ExportableModule is a proper nn.Module."""
