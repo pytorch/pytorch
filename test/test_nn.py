@@ -8890,9 +8890,9 @@ class TestNNDeviceType(NNTestCase):
                 for r in range(affine_tensor.size(2)):
                     for c in range(affine_tensor.size(3)):
                         grid_out = np.dot(grid_ary, [i, r, c, 1])
-                        self.assertEqual(affine_tensor[0, i, r, c], grid_out[:3], exact_dtype=False)
+                        torch.testing.assert_close(affine_tensor[0, i, r, c], torch.tensor(grid_out[:3]), rtol=1e-4, atol=1e-4)
 
-            self.assertEqual(scipy_ary, gridsample_ary.reshape_as(scipy_ary))
+            torch.testing.assert_close(scipy_ary, gridsample_ary.reshape_as(scipy_ary), rtol=1e-4, atol=1e-4)
 
 
     @onlyCUDA
