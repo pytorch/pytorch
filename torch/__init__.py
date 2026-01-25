@@ -2888,7 +2888,8 @@ def get_device_module(device: torch.device | str | None = None):
         device_module_name = torch.device(device).type
     elif device is None:
         # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
-        device_module_name = torch._C._get_accelerator().type
+        acc = torch._C._accelerator_getAccelerator()
+        device_module_name = (acc or torch.device("cpu")).type
     else:
         raise RuntimeError(
             f"Invalid value of device '{device}', expect torch.device, str, or None"

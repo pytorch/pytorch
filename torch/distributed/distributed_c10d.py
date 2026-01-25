@@ -384,7 +384,8 @@ class BackendConfig:
         if backend == Backend.UNDEFINED:
             # Detect the accelerator on the machine. If no accelerator is
             # available, it returns CPU.
-            device_type = torch._C._get_accelerator().type
+            acc = torch._C._accelerator_getAccelerator()
+            device_type = (acc or torch.device("cpu")).type
             try:
                 backend_str = Backend.default_device_backend_map[device_type]
                 self.device_backend_map[device_type] = Backend(backend_str)
@@ -4940,7 +4941,7 @@ def barrier(
     opts.asyncOp = async_op
     # Detect the accelerator on the machine. If no accelerator is available, it
     # returns CPU.
-    device = torch._C._get_accelerator()
+    device = torch._C._accelerator_getAccelerator() or torch.device("cpu")
     if isinstance(device_ids, list):
         opts.device_ids = device_ids
         # use only the first device id

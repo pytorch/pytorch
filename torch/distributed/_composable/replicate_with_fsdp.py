@@ -349,7 +349,7 @@ def replicate_mesh():
     if not dist.distributed_c10d.is_initialized():
         dist.distributed_c10d.init_process_group()
     default_pg = dist.distributed_c10d._get_default_group()
-    device = torch._C._get_accelerator()
+    device = torch._C._accelerator_getAccelerator() or torch.device("cpu")
     mesh = init_device_mesh(
         device.type,
         mesh_shape=(default_pg.size(),),
