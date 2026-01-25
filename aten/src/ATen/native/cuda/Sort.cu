@@ -383,7 +383,7 @@ void sortKeyValueInplace(
     } else {
       sortCommon<scalar_t>(MediumRadixSort{}, key, value, dim, descending);
     }
-  }), kByte, kUInt16, kUInt32, kLong);
+  }), kChar, kByte, kShort, kUInt16, kInt, kLong);
 
 }
 
