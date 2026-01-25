@@ -358,7 +358,7 @@ def expand_to_full_mesh_op_strategy(
     input_index: int = 1,
     inplace_op: bool = False,
     is_valid_strategy_cb: Callable[
-        [list[DTensorSpec], tuple[DTensorSpec | None, ...]], bool
+        [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
 ) -> OpStrategy:
@@ -453,12 +453,27 @@ def expand_to_full_mesh_op_strategy(
             # input_spec matches the first argument's runtime sharding, otherwise we skip
             continue
 
-        output_specs: tuple[DTensorSpec | None, ...]
-        if input_index > 1:
+        # For out= variant ops, output placement must match the "out" kwarg's placement
+        if (
+            op_schema.is_out_variant_op()
+            and "out" in op_schema.kwargs_schema
+            and isinstance(op_schema.kwargs_schema["out"], OpStrategy)
+        ):
+            out_kwarg_spec = op_schema.kwargs_schema["out"].strategies[0].output_spec
+            # spec_list[0] is the output spec for this strategy combination
+            if spec_list[0] is not None:
+                if spec_list[0].placements != out_kwarg_spec.placements:
+                    continue
+
+        output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
+        if input_index == 0:
+            # No outputs (e.g., _linalg_check_errors)
+            output_specs = None
+        elif input_index > 1:
             output_specs = tuple(spec_list[:input_index])
         else:
             if spec_list[0] is not None:
-                output_specs = spec_list[0]  # type: ignore[assignment]
+                output_specs = spec_list[0]
             else:
                 raise RuntimeError("output spec is None")
 
@@ -470,7 +485,8 @@ def expand_to_full_mesh_op_strategy(
             continue
 
         # perform additional op-specific filtering
-        if is_valid_strategy_cb is not None:
+        # Skip callback for no-output ops (output_specs is None)
+        if is_valid_strategy_cb is not None and output_specs is not None:
             if not is_valid_strategy_cb(input_specs, output_specs):
                 continue
 
