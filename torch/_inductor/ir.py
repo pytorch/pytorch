@@ -3259,8 +3259,12 @@ class View(GenericView):
 
         from torch._subclasses.fake_impls import _compute_stride
 
+        # Use size_oblivious=True for unbacked symbols to avoid DDE errors
         new_stride_symint = _compute_stride(
-            old_size_symint, old_stride_symint, new_size_symint
+            old_size_symint,
+            old_stride_symint,
+            new_size_symint,
+            size_oblivious=unbacked_symbols_in_sizes,
         )
 
         if new_stride_symint is not None:
