@@ -172,7 +172,7 @@ def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: _SingleDimStrategyFunc,
-    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
 ) -> _ExpandedSingleDimStrategyFunc:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
@@ -192,7 +192,7 @@ def _expand_single_dim_strategy_to_mesh(
 
     def _create_expanded_strategy_impl(
         op_schema: OpSchema,
-        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
     ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
         def expanded_strategy(
             op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -208,7 +208,9 @@ def _expand_single_dim_strategy_to_mesh(
             num_inputs = _get_num_tensor_inputs(op_schema)
 
             # Compute num_outputs from output_tensor_meta
-            if isinstance(output_tensor_meta, TensorMeta):
+            if output_tensor_meta is None:
+                num_outputs = 0
+            elif isinstance(output_tensor_meta, TensorMeta):
                 num_outputs = 1
             else:
                 num_outputs = len(output_tensor_meta)
@@ -260,7 +262,7 @@ def _expand_single_dim_strategy_to_mesh(
 
     def _create_expanded_strategy(
         op_schema: OpSchema,
-        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
     ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
         # Try to use cache, but fall back to uncached version if hashing fails
         # (e.g., when TensorMeta contains SymInts from dynamic shapes)
