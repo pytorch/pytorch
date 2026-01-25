@@ -19,5 +19,6 @@
 #include <torch/special.h>
 #include <torch/types.h>
 #include <torch/utils.h>
+#include <torch/print.h>
 #include <torch/version.h>
 #include <torch/xpu.h>
