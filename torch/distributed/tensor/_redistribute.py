@@ -21,7 +21,6 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
-from torch.distributed.tensor._utils import assert_no_mixed_partial_types
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -108,6 +107,12 @@ class _TransformInfo(NamedTuple):
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
+
+    def __post_init__(self):
+        assert self.mesh_dim >= 0
+        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
+            "TransformInfo should only be created if it is an op with some effect, not a no-op"
+        )
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -790,14 +795,18 @@ class DTensorRedistributePlanner:
         transform_infos: list[_TransformInfo] = []
         if self.device_mesh.ndim == 1:
             # if device_mesh is 1D, redistribute is a simple direct
-            # transformation
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=0,
-                    src_dst_placements=(src_spec.placements[0], dst_spec.placements[0]),
-                    logical_shape=initial_logical_shape,
+            # transformation (skip if src == dst)
+            if src_spec.placements[0] != dst_spec.placements[0]:
+                transform_infos.append(
+                    _TransformInfo(
+                        mesh_dim=0,
+                        src_dst_placements=(
+                            src_spec.placements[0],
+                            dst_spec.placements[0],
+                        ),
+                        logical_shape=initial_logical_shape,
+                    )
                 )
-            )
             return transform_infos
 
         # Handle multi-dim device mesh placement redistribution First, we need
@@ -958,12 +967,6 @@ def redistribute_local_tensor(
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
-
-    # We do not see a valid use case for mixing different partial types in the same DTensor.
-    # in principle it could be supported, but since nonlinear reductions (e.g. max) exist, relative ordering
-    # of different partials would become semantically critical.  Without a motivating use case, we prohibit this.
-    assert_no_mixed_partial_types(current_spec.placements)
-    assert_no_mixed_partial_types(target_spec.placements)
 
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
