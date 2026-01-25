@@ -394,18 +394,9 @@ class TensorMeta:
         return TensorMeta(
             device=device,
             dtype=dtype,
-            sizes=V.graph.sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            strides=V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            offset=V.graph.sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
+            sizes=V.graph.sizevars.optimization_hints(node.get_size()),
+            strides=V.graph.sizevars.optimization_hints(node.get_stride()),
+            offset=V.graph.sizevars.optimization_hint(node.get_layout().offset),
             name=node.get_name(),
         )
 
