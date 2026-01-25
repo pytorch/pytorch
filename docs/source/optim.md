@@ -544,13 +544,32 @@ EMA models are constructed by specifying the `multi_avg_fn` argument as follows:
 
 Decay is a parameter between 0 and 1 that controls how fast the averaged parameters are decayed. If not provided to {func}`torch.optim.swa_utils.get_ema_multi_avg_fn`, the default is 0.999. Decay value should be close to 1.0, as smaller values can cause optimization convergence issues.
 
-{func}`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the following EMA equation to the weights:
+{func}`torch.optim.swa_utils.get_ema_multi_avg_fn` returns a function that applies the exponential
+moving average (EMA) to the weights. We recommend stating the initialization and the
+indexing convention explicitly to avoid ambiguity.
+
+Initialize the EMA from the model weights at step 0:
 
 ```{math}
-W^\textrm{EMA}_{t+1} = \alpha W^\textrm{EMA}_{t} + (1 - \alpha) W^\textrm{model}_t
+W_{0}^{\\mathrm{EMA}} = W_{0}^{\\mathrm{model}}
 ```
 
-where alpha is the EMA decay.
+Then update the EMA at each step using one of the equivalent forms:
+
+```{math}
+W_{t+1}^{\\mathrm{EMA}} = \\alpha\\, W_{t}^{\\mathrm{EMA}} + (1 - \\alpha)\\, W_{t+1}^{\\mathrm{model}}
+```
+
+or equivalently (shifted indexing):
+
+```{math}
+W_{t}^{\\mathrm{EMA}} = \\alpha\\, W_{t-1}^{\\mathrm{EMA}} + (1 - \\alpha)\\, W_{t}^{\\mathrm{model}}
+```
+
+Here \\(\\alpha\\in[0,1)\\) is the EMA decay (larger \\(\\alpha\\) gives more smoothing). Typical
+choices are around \\(0.99\\)–\\(0.999\\). Be explicit in the documentation and code which of the
+indexing conventions above is used (i.e., whether the EMA is updated using the newly computed
+model weights at step \\(t+1\\) or using the current model weights at step \\(t\\)).
 
 Here the model `model` can be an arbitrary {class}`torch.nn.Module` object. `averaged_model`
 will keep track of the running averages of the parameters of the `model`. To update these
