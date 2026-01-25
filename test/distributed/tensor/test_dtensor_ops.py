@@ -17,6 +17,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -27,9 +28,10 @@ from torch.testing._internal.common_utils import run_tests, suppress_warnings, T
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
+    validate_sharding_rule_sample,
 )
 from torch.utils import _pytree as pytree
-from torch.utils._debug_mode import DebugMode
+from torch.utils._debug_mode import _OpCall, DebugMode
 from torch.utils._pytree import tree_map
 
 
@@ -811,12 +813,126 @@ class TestLocalDTensorOps(TestDTensorOps):
         self.assertEqual(x, y, msg)
 
 
+class TestSingleDimStrategies(DTensorOpTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _extract_aten_op_and_args(self, torch_op, args, kwargs):
+        with DebugMode(store_original_args=True) as debug_mode:
+            try:
+                torch_op(*args, **kwargs)
+            except Exception:
+                self.skipTest(f"Op {torch_op} failed on replicated DTensors")
+
+        for op in debug_mode.operators:
+            if isinstance(op, _OpCall) and "aten" in str(op.op):
+                return op.op, op.args, op.kwargs
+
+        self.skipTest(f"Op {torch_op} failed to extract aten op")
+
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_single_dim_strategy(self, dtype, op):
+        torch.manual_seed(42)
+        mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+        sharding_prop = DTensor._op_dispatcher.sharding_propagator
+
+        try:
+            samples = list(op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=False))
+        except Exception:
+            self.skipTest(f"Failed to get sample inputs for {op.name}")
+        if not samples:
+            self.skipTest(f"No sample inputs for {op.name}")
+
+        sample = samples[0]
+        args = (sample.input,) + tuple(sample.args)
+
+        # create Replicated DTensors
+        try:
+            dtensor_args, dtensor_kwargs = pytree.tree_map_only(
+                torch.Tensor,
+                lambda t: distribute_tensor(t, mesh, (Replicate(),)),
+                (args, sample.kwargs),
+            )
+        except Exception:
+            self.skipTest(f"Failed to create replicate DTensors for {op.name}")
+
+        # extract aten op/args/kwargs
+        aten_op, aten_args, aten_kwargs = self._extract_aten_op_and_args(
+            op.op, dtensor_args, dtensor_kwargs
+        )
+
+        single_dim_strats = sharding_prop.op_single_dim_strategy_funcs
+        if aten_op not in single_dim_strats:
+            self.skipTest(f"No single-dim strategy for {op.name}: {aten_op}")
+
+        # extract tensor_meta, full tensors
+        all_tensor_meta = []
+
+        def _collect_tensor_meta(dt):
+            meta = dt._spec.tensor_meta
+            all_tensor_meta.append(meta)
+            return meta
+
+        args_meta, kwargs_meta = pytree.tree_map_only(
+            DTensor, _collect_tensor_meta, (aten_args, aten_kwargs)
+        )
+        full_args, full_kwargs = pytree.tree_map_only(
+            torch.Tensor, lambda t: t.full_tensor(), (aten_args, aten_kwargs)
+        )
+
+        # enumerate strategies, replace placeholders with Shard
+        strategies = pytree.tree_map_only(
+            _ShardingPlaceholder,
+            lambda s: Shard(s.dim),
+            single_dim_strats[aten_op](aten_op, args_meta, kwargs_meta),
+        )
+        # TODO(pianpwk): handle multi-output once that lands for single-dim
+        for output_placement, *input_placements in strategies:
+            # skip strategies with invalid shards
+            def is_invalid_shard(meta, p):
+                ndim = len(meta.shape)
+                if (
+                    not isinstance(p, Shard)
+                    or ndim == 0
+                    or p.dim >= ndim
+                    or meta.shape[p.dim] == 0
+                    or meta.shape[p.dim] % self.world_size != 0
+                ):
+                    return True
+                return False
+
+            if any(
+                is_invalid_shard(t, p)
+                for t, p in zip(all_tensor_meta, input_placements)
+            ):
+                continue
+
+            # add the validate_sharding_rule function
+            self.assertTrue(
+                validate_sharding_rule_sample(
+                    aten_op,
+                    full_args,
+                    full_kwargs,
+                    input_placements,
+                    (output_placement,),
+                    mesh,
+                ),
+                f"{op.name}: {input_placements} -> {(output_placement,)} failed",
+            )
+
+
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
 instantiate_device_type_tests(
     TestMultiThreadedDTensorOps, globals(), only_for=(DEVICE_TYPE,)
 )
 
 instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=(DEVICE_TYPE,))
+
+instantiate_device_type_tests(
+    TestSingleDimStrategies, globals(), only_for=(DEVICE_TYPE,)
+)
 
 if __name__ == "__main__":
     run_tests()
