@@ -71,7 +71,7 @@ TORCH_META_FUNC(topk)
 
   const auto indices_dtype = maybe_get_output(1).defined()
       ? maybe_get_output(1).scalar_type()
-      : at::kLong;
+      : at::kLong; // for down-up cast if functional op is used.
 
   set_output_raw_strided(0, topKSize, {}, self.options());
   set_output_raw_strided(1, topKSize, {}, self.options().dtype(indices_dtype));
@@ -92,7 +92,7 @@ TORCH_META_FUNC2(sort, stable)
 
   const auto indices_dtype = maybe_get_output(1).defined()
       ? maybe_get_output(1).scalar_type()
-      : at::kLong;
+      : at::kLong; // for down-up cast if functional op is used.
 
   set_output_raw_strided(0, self.sizes(), strides, self.options(), {});
   set_output_raw_strided(1, self.sizes(), strides, self.options().dtype(indices_dtype), {});
@@ -969,13 +969,12 @@ TORCH_IMPL_FUNC(sort_stable_out)
       indices_dtype = at::kByte;
     } else if (sort_size - 1 <= std::numeric_limits<uint16_t>::max()) {
       indices_dtype = at::kUInt16;
-    } else if (sort_size - 1 <= std::numeric_limits<uint32_t>::max()) {
-      indices_dtype = at::kUInt32;
-    } else {
-      indices_dtype = at::kLong;
+    } else if (sort_size - 1 <= std::numeric_limits<int32_t>::max()) {
+      indices_dtype = at::kInt;
     }
 
-    if (indices_dtype == indices.scalar_type()) {
+    if (indices.scalar_type() != kLong) {
+      // use the indices_dtype w/o down upcast in case of out-variant op with indices.
       indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
     } else {
       indices_tmp = c10::MaybeOwned<Tensor>::owned(indices.to(indices_dtype));
