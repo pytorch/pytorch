@@ -7524,6 +7524,7 @@ def associative_scan(
             for x in itertools.chain(xs, xs)
         ]
         subgraph_inputs += [
+            # pyrefly: ignore [missing-attribute, bad-argument-type]
             InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
             for x in additional_inputs
         ]
@@ -7551,9 +7552,12 @@ def associative_scan(
     kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
+    # pyrefly: ignore [missing-attribute]
     kwargs["additional_inputs_dtypes"] = tuple(x.get_dtype() for x in additional_inputs)
+    # pyrefly: ignore [missing-attribute]
     kwargs["additional_inputs_fns"] = tuple(x.make_loader() for x in additional_inputs)
     result = ir.Scan.create(
+        # pyrefly: ignore [bad-argument-type]
         combine_fn=wrapped_combine_fn,
         can_fallback_to_aten=False,
         **kwargs,

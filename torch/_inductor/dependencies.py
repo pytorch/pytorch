@@ -845,7 +845,11 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         return (None,) * 2
 
     def scan(
-        self, dtypes: Any, combine_fn: Any, values: Sequence[Any], additonal_inputs: Sequence[Any]
+        self,
+        dtypes: Any,
+        combine_fn: Any,
+        values: Sequence[Any],
+        additonal_inputs: Sequence[Any],
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 

@@ -95,18 +95,30 @@ class AssociativeScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
-        try:
-            # TODO: Improve/Fix this
-            # Try to broadcast the shapes of the additional arguments to the inputs
-            # This is necessary as the triton kernel for the lowering during
-            # in combine_mode='pointwise', requires already broadcasted shapes
-            additional_inputsb = torch.broadcast_tensors(*xs, *additional_inputs)[
-                len(xs) :
-            ]
-            additional_inputsb = [add_inpsb[0, :] for add_inpsb in additional_inputsb]
-        except:  # noqa: E722
-            additional_inputsb = additional_inputs
-        return super().__call__(combine_fn, xs, additional_inputsb)
+        # TODO: Improve/Fix this
+        # Try to broadcast the shapes of the additional arguments to the inputs
+        # This is necessary as the triton kernel for the lowering during
+        # in combine_mode='pointwise', requires already broadcasted shapes
+        # The only exceptions are SymInts, which are just passed through
+        non_symint_mask = [
+            not isinstance(add_inp, torch.SymInt) for add_inp in additional_inputs
+        ]
+        non_symint_additional_inputs = [
+            add_inp
+            for add_inp in additional_inputs
+            if not isinstance(add_inp, torch.SymInt)
+        ]
+
+        # For the shape broadcast, only the first time slice of xs is needed
+        additional_inputs_broadcasted = torch.broadcast_tensors(
+            *[first_slice_copy(x) for x in xs], *non_symint_additional_inputs
+        )[len(xs) :]
+        additional_inputs = [
+            additional_inputs_broadcasted[ind] if mask else additional_inputs[ind]
+            for ind, mask in enumerate(non_symint_mask)
+        ]
+        # pyrefly: ignore [missing-attribute]
+        return super().__call__(combine_fn, xs, additional_inputs)
 
     # pyrefly: ignore [bad-override]
     def gen_schema(self, combine_fn, xs, additional_inputs):
@@ -199,7 +211,6 @@ def associative_scan(
         cumsum = associative_scan(add, x, dim)
 
     """
-    # TODO: Support lifted arguments in inductor for associative_scan
     # TODO: Support autograd for cases with lifted arguments for combine_mode=pointwise
 
     # The reason we flatten xs before calling into dynamo is that

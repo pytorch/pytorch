@@ -842,7 +842,9 @@ class NoopHandler(DefaultHandler):
         return (None, None)
 
     @staticmethod
-    def scan(dtypes, combine_fn, values, additional_inputs_dtypes, additional_inputs) -> tuple[None, ...]:
+    def scan(
+        dtypes, combine_fn, values, additional_inputs_dtypes, additional_inputs
+    ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod

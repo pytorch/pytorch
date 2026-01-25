@@ -2831,7 +2831,9 @@ class CSEProxy(DefaultHandler):
         additional_inputs_dtypes: tuple[torch.dtype, ...],
         additional_inputs: tuple[CSEVariable, ...],
     ) -> tuple[CSEVariable, ...]:
-        return self.kernel.scan(dtypes, combine_fn, values, additional_inputs_dtypes, additional_inputs)
+        return self.kernel.scan(
+            dtypes, combine_fn, values, additional_inputs_dtypes, additional_inputs
+        )
 
     def sort(
         self,
