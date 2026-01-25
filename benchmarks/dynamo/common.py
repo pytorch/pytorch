@@ -4415,7 +4415,7 @@ def run(runner, args, original_dir=None):
                             # Use duck_shape_id="batch" so all batch dimensions
                             # share the same unbacked symbol
                             torch._dynamo.decorators.mark_unbacked(
-                                t, i, shape_id="batch", hint_override = batch_size
+                                t, i, shape_id="batch", hint_override=batch_size
                             )
                         else:
                             torch._dynamo.maybe_mark_dynamic(t, i)
