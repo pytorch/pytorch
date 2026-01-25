@@ -102,7 +102,6 @@ case "$tag" in
     CUDA_VERSION=12.4
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
@@ -112,7 +111,6 @@ case "$tag" in
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
@@ -123,7 +121,6 @@ case "$tag" in
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
@@ -133,7 +130,6 @@ case "$tag" in
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
@@ -144,7 +140,6 @@ case "$tag" in
     CUDA_VERSION=13.0.2
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
@@ -155,7 +150,6 @@ case "$tag" in
     CUDA_VERSION=12.9.1
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
@@ -164,25 +158,21 @@ case "$tag" in
   pytorch-linux-jammy-py3-clang12-onnx)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
-    VISION=yes
     ONNX=yes
     ;;
   pytorch-linux-jammy-py3.10-clang12)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
-    VISION=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3.11-clang12)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=12
-    VISION=no
     TRITON=no
     ;;
   pytorch-linux-jammy-py3.12-clang12)
     ANACONDA_PYTHON_VERSION=3.12
     CLANG_VERSION=12
-    VISION=no
     TRITON=no
     ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
@@ -192,7 +182,6 @@ case "$tag" in
       ANACONDA_PYTHON_VERSION=3.12
     fi
     GCC_VERSION=11
-    VISION=yes
     ROCM_VERSION=7.1
     NINJA_VERSION=1.9.0
     TRITON=yes
@@ -238,7 +227,6 @@ case "$tag" in
   pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     TRITON=yes
     DOCS=yes
@@ -248,18 +236,15 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
     CLANG_VERSION=12
-    VISION=yes
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang18-asan)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=18
-    VISION=yes
     ;;
   pytorch-linux-jammy-py3.10-gcc11)
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=11
-    VISION=yes
     KATEX=yes
     TRITON=yes
     DOCS=yes
@@ -312,7 +297,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     ACL=yes
-    VISION=yes
     OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
@@ -322,7 +306,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=21
     ACL=yes
-    VISION=yes
     OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
@@ -332,7 +315,6 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=13
     ACL=yes
-    VISION=yes
     OPENBLAS=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
@@ -344,7 +326,6 @@ case "$tag" in
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
-    VISION=yes
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
@@ -400,7 +381,6 @@ docker buildx build \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
-       --build-arg "VISION=${VISION:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
        --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
