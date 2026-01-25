@@ -15,6 +15,7 @@ import threading
 import time
 import unittest
 import warnings
+import weakref
 from collections import defaultdict
 from copy import deepcopy
 from itertools import product
@@ -4219,6 +4220,79 @@ class TestCudaMallocAsync(TestCase):
             # call so it doesn't actual fire until the next
             # method call after a gc.collect
             noop()
+            self.assertTrue(fired)
+        finally:
+            disarm()
+
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    @requiresCppContext
+    def test_cycles_containing_weakref_proxy(self):
+        """
+        Test that cycles containing dead weak proxies don't crash the observer.
+
+        This test reproduces the scenario where gc.garbage contains both CUDA tensor
+        cycles AND dead weak proxies, verifying that is_cuda_tensor() handles the
+        ReferenceError gracefully and the observer still fires correctly.
+        """
+        fired = False
+
+        def observer(html):
+            nonlocal fired
+            fired = True
+            self.assertTrue("torch.Tensor" in html)
+            self.assertTrue("test_cuda" in html)
+            self.assertTrue("cell_contents" in html)
+
+        disarm = observe_tensor_cycles(observer)
+
+        def noop():
+            pass
+
+        try:
+
+            def create():
+                # Create a CUDA tensor cycle
+                x = torch.empty(3, 4, device="cuda")
+
+                def foo(p):
+                    if p:
+                        return foo(not p)
+                    else:
+                        return x
+
+                # Create a weak proxy that will become dead and end up in gc.garbage
+                class Klass:
+                    pass
+
+                obj = Klass()
+                proxy = weakref.proxy(obj)
+
+                # Create a cycle that references the weak proxy
+                container = [proxy]
+                container.append(container)
+
+                # Delete the object, making the proxy dead
+                del obj
+
+                # Verify the proxy is dead (isinstance should raise ReferenceError)
+                with self.assertRaises(ReferenceError):
+                    isinstance(proxy, type)
+
+                return foo
+
+            create()
+
+            # Force garbage collection - this will create gc.garbage containing
+            # both the dead weak proxy AND the CUDA tensor cycle
+            gc.collect()
+
+            # The callback has to run outside of the collect call
+            # so it doesn't actually fire until the next method call after gc.collect
+            noop()
+
+            # The observer should still fire successfully despite the dead weak proxy
             self.assertTrue(fired)
         finally:
             disarm()
