@@ -635,7 +635,7 @@ class TritonTemplateKernel(TritonKernel):
                 if f is not None:
                     if isinstance(f, torch.SymInt):
                         f = f.node.expr
-                    return V.graph.sizevars.optimization_hint(f)
+                    return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
     def jit_lines(self):
