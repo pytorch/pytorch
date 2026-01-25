@@ -2320,7 +2320,9 @@ class PythonWrapperCodegen(CodeGen):
                     # invalid benchmark code, because it's not guaranteed 42
                     # is actually a valid value for the kernel in question.
                     # See https://github.com/pytorch/pytorch/issues/124686
-                    add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
+                    add_expr_input(
+                        name, V.graph.sizevars.optimization_hint(value, fallback=42)
+                    )
                 elif isinstance(value, ir.GeneratorState):
                     add_expr_input(
                         name,
@@ -2328,7 +2330,7 @@ class PythonWrapperCodegen(CodeGen):
                     )
                 else:
                     shape = [
-                        V.graph.sizevars.size_hint(x, fallback=42)
+                        V.graph.sizevars.optimization_hint(x, fallback=42)
                         for x in value.get_size()
                     ]
                     stride = [
