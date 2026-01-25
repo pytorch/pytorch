@@ -4,10 +4,22 @@
  * Implements:
  * - Standard Gamma: Marsaglia-Tsang method (2000)
  * - Poisson: Transformed rejection (Hörmann 1993) + Knuth algorithm
+ *
+ * Note on RNG offset management:
+ * The offset is incremented conservatively by numel * MAX_RANDOMS_PER_SAMPLE
+ * to account for worst-case random consumption in rejection sampling loops.
+ * This ensures non-overlapping sequences between kernel launches at the cost
+ * of some RNG state "wastage".
  */
 
 #include <metal_stdlib>
 using namespace metal;
+
+// Maximum iterations for rejection sampling loops to prevent GPU hangs
+// These values are chosen to be extremely conservative - in practice,
+// rejection sampling converges much faster for valid input parameters.
+constant int MAX_GAMMA_ITERATIONS = 1000000;
+constant int MAX_POISSON_ITERATIONS = 1000000;
 
 // Philox4x32 random number generator constants
 constant uint PHILOX_M0 = 0xD2511F53;
@@ -126,12 +138,19 @@ inline float sample_gamma_ge1(float alpha, thread PhiloxState& state) {
   float d = alpha - 1.0f / 3.0f;
   float c = 1.0f / sqrt(9.0f * d);
 
-  while (true) {
+  for (int iter = 0; iter < MAX_GAMMA_ITERATIONS; iter++) {
     float x, v;
+    int inner_iter = 0;
     do {
       x = rand_normal(state);
       v = 1.0f + c * x;
-    } while (v <= 0.0f);
+      inner_iter++;
+    } while (v <= 0.0f && inner_iter < MAX_GAMMA_ITERATIONS);
+
+    if (inner_iter >= MAX_GAMMA_ITERATIONS) {
+      // Fallback: return mean of Gamma(alpha, 1) = alpha
+      return alpha;
+    }
 
     v = v * v * v;
     float u = rand_uniform(state);
@@ -144,6 +163,9 @@ inline float sample_gamma_ge1(float alpha, thread PhiloxState& state) {
       return d * v;
     }
   }
+
+  // Fallback after max iterations (should never happen for valid alpha)
+  return alpha;
 }
 
 template <typename T>
@@ -178,7 +200,7 @@ inline int sample_poisson_small(float lambda, thread PhiloxState& state) {
   int x = 0;
   float prod = 1.0f;
 
-  while (true) {
+  for (int iter = 0; iter < MAX_POISSON_ITERATIONS; iter++) {
     float u = rand_uniform(state);
     prod *= u;
     if (prod > enlam) {
@@ -187,6 +209,9 @@ inline int sample_poisson_small(float lambda, thread PhiloxState& state) {
       return x;
     }
   }
+
+  // Fallback: return expected value (should never reach for valid lambda < 10)
+  return int(lambda);
 }
 
 inline int sample_poisson_large(float lambda, thread PhiloxState& state) {
@@ -197,7 +222,7 @@ inline int sample_poisson_large(float lambda, thread PhiloxState& state) {
   float invalpha = 1.1239f + 1.1328f / (b - 3.4f);
   float vr = 0.9277f - 3.6224f / (b - 2.0f);
 
-  while (true) {
+  for (int iter = 0; iter < MAX_POISSON_ITERATIONS; iter++) {
     float u = rand_uniform(state) - 0.5f;
     float v = rand_uniform(state);
     float us = 0.5f - abs(u);
@@ -216,13 +241,18 @@ inline int sample_poisson_large(float lambda, thread PhiloxState& state) {
     }
 
     float kp1 = k + 1.0f;
-    float lgamma_kp1 = (k + 0.5f) * log(kp1) - kp1 + 0.9189385332f;
+    // Stirling approximation: log(k!) ≈ (k + 0.5) * log(k+1) - (k+1) + log(sqrt(2*pi))
+    // log(sqrt(2*pi)) = 0.9189385332046727... (using higher precision constant)
+    float lgamma_kp1 = (k + 0.5f) * log(kp1) - kp1 + 0.91893853320467274f;
 
     if ((log(v) + log(invalpha) - log(a / (us * us) + b)) <=
         (-lambda + k * loglam - lgamma_kp1)) {
       return int(k);
     }
   }
+
+  // Fallback: return expected value (should never reach for valid lambda)
+  return int(lambda);
 }
 
 template <typename T>

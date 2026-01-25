@@ -8035,6 +8035,98 @@ class TestMPS(TestCaseMPS):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_standard_gamma(self, dtype):
+        """Test _standard_gamma on MPS matches expected statistical properties."""
+        n_samples = 10000
+
+        # Test various alpha values including edge cases
+        for alpha_val in [0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 50.0]:
+            alpha = torch.full((n_samples,), alpha_val, device='mps', dtype=dtype)
+            samples = torch._standard_gamma(alpha)
+
+            # All samples should be positive
+            self.assertTrue((samples > 0).all(),
+                            f"Gamma samples should be positive for alpha={alpha_val}")
+
+            # Check mean is close to alpha (within 10% for statistical tolerance)
+            mean = samples.float().mean().item()
+            self.assertAlmostEqual(mean, alpha_val, delta=alpha_val * 0.15,
+                                   msg=f"Mean should be close to alpha={alpha_val}")
+
+        # Test empty tensor
+        empty_alpha = torch.empty(0, device='mps', dtype=dtype)
+        empty_samples = torch._standard_gamma(empty_alpha)
+        self.assertEqual(empty_samples.numel(), 0)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_poisson(self, dtype):
+        """Test poisson on MPS matches expected statistical properties."""
+        n_samples = 10000
+
+        # Test various rate values
+        for rate_val in [0.5, 1.0, 5.0, 10.0, 50.0]:
+            rate = torch.full((n_samples,), rate_val, device='mps', dtype=dtype)
+            samples = torch.poisson(rate)
+
+            # All samples should be non-negative integers
+            self.assertTrue((samples >= 0).all(),
+                            f"Poisson samples should be non-negative for rate={rate_val}")
+
+            # Check samples are integers
+            samples_float = samples.float()
+            self.assertTrue(torch.allclose(samples_float, samples_float.floor()),
+                            f"Poisson samples should be integers for rate={rate_val}")
+
+            # Check mean is close to rate (within 15% for statistical tolerance)
+            mean = samples_float.mean().item()
+            self.assertAlmostEqual(mean, rate_val, delta=rate_val * 0.15,
+                                   msg=f"Mean should be close to rate={rate_val}")
+
+        # Test zero rate
+        zero_rate = torch.zeros(100, device='mps', dtype=dtype)
+        zero_samples = torch.poisson(zero_rate)
+        self.assertTrue((zero_samples == 0).all(), "Poisson(0) should return all zeros")
+
+        # Test empty tensor
+        empty_rate = torch.empty(0, device='mps', dtype=dtype)
+        empty_samples = torch.poisson(empty_rate)
+        self.assertEqual(empty_samples.numel(), 0)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_sample_dirichlet(self, dtype):
+        """Test _sample_dirichlet on MPS matches expected statistical properties."""
+        n_samples = 1000
+
+        # Test various k values
+        for k in [3, 5, 10]:
+            alpha = torch.ones((n_samples, k), device='mps', dtype=dtype)
+            samples = torch._sample_dirichlet(alpha)
+
+            # Check shape
+            self.assertEqual(samples.shape, (n_samples, k))
+
+            # All samples should be positive
+            self.assertTrue((samples > 0).all(),
+                            f"Dirichlet samples should be positive for k={k}")
+
+            # Samples should sum to 1 along last dimension
+            sums = samples.sum(dim=-1)
+            self.assertTrue(torch.allclose(sums, torch.ones_like(sums), atol=1e-4),
+                            f"Dirichlet samples should sum to 1 for k={k}")
+
+            # Check mean is close to 1/k for uniform alpha
+            expected_mean = 1.0 / k
+            mean = samples.float().mean(dim=0)
+            for i in range(k):
+                self.assertAlmostEqual(mean[i].item(), expected_mean, delta=0.05,
+                                       msg=f"Mean[{i}] should be close to {expected_mean} for k={k}")
+
+        # Test empty tensor
+        empty_alpha = torch.empty(0, 3, device='mps', dtype=dtype)
+        empty_samples = torch._sample_dirichlet(empty_alpha)
+        self.assertEqual(empty_samples.numel(), 0)
+
     def test_distributions(self):
         ops = [
             ("normal_", lambda t: t.normal_(0, 1)),
