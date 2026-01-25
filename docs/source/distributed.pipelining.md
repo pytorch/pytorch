@@ -318,6 +318,7 @@ modification to the `stage_mod`, you can use a functional version of the
 from torch.distributed.pipelining import build_stage
 from torch.nn.parallel import DistributedDataParallel
 
+# DistributedDataParallel (DDP) is an nn.Module wrapper, so it can be passed to build_stage.
 dp_mod = DistributedDataParallel(stage_mod)
 info = pipe.info()
 stage = build_stage(dp_mod, stage_idx, info, device, group)
