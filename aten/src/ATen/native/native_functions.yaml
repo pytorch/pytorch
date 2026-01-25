@@ -2317,6 +2317,7 @@
   dispatch:
     CPU: vdot
     CUDA: vdot_cuda
+    MPS: vdot_mps
 
 - func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
@@ -9034,6 +9035,7 @@
   tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: cauchy_
+    MPS: cauchy_mps_
   autogen: cauchy, cauchy.out
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
@@ -9060,6 +9062,7 @@
   variants: method
   dispatch:
     CPU, CUDA: geometric_
+    MPS: geometric_mps_
 
   # wrappers for TH functions
   autogen: geometric, geometric.out
@@ -11562,6 +11565,15 @@
     MTIA: foreach_tensor_norm_mtia
   autogen: _foreach_norm.Scalar_out
 
+# Like _foreach_norm but returns sum(|x|^ord) without the final root
+- func: _foreach_powsum.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_powsum_slow
+    CUDA: foreach_tensor_powsum_cuda
+  autogen: _foreach_powsum.Scalar_out
+
 - func: _foreach_pow.List(Tensor[] self, Tensor[] exponent) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
@@ -13646,7 +13658,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: special_erfcx_out
+    CPU, CUDA, MPS: special_erfcx_out
   tags: pointwise
 
 - func: special_erfinv(Tensor self) -> Tensor
@@ -14513,6 +14525,17 @@
     MPS: linalg_vector_norm_out_mps
   tags: reduction
 
+# Computes sum(|x|^ord) - the "power sum" without the final root.
+# This is useful for distributed computing where partial power sums
+# can be reduced across shards before taking the final root.
+- func: linalg__powsum(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  python_module: linalg
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg__powsum_slow
+    CPU, CUDA: linalg__powsum
+  tags: reduction
+
 - func: linalg_matrix_norm(Tensor self, Scalar ord, int[] dim=[-2,-1], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg
 
@@ -15172,6 +15195,11 @@
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
   tags: nondeterministic_seeded
 
+- func: _scaled_dot_product_flash_attention.quantized(Tensor query, Tensor key, Tensor value, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+  dispatch:
+    CUDA: _scaled_dot_product_flash_attention_cuda_quantized
+  tags: nondeterministic_seeded
+
 - func: _scaled_dot_product_flash_attention_for_cpu(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor output, Tensor logsumexp)
   dispatch:
     CPU: _scaled_dot_product_flash_attention_cpu
@@ -15231,6 +15259,12 @@
   variants: function
   dispatch:
     CUDA: _flash_attention_forward
+  tags: nondeterministic_seeded
+
+- func: _flash_attention_forward.quantized(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+  variants: function
+  dispatch:
+    CUDA: _flash_attention_forward_quantized
   tags: nondeterministic_seeded
 
 - func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor rng_state, Tensor unused, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None) -> (Tensor, Tensor, Tensor)
