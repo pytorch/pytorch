@@ -3170,6 +3170,11 @@ class GenericView(BaseView):
 
 @ir_dataclass
 class View(GenericView):
+    """
+    This class handles tensor reshaping by computing appropriate index transformations
+    to map the new shape back to the original storage layout.
+    """
+
     @staticmethod
     def handle_negative_index(idx: Expr, size: Expr) -> Expr:
         idx = sympy.expand(idx)
@@ -3180,6 +3185,7 @@ class View(GenericView):
         return idx
 
     @classmethod
+    @override
     def create(cls, x: IRNode, new_size: Sequence[Expr]) -> IRNode:  # type: ignore[override]
         assert isinstance(new_size, Sequence), type(new_size)
         old_size, new_size = cls.resolve_negative_size(x.get_size(), new_size)
@@ -3253,9 +3259,9 @@ class View(GenericView):
         old_stride = old_layout.stride
 
         # Convert sympy exprs to SymInt for _compute_stride, then convert back
-        old_size_symint = V.graph.sizevars.to_symints(old_size)
-        old_stride_symint = V.graph.sizevars.to_symints(old_stride)
-        new_size_symint = V.graph.sizevars.to_symints(new_size)
+        old_size_symint = V.graph.sizevars.to_symints_or_ints(old_size)
+        old_stride_symint = V.graph.sizevars.to_symints_or_ints(old_stride)
+        new_size_symint = V.graph.sizevars.to_symints_or_ints(new_size)
 
         from torch._subclasses.fake_impls import _compute_stride
 
