@@ -233,7 +233,7 @@ struct TensorArgs {
       it = _args.emplace(impl, TensorArg(_next_id++)).first;
       inputs.emplace_back(tensor);
       if (active_node_call_idx.has_value()) {
-        input_origins.emplace_back(active_node_call_idx.value());
+        input_origins.emplace_back(static_cast<uint32_t>(active_node_call_idx.value()));
       }
     }
     return it->second;
