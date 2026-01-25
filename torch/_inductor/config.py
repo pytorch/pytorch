@@ -476,7 +476,7 @@ pipeline_max_autotune_gemm = (
 # use torch profiler to benchmark kernels during autotuning
 # when enabled, this takes precedence over use_experimental_benchmarker
 use_torch_profiler_benchmarker: bool = Config(
-    default=False,
+    default=True,
     env_name_force="TORCHINDUCTOR_USE_TORCH_PROFILER_BENCHMARKER",
     justknob="pytorch/inductor:use_torch_profiler_benchmarker",
 )
