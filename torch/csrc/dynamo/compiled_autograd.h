@@ -302,7 +302,7 @@ struct LiftedIValueArgs {
   void add(const at::IValue* iv) {
     args.emplace_back(iv);
     if (active_node_call_idx.has_value()) {
-      args_origins.emplace_back(active_node_call_idx.value());
+      args_origins.emplace_back(static_cast<uint32_t>(active_node_call_idx.value()));
     }
   }
 
