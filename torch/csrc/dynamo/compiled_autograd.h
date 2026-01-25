@@ -663,7 +663,7 @@ class CompiledNodeArgs {
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.tensor_pre_hooks.emplace_back(fn_id, index);
+    _node_call.tensor_pre_hooks.emplace_back(static_cast<int>(fn_id), static_cast<int>(index));
   }
 
   void add_cpp_single_tensor_pre_hook(
