@@ -756,9 +756,15 @@ Tensor infinitely_differentiable_gelu_backward(
     const Tensor& grad,
     const Tensor& self) {
   constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
-  Tensor pdf = (-0.5 * self * self).exp_();
-  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
+  // Use opmath type (float32 for BF16/Half) for computation to ensure consistency and accuracy
+  const auto original_dtype = self.scalar_type();
+  const auto opmath_dtype = at::toOpMathType(original_dtype);
+  Tensor self_fp = self.to(opmath_dtype);
+  Tensor grad_fp = grad.to(opmath_dtype);
+  Tensor cdf = (1.0 + (self_fp * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self_fp * self_fp).exp_();
+  Tensor result = cdf.addcmul_(self_fp, pdf, kAlpha).mul_(grad_fp);
+  return result.to(original_dtype);
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {

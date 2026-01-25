@@ -82,6 +82,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     largeTensorTest,
+    skipCPUIf,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
@@ -8529,6 +8530,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (a, b, c, d, e, f, h)
 
         self.common(fn, [torch.randn(64) * 10])
+
+    @skipCPUIf(True, "requires CUDA for bfloat16")
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_infinitely_differentiable_gelu_backward_bf16_consistency(self):
+        """Test that infinitely_differentiable_gelu_backward produces consistent results
+        between eager and inductor backends for bfloat16 inputs."""
+        def model_func(grad, self):
+            return torch.ops.aten.infinitely_differentiable_gelu_backward(
+                grad, self=self
+            )
+
+        # Test with bfloat16 on CUDA
+        device = "cuda"
+        op_config_bf16 = {
+            "grad": torch.randn([2, 3, 5], device=device, dtype=torch.bfloat16),
+            "self": torch.randn([2, 3, 5], device=device, dtype=torch.bfloat16),
+        }
+
+        compiled_eager = torch.compile(model_func, backend="eager")
+        compiled_inductor = torch.compile(model_func, backend="inductor")
+
+        out_eager_bf16 = compiled_eager(**op_config_bf16)
+        out_inductor_bf16 = compiled_inductor(**op_config_bf16)
+
+        torch.testing.assert_close(
+            out_eager_bf16, out_inductor_bf16,
+            msg="infinitely_differentiable_gelu_backward: eager and inductor outputs differ for bfloat16"
+        )
 
     def test_baddbmm(self):
         def fn(a, b, c, beta):
