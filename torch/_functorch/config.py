@@ -22,6 +22,9 @@ from torch.utils._config_module import Config, install_config_module
 _save_config_ignore = [
     # callable not serializable
     "joint_custom_pass",
+    # callable configs with uuid() for caching, or raw callables
+    "activation_memory_budget_runtime_estimator",
+    "activation_memory_budget_solver",
 ]
 
 
