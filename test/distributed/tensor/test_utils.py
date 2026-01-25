@@ -1067,6 +1067,48 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
             assert isinstance(res2, DTensor)
             self.assertEqual(res2.full_tensor(), torch.sum(input_tensor, dim=1))
 
+    @with_comms
+    def test_inplace_op_with_strided_shard(self):
+        """Test that inplace ops work correctly with strided shard placements.
+
+        This verifies that the inplace_op flag is correctly passed during strategy
+        expansion, ensuring that incompatible Partial strategies are filtered out
+        for inplace ops like mul_.
+        """
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = init_device_mesh("cpu", (4, 4))
+            input_tensor = torch.arange(32).float().view(2, 16)
+            # Create a strided shard DTensor (similar to FSDP+TP pattern)
+            A = distribute_tensor(
+                input_tensor,
+                mesh,
+                [_StridedShard(1, split_factor=mesh.size(1)), Shard(1)],
+            )
+            original_placements = A.placements
+
+            # Test inplace mul_ with scalar - this should preserve the strided shard placement
+            with CommDebugMode() as comm_mode:
+                A.mul_(0.9)
+            # Inplace op should not require redistribution
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            # Placements should be preserved
+            self.assertEqual(A.placements, original_placements)
+            # Verify correctness
+            expected = input_tensor * 0.9
+            self.assertEqual(A.full_tensor(), expected)
+
+            # Test inplace add_ with scalar
+            B = distribute_tensor(
+                input_tensor,
+                mesh,
+                [_StridedShard(1, split_factor=mesh.size(1)), Shard(1)],
+            )
+            with CommDebugMode() as comm_mode:
+                B.add_(1.0)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(B.placements, original_placements)
+            self.assertEqual(B.full_tensor(), input_tensor + 1.0)
+
     def run_view_propagation(
         self,
         mesh,
@@ -1607,6 +1649,26 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                     a_dt_after_to_replicate,
                     b_dt.to_local(),
                     f"{tensor_size=}, placements={src_p}",
+                )
+
+    @with_comms
+    def test_replicate_to_StridedShard(self):
+        mesh = self.build_device_mesh()
+        coordinate = mesh.get_coordinate()
+        for split_factor in range(2, 17):
+            for tensor_size in range(1, 200):
+                a = torch.arange(tensor_size)
+                a_dt_replicate = distribute_tensor(
+                    a, mesh, [Replicate()], src_data_rank=None
+                )
+                p = _StridedShard(0, split_factor=split_factor)
+                a_dt_strided = p._replicate_to_strided_shard(
+                    a_dt_replicate.to_local(), mesh, 0, coordinate[0]
+                )
+                b_dt = distribute_tensor(a, mesh, (p,), src_data_rank=None)
+                self.assertEqual(
+                    a_dt_strided,
+                    b_dt.to_local(),
                 )
 
 
