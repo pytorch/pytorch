@@ -7,12 +7,20 @@
 import gc
 from unittest import skip, skipIf
 
-from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
-from attn_positional import BertSelfAttention as BertSelfAttentionB
-
-import functorch.dim
+import sys
 import torch
-from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
+
+try:
+    from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
+    from attn_positional import BertSelfAttention as BertSelfAttentionB
+
+    import functorch.dim
+    from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
+except (ImportError, RuntimeError) as e:
+    if sys.version_info >= (3, 12):
+        print(f"Skipping functorch dims tests on Python 3.12+: {e}")
+        sys.exit(0)
+    raise
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,

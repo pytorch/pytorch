@@ -57,11 +57,11 @@ importlib.import_module("filelock")
 test_failures = {
     # TypeError: cannot pickle 'generator' object
     "test_layer_norm": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_remove_noop_slice": TestFailure(("xpu"), is_skip=True),
-    "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
-    "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
-    "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
-    "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
+    # "test_remove_noop_slice": TestFailure(("xpu"), is_skip=True),
+    # "test_remove_noop_slice1": TestFailure(("xpu"), is_skip=True),
+    # "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
+    # "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
+    # "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
     # can not pickle ParametrizedConv2d
     "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
 }
