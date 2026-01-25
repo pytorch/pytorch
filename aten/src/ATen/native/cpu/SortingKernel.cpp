@@ -229,7 +229,7 @@ void sort_kernel(
         }
       }
     );
-  }), kByte, kUInt16, kUInt32, kLong);
+  }), kChar, kByte, kShort, kUInt16, kInt, kLong);
 }
 
 void topk_kernel(
