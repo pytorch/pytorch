@@ -8112,7 +8112,9 @@ class TestMPS(TestCaseMPS):
 
             # Samples should sum to 1 along last dimension
             sums = samples.sum(dim=-1)
-            self.assertTrue(torch.allclose(sums, torch.ones_like(sums), atol=1e-4),
+            # Use larger tolerance for float16 due to reduced precision
+            atol = 1e-2 if dtype == torch.float16 else 1e-4
+            self.assertTrue(torch.allclose(sums, torch.ones_like(sums), atol=atol),
                             f"Dirichlet samples should sum to 1 for k={k}")
 
             # Check mean is close to 1/k for uniform alpha
