@@ -698,7 +698,7 @@ class CompiledNodeArgs {
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.post_acc_grad_hooks.emplace_back(fn_id);
+    _node_call.post_acc_grad_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   // Need to template the size_t to silence internal 32-bit build errors due to
