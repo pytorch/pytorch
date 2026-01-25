@@ -10,9 +10,16 @@
  * to account for worst-case random consumption in rejection sampling loops.
  * This ensures non-overlapping sequences between kernel launches at the cost
  * of some RNG state "wastage".
+ *
+ * Note on Philox RNG:
+ * We use a stateful PhiloxState wrapper around the c10::metal::philox4 core
+ * because rejection sampling requires consuming a variable number of random
+ * values per thread. The stateless API in c10/metal/random.h (rand(seed, index))
+ * assumes a fixed index per call, but our loops need to advance state dynamically.
  */
 
 #include <metal_stdlib>
+#include <c10/metal/random.h>
 using namespace metal;
 
 // Maximum iterations for rejection sampling loops to prevent GPU hangs
@@ -21,86 +28,30 @@ using namespace metal;
 constant int MAX_GAMMA_ITERATIONS = 1000000;
 constant int MAX_POISSON_ITERATIONS = 1000000;
 
-// Philox4x32 random number generator constants
-constant uint PHILOX_M0 = 0xD2511F53;
-constant uint PHILOX_M1 = 0xCD9E8D57;
-constant uint PHILOX_W0 = 0x9E3779B9;
-constant uint PHILOX_W1 = 0xBB67AE85;
-
-// Type-specific minimum positive normal value for clamping gamma samples
+// Get minimum positive normal value using metal::numeric_limits
 template <typename T>
-inline float type_min();
-
-template <>
-inline float type_min<float>() {
-  return 1.1754943508222875e-38f;
+constexpr float type_min() {
+  return metal::numeric_limits<T>::min();
 }
 
-template <>
-inline float type_min<half>() {
-  return 6.103515625e-05f;
-}
-
-template <>
-inline float type_min<bfloat>() {
-  return 1.1754943508222875e-38f;
-}
-
-// Single round of Philox
-inline void philox_single_round(thread uint& c0,
-                                thread uint& c1,
-                                thread uint& c2,
-                                thread uint& c3,
-                                uint k0,
-                                uint k1) {
-  ulong prod0 = ulong(PHILOX_M0) * ulong(c0);
-  ulong prod1 = ulong(PHILOX_M1) * ulong(c2);
-
-  c0 = uint(prod1 >> 32) ^ c1 ^ k0;
-  c1 = uint(prod1);
-  c2 = uint(prod0 >> 32) ^ c3 ^ k1;
-  c3 = uint(prod0);
-}
-
-// Philox4x32-10 generator (10 rounds)
-inline void philox4x32_10(thread uint& c0,
-                          thread uint& c1,
-                          thread uint& c2,
-                          thread uint& c3,
-                          uint k0,
-                          uint k1) {
-  for (int i = 0; i < 10; i++) {
-    philox_single_round(c0, c1, c2, c3, k0, k1);
-    k0 += PHILOX_W0;
-    k1 += PHILOX_W1;
-  }
-}
-
-// Philox state structure for proper 128-bit counter management
+// Philox state structure for rejection sampling
+// Uses c10::metal::philox4 core, but wraps it for stateful incremental generation.
 // counter[0..1] = 64-bit offset, counter[2..3] = 64-bit subsequence (tid)
 struct PhiloxState {
-  uint counter[4];
-  uint key[2];
-  uint output[4];
+  uint4 counter;
+  uint2 key;
+  uint4 output;
   int output_idx;
 };
 
 inline void philox_next_output(thread PhiloxState& state) {
-  state.output[0] = state.counter[0];
-  state.output[1] = state.counter[1];
-  state.output[2] = state.counter[2];
-  state.output[3] = state.counter[3];
+  // Use c10::metal::philox4::multiple_rounds for the core Philox computation
+  state.output = c10::metal::philox4::multiple_rounds(state.counter, state.key, 10);
 
-  philox4x32_10(state.output[0],
-                state.output[1],
-                state.output[2],
-                state.output[3],
-                state.key[0],
-                state.key[1]);
-
-  state.counter[0]++;
-  if (state.counter[0] == 0) {
-    state.counter[1]++;
+  // Advance counter
+  state.counter.x++;
+  if (state.counter.x == 0) {
+    state.counter.y++;
   }
 
   state.output_idx = 0;
@@ -110,7 +61,14 @@ inline uint philox_rand32(thread PhiloxState& state) {
   if (state.output_idx >= 4) {
     philox_next_output(state);
   }
-  return state.output[state.output_idx++];
+  int idx = state.output_idx++;
+  // Access uint4 components by index
+  switch (idx) {
+    case 0: return state.output.x;
+    case 1: return state.output.y;
+    case 2: return state.output.z;
+    default: return state.output.w;
+  }
 }
 
 // Generate uniform random float in (0, 1)
@@ -135,8 +93,8 @@ inline float rand_normal(thread PhiloxState& state) {
 // ============================================================================
 
 inline float sample_gamma_ge1(float alpha, thread PhiloxState& state) {
-  float d = alpha - 1.0f / 3.0f;
-  float c = 1.0f / sqrt(9.0f * d);
+  const float d = alpha - 1.0f / 3.0f;
+  const float c = rsqrt(9.0f * d);
 
   for (int iter = 0; iter < MAX_GAMMA_ITERATIONS; iter++) {
     float x, v;
@@ -274,13 +232,9 @@ inline T sample_poisson(T lambda, thread PhiloxState& state) {
 
 inline PhiloxState init_philox_state(constant uint* rng_state, uint tid) {
   PhiloxState state;
-  state.key[0] = rng_state[0];
-  state.key[1] = rng_state[1];
-  state.counter[0] = rng_state[2];
-  state.counter[1] = rng_state[3];
-  state.counter[2] = tid;
-  state.counter[3] = 0;
-  state.output_idx = 4;
+  state.key = uint2(rng_state[0], rng_state[1]);
+  state.counter = uint4(rng_state[2], rng_state[3], tid, 0);
+  state.output_idx = 4;  // Force generation on first use
   return state;
 }
 

@@ -554,7 +554,7 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
               "MPS _standard_gamma only supports Float, Half, and BFloat16, got: ",
               alpha.scalar_type());
 
-  Tensor result = at::empty(alpha.sizes(), alpha.options());
+  Tensor result = at::empty_like(alpha);
   if (result.numel() == 0) {
     return result;
   }
@@ -612,7 +612,7 @@ Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
   // Negative lambda values will return 0 (matching the behavior of returning
   // the expected value for invalid inputs). Users should ensure lambda >= 0.
 
-  Tensor result = at::empty(lambda.sizes(), lambda.options());
+  Tensor result = at::empty_like(lambda);
   if (result.numel() == 0) {
     return result;
   }
