@@ -634,7 +634,7 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out, exc_info=True)
             raise
 
-    def _handle_special_expr_values(self, expr: Expr, fallback: int) -> Optional[int]:
+    def _maybe_realize_expr(self, expr: Expr, fallback: Optional[int]) -> Optional[int]:
         """
         Handle special sympy values in optimization hints.
 
@@ -658,7 +658,7 @@ class SizeVarAllocator:
                 return sys.maxsize
             if expr in (-int_oo, -sympy.oo):
                 return -sys.maxsize
-            if expr is sympy.nan or expr.has(sympy.nan):
+            if fallback is not None and expr is sympy.nan or expr.has(sympy.nan):
                 return fallback
 
         return None
@@ -682,9 +682,9 @@ class SizeVarAllocator:
         # Read config at call time to respect runtime patches (e.g., in tests)
         if fallback is None:
             fallback = config.unbacked_symint_fallback
-
+        assert fallback is not None
         simplified = self.simplify(expr)
-        result = self._handle_special_expr_values(simplified, fallback)
+        result = self._maybe_realize_expr(simplified, fallback)
         if result is not None:
             return result
 
@@ -697,7 +697,7 @@ class SizeVarAllocator:
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
 
-        result = self._handle_special_expr_values(expr, fallback)
+        result = self._maybe_realize_expr(expr, fallback)
         if result is not None:
             return result
 
@@ -709,7 +709,7 @@ class SizeVarAllocator:
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
         # TODO optimize _sub_unbacked_exprs
         expr = self._sub_unbacked_exprs(sympy.factor(original))
-        # remove precomputed_replacements
+
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
 
@@ -735,20 +735,23 @@ class SizeVarAllocator:
 
         final_result = expr.subs(size_dict)
 
-        result = self._handle_special_expr_values(final_result, fallback)
-        assert result is not None
+        final_result = self._maybe_realize_expr(final_result, fallback)
+        assert final_result is not None, final_result
 
         return int(final_result)
 
     def optimization_hints(
         self,
         exprs: Iterable[Union[Expr, int]],
-        fallback: int = config.unbacked_symint_fallback,
+        fallback: Optional[int] = None,
     ) -> tuple[int, ...]:
         """
         Like optimization_hint but for a sequence of expressions.
         Returns a tuple of concrete integer hints.
         """
+        # Read config at call time to respect runtime patches (e.g., in tests)
+        if fallback is None:
+            fallback = config.unbacked_symint_fallback
         return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
 
     def optimization_hint_with_override(
@@ -772,13 +775,10 @@ class SizeVarAllocator:
         Returns:
             int: A concrete integer hint for the expression.
         """
-        simplified = self.simplify(expr)
-        if isinstance(simplified, (int, sympy.Integer)):
-            return int(simplified)
-        if simplified in (int_oo, sympy.oo):
-            return sys.maxsize
-        if simplified in (-int_oo, -sympy.oo):
-            return -sys.maxsize
+        simplified = self._maybe_realize_expr(self.simplify(expr), None)
+
+        if simplified is not None:
+            return simplified
 
         # Dynamic shape: use hint_override if set,
         # else return optimization_hint
