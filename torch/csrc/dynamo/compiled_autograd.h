@@ -680,19 +680,19 @@ class CompiledNodeArgs {
 
     auto hook_id = _compiler.emplace_cpp_tensor_pre_hook(std::move(wrapper));
     collect_size(hook_id);
-    _node_call.cpp_tensor_pre_hooks.emplace_back(hook_id, idx);
+    _node_call.cpp_tensor_pre_hooks.emplace_back(static_cast<int>(hook_id), static_cast<int>(idx));
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.pre_hooks.emplace_back(fn_id);
+    _node_call.pre_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   void add_post_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.post_hooks.emplace_back(fn_id);
+    _node_call.post_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
