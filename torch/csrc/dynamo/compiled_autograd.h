@@ -326,7 +326,7 @@ struct AutogradCompilerCall {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
     if (active_node_call_idx.has_value()) {
-      size_input_origins.emplace_back(active_node_call_idx.value());
+      size_input_origins.emplace_back(static_cast<uint32_t>(active_node_call_idx.value()));
     }
   }
 
