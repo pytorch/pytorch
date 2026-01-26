@@ -138,9 +138,8 @@ struct FusedAdamMathFunctor {
     }
     const auto [bias_correction1, bias_correction2_sqrt] =
         [&]() -> std::pair<opmath_t, opmath_t> {
-      auto step_count =
-          static_cast<opmath_t>(*reinterpret_cast<const float*>(
-              tl.state_steps_addresses[tensor_loc]));
+      auto step_count = static_cast<opmath_t>(*reinterpret_cast<const float*>(
+          tl.state_steps_addresses[tensor_loc]));
 
       const opmath_t bias_correction1 =
           1 - at::native::pow_(beta1_opmath, step_count);
