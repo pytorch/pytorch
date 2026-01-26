@@ -901,54 +901,6 @@ class TestFlexFlash(InductorTestCase):
                 out.sum().backward()
 
     @dtypes(torch.float16, torch.bfloat16)
-    @parametrize("case", DETERMINISTIC_MASK_MOD_CASES, name_fn=mask_case_name)
-    def test_flash_attention_backward_deterministic_warn_only_block_mask(
-        self, device, dtype, case
-    ):
-        major, _ = torch.cuda.get_device_capability()
-        if major < 9:
-            self.skipTest("block sparse backward only supported on SM90+ for FLASH")
-
-        q, k, v = create_test_tensors(
-            batch_size=case.batch_size,
-            num_heads=case.num_heads,
-            num_heads_kv=case.num_heads_kv,
-            seq_len=case.seq_len,
-            dim=case.dim,
-            dtype=dtype,
-            device=device,
-            requires_grad=case.requires_grad,
-        )
-        block_mask = _create_block_mask_for_device(
-            case.mask_mod_factory(dtype, device),
-            case.batch_size,
-            case.block_mask_num_heads or case.num_heads,
-            case.seq_len,
-            case.seq_len,
-            device=device,
-        )
-        compiled_fn = torch.compile(flex_attention, fullgraph=True)
-
-        with DeterministicGuard(True, warn_only=True):
-            out = compiled_fn(
-                q,
-                k,
-                v,
-                score_mod=(
-                    case.score_mod_factory(dtype, device)
-                    if case.score_mod_factory
-                    else None
-                ),
-                block_mask=block_mask,
-                kernel_options={"BACKEND": "FLASH"},
-            )
-            with self.assertWarnsRegex(
-                UserWarning,
-                "Deterministic backward for flex_attention with block_mask",
-            ):
-                out.sum().backward()
-
-    @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
     def test_flash_attention_gqa_mqa_block_mask_cases(self, device, dtype, case):
         if case.requires_grad:

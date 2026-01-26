@@ -776,6 +776,7 @@ def flex_attention_backward(*args, **kwargs):
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
                 "is not yet implemented. The TRITON backend supports deterministic backward."
             )
+        #todo i think we need structure the warning better
         if torch.is_deterministic_algorithms_warn_only_enabled() and needs_block_mask:
             warnings.warn(
                 "Deterministic backward for flex_attention with block_mask using the FLASH backend "
