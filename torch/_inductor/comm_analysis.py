@@ -78,7 +78,7 @@ def get_ir_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int
     numel = sympy_product(size)
     if isinstance(numel, sympy.Integer):
         return int(numel)
-    return V.graph.sizevars.size_hint(numel, fallback=fallback)
+    return V.graph.sizevars.optimization_hint(numel, fallback=fallback)
 
 
 def get_fx_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
@@ -428,6 +428,11 @@ def estimate_nccl_collective_runtime_from_fx_node(
     """
     from torch.distributed.distributed_c10d import _get_group_size_by_name
 
+    if fx_node.target is torch.ops._c10d_functional.all_to_all_single.default:
+        # TODO(ivankobzarev): Temporarily disabled - NCCL estimator returns internal error.
+        # for all_to_all during inductor compilation. Falls back to heuristic estimation.
+        use_nccl_estimator = False
+
     if override_size is None:
         tensor_storage_size_bytes = estimate_fx_collective_size(fx_node)
     else:
@@ -475,7 +480,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
             )
 
         def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.size_hint(s, fallback=0)
+            return V.graph.sizevars.optimization_hint(s, fallback=0)
 
         def to_real_tensor(e: Any) -> Any:
             if isinstance(e, torch.fx.Node):
