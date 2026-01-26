@@ -3439,7 +3439,6 @@ class InstructionTranslatorBase(
         # Nested graph breaks are currently not supported for 3.12+ comprehension handling
         if sys.version_info >= (3, 12) and inst.argval == 0 and not config.nested_graph_breaks:
             is_comp_start = self._is_comprehension_start()
-            log.debug("BUILD_LIST: argval=0, is_comprehension_start=%s", is_comp_start)
             if is_comp_start:
                 # For comprehensions, we use more permissive conditions:
                 # - We don't require > 1 calls in graph (even 0 is okay)
@@ -3454,23 +3453,14 @@ class InstructionTranslatorBase(
                     and self.output.current_tracer.parent is None
                     and self.parent is None  # Not inside an inlined function
                 )
-                log.debug(
-                    "BUILD_LIST comprehension: can_speculate=%s, depth=%s",
-                    can_speculate,
-                    self._comprehension_depth,
-                )
                 # Only set up speculation at depth 0 (outermost comprehension)
                 if can_speculate and self._comprehension_depth == 0:
                     speculation = self.speculate()
                     if speculation.failed(self):
-                        log.debug(
-                            "BUILD_LIST: speculation failed, handling comprehension graph break"
-                        )
                         # Graph break occurred in comprehension on previous attempt
                         self._handle_comprehension_graph_break(inst)
                         return
                     # Store speculation for later graph break handling
-                    log.debug("BUILD_LIST: storing comprehension speculation")
                     self.current_speculation = speculation
                 # Track nesting depth for nested comprehensions
                 self._comprehension_depth += 1
@@ -3515,7 +3505,6 @@ class InstructionTranslatorBase(
         # Nested graph breaks are currently not supported for 3.12+ comprehension handling
         if sys.version_info >= (3, 12) and inst.argval == 0 and not config.nested_graph_breaks:
             is_comp_start = self._is_comprehension_start()
-            log.debug("BUILD_MAP: argval=0, is_comprehension_start=%s", is_comp_start)
             if is_comp_start:
                 # For comprehensions, we use more permissive conditions:
                 # - We don't require > 1 calls in graph (even 0 is okay)
@@ -3530,23 +3519,14 @@ class InstructionTranslatorBase(
                     and self.output.current_tracer.parent is None
                     and self.parent is None  # Not inside an inlined function
                 )
-                log.debug(
-                    "BUILD_MAP comprehension: can_speculate=%s, depth=%s",
-                    can_speculate,
-                    self._comprehension_depth,
-                )
                 # Only set up speculation at depth 0 (outermost comprehension)
                 if can_speculate and self._comprehension_depth == 0:
                     speculation = self.speculate()
                     if speculation.failed(self):
-                        log.debug(
-                            "BUILD_MAP: speculation failed, handling comprehension graph break"
-                        )
                         # Graph break occurred in comprehension on previous attempt
                         self._handle_comprehension_graph_break(inst)
                         return
                     # Store speculation for later graph break handling
-                    log.debug("BUILD_MAP: storing comprehension speculation")
                     self.current_speculation = speculation
                 # Track nesting depth for nested comprehensions
                 self._comprehension_depth += 1
@@ -4715,21 +4695,11 @@ class InstructionTranslatorBase(
             self.instruction_pointer - 1
         )  # Current instruction (BUILD_LIST/BUILD_MAP)
 
-        log.debug(
-            "Handling comprehension graph break from ip %s to %s, result_var=%s, disposition=%s",
-            start_ip,
-            analysis.end_ip,
-            analysis.result_var,
-            analysis.result_disposition,
-        )
-
         reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
         log.debug("comprehension triggered compile")
 
         # Calculate stack_pops: 1 for iterator + len(iterator_vars) for saved values
         stack_pops = 1 + len(analysis.iterator_vars)
-
-        log.debug("comprehension stack_pops=%s", stack_pops)
 
         # Handle captured variables BEFORE compile_subgraph.
         # For mutable objects (lists, dicts) that are captured by the comprehension,
