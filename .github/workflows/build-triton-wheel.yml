@@ -86,6 +86,9 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:

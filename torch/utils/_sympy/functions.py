@@ -92,7 +92,8 @@ __all__ = [
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     # No need to check that two args are not the same, since expr is pr-optimized but we do it anyway.
     return (
-        expr.is_Add
+        isinstance(expr, sympy.Expr)
+        and expr.is_Add
         and len(expr._args) == 2
         and expr._args[0].is_symbol
         and expr._args[1].is_symbol
@@ -105,7 +106,6 @@ def _keep_float(
 ) -> Callable[[Unpack[_Ts]], _T | sympy.Float]:
     @functools.wraps(f)
     def inner(*args: Unpack[_Ts]) -> _T | sympy.Float:
-        # pyrefly: ignore [bad-argument-type]
         r: _T | sympy.Float = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -242,6 +242,9 @@ class FloorDiv(sympy.Function):
             return base
         if base.is_integer and equal_valued(divisor, -1):
             return sympy.Mul(base, -1)
+        if base == divisor:
+            return sympy.S.One
+
         if (
             isinstance(base, sympy.Number)
             and isinstance(divisor, sympy.Number)
@@ -1240,6 +1243,8 @@ class TruncToFloat(sympy.Function):
 
     @classmethod
     def eval(cls, number):
+        if number in (sympy.oo, -sympy.oo):
+            return number
         # assert number.is_integer is not True, number
         if isinstance(number, sympy.Number):
             # NB: It is safe to use truncation to integer, which is what

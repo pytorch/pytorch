@@ -27,6 +27,7 @@ from torch._prims_common import (
     IntLike,
     make_contiguous_strides_for,
     Number,
+    NumberType,
     suggest_memory_format,
     TensorLike,
 )
@@ -148,7 +149,8 @@ def meta_linspace_logspace(
             )
     else:
         dtype = dtype or torch.get_default_dtype()
-    assert isinstance(dtype, torch.dtype)
+    if not isinstance(dtype, torch.dtype):
+        raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
 
     # steps does not participate in the computation of the dtype
     torch._check_type(
@@ -156,7 +158,8 @@ def meta_linspace_logspace(
         lambda: f"received an invalid combination of arguments - got \
 ({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
-    assert isinstance(steps, IntLike)  # for mypy
+    if not isinstance(steps, IntLike):
+        raise AssertionError(f"steps must be IntLike, got {type(steps)}")
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
 
     return torch.empty(
@@ -553,21 +556,31 @@ def meta_sparse_structured_linear(
 ):
     output_sizes = list(input.shape)
     if bias is not None:
-        assert weight.size(0) == bias.size(0), "output size mismatch"
-    assert weight.size(1) == input.size(-1) / 2
+        if weight.size(0) != bias.size(0):
+            raise AssertionError(
+                f"output size mismatch: weight.size(0)={weight.size(0)} != bias.size(0)={bias.size(0)}"
+            )
+    if weight.size(1) != input.size(-1) / 2:
+        raise AssertionError(
+            f"weight.size(1)={weight.size(1)} != input.size(-1)/2={input.size(-1) / 2}"
+        )
     output_sizes[-1] = weight.size(0)
 
     # see: https://github.com/pytorch/pytorch/pull/114477#issuecomment-1830121375
     # We assume that we have already squashed the inputs into a 2-D tensor
     # Then, as the output is transposed, we need to propagate the transposed
     # stride information to the output tensor
-    assert len(input.shape) == 2, "we can only handle the squashed input case"
+    if len(input.shape) != 2:
+        raise AssertionError(
+            f"we can only handle the squashed input case, got {len(input.shape)}D input"
+        )
     transposed_strides = (1, input.size(0))
 
     if out_dtype is not None:
-        assert input.dtype == torch.int8 and out_dtype == torch.int32, (
-            "out_dtype is only supported for i8i8->i32 linear operator"
-        )
+        if not (input.dtype == torch.int8 and out_dtype == torch.int32):
+            raise AssertionError(
+                f"out_dtype is only supported for i8i8->i32 linear operator, got input.dtype={input.dtype}, out_dtype={out_dtype}"
+            )
     output = input.new_empty(
         output_sizes,
         dtype=input.dtype if out_dtype is None else out_dtype,
@@ -583,16 +596,23 @@ def meta_sparse_structured_mm(
     mat2: Tensor,
     out_dtype: torch.dtype | None = None,
 ):
-    assert len(mat1.shape) == 2
-    assert len(mat1_meta.shape) == 2
-    assert len(mat2.shape) == 2
-    assert mat1.size(1) == mat2.size(0) / 2
+    if len(mat1.shape) != 2:
+        raise AssertionError(f"mat1 must be 2D, got {len(mat1.shape)}D")
+    if len(mat1_meta.shape) != 2:
+        raise AssertionError(f"mat1_meta must be 2D, got {len(mat1_meta.shape)}D")
+    if len(mat2.shape) != 2:
+        raise AssertionError(f"mat2 must be 2D, got {len(mat2.shape)}D")
+    if mat1.size(1) != mat2.size(0) / 2:
+        raise AssertionError(
+            f"mat1.size(1)={mat1.size(1)} != mat2.size(0)/2={mat2.size(0) / 2}"
+        )
     output_sizes = [mat1.size(0), mat2.size(1)]
 
     if out_dtype is not None:
-        assert mat2.dtype == torch.int8 and out_dtype == torch.int32, (
-            "out_dtype is only supported for i8i8->i32 linear operator"
-        )
+        if not (mat2.dtype == torch.int8 and out_dtype == torch.int32):
+            raise AssertionError(
+                f"out_dtype is only supported for i8i8->i32 linear operator, got mat2.dtype={mat2.dtype}, out_dtype={out_dtype}"
+            )
     output = mat2.new_empty(
         output_sizes,
         dtype=mat2.dtype if out_dtype is None else out_dtype,
@@ -612,22 +632,32 @@ def meta_sparse_structured_addmm(
     beta=1,
     out_dtype: torch.dtype | None = None,
 ):
-    assert len(input.shape) == 1, (
-        "only input broadcasted to columns of mat1 * mat2 product is supported"
-    )
-    assert len(mat1.shape) == 2
-    assert len(mat1_meta.shape) == 2
-    assert len(mat2.shape) == 2
-    assert input.size(0) == mat1.size(0), (
-        "only input broadcasted to columns of mat1 * mat2 product is supported"
-    )
-    assert mat1.size(1) == mat2.size(0) / 2
+    if len(input.shape) != 1:
+        raise AssertionError(
+            f"only input broadcasted to columns of mat1 * mat2 product is supported, got {len(input.shape)}D input"
+        )
+    if len(mat1.shape) != 2:
+        raise AssertionError(f"mat1 must be 2D, got {len(mat1.shape)}D")
+    if len(mat1_meta.shape) != 2:
+        raise AssertionError(f"mat1_meta must be 2D, got {len(mat1_meta.shape)}D")
+    if len(mat2.shape) != 2:
+        raise AssertionError(f"mat2 must be 2D, got {len(mat2.shape)}D")
+    if input.size(0) != mat1.size(0):
+        raise AssertionError(
+            f"only input broadcasted to columns of mat1 * mat2 product is supported, "
+            f"input.size(0)={input.size(0)} != mat1.size(0)={mat1.size(0)}"
+        )
+    if mat1.size(1) != mat2.size(0) / 2:
+        raise AssertionError(
+            f"mat1.size(1)={mat1.size(1)} != mat2.size(0)/2={mat2.size(0) / 2}"
+        )
     output_sizes = [mat1.size(0), mat2.size(1)]
 
     if out_dtype is not None:
-        assert mat2.dtype == torch.int8 and out_dtype == torch.int32, (
-            "out_dtype is only supported for i8i8->i32 linear operator"
-        )
+        if not (mat2.dtype == torch.int8 and out_dtype == torch.int32):
+            raise AssertionError(
+                f"out_dtype is only supported for i8i8->i32 linear operator, got mat2.dtype={mat2.dtype}, out_dtype={out_dtype}"
+            )
     output = mat2.new_empty(
         output_sizes,
         dtype=mat2.dtype if out_dtype is None else out_dtype,
@@ -648,37 +678,53 @@ def meta__cslt_sparse_mm(
     split_k: int = 1,
     split_k_mode: int = -1,
 ):
-    assert dense_B.dtype in {
+    if dense_B.dtype not in {
         torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
         torch.float8_e4m3fn,
-    }, "_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3"
-    assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
-    assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
+    }:
+        raise AssertionError(
+            f"_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3, got {dense_B.dtype}"
+        )
+    if compressed_A.dtype != dense_B.dtype:
+        raise AssertionError(
+            f"inputs must have the same dtype, got {compressed_A.dtype} and {dense_B.dtype}"
+        )
+    if len(dense_B.shape) != 2:
+        raise AssertionError(
+            f"_cslt_sparse_mm only supports 2d inputs, got {len(dense_B.shape)}D"
+        )
 
     is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
 
     if is_8bit_input_type:
-        assert not dense_B.is_contiguous(), (
-            "dense input must be transposed for 8bit dtypes"
-        )
+        if dense_B.is_contiguous():
+            raise AssertionError("dense input must be transposed for 8bit dtypes")
 
     n = dense_B.size(1)
     m = compressed_A.size(0)
     if bias is not None:
-        assert m == bias.size(0)
+        if m != bias.size(0):
+            raise AssertionError(
+                f"bias size mismatch: m={m} != bias.size(0)={bias.size(0)}"
+            )
 
     if out_dtype is not None:
-        assert is_8bit_input_type and out_dtype in {
-            torch.float16,
-            torch.bfloat16,
-            torch.int32,
-            torch.float8_e4m3fn,
-        }, (
-            f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
-        )
+        if not (
+            is_8bit_input_type
+            and out_dtype
+            in {
+                torch.float16,
+                torch.bfloat16,
+                torch.int32,
+                torch.float8_e4m3fn,
+            }
+        ):
+            raise AssertionError(
+                f"out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
+            )
     output_shape = (n, m) if transpose_result else (m, n)
     return dense_B.new_empty(output_shape, dtype=out_dtype)
 
@@ -881,12 +927,14 @@ def functional_assert_async_meta(val, assert_msg, dep_token):
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
-    assert self.dim() >= 2, (
-        f"{f_name}: The input tensor must have at least 2 dimensions."
-    )
-    assert self.size(-1) == self.size(-2), (
-        f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
-    )
+    if self.dim() < 2:
+        raise AssertionError(
+            f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
+        )
+    if self.size(-1) != self.size(-2):
+        raise AssertionError(
+            f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+        )
 
 
 # Validates input shapes and devices
@@ -1617,7 +1665,8 @@ def linalg_solve_triangular_meta(
 ) -> Tensor:
     if out is None:
         out = A.new_empty([0])
-    assert isinstance(out, TensorLike)
+    if not isinstance(out, TensorLike):
+        raise AssertionError(f"out must be TensorLike, got {type(out)}")
     checkInputsSolver(A, B, left, "linalg.solve_triangular")
     B_, A_ = _linalg_broadcast_batch_dims_name(B, A, None)
     avoid_copy_A = A_.transpose(-2, -1).is_contiguous() and A_.is_conj()
@@ -2119,8 +2168,12 @@ def meta_replication_pad3d(input, padding):
 @out_wrapper("grad_input")
 def meta_pad3d_backward(grad_output, input, padding):
     torch._check(len(padding) == 6, lambda: "padding size is expected to be 6")
-    assert input.ndim > 3
-    assert grad_output.ndim == input.ndim
+    if input.ndim <= 3:
+        raise AssertionError(f"input.ndim must be > 3, got {input.ndim}")
+    if grad_output.ndim != input.ndim:
+        raise AssertionError(
+            f"grad_output.ndim must equal input.ndim, got {grad_output.ndim} != {input.ndim}"
+        )
 
     dim_w = 3
     dim_h = 2
@@ -2400,29 +2453,45 @@ def calc_conv_nd_return_shape(
             ret_shape.append(
                 _formula_transposed(
                     dims[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index]
                     padding[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     dilation[i],
                     kernel_size[i],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     stride[i],
                     output_padding_list[i],
                 )
             )
         else:
             ret_shape.append(
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
+    # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
+    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
+    # but other backends fail: CPU rejects it, ROCm/miopen returns
+    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
+    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
+    from torch._subclasses.fake_tensor import FakeTensor
     from torch.fx.experimental.symbolic_shapes import sym_or
 
-    torch._check(
-        sym_or(*[x > 0 for x in ret_shape[2:]]),
-        lambda: f"Given input size per channel: {list(dims)}. "
-        f"Calculated output size per channel: {ret_shape[2:]}. "
-        f"Output size is too small",
+    device = (
+        input_tensor.fake_device
+        if isinstance(input_tensor, FakeTensor)
+        else input_tensor.device
     )
+
+    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    is_cudnn = device.type == "cuda" and torch.version.hip is None
+    if not is_cudnn:
+        torch._check(
+            sym_or(*[x > 0 for x in ret_shape[2:]]),
+            lambda: f"Given input size per channel: {list(dims)}. "
+            f"Calculated output size per channel: {ret_shape[2:]}. "
+            f"Output size is too small",
+        )
 
     return ret_shape
 
@@ -2584,17 +2653,21 @@ if torch._C._has_mkldnn:
         )
         if output_dtype is None:
             output_dtype = x.dtype
-        assert output_dtype in [
+        if output_dtype not in [
             torch.float32,
             torch.bfloat16,
             torch.uint8,
             torch.int8,
             torch.float8_e4m3fn,
-        ]
+        ]:
+            raise AssertionError(
+                f"output_dtype must be one of float32, bfloat16, uint8, int8, float8_e4m3fn, got {output_dtype}"
+            )
         out = x.new_empty(shape_out, dtype=output_dtype)
-        assert len(shape_out) in [3, 4, 5], (
-            "Expect output to be 3d/4d/5d for conv1d/2d/3d"
-        )
+        if len(shape_out) not in [3, 4, 5]:
+            raise AssertionError(
+                f"Expect output to be 3d/4d/5d for conv1d/2d/3d, got {len(shape_out)}d"
+            )
         format = {
             3: torch.contiguous_format,
             4: torch.channels_last,
@@ -2629,7 +2702,10 @@ if torch._C._has_mkldnn:
         unary_op_args,
         unary_op_algorithm,
     ):
-        assert binary_op_name == "sum"
+        if binary_op_name != "sum":
+            raise AssertionError(
+                f"binary_op_name must be 'sum', got '{binary_op_name}'"
+            )
         return accum
 
     @register_meta(torch.ops.onednn.qlinear_pointwise.default)
@@ -2652,13 +2728,16 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [
+        if output_dtype not in [
             torch.float32,
             torch.bfloat16,
             torch.int8,
             torch.uint8,
             torch.float8_e4m3fn,
-        ]
+        ]:
+            raise AssertionError(
+                f"output_dtype must be one of float32, bfloat16, int8, uint8, float8_e4m3fn, got {output_dtype}"
+            )
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -2689,13 +2768,16 @@ if torch._C._has_mkldnn:
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
-        assert output_dtype in [
+        if output_dtype not in [
             torch.float32,
             torch.bfloat16,
             torch.uint8,
             torch.int8,
             torch.float8_e4m3fn,
-        ]
+        ]:
+            raise AssertionError(
+                f"output_dtype must be one of float32, bfloat16, uint8, int8, float8_e4m3fn, got {output_dtype}"
+            )
         out = x.new_empty(output_shape, dtype=output_dtype)
         return out
 
@@ -3343,8 +3425,10 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
 @register_meta([aten.complex.default, aten.complex.out])
 @out_wrapper()
 def meta_complex(real, imag):
-    assert real.dtype.is_floating_point
-    assert imag.dtype.is_floating_point
+    if not real.dtype.is_floating_point:
+        raise AssertionError(f"real must be floating point, got {real.dtype}")
+    if not imag.dtype.is_floating_point:
+        raise AssertionError(f"imag must be floating point, got {imag.dtype}")
     result = elementwise_meta(
         real.to(corresponding_complex_dtype(real.dtype)),
         imag.to(corresponding_complex_dtype(imag.dtype)),
@@ -3356,7 +3440,16 @@ def meta_complex(real, imag):
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 @out_wrapper()
 def nonzero_static(self, *, size, fill_value: int = -1):
-    return self.new_empty((size, self.dim()), dtype=torch.long)
+    # The impl of xpu nonzero_static is different with cuda but aligned with cpu
+    if device_hint(self) in ("cpu", "xpu"):
+        return self.new_empty((size, self.dim()), dtype=torch.long)
+    else:
+        return torch.empty_strided(
+            (size, self.dim()),
+            (1, size),
+            dtype=torch.long,
+            device=self.device,
+        )
 
 
 @register_meta([torch.ops.aten.nonzero.default, torch.ops.aten.nonzero.out])
@@ -3530,10 +3623,36 @@ def meta_convolution_backward(
     backend_grad_weight = None
     backend_grad_bias = None
 
+    # Backend layout expectation: GPU backends (CUDA via cudnn_conv_suggest_memory_format,
+    # MPS via mps_conv_use_channels_last) return channels_last outputs when either input
+    # tensor is channels_last. This must be matched here to avoid stride assertion failures
+    # in inductor when the predicted strides don't match actual backend output strides.
+    # See: https://github.com/pytorch/pytorch/issues/171622
+    #
+    # Memory format inference rules (matching backend behavior):
+    #   - grad_input format: derived from grad_output and weight
+    #   - grad_weight format: derived from input and grad_output
+    def _conv_memory_format(t1, t2):
+        # Match the logic in cudnn_conv_suggest_memory_format and mps_conv_use_channels_last:
+        # Use channels_last if either tensor suggests it
+        fmt1 = suggest_memory_format(t1)
+        fmt2 = suggest_memory_format(t2)
+        if fmt1 == torch.channels_last or fmt2 == torch.channels_last:
+            return torch.channels_last
+        if fmt1 == torch.channels_last_3d or fmt2 == torch.channels_last_3d:
+            return torch.channels_last_3d
+        return torch.contiguous_format
+
     if output_mask[0]:
-        backend_grad_input = grad_output_.new_empty(input_.size())
+        memory_format = _conv_memory_format(grad_output_, weight_)
+        backend_grad_input = grad_output_.new_empty(input_.size()).to(
+            memory_format=memory_format
+        )
     if output_mask[1]:
-        backend_grad_weight = grad_output_.new_empty(weight_.size())
+        memory_format = _conv_memory_format(input_, grad_output_)
+        backend_grad_weight = grad_output_.new_empty(weight_.size()).to(
+            memory_format=memory_format
+        )
     if output_mask[2]:
         backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 
@@ -3695,7 +3814,8 @@ def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
-    torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
+    expected_dim = 2 if w.fake_device.type == "xpu" else 4
+    torch._check(w.dim() == expected_dim, lambda: f"w must be a {expected_dim}D tensor")
     torch._check(
         x.dtype in [torch.float32, torch.float16, torch.bfloat16],
         lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
@@ -3704,7 +3824,8 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         w.dtype is torch.int32,
         lambda: f"expected w to be int32, got {w.dtype}",
     )
-    return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+    dim_n = w.size(0) if w.fake_device.type == "xpu" else w.size(0) * 8
+    return x.new_empty(x.size(0), dim_n, dtype=x.dtype)
 
 
 @register_meta([aten._weight_int4pack_mm_for_cpu])
@@ -3764,7 +3885,8 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
             ):
                 k_internal = kai_k_roundedup(k, kr, sr)
 
-                assert (k_internal % 2) == 0, "k_internal must be even"
+                if (k_internal % 2) != 0:
+                    raise AssertionError(f"k_internal must be even, got {k_internal}")
 
                 return nr * (
                     (k_internal // 2)
@@ -3800,9 +3922,16 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
             def kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
                 n, k, nr, kr, sr, bl
             ):
-                assert (bl % kr) == 0
-                assert (nr % kai_nr_multiple_of) == 0
-                assert (bl % kai_bl_multiple_of) == 0
+                if (bl % kr) != 0:
+                    raise AssertionError(f"bl ({bl}) must be divisible by kr ({kr})")
+                if (nr % kai_nr_multiple_of) != 0:
+                    raise AssertionError(
+                        f"nr ({nr}) must be divisible by kai_nr_multiple_of ({kai_nr_multiple_of})"
+                    )
+                if (bl % kai_bl_multiple_of) != 0:
+                    raise AssertionError(
+                        f"bl ({bl}) must be divisible by kai_bl_multiple_of ({kai_bl_multiple_of})"
+                    )
 
                 num_rows = kai_roundup(n, nr) // nr
 
@@ -3816,9 +3945,16 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
             def kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
                 k, nr, kr, sr, bl
             ):
-                assert (bl % kr) == 0
-                assert (nr % kai_nr_multiple_of) == 0
-                assert (bl % kai_bl_multiple_of) == 0
+                if (bl % kr) != 0:
+                    raise AssertionError(f"bl ({bl}) must be divisible by kr ({kr})")
+                if (nr % kai_nr_multiple_of) != 0:
+                    raise AssertionError(
+                        f"nr ({nr}) must be divisible by kai_nr_multiple_of ({kai_nr_multiple_of})"
+                    )
+                if (bl % kai_bl_multiple_of) != 0:
+                    raise AssertionError(
+                        f"bl ({bl}) must be divisible by kai_bl_multiple_of ({kai_bl_multiple_of})"
+                    )
 
                 # kr and sr are unused in the calculation
                 num_bytes_multiplier_rhs = kai_get_bf16_datatype_size_in_bytes()
@@ -3839,11 +3975,17 @@ def get_kai_packed_weight_size(n_bits, N, K, groupsize):
                 return 2  # 2 bytes
 
             def kai_num_blocks_per_row(k, bl):
-                assert (bl % kai_bl_multiple_of) == 0
+                if (bl % kai_bl_multiple_of) != 0:
+                    raise AssertionError(
+                        f"bl ({bl}) must be divisible by kai_bl_multiple_of ({kai_bl_multiple_of})"
+                    )
                 return kai_roundup(k, bl) // bl
 
             def kai_num_bytes_per_block(bl, num_bytes_multiplier_rhs):
-                assert (bl % kai_bl_multiple_of) == 0
+                if (bl % kai_bl_multiple_of) != 0:
+                    raise AssertionError(
+                        f"bl ({bl}) must be divisible by kai_bl_multiple_of ({kai_bl_multiple_of})"
+                    )
                 return (bl // 2) + num_bytes_multiplier_rhs
 
             return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
@@ -5087,16 +5229,11 @@ def meta_max_pool3d_with_indices(
         "max_pool3d_with_indices()",
     )
 
+    # channels_last_3d only applies to 5D tensors (C++ enforces this)
     channels_last = (
         input.ndim == 5 and utils.suggest_memory_format(input) == torch.channels_last_3d
     )
     if input.ndim == 4:
-        input_channels_last_check = input.unsqueeze(0)
-        channels_last = (
-            not input_channels_last_check.is_contiguous()
-        ) and input_channels_last_check.is_contiguous(
-            memory_format=torch.channels_last_3d
-        )
         out_shape = (nslices, otime, oheight, owidth)
     else:
         out_shape = (nbatch, nslices, otime, oheight, owidth)  # type: ignore[assignment]
@@ -5195,16 +5332,10 @@ def meta_max_pool3d_with_indices_backward(
         "max_pool3d_with_indices_backward()",
     )
 
+    # channels_last_3d only applies to 5D tensors (C++ enforces this)
     channels_last = (
         input.ndim == 5 and utils.suggest_memory_format(input) == torch.channels_last_3d
     )
-    if input.ndim == 4:
-        input_channels_last_check = input.unsqueeze(0)
-        channels_last = (
-            not input_channels_last_check.is_contiguous()
-        ) and input_channels_last_check.is_contiguous(
-            memory_format=torch.channels_last_3d
-        )
 
     grad_input = input.new_empty(input.shape)
 
@@ -5346,7 +5477,7 @@ def full(size, fill_value, *args, **kwargs):
     if not dtype:
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
-    # pyrefly: ignore [not-iterable]
+
     return torch.empty(size, *args, **kwargs)
 
 
@@ -5453,11 +5584,15 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
 # TODO: Deduplicate this with canonicalize_dim
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
-        assert wrap_scalar
+        if not wrap_scalar:
+            raise AssertionError(
+                f"dim_post_expr={dim_post_expr} <= 0 but wrap_scalar is False"
+            )
         dim_post_expr = 1
     min = -dim_post_expr
     max = dim_post_expr - 1
-    assert not (dim < min or dim > max), f"dim {dim} out of bounds ({min}, {max})"
+    if dim < min or dim > max:
+        raise AssertionError(f"dim {dim} out of bounds ({min}, {max})")
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -6253,7 +6388,10 @@ def meta__efficient_attention_forward(
     logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
     actual_max_seqlen_q = M
     if cu_seqlens_q is not None:
-        assert max_seqlen_q is not None
+        if max_seqlen_q is None:
+            raise AssertionError(
+                "max_seqlen_q must not be None when cu_seqlens_q is provided"
+            )
         actual_max_seqlen_q = max_seqlen_q
     actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
     logsumexp_dim = (
@@ -6491,6 +6629,13 @@ def _check_scaled_mm_sizes(
             ):
                 # (BlockWise1x128, BlockWise1x128)
                 pass  # do nothing, but do not error
+            elif (
+                scale_a.size(0) == ceil_div(m, 128)
+                and scale_a.size(1) == scale_b.size(0) == ceil_div(_k, 128)
+                and scale_b.size(1) == n
+            ):
+                # (BlockWise128x128, BlockWise1x128)
+                pass  # do nothing, but do not error
             else:
                 # does not match any valid scaling type
                 torch._check(
@@ -6502,6 +6647,8 @@ def _check_scaled_mm_sizes(
                         f"For (BlockWise1x128, BlockWise128x128), scale_a should be ({m}, {ceil_div(_k, 128)}), "
                         + f"scale_b should be ({ceil_div(_k, 128)}, {ceil_div(n, 128)}). "
                         f"For (BlockWise1x128, BlockWise1x128), scale_a should be ({m}, {ceil_div(_k, 128)}), "
+                        + f"scale_b should be ({ceil_div(_k, 128)}, {n}). "
+                        f"For (BlockWise128x128, BlockWise1x128), scale_a should be ({ceil_div(m, 128)}, {ceil_div(_k, 128)}), "
                         + f"scale_b should be ({ceil_div(_k, 128)}, {n}). "
                         f"Got scale_a.size()=({scale_a.size(0)}, {scale_a.size(1)}) "
                         f"and scale_b.size()=({scale_b.size(0)}, {scale_b.size(1)})"
@@ -6551,7 +6698,7 @@ def _check_scaled_mm_sizes_v2(
         )
 
     def is_fp4_type(dtype):
-        return dtype in (torch.float4_e2m1fn_x2,)
+        return dtype == torch.float4_e2m1fn_x2
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,
@@ -7049,8 +7196,10 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
 def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
     v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
     if values is not None and indices is not None:
-        assert isinstance(values, TensorLike)
-        assert isinstance(indices, TensorLike)
+        if not isinstance(values, TensorLike):
+            raise AssertionError(f"values must be TensorLike, got {type(values)}")
+        if not isinstance(indices, TensorLike):
+            raise AssertionError(f"indices must be TensorLike, got {type(indices)}")
         # Makes sure values and indices have the same strides. For cases where
         # these have different shapes, like (5, 10, 5) and (0) in msort.
         out_shape = v.shape
@@ -7097,7 +7246,6 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-            # pyrefly: ignore [missing-attribute]
             x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),
@@ -7174,6 +7322,51 @@ def _cudnn_rnn(
     reserve = input.new_empty(reserve_shape, dtype=torch.uint8)
 
     return output, hy, cy, reserve, weight_buf
+
+
+@register_meta(aten.miopen_rnn.default)
+def miopen_rnn(
+    input,
+    weight,
+    weight_stride0,
+    # weight_buf,
+    hx,
+    cx,
+    mode,
+    hidden_size,
+    # proj_size,
+    num_layers,
+    batch_first,
+    dropout,
+    train,
+    bidirectional,
+    batch_sizes,
+    dropout_state,
+):
+    total_weight_elems = 0
+    for w in weight:
+        if w.numel() > 0:
+            total_weight_elems += w.numel()
+
+    weight_buf = input.new_empty((total_weight_elems,))
+    return _cudnn_rnn(
+        input,
+        weight,
+        weight_stride0,
+        weight_buf,
+        hx,
+        cx,
+        mode,
+        hidden_size,
+        0,
+        num_layers,
+        batch_first,
+        dropout,
+        train,
+        bidirectional,
+        batch_sizes,
+        dropout_state,
+    )
 
 
 @register_meta(aten.mkldnn_rnn_layer.default)
@@ -7280,9 +7473,10 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
 def meta__segment_reduce_backward(
     grad, output, data, reduce, lengths=None, offsets=None, axis=0, initial=None
 ):
-    assert lengths is not None or offsets is not None, (
-        "segment_reduce(): Either lengths or offsets must be defined"
-    )
+    if lengths is None and offsets is None:
+        raise AssertionError(
+            "segment_reduce(): Either lengths or offsets must be defined"
+        )
     data_contig = data.contiguous()
     grad_contig = grad.contiguous()
     return torch.empty_like(
@@ -7359,11 +7553,12 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
-    assert (
+    if not (
         len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
-    ), (
-        f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
-    )
+    ):
+        raise AssertionError(
+            f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
+        )
 
     def is_channels_last(ten):
         return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
@@ -7431,6 +7626,20 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
         self,
         dtype=torch.int32 if out_int32 else torch.int64,
         memory_format=torch.contiguous_format,
+    )
+
+
+@register_meta([aten.bucketize.Scalar, aten.bucketize.Scalar_out])
+def meta_bucketize_scalar(
+    self: NumberType,
+    boundaries: Tensor,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+    return boundaries.new_empty(
+        (),
+        dtype=torch.int32 if out_int32 else torch.int64,
     )
 
 
@@ -7540,14 +7749,15 @@ def nan_to_num(self, nan=None, posinf=None, neginf=None):
 
 @register_meta(torch.ops.aten.transpose_)
 def transpose_(self, dim0, dim1):
-    assert self.layout not in {
+    if self.layout in {
         torch.sparse_csr,
         torch.sparse_csc,
         torch.sparse_bsr,
         torch.sparse_bsc,
-    }, (
-        f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
-    )
+    }:
+        raise AssertionError(
+            f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
+        )
 
     ndims = self.ndim
 
@@ -7574,14 +7784,16 @@ def t_(self):
     if self.is_sparse:
         sparse_dim = self.sparse_dim()
         dense_dim = self.dense_dim()
-        assert sparse_dim <= 2 and dense_dim == 0, (
-            f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, "
-            f"but got {sparse_dim} sparse and {dense_dim} dense dimensions"
-        )
+        if not (sparse_dim <= 2 and dense_dim == 0):
+            raise AssertionError(
+                f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, "
+                f"but got {sparse_dim} sparse and {dense_dim} dense dimensions"
+            )
     else:
-        assert self.dim() <= 2, (
-            f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
-        )
+        if self.dim() > 2:
+            raise AssertionError(
+                f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
+            )
 
     return transpose_(self, 0, 0 if ndims < 2 else 1)
 
@@ -8101,7 +8313,10 @@ def meta_scaled_grouped_mm(
 @out_wrapper()
 def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     if half_to_float:
-        assert x.dtype in [torch.half, torch.bfloat16]
+        if x.dtype not in [torch.half, torch.bfloat16]:
+            raise AssertionError(
+                f"half_to_float is True but x.dtype is {x.dtype}, expected half or bfloat16"
+            )
 
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -8177,7 +8392,8 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ) -> Tensor:
-    assert weight.dim() == 2, "'weight' must be 2-D"
+    if weight.dim() != 2:
+        raise AssertionError(f"'weight' must be 2-D, got {weight.dim()}-D")
     weight_shape = weight.shape
     indices_shape = indices.shape
 
@@ -8200,8 +8416,14 @@ def meta__jagged_to_padded_dense_forward(
     padding_value: float = 0.0,
 ):
     # only one jagged dim is supported for now
-    assert len(offsets) == 1
-    assert len(max_lengths) == 1
+    if len(offsets) != 1:
+        raise AssertionError(
+            f"Only one jagged dim is supported, got {len(offsets)} offsets"
+        )
+    if len(max_lengths) != 1:
+        raise AssertionError(
+            f"Only one jagged dim is supported, got {len(max_lengths)} max_lengths"
+        )
 
     B = offsets[0].shape[0] - 1
     S = max_lengths[0]
@@ -8389,8 +8611,8 @@ def activate_meta():
 
     # For a given op, we pick the most specific decomp function from
     # global_decomp_table in the precedence order of meta > post_autograd > pre_autograd
-    for type in ["meta", "post_autograd", "pre_autograd"]:
-        registry = global_decomposition_table[type]
+    for typ in ["meta", "post_autograd", "pre_autograd"]:
+        registry = global_decomposition_table[typ]
 
         for opo in registry:
             if opo not in activate_meta_table:
@@ -8403,7 +8625,10 @@ def activate_meta():
         # OpOverload.
         if isinstance(op_overload, torch._ops.HigherOrderOperator):
             continue
-        assert isinstance(op_overload, OpOverload)
+        if not isinstance(op_overload, OpOverload):
+            raise AssertionError(
+                f"op_overload must be OpOverload, got {type(op_overload)}"
+            )
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 

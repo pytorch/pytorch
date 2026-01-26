@@ -76,10 +76,12 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfMPS,
     skipIfNoLapack,
+    skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     skipIfWindows,
     skipIfXpu,
     slowTest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 from torch.utils._mode_utils import no_dispatch
@@ -4563,6 +4565,7 @@ class TestAutograd(TestCase):
         torch.autograd.backward(r2, grad)
         self.assertEqual(input1.grad, input2.grad, rtol=0.01, atol=0.0)
 
+    @skipIfSlowGradcheckEnv
     @skipIfNoLapack
     def test_lobpcg(self):
         def func(k, A, largest=True, B=None):
@@ -4718,6 +4721,9 @@ class TestAutograd(TestCase):
 
         self.assertEqual(torch._C._current_graph_task_id(), -1)
 
+    @skipIfTorchDynamo(
+        "_current_graph_task_execution_order requires active backward pass"
+    )
     def test_current_graph_task_execution_order(self):
         predicted = [None]
         all_hooks = []
@@ -6378,6 +6384,19 @@ Done""",
         check(fast_mode=True)
         check(fast_mode=False)
 
+    # There are two issues:
+    # 1. Dynamo uses real fake tensor when speculating so we never trace
+    #    the x is none branch.
+    # 2. torch.autograd.gradcheck wraps grads with UndefinedGrad which
+    #    gets resulted as Zero tensors when getting passed into custom
+    #    autograd function in the runtime. Apply materialize grad is tricky,
+    #    because user function (dynamo in this case) needs to handle None case
+    # this is fine in normal torch.compile case because aot_autograd would
+    # never receive None tensors. But it will be a problem when we are directly
+    # tracing autograd.grad into graph because now you will get different
+    # result from eager. One potential fix is to detect x is None in dynamo
+    # bytecode level but that is too complicated so we just YOLO.
+    @skipIfTorchDynamo("branching on grad")
     def test_gradcheck_undefined_grad(self):
         def check(fast_mode):
             # when encounter runtime error while running backward
@@ -9026,6 +9045,9 @@ for shape in [(1,), ()]:
         expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
         self.assertEqual(z.grad, torch.view_as_real(expected))
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
+    )
     def test_custom_function_saving_mutated_view_no_leak(self):
         class Test(torch.autograd.Function):
             @staticmethod
@@ -9641,6 +9663,9 @@ for shape in [(1,), ()]:
                     )
                     assert_only_first_requires_grad(res)
 
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
+    )
     def test_custom_function_cycle(self):
         class MyFn(Function):
             @staticmethod
@@ -13826,23 +13851,24 @@ class TestAutogradStreamSynchronization(TestCase):
 
         def do_test(suppress_warn, keep_grad_acc):
             def _test():
-                with warnings.catch_warnings(record=True) as warns:
-                    warnings.simplefilter("always")
+                with set_warn_always_context(True):
+                    with warnings.catch_warnings(record=True) as warns:
+                        warnings.simplefilter("always")
 
-                    with torch.Stream(0) as s0:
-                        a = torch.ones(8, 8, device=device, requires_grad=True)
-                        if keep_grad_acc:
-                            # create grad_acc under s1 and keep alive with b
-                            b = a.clone()
+                        with torch.Stream(0) as s0:
+                            a = torch.ones(8, 8, device=device, requires_grad=True)
+                            if keep_grad_acc:
+                                # create grad_acc under s1 and keep alive with b
+                                b = a.clone()
 
-                    with torch.Stream(0) as s1:
-                        s1.wait_stream(s0)
-                        c = a.sum()
+                        with torch.Stream(0) as s1:
+                            s1.wait_stream(s0)
+                            c = a.sum()
 
-                    c.backward()
+                        c.backward()
 
-                filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
-                return sum([filter_str in str(w.message) for w in warns]) > 0
+                    filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
+                    return sum([filter_str in str(w.message) for w in warns]) > 0
 
             if suppress_warn:
                 try:
@@ -15345,6 +15371,72 @@ class TestAutogradMultipleDispatch(TestCase):
         z.backward()
         self.assertEqual(x.grad, torch.zeros_like(x))
         self.assertEqual(y.grad, torch.zeros_like(y))
+
+    # Test that torch.autograd.backward respects __torch_function__ on tensor subclasses.
+    def test_backward_respects_torch_function(self):
+        backward_called_with_subclass = [False]
+
+        class AsyncTensorLike(torch.Tensor):
+            """Tensor subclass that tracks when backward is called with it."""
+
+            @staticmethod
+            def __new__(cls, data):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    data.size(),
+                    strides=data.stride(),
+                    storage_offset=data.storage_offset(),
+                    dtype=data.dtype,
+                    layout=data.layout,
+                    device=data.device,
+                    requires_grad=data.requires_grad,
+                )
+
+            def __init__(self, data):
+                # store the inner tensor
+                self._data = data
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func is torch.autograd.backward:
+                    backward_called_with_subclass[0] = True
+                    # unwrap inner tensors and call the real backward
+                    new_args = []
+                    for arg in args:
+                        if isinstance(arg, tuple):
+                            new_args.append(
+                                tuple(a._data if isinstance(a, cls) else a for a in arg)
+                            )
+                        elif isinstance(arg, cls):
+                            new_args.append(arg._data)
+                        else:
+                            new_args.append(arg)
+                    return func(*new_args, **kwargs)
+                return func(
+                    *tuple(a._data if isinstance(a, cls) else a for a in args), **kwargs
+                )
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(t):
+                    return t._data if isinstance(t, cls) else t
+
+                return func(
+                    *torch.utils._pytree.tree_map(unwrap, args),
+                    **torch.utils._pytree.tree_map(unwrap, kwargs or {}),
+                )
+
+        x = torch.randn(3, requires_grad=True)
+        y = x * 2
+        wrapped = AsyncTensorLike(y)
+        torch.autograd.backward(wrapped, torch.ones_like(y))
+
+        self.assertTrue(
+            backward_called_with_subclass[0],
+            "backward() should invoke __torch_function__ on tensor subclasses",
+        )
+        self.assertEqual(x.grad, 2 * torch.ones_like(x))
 
 
 # Import test cases from below autograd/ here. These are found

@@ -19,6 +19,7 @@ class RunConstGraph(HigherOrderOperator):
         super().__init__("run_const_graph")
 
     def __call__(self, graph: torch.fx.GraphModule, args: tuple[object, ...]) -> object:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(graph, args)
 
 

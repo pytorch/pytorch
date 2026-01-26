@@ -20,6 +20,7 @@ __all__ = [
 @functional_datapipe("_dataframes_as_tuples")
 class DataFramesAsTuplesPipe(IterDataPipe):
     def __init__(self, source_datapipe) -> None:
+        super().__init__()
         self.source_datapipe = source_datapipe
 
     def __iter__(self):

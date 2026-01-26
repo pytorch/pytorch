@@ -130,7 +130,7 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
       ```
 
 
-* If you run into issue running `git submodule update --init --recursive`. Please try the following:
+* If you run into an issue running `git submodule update --init --recursive`, please try the following:
   - If you encounter an error such as
     ```
     error: Submodule 'third_party/pybind11' could not be updated
@@ -142,8 +142,8 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
     ```
     fatal: unable to access 'https://github.com/pybind/pybind11.git': could not load PEM client certificate ...
     ```
-    this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
-    `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
+    it is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
+    `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate validity dates by running
     ```bash
     openssl x509 -noout -in <cert_file> -dates
     ```
@@ -290,11 +290,11 @@ Currently, we support the following tasks with Spin:
 Spin helps with linting by making sure that lintrunner is installed correctly
 and by isolating the lintrunner environment from the general development
 environment using uv.
+You can pass additional arguments to lintrunner by adding them after a
+separating double dash (`--`), for example `spin quicklint -- --take CLANGTIDY`.
 
 |command||
 |-|-|
-|`setup-lint`|update lintrunner and perform a fresh setup|
-|`lazy-setup-lint`|only perform setup if the lint configuration has changed|
 |`lint`|perform default lint (see below)|
 |`quicklint`|perform lint on all files changed in the latest commit and the working directory|
 |`quickfix`|autofix issues on all files changed in the latest commit and the working directory|
@@ -307,7 +307,7 @@ the slow linters are run on the changed files only.
 
 ### Regenerating
 
-Pytorch makes use of a number of code generations, which range from the version
+PyTorch makes use of a number of code generations, which range from the version
 information in `torch/version.py` over type stubs and other linter support to
 github workflows.
 With Spin, we offer a unified interface to these tasks.

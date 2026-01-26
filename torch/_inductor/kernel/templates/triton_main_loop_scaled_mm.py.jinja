@@ -42,8 +42,6 @@
 
     num_pid_in_group = GROUP_M * num_pid_n
     accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    a_scale = load_scales(A_inverse_scale, SCALE_RECIPE_A)
-    b_scale = load_scales(B_inverse_scale, SCALE_RECIPE_B)
 
     for _ in range(0, k_tiles * tiles_per_SM):
         ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
@@ -71,7 +69,7 @@
         {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
         scale_a_block = blockwise128x128_scaling(
             pid_m,
-            a_scale,
+            A_inverse_scale,
             ki,
             am_blocks,
             ak_blocks,
@@ -83,7 +81,7 @@
         {%- else %}  # ScalingType.Blockwise1xTILESIZE
         scale_a_block = blockwise1xTILESIZE_scaling(
             pid_m,
-            a_scale,
+            A_inverse_scale,
             ki,
             M,
             am_blocks,
@@ -98,7 +96,7 @@
         {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
         scale_b_block = blockwise128x128_scaling(
             pid_n,
-            b_scale,
+            B_inverse_scale,
             ki,
             bn_blocks,
             bk_blocks,
@@ -110,7 +108,7 @@
         {%- else %}  # ScalingType.Blockwise1xTILESIZE
         scale_b_block = blockwise1xTILESIZE_scaling(
             pid_n,
-            b_scale,
+            B_inverse_scale,
             ki,
             N,
             bn_blocks,
@@ -139,14 +137,6 @@
                 block_indexing=True,
             )}}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-
-
-@triton.jit
-def load_scales(scale_ptr, SCALE_RECIPE: tl.constexpr):
-    if SCALE_RECIPE == 0:
-        return tl.load(scale_ptr)  # For tensor-wise scaling, we'll load the scalar values
-    else:
-        return scale_ptr  # For all other scaling recipes, we'll return the pointers
 
 
 @triton.jit

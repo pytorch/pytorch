@@ -71,7 +71,11 @@ def mark_non_differentiable(ctx, output, output_differentiability):
             tuple_output = (output,)
         else:
             tuple_output = output  # type: ignore[assignment]
-        assert len(output_differentiability) == len(tuple_output)
+        if len(output_differentiability) != len(tuple_output):
+            raise AssertionError(
+                f"output_differentiability length {len(output_differentiability)} "
+                f"!= output length {len(tuple_output)}"
+            )
         non_differentiable_tensors = []
         for idx, (differentiable, out) in enumerate(
             zip(output_differentiability, tuple_output)
@@ -127,7 +131,8 @@ def construct_autograd_kernel(
             return tuple(flat_output)
 
         def backward(ctx, *flat_grad_output):
-            assert out_spec is not None
+            if out_spec is None:
+                raise AssertionError("out_spec is unexpectedly None")
             grads = pytree.tree_unflatten(list(flat_grad_output), out_spec)
             saved, args_info = unpack_saved(ctx)
             # There is nothing on the ctx object for now, it is just there so
@@ -147,7 +152,8 @@ def construct_autograd_kernel(
         )
 
         flat_output = generated_cls.apply(*flat_args)
-        assert out_spec is not None
+        if out_spec is None:
+            raise AssertionError("out_spec is unexpectedly None")
         return pytree.tree_unflatten(list(flat_output), out_spec)
 
     return apply
@@ -175,7 +181,8 @@ def namedtuple_args_cls(schema):
 
 
 def namedtuple_args(schema, args):
-    assert isinstance(args, tuple)
+    if not isinstance(args, tuple):
+        raise AssertionError(f"expected tuple, got {type(args)}")
     tuple_cls = namedtuple_args_cls(schema)
     return tuple_cls(*args)
 

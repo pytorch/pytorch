@@ -100,13 +100,6 @@ void block_sparse_triangular_solve_vec(
     bool upper,
     bool transpose,
     bool unitriangular) {
-#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
-  TORCH_CHECK(
-      false,
-      "Calling triangular solver with block sparse GPU tensors requires compiling ",
-      "PyTorch with ROCm 4.5.0+. ",
-      "Please use PyTorch built with newer ROCm version.");
-#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
@@ -217,7 +210,6 @@ void block_sparse_triangular_solve_vec(
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void block_sparse_triangular_solve_mat(
@@ -227,13 +219,6 @@ void block_sparse_triangular_solve_mat(
     bool upper,
     bool transpose,
     bool unitriangular) {
-#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
-  TORCH_CHECK(
-      false,
-      "Calling triangular solver with block sparse GPU tensors requires compiling ",
-      "PyTorch with ROCm 4.5.0+. ",
-      "Please use PyTorch built with newer ROCm version.");
-#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
@@ -357,7 +342,6 @@ void block_sparse_triangular_solve_mat(
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void block_sparse_mv(
@@ -1205,9 +1189,7 @@ void triangular_solve_out_sparse_csr(
       block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular); return;
     }
   }
-#ifdef USE_ROCM
-  TORCH_CHECK(false, "ROCm is not supported");
-#else
+
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format
   // but there is a bug in CUDA 11.3.1 version:
@@ -1273,6 +1255,12 @@ void triangular_solve_out_sparse_csr(
               desc_spsv.descriptor()));
         });
   } else {
+    // this macro must exist outside the DISPATCH macro for windows builds
+#ifdef USE_ROCM
+#define ROCM_EXTRA_ARG ,nullptr
+#else
+#define ROCM_EXTRA_ARG
+#endif
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
         X.scalar_type(), "triangular_solve_out_sparse_csr_cuda_impl", [&] {
           scalar_t alpha = 1;
@@ -1324,13 +1312,14 @@ void triangular_solve_out_sparse_csr(
               descX.descriptor(),
               compute_type,
               CUSPARSE_SPSM_ALG_DEFAULT,
-              desc_spsm.descriptor()));
+              desc_spsm.descriptor()
+              ROCM_EXTRA_ARG
+            ));
         });
   }
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void sampled_addmm_out_sparse_csr(

@@ -91,6 +91,7 @@ class WithEffects(HigherOrderOperator):
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
         assert isinstance(kwargs, dict)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(token, op, *args, **kwargs)
 
 

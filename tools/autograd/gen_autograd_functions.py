@@ -863,7 +863,7 @@ static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             saved_variables.append(f"{type.cpp_type()} {name};")
 
             if type in MISC_GETTER_DEFS:
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index, index-error]
                 getter_def, body = MISC_GETTER_DEFS[type]
                 getter_definitions.append(
                     getter_def.substitute(op=info.op, name=name, body=body)

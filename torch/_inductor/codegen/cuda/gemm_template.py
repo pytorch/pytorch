@@ -19,7 +19,7 @@ from torch._inductor.select_algorithm import create_inputs_key
 from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import ir
-from ...config import cutlass as inductor_cutlass_config
+from ...config import cuda as inductor_cuda_config
 from ...ir import (
     Buffer,
     ChoiceCaller,
@@ -67,6 +67,7 @@ PT_EXPORT {{kernel_call_signature}} {
     hw_info.sm_count = cutlass::KernelHardwareInfo::query_device_multiprocessor_count(0);
     CUTLASS_TRACE_HOST("Query result for SM count per device: " << hw_info.sm_count);
   }
+  {{dynamic_cluster}}
   {{instance_type}}::Arguments arguments;
   {{template.render_gemm_arguments(argument_template, epilogue_template, should_swap_xw,
                                     X, W, Bias, Y, alpha, beta, kernel, epilogue_args)}}
@@ -578,7 +579,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             for name, op in ops:
                 for (
                     swizzle
-                ) in inductor_cutlass_config.cutlass_max_profiling_swizzle_options:
+                ) in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
                     description = f"{name} swizzle={swizzle}"
                     self.maybe_append_choice(
                         choices,
@@ -635,7 +636,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
-        if inductor_cutlass_config.generate_test_runner and not is_dynamic(
+        if inductor_cuda_config.generate_test_runner and not is_dynamic(
             *self.input_nodes, self.output_node
         ):
             res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
@@ -953,7 +954,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             return None
 
-        if inductor_cutlass_config.cutlass_tma_only and not self._has_tma_epilogue(op):
+        if inductor_cuda_config.cutlass_tma_only and not self._has_tma_epilogue(op):
             return None
 
         # Set epilogue.
@@ -975,16 +976,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return None
 
         # Apply regex filters at the end when configuration name doesn't change anymore
-        if inductor_cutlass_config.cutlass_op_allowlist_regex:
+        if inductor_cuda_config.cutlass_op_allowlist_regex:
             if not re.search(
-                inductor_cutlass_config.cutlass_op_allowlist_regex,
-                op.configuration_name(),
+                inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
             ):
                 return None
-        if inductor_cutlass_config.cutlass_op_denylist_regex is not None:
+        if inductor_cuda_config.cutlass_op_denylist_regex is not None:
             if re.search(
-                inductor_cutlass_config.cutlass_op_denylist_regex,
-                op.configuration_name(),
+                inductor_cuda_config.cutlass_op_denylist_regex, op.configuration_name()
             ):
                 return None
 
@@ -1028,7 +1027,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             filter_res = self.filter_op(op)
             if (
                 filter_res is not None
-                and res.get(filter_res.configuration_name(), None) is None
+                and res.get(filter_res.configuration_name()) is None
             ):
                 res[filter_res.configuration_name()] = filter_res
         log.info(
@@ -1037,7 +1036,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        ret_res = sorted_res[: inductor_cutlass_config.cutlass_max_profiling_configs]
+        ret_res = sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
         if len(self.filtered_ops_cache) < 50:
             self.filtered_ops_cache[self.cache_key] = ret_res
         else:
@@ -1059,6 +1058,36 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return "cutlass::gemm::GemmUniversalMode::kBatched"
         else:
             return "cutlass::gemm::GemmUniversalMode::kGemm"
+
+    def _dynamic_cluster_block(self, op: "cutlass_gemm_op.GemmOperation") -> str:  # type: ignore[name-defined]  # noqa: F821
+        """
+        Temporary workaround for CUTLASS GEMMs that encode cluster shape as runtime values.
+
+        For dynamic-cluster kernels, CUTLASS expects `KernelHardwareInfo.cluster_shape` and
+        `KernelHardwareInfo.cluster_shape_fallback` to be populated with valid runtime values.
+        Today we provide a single global preferred/fallback pair (configurable via env),
+        which is sufficient for correctness but is not performance-optimal.
+
+        Note: This is intentionally minimal because this code path is transitional. Cluster-shape
+        selection should ultimately be handled in the CuTe/DSL implementation rather than
+        investing heavily in the legacy CUTLASS template pipeline.
+        """
+        shape = getattr(getattr(op, "tile_description", None), "cluster_shape", None)
+        if not shape or len(shape) < 2 or (shape[0] > 0 and shape[1] > 0):
+            return ""
+
+        preferred = inductor_cuda_config.cutlass_dynamic_cluster_shape
+        fallback = inductor_cuda_config.cutlass_dynamic_cluster_fallback
+
+        cluster_k = shape[2] if len(shape) > 2 and shape[2] > 0 else preferred[2]
+        preferred = (preferred[0], preferred[1], cluster_k)
+        fallback_k = fallback[2] if len(fallback) > 2 and fallback[2] > 0 else cluster_k
+        fallback = (fallback[0], fallback[1], fallback_k)
+
+        return (
+            f"  hw_info.cluster_shape = {{{preferred[0]}, {preferred[1]}, {preferred[2]}}};\n"
+            f"  hw_info.cluster_shape_fallback = {{{fallback[0]}, {fallback[1]}, {fallback[2]}}};"
+        )
 
     def render(  # type: ignore[override]
         self,
@@ -1255,6 +1284,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         test_call_statement = self.test_call_statement(kernel, inputs, names_str)
 
         instance_definition, instance_type = self._define_gemm_instance(op, evt_name)
+        dynamic_cluster = self._dynamic_cluster_block(op)
 
         options = {
             "alpha": self.alpha,
@@ -1276,12 +1306,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             "test_call_statement": test_call_statement,
             "op_conf_name": op.configuration_name(),
             "epilogue_visitor_tree": evt_code,
+            "dynamic_cluster": dynamic_cluster,
         }
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
-        if inductor_cutlass_config.generate_test_runner and not is_dynamic(
-            X, W, Y, Bias
-        ):
+        if inductor_cuda_config.generate_test_runner and not is_dynamic(X, W, Y, Bias):
             test_runner_code = self._template_from_string(
                 GEMM_STANDALONE_RUNNER_TEMPLATE
             ).render(**options)

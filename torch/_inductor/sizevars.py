@@ -9,6 +9,7 @@ from typing import Any, cast, Optional, Union
 import sympy
 from sympy import Expr
 
+from torch import SymInt
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     has_free_unbacked_symbols,
@@ -387,10 +388,6 @@ class SizeVarAllocator:
         """
         # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
         # see https://github.com/sympy/sympy/issues/28200
-        if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
-            denominator
-        ):
-            return False
 
         if len(free_symbols(numerator)) > 20:
             return False
@@ -602,6 +599,11 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
     ) -> int:
+        if isinstance(expr, SymInt):
+            raise TypeError(
+                "wrong API usage!, use size_hint from torch.fx.experimental.symbolic_shapes or pass sympy expressions instead"
+            )
+
         out = self.symbolic_hint(
             expr,
             hint_override=hint_override,

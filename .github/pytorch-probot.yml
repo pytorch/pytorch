@@ -16,13 +16,13 @@ ciflow_push_tags:
 - ciflow/inductor-cu126
 - ciflow/inductor-micro-benchmark
 - ciflow/inductor-micro-benchmark-cpu-x86
+- ciflow/inductor-pallas
 - ciflow/inductor-perf-compare
 - ciflow/inductor-perf-test-nightly-rocm-mi300
 - ciflow/inductor-perf-test-nightly-rocm-mi355
 - ciflow/inductor-perf-test-nightly-x86-zen
 - ciflow/inductor-perf-test-nightly-xpu
 - ciflow/inductor-periodic
-- ciflow/inductor-rocm
 - ciflow/inductor-rocm-mi200
 - ciflow/inductor-rocm-mi300
 - ciflow/linux-aarch64
@@ -35,7 +35,6 @@ ciflow_push_tags:
 - ciflow/pull
 - ciflow/quantization-periodic
 - ciflow/riscv64
-- ciflow/rocm
 - ciflow/rocm-mi200
 - ciflow/rocm-mi300
 - ciflow/rocm-mi355

@@ -350,9 +350,9 @@ std::ostream& operator<<(
         ", TensorShape=[",
         c10::Join(", ", size_strs),
         "], TensorDtypes=",
-        (dtype_strs),
+        dtype_strs,
         ", TensorDeviceTypes=",
-        (device_type_strs),
+        device_type_strs,
         ")");
   } else {
     collectiveInfo = c10::str(

@@ -33,7 +33,12 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    MI200_ARCH,
+    skipIfRocm,
+    skipIfRocmArch,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -513,6 +518,43 @@ class TestSelectAlgorithm(TestCase):
 
 
 class TestExternKernelCaller(TestCase):
+    @requires_gpu()
+    @patches
+    @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
+    def test_extern_kernel_tensor_meta_failure(self):
+        """
+        Test that when TensorMeta.from_irnodes fails during ExternKernelCaller
+        initialization, a warning is logged with the correct message.
+        """
+        from unittest.mock import patch
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+
+        with patch.object(
+            TensorMeta, "from_irnodes", side_effect=ValueError("Mocked failure")
+        ):
+            with self.assertLogs(
+                "torch._inductor.select_algorithm", level="WARNING"
+            ) as log_context:
+                compiled_fn = torch.compile(fn)
+                result = compiled_fn(a, b)
+
+        self.assertTrue(
+            any(
+                "Constructing input/output tensor meta failed for Extern Choice"
+                in message
+                for message in log_context.output
+            ),
+            f"Expected warning message not found in logs: {log_context.output}",
+        )
+
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+
     @patches
     def test_extern_kernel_caller_hash_key_deduplication(self):
         def fn(a, b, c, d):
@@ -538,6 +580,7 @@ class TestExternKernelCaller(TestCase):
         # Only autotune once, cache hit
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @skipIfRocmArch(MI200_ARCH)
     @patches
     def test_extern_kernel_benchmark_valid_timing(self):
         def fn(a, b):

@@ -95,7 +95,8 @@ def _find_loss_from_output_and_spec(output_val, spec_val):
 
 def _find_loss_output(mod: torch.nn.Module, g: fx.Graph, output_loss_value_spec):
     output_nodes = [n for n in g.nodes if n.op == "output"]
-    assert len(output_nodes) == 1
+    if not len(output_nodes) == 1:
+        raise AssertionError(f"Expected 1 output node, got {len(output_nodes)}")
     output_node = output_nodes[0]
     output_val = output_node.args[0]
     generated_spec: Any = None
@@ -103,7 +104,8 @@ def _find_loss_output(mod: torch.nn.Module, g: fx.Graph, output_loss_value_spec)
     if isinstance(mod, TrivialLossWrapper):
         # TrivialLossWrapper is pre-defined by PiPPy.
         # It has loss as the only output so we can safely assume the first output arg is the loss.
-        assert len(output_node.args) == 1
+        if not len(output_node.args) == 1:
+            raise AssertionError(f"Expected 1 output arg, got {len(output_node.args)}")
         loss_node = output_val
         generated_spec = TrivialLossWrapper.loss_spec
     elif output_loss_value_spec is None:
@@ -133,12 +135,14 @@ def _insert_stage_symbolic_backward(
             # In the forward pass, only emit placeholder, module calls, and
             # getitem calls. If we have a target other than getitem in this
             # (forward-only) code, there is a bug.
-            assert node.target is operator.getitem, (
-                "Found non-getitem call in forward pass. Please report a bug to PiPPy"
-            )
-            assert len(node.args) == 2, (
-                "Found malformed getitem call. Please report a bug to PiPPy"
-            )
+            if not node.target == operator.getitem:
+                raise AssertionError(
+                    "Found non-getitem call in forward pass. Please report a bug to PiPPy"
+                )
+            if not len(node.args) == 2:
+                raise AssertionError(
+                    "Found malformed getitem call. Please report a bug to PiPPy"
+                )
             indexed_value, node_idx = tuple(node.args)
 
             # indexed_value is a collection that we are indexing into. It could
@@ -550,14 +554,15 @@ class Pipe(torch.nn.Module):
         self.loss_spec = loss_spec
 
         for node in split_gm.graph.nodes:
-            assert (
+            if not (
                 node.op in {"call_module", "placeholder", "output"}
                 or (node.op, node.target) == ("call_function", operator.getitem)
                 or (node.op, node.target) == ("call_method", "backward")
                 or (node.op, node.target) == ("call_function", stage_backward)
                 or (node.op, node.target)
                 == ("call_function", _null_coalesce_accumulate)
-            ), node
+            ):
+                raise AssertionError(f"Unexpected node: {node}")
 
         # Detect replicated parameters so we know that we have to do an additional allreduce
         # before applying the optimizer
@@ -771,9 +776,13 @@ class Pipe(torch.nn.Module):
                 - node: a `get_attr` node at root.
                 - user: a submodule node that uses `node`.
             """
-            assert len(user.kwargs) == 0
+            if not len(user.kwargs) == 0:
+                raise AssertionError(
+                    f"Expected user.kwargs to be empty, got {len(user.kwargs)}"
+                )
             use_idxs = [i for i, arg in enumerate(user.args) if arg == node]
-            assert len(use_idxs) == 1
+            if not len(use_idxs) == 1:
+                raise AssertionError(f"Expected 1 use index, got {len(use_idxs)}")
             args_copy = list(user.args)
             args_copy.pop(use_idxs[0])
             user.args = tuple(args_copy)
@@ -817,22 +826,24 @@ class Pipe(torch.nn.Module):
             is_buffer = atoms[-1] in mod_itr._buffers
 
             # Check whether the parameter is a tensor
-            assert isinstance(param_val, torch.Tensor), (
-                f"Expected '{param_fqn}' to be {torch.Tensor} but got {type(param_val)}."
-                + (
-                    f" It might happen if module '{param_fqn}' was passed to some 'leaf function'"
-                    f"(see https://pytorch.org/docs/stable/fx.html#fx.wrap). Please inspect "
-                    f"usages of '{param_fqn}' in the traced graph."
-                    if isinstance(param_val, torch.nn.Module)
-                    else ""
+            if not isinstance(param_val, torch.Tensor):
+                raise AssertionError(
+                    f"Expected '{param_fqn}' to be {torch.Tensor} but got {type(param_val)}."
+                    + (
+                        f" It might happen if module '{param_fqn}' was passed to some 'leaf function'"
+                        f"(see https://pytorch.org/docs/stable/fx.html#fx.wrap). Please inspect "
+                        f"usages of '{param_fqn}' in the traced graph."
+                        if isinstance(param_val, torch.nn.Module)
+                        else ""
+                    )
                 )
-            )
 
             # Get submodule
             callee = root.get_submodule(callee_name)
-            assert not hasattr(callee, param_fqn), (
-                f"Module {callee_name} already has a parameter named {param_fqn}"
-            )
+            if hasattr(callee, param_fqn):
+                raise AssertionError(
+                    f"Module {callee_name} already has a parameter named {param_fqn}"
+                )
 
             # Assign the parameter to the submodule
             if is_buffer:
@@ -870,7 +881,10 @@ class Pipe(torch.nn.Module):
                     f"Parameter {node.target} used in multiple stages: {node.users}."  # noqa: G004
                 )
             for user in node.users:
-                assert user.op == "call_module"
+                if not user.op == "call_module":
+                    raise AssertionError(
+                        f"Expected user.op to be 'call_module', got {user.op}"
+                    )
                 # Move parameter into submodule
                 move_param_to_callee(
                     split,
@@ -957,7 +971,10 @@ class Pipe(torch.nn.Module):
         for node in attr_nodes:
             # And (2): remove `get_attr` node from submod's arg list
             for user in copy.copy(node.users):
-                assert user.op == "call_module"
+                if not user.op == "call_module":
+                    raise AssertionError(
+                        f"Expected user.op to be 'call_module', got {user.op}"
+                    )
                 delete_user_reference(node, user)
             # And (3): remove the `get_attr` node from the root graph.
             split.graph.erase_node(node)

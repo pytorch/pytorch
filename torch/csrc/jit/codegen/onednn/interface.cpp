@@ -57,7 +57,6 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
           aten::leaky_relu_,
           aten::round_,
           aten::exp_,
-          aten::abs_,
           aten::hardswish_,
           aten::silu_};
       return supportedOps.count(nodeToFunctionalize->kind()) != 0;

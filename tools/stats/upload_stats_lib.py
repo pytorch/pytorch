@@ -234,12 +234,14 @@ def upload_file_to_s3(
     )
 
 
-def unzip(p: Path) -> None:
+def unzip(p: Path) -> Path:
     """Unzip the provided zipfile to a similarly-named directory.
 
     Returns None if `p` is not a zipfile.
 
     Looks like: /tmp/test-reports.zip -> /tmp/unzipped-test-reports/
+
+    Returns the path to the unzipped directory.
     """
     assert p.is_file()
     unzipped_dir = p.with_name("unzipped-" + p.stem)
@@ -247,6 +249,8 @@ def unzip(p: Path) -> None:
 
     with zipfile.ZipFile(p, "r") as zip:
         zip.extractall(unzipped_dir)
+
+    return unzipped_dir
 
 
 def is_rerun_disabled_tests(

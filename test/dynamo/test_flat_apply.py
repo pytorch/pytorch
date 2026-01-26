@@ -1,12 +1,16 @@
 # Owner(s): ["module: dynamo", "module: higher order operators"]
+import re
 from dataclasses import dataclass
 
 import torch
 import torch.utils._pytree as pytree
+from torch import Tensor
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
+    extract_graph,
     normalize_gm,
+    remove_trailing_space,
 )
 from torch._higher_order_ops.flat_apply import (
     flat_apply,
@@ -14,6 +18,7 @@ from torch._higher_order_ops.flat_apply import (
     is_graphable,
     to_graphable,
 )
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
 
 
@@ -28,17 +33,56 @@ def distance(a, b, norm):
 class Norm:
     typ: str
 
+    def __fx_repr__(self):
+        return f"Norm(typ={self.typ!r})", {"Norm": Norm}
 
-pytree.register_constant(Norm)
+
+torch._library.opaque_object.register_opaque_type(Norm, typ="value")
 
 
 @dataclass
 class Point:
-    x: torch.Tensor
-    y: torch.Tensor
+    x: Tensor
+    y: Tensor
 
 
 pytree.register_dataclass(Point)
+
+
+@dataclass
+class InputData:
+    count: int
+    values: Tensor
+
+
+torch.utils._pytree.register_dataclass(InputData)
+
+
+@dataclass
+class InputInvalid:
+    count: int
+    values: Tensor
+
+
+# No pytree for InputInvalid
+
+
+@dataclass
+class OutputData:
+    result1: Tensor
+    result2: Tensor
+
+
+torch.utils._pytree.register_dataclass(OutputData)
+
+
+@dataclass
+class OutputInvalid:
+    result1: Tensor
+    result2: Tensor
+
+
+# No pytree for OutputInvalid
 
 
 class FlatApplyTests(PytreeRegisteringTestCase):
@@ -90,8 +134,8 @@ class FlatApplyTests(PytreeRegisteringTestCase):
 
     def test_nonstrict_trace_dynamo_graph(self):
         class Point:
-            x: torch.Tensor
-            y: torch.Tensor
+            x: Tensor
+            y: Tensor
 
             def __init__(self, x, y):
                 self.x = x
@@ -99,7 +143,7 @@ class FlatApplyTests(PytreeRegisteringTestCase):
 
         class PointTensor:
             p: Point
-            t: torch.Tensor
+            t: Tensor
 
             def __init__(self, p, t):
                 self.p = p
@@ -151,7 +195,8 @@ class GraphModule(torch.nn.Module):
 
         trace_point_tensor_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_spec
         trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
-        res: "f32[10]" = torch.ops.higher_order.flat_apply(trace_point_tensor_spec, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_spec = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_spec, trace_point_tensor_input_spec, l_x_, l_y_, t);  trace_point_tensor_spec = trace_point_tensor_input_spec = l_x_ = l_y_ = t = None
+        res: "f32[10]" = flat_apply_capture[0];  flat_apply_capture = None
         return (res,)
 """,  # NOQA: B950
         )
@@ -182,6 +227,234 @@ class <lambda>(torch.nn.Module):
         return (add,)
 """,  # NOQA: B950
         )
+
+
+@skipIfTorchDynamo("Not a suitable dynamo wrapped test")
+class TestInputOutput(PytreeRegisteringTestCase):
+    def test_simple(self):
+        a = 4
+        b = torch.randn(4, 4)
+
+        @torch._dynamo.nonstrict_trace
+        def gn(i_count: int, i_values: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+            output_tensor = a + b * i_count * i_values
+
+            result1 = output_tensor + i_count
+            result2 = output_tensor * (i_count + 1)
+
+            return output_tensor, result1, result2
+
+        def fn(i: InputData) -> Tensor:
+            x = torch.sin(i.values)
+            y, z_result1, z_result2 = gn(i.count, i.values)
+            return x + y + z_result1 + z_result2
+
+        count = 5
+        values = torch.randn(4, 4)
+        i = InputData(count, values)
+        ref = fn(i)
+        opt_fn = torch.compile(lambda i: fn(i), backend="aot_eager", fullgraph=True)
+        res = opt_fn(i)
+        self.assertEqual(ref, res)
+
+        _, gms, _, _ = extract_graph(lambda i: fn(i), i)
+        self.assertExpectedInline(
+            print_graph(gms[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_i_values: "f32[4, 4]"):
+        l_i_values = L_i_values
+
+        # code: x = torch.sin(i.values)
+        x: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z_result1, z_result2 = gn(i.count, i.values)
+        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_spec, gn_input_spec, 5, l_i_values);  gn_spec = gn_input_spec = l_i_values = None
+        y: "f32[4, 4]" = flat_apply_capture[0]
+        z_result1: "f32[4, 4]" = flat_apply_capture[1]
+        z_result2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z_result1 + z_result2
+        add: "f32[4, 4]" = x + y;  x = y = None
+        add_1: "f32[4, 4]" = add + z_result1;  add = z_result1 = None
+        add_2: "f32[4, 4]" = add_1 + z_result2;  add_1 = z_result2 = None
+        return (add_2,)
+""",  # NOQA: B950
+        )
+
+    def test_dataclass_input(self):
+        a = 4
+        b = torch.randn(4, 4)
+
+        @torch._dynamo.nonstrict_trace
+        def gn(i: InputData) -> tuple[Tensor, Tensor, Tensor]:
+            output_tensor = a + b * i.count * i.values
+
+            result1 = output_tensor + i.count
+            result2 = output_tensor * (i.count + 1)
+
+            return output_tensor, result1, result2
+
+        def fn(i: InputData) -> Tensor:
+            x = torch.sin(i.values)
+            y, z_result1, z_result2 = gn(i)
+            return x + y + z_result1 + z_result2
+
+        count = 5
+        values = torch.randn(4, 4)
+        i = InputData(count, values)
+        ref = fn(i)
+        opt_fn = torch.compile(lambda i: fn(i), backend="aot_eager", fullgraph=True)
+        res = opt_fn(i)
+        self.assertEqual(ref, res)
+
+        _, gms, _, _ = extract_graph(lambda i: fn(i), i)
+        self.assertExpectedInline(
+            print_graph(gms[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_i_values: "f32[4, 4]"):
+        l_i_values = L_i_values
+
+        # code: x = torch.sin(i.values)
+        x: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z_result1, z_result2 = gn(i)
+        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_spec, gn_input_spec, 5, l_i_values);  gn_spec = gn_input_spec = l_i_values = None
+        y: "f32[4, 4]" = flat_apply_capture[0]
+        z_result1: "f32[4, 4]" = flat_apply_capture[1]
+        z_result2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z_result1 + z_result2
+        add: "f32[4, 4]" = x + y;  x = y = None
+        add_1: "f32[4, 4]" = add + z_result1;  add = z_result1 = None
+        add_2: "f32[4, 4]" = add_1 + z_result2;  add_1 = z_result2 = None
+        return (add_2,)
+""",  # NOQA: B950
+        )
+
+    def test_invalid_input(self):
+        a = 4
+        b = torch.randn(4, 4)
+
+        @torch._dynamo.nonstrict_trace
+        def gn(i: InputInvalid) -> tuple[Tensor, Tensor, Tensor]:
+            output_tensor = a + b * i.count * i.values
+
+            result1 = output_tensor + i.count
+            result2 = output_tensor * (i.count + 1)
+
+            return output_tensor, result1, result2
+
+        def fn(i: InputInvalid) -> Tensor:
+            x = torch.sin(i.values)
+            y, z_result1, z_result2 = gn(i)
+            return x + y + z_result1 + z_result2
+
+        count = 5
+        values = torch.randn(4, 4)
+        i = InputInvalid(count, values)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Invalid input type for nonstrict_trace-ed function",
+        ):
+            opt_fn(i)
+
+    def test_dataclass_output(self):
+        a = 4
+        b = torch.randn(4, 4)
+
+        @torch._dynamo.nonstrict_trace
+        def gn(i_count: int, i_values: Tensor) -> tuple[Tensor, OutputData]:
+            output_tensor = a + b * i_count * i_values
+
+            result1 = output_tensor + i_count
+            result2 = output_tensor * (i_count + 1)
+            out = OutputData(result1, result2)
+
+            return output_tensor, out
+
+        def fn(i: InputData) -> Tensor:
+            x = torch.sin(i.values)
+            y, z = gn(i.count, i.values)
+            return x + y + z.result1 + z.result2
+
+        count = 5
+        values = torch.randn(4, 4)
+        i = InputData(count, values)
+        ref = fn(i)
+        opt_fn = torch.compile(lambda i: fn(i), backend="aot_eager", fullgraph=True)
+        res = opt_fn(i)
+        self.assertEqual(ref, res)
+
+        _, gms, _, _ = extract_graph(lambda i: fn(i), i)
+        self.assertExpectedInline(
+            print_graph(gms[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_i_values: "f32[4, 4]"):
+        l_i_values = L_i_values
+
+        # code: x = torch.sin(i.values)
+        x: "f32[4, 4]" = torch.sin(l_i_values)
+
+        # code: y, z = gn(i.count, i.values)
+        gn_spec : torch.utils._pytree.TreeSpec = self.gn_spec
+        gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_spec, gn_input_spec, 5, l_i_values);  gn_spec = gn_input_spec = l_i_values = None
+        y: "f32[4, 4]" = flat_apply_capture[0]
+        value: "f32[4, 4]" = flat_apply_capture[1]
+        value_1: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z.result1 + z.result2
+        add: "f32[4, 4]" = x + y;  x = y = None
+        add_1: "f32[4, 4]" = add + value;  add = value = None
+        add_2: "f32[4, 4]" = add_1 + value_1;  add_1 = value_1 = None
+        return (add_2,)
+""",  # NOQA: B950
+        )
+
+    def test_invalid_output(self):
+        a = 4
+        b = torch.randn(4, 4)
+
+        @torch._dynamo.nonstrict_trace
+        def gn(i_count: int, i_values: Tensor) -> tuple[Tensor, OutputInvalid]:
+            output_tensor = a + b * i_count * i_values
+
+            result1 = output_tensor + i_count
+            result2 = output_tensor * (i_count + 1)
+            out = OutputInvalid(result1, result2)
+
+            return output_tensor, out
+
+        def fn(i: InputData) -> Tensor:
+            x = torch.sin(i.values)
+            y, z = gn(i.count, i.values)
+            return x + y + z.result1 + z.result2
+
+        count = 5
+        values = torch.randn(4, 4)
+        i = InputData(count, values)
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Unsupported output type for nonstrict_trace-ed function",
+        ):
+            opt_fn(i)
+
+
+def remove_file_comment(gm_str: str) -> str:
+    return remove_trailing_space(re.sub(r"# File.*, code:", "# code:", gm_str))
+
+
+def print_graph(graph: torch.fx.GraphModule) -> str:
+    return remove_file_comment(graph.print_readable(print_output=False))
 
 
 if __name__ == "__main__":

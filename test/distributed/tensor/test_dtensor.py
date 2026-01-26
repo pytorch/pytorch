@@ -8,6 +8,7 @@ import unittest
 from numpy.testing import assert_array_equal
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import init_device_mesh
@@ -25,6 +26,7 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import (
@@ -32,15 +34,20 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    run_tests,
+    skipIfHpu,
+    TestCase,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
     map_local_tensor_for_rank,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 c10d_functional = torch.ops.c10d_functional
@@ -1265,14 +1272,6 @@ class TestDTensorSpec(DTensorTestBase):
         )
         self.assertEqual(tensor_global._spec.shard_order, ())
 
-        # shard_order doesn't work with _StridedShard
-        tensor_global = DTensor.from_local(
-            tensor_local,
-            mesh,
-            [Replicate(), _StridedShard(0, split_factor=2), Shard(0)],
-        )
-        self.assertEqual(tensor_global._spec.shard_order, ())
-
     @with_comms
     def test_default_shard_order(self):
         mesh_shape = (2, 2, self.world_size // 4)
@@ -1306,6 +1305,48 @@ class TestDTensorSpec(DTensorTestBase):
 TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
     TestDTensorSpec,
 )
+
+
+class TestMixedPartialTypes(TestCase):
+    """Test that mixed Partial reduce types are rejected by all DTensor APIs."""
+
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group(backend="fake", rank=0, world_size=8, store=FakeStore())
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_mixed_partial_types_rejected(self):
+        mesh = DeviceMesh("cpu", torch.arange(8).reshape(2, 4))
+        tensor = torch.randn(8, 8)
+        mixed = [Partial("sum"), Partial("max")]
+
+        # Test distribute_tensor and from_local APIs
+        for api in [
+            lambda: distribute_tensor(tensor, mesh, mixed),
+            lambda: DTensor.from_local(tensor, mesh, mixed),
+        ]:
+            with self.assertRaisesRegex(ValueError, "Mixed Partial reduce types"):
+                api()
+
+        # Test redistribute_local_tensor separately (different call pattern)
+        # Note: public DTensor.redistribute() doesn't allow Partial targets at all,
+        # so we test the internal redistribute_local_tensor directly
+        current_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
+        )
+        target_spec = DTensorSpec(
+            mesh,
+            tuple(mixed),
+            tensor_meta=TensorMeta(tensor.shape, tensor.stride(), tensor.dtype),
+        )
+        with self.assertRaisesRegex(ValueError, "Mixed Partial reduce types"):
+            redistribute_local_tensor(tensor, current_spec, target_spec)
+
 
 if __name__ == "__main__":
     run_tests()

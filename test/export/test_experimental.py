@@ -9,7 +9,10 @@ from typing import Any, Dict, List, Tuple
 
 import torch
 import torch._dynamo
-from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+from torch._dynamo.functional_export import (
+    _dynamo_graph_capture_for_export,
+    dynamo_graph_capture_for_export,
+)
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export import export
@@ -21,6 +24,21 @@ from torch.utils import _pytree as pytree
 
 
 GLOBAL_LIST = []
+
+
+def _register_blockmask_pytree():
+    """Register BlockMask as a pytree node if not already registered."""
+    from torch.nn.attention.flex_attention import BlockMask
+    from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+
+    if BlockMask not in SUPPORTED_NODES:
+        register_pytree_node(
+            BlockMask,
+            BlockMask._flatten,
+            BlockMask._unflatten,
+            flatten_with_keys_fn=BlockMask._flatten_with_keys,
+            serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+        )
 
 
 class GlobalContext:
@@ -160,6 +178,231 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     permute_3 = torch.ops.aten.permute.default(permute_2, [1, 0]);  permute_2 = None
     return (div, permute_3, view_3)""",
         )
+
+    def _test_export_blockmask_with_mask_fn(self, make_mask_fn):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        class Model(torch.nn.Module):
+            def __init__(self, mask_fn_factory):
+                super().__init__()
+                self.mask_fn_factory = mask_fn_factory
+
+            def forward(self, x):
+                mask_fn = self.mask_fn_factory()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model(make_mask_fn)
+
+        out_eager, mask_eager = module(x)
+
+        compiled = _dynamo_graph_capture_for_export(module)(x)
+        out_compiled, mask_compiled = compiled(x)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(
+            mask_eager.mask_mod(1, 1, 64, 64),
+            mask_compiled.mask_mod(1, 1, 64, 64),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask(self):
+        def make_mask_fn():
+            res = 4
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_mutated_closure(self):
+        def make_mask_fn():
+            res = 1
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            res = 4  # mutation after function definition
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_with_containers(self):
+        def make_mask_fn():
+            offsets = [1, 2, 3]
+            config = {"base": 4, "nested": {"scale": 2}}
+
+            def fn(b, h, q, k):
+                return q >= k + config["base"] + sum(offsets)
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_triple_nested(self):
+        def make_mask_fn():
+            a = 1
+
+            def level1():
+                b = 2
+
+                def level2():
+                    c = 3
+
+                    def fn(bx, h, q, k):
+                        return q >= k + a + b + c
+
+                    return fn
+
+                return level2()
+
+            return level1()
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_self_recursive(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            # Self-referential: fn captures itself through the closure
+            def fn(b, h, q, k):
+                _ = fn  # self-reference
+                return q >= k + 4
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_tensor(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            tensor = torch.ones(2, 2)
+
+            def fn(b, h, q, k):
+                _ = fn
+                return q >= k + 4 + tensor.sum()
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_unsupported_class_instance(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        class MaskConfig:
+            def __init__(self, offset):
+                self.offset = offset
+
+        def make_mask_fn():
+            cfg = MaskConfig(offset=5)
+
+            def fn(b, h, q, k):
+                return q >= k + cfg.offset
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_mutually_recursive(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            # Create mutually recursive closures: fn_a references fn_b, fn_b references fn_a
+            # This is non-constructible because we cannot serialize mutually recursive closures
+            def fn_a(b, h, q, k):
+                _ = fn_b  # reference to fn_b
+                return q >= k
+
+            def fn_b(b, h, q, k):
+                _ = fn_a  # reference to fn_a
+                return q >= k + 1
+
+            return fn_a
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
@@ -805,6 +1048,124 @@ def forward(self, args_0):
         ep = dynamo_graph_capture_for_export(m)(torch.randn(2, 3))
         test_inputs = (torch.randn(2, 3),)
         self.assertEqual(ep(*test_inputs), m(*test_inputs))
+
+    def test_restore_state_dict_basic(self):
+        """Test basic state dict restoration with a simple model."""
+        from torch.export import _restore_state_dict
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.register_buffer("buf", torch.randn(4))
+
+            def forward(self, x):
+                return self.linear(x) + self.buf
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 4))
+
+        # Before restoration, FQNs may be flattened
+        state_dict_before = dict(gm.named_parameters())
+        buffer_dict_before = dict(gm.named_buffers())
+
+        _restore_state_dict(model, gm)
+
+        # After restoration, FQNs should match original module
+        state_dict_after = dict(gm.named_parameters())
+        buffer_dict_after = dict(gm.named_buffers())
+
+        # Check that the parameter names match the original
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(state_dict_after.keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+        # Check that the buffer names match the original
+        original_buffer_names = set(dict(model.named_buffers()).keys())
+        restored_buffer_names = set(buffer_dict_after.keys())
+        self.assertEqual(original_buffer_names, restored_buffer_names)
+
+        # Verify the model still works correctly
+        test_input = torch.randn(2, 4)
+        expected = model(test_input)
+        actual = gm(test_input)
+        self.assertEqual(expected, actual)
+
+    def test_restore_state_dict_nested_modules(self):
+        """Test state dict restoration with nested modules."""
+        from torch.export import _restore_state_dict
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(8, 8)
+                self.register_buffer("scale", torch.tensor(2.0))
+
+            def forward(self, x):
+                return self.fc(x) * self.scale
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub1 = SubModule()
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub1(x) + self.sub2(x)
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 8))
+
+        _restore_state_dict(model, gm)
+
+        # Check that nested FQNs are properly restored
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(dict(gm.named_parameters()).keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+        # Check buffers too
+        original_buffer_names = set(dict(model.named_buffers()).keys())
+        restored_buffer_names = set(dict(gm.named_buffers()).keys())
+        self.assertEqual(original_buffer_names, restored_buffer_names)
+
+        # Verify functionality
+        test_input = torch.randn(2, 8)
+        expected = model(test_input)
+        actual = gm(test_input)
+        self.assertEqual(expected, actual)
+
+    def test_restore_state_dict_with_bound_method(self):
+        """Test state dict restoration when passing a bound method."""
+        from torch.export import _restore_state_dict
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model.forward)(torch.randn(2, 4))
+
+        # Pass bound method instead of module
+        _restore_state_dict(model.forward, gm)
+
+        # Verify FQNs match
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(dict(gm.named_parameters()).keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+    def test_restore_state_dict_type_error(self):
+        """Test that _restore_state_dict raises TypeError for invalid input."""
+        from torch.export import _restore_state_dict
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+
+        # Should raise TypeError when given a non-module, non-bound-method
+        with self.assertRaises(TypeError):
+            _restore_state_dict(lambda x: x, gm)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ if [ -z "${image}" ]; then
 fi
 
 function extract_version_from_image_name() {
-  eval export $2=$(echo "${image}" | perl -n -e"/$1(\d+(\.\d+)?(\.\d+)?)/ && print \$1")
+  eval export $2=$(echo "${image}" | perl -n -e"/$1(\d+(\.\d+)?(\.\d+)?t?)/ && print \$1")
   if [ "x${!2}" = x ]; then
     echo "variable '$2' not correctly parsed from image='$image'"
     exit 1
@@ -89,6 +89,10 @@ if [[ "$image" == *rocm* ]]; then
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
+# If no tag (no colon in image name), use the image name itself
+if [[ -z "$tag" ]]; then
+  tag="$image"
+fi
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -147,8 +151,8 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm)
-    CUDA_VERSION=12.8.1
+  pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=12.9.1
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     VISION=yes
@@ -199,6 +203,18 @@ case "$tag" in
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi
+    ;;
+  pytorch-linux-noble-rocm-nightly-py3)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    VISION=yes
+    ROCM_VERSION=nightly
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    PYTORCH_ROCM_ARCH="gfx942"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -273,6 +289,12 @@ case "$tag" in
     PALLAS=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-tpu-py3.12-pallas)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    PALLAS=yes
+    TPU=yes
+    ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
     CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
@@ -326,12 +348,19 @@ case "$tag" in
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
+      if [[ "$ANACONDA_PYTHON_VERSION" == *t ]]
+      then
+        ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION%?}
+        PYTHON_FREETHREADED=1
+      fi
     fi
     if [[ "$image" == *cuda* ]]; then
       extract_version_from_image_name cuda CUDA_VERSION
     fi
     if [[ "$image" == *rocm* ]]; then
-      extract_version_from_image_name rocm ROCM_VERSION
+      if [[ -z "$ROCM_VERSION" ]]; then
+        extract_version_from_image_name rocm ROCM_VERSION
+      fi
       NINJA_VERSION=1.9.0
       TRITON=yes
       # To ensure that any ROCm config will build using conda cmake
@@ -366,7 +395,7 @@ if [[ -n "${CI:-}" ]]; then
 fi
 
 # Build image
-docker build \
+docker buildx build \
        ${no_cache_flag} \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
@@ -377,6 +406,7 @@ docker build \
        --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
+       --build-arg "PYTHON_FREETHREADED=${PYTHON_FREETHREADED}" \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
@@ -395,6 +425,7 @@ docker build \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
        --build-arg "PALLAS=${PALLAS}" \
+       --build-arg "TPU=${TPU}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
@@ -403,6 +434,7 @@ docker build \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
+       --load \
        -t "$tmp_tag" \
        "$@" \
        .

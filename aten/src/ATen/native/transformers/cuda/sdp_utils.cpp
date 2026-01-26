@@ -80,12 +80,16 @@ bool check_prefer_cudnn_attention() {
   if (!prefer_cudnn) {
     return false;
   }
-#if (defined(CUDNN_VERSION) && (CUDNN_VERSION >= 90900))
+// cuDNN 9.15.1 required for seq_len not divisible by 128 fix, CUDA <= 12.9 wheels
+// ship with older cuDNN see #169849
+#if defined(CUDNN_VERSION)
+  static long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   try {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     auto major = dprops->major;
-    return (major == 9 || major == 10) && !dprops->minor;
-  } catch (c10::Error const& e) {
+    auto minor = dprops->minor;
+    return cudnn_version > 91500 && (major == 9 || major == 10) && (!minor || minor == 3);
+  } catch ([[maybe_unused]] c10::Error const& e) {
 #ifdef DEBUG
     TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
 #endif
@@ -142,6 +146,9 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
 #if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
   // AOTriton 0.9+ supports head_dim up to 512
   const static auto max_hdim = []() {
 #if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
@@ -351,6 +358,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm121 = SMVersion<12, 1>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     // User explicitly set CK as the flash attention backend. Return true for now
     // TODO: Flesh out sanity checks
