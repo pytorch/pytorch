@@ -768,7 +768,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("N", [8192])
     @parametrize("K", [16640])
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
-    def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format):
+    @parametrize("use_compile", [False, True])
+    def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format, use_compile):
         torch.manual_seed(42)
 
         if format == "mxfp4" and SM120OrLater:
@@ -810,7 +811,8 @@ class TestFP8Matmul(TestCase):
             assert x_global_scales.numel() == G
 
         # Compute mxfp8 grouped mm output
-        y_lp = scaled_grouped_mm_wrap(
+        scaled_grouped_mm_fn = torch.compile(scaled_grouped_mm_wrap, backend="inductor") if use_compile else scaled_grouped_mm_wrap
+        y_lp = scaled_grouped_mm_fn(
             xq,
             wq.transpose(-2, -1),
             **kwargs,
@@ -835,7 +837,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("N", [8192])
     @parametrize("K", [4096])
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
+    @parametrize("use_compile", [False, True])
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_compile):
         torch.manual_seed(42)
 
         if format == "mxfp4" and SM120OrLater:
@@ -954,7 +957,8 @@ class TestFP8Matmul(TestCase):
             assert x_global_scales.numel() == G
 
         # Compute low-precision grouped gemm.
-        y_lp = scaled_grouped_mm_wrap(
+        scaled_grouped_mm_fn = torch.compile(scaled_grouped_mm_wrap, backend="inductor") if use_compile else scaled_grouped_mm_wrap
+        y_lp = scaled_grouped_mm_fn(
             xq,
             wq.transpose(-2, -1),
             **kwargs
@@ -1856,7 +1860,8 @@ class TestFP8Matmul(TestCase):
         (127, 96, 1024),
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
-    def test_blockwise_nvfp4_with_global_scale(self, mkn) -> None:
+    @parametrize("use_compile", [False, True])
+    def test_blockwise_nvfp4_with_global_scale(self, mkn, use_compile) -> None:
         device = 'cuda'
         M, K, N = mkn
         BLOCK_SIZE = 16
@@ -1878,7 +1883,8 @@ class TestFP8Matmul(TestCase):
 
         C_ref = A_ref @ B_ref.t()
 
-        C = scaled_mm(
+        scaled_mm_fn = torch.compile(scaled_mm, backend="inductor") if use_compile else scaled_mm
+        C = scaled_mm_fn(
             A,
             B.t(),
             scale_a=[A_scale, A_global_scale],
@@ -1930,7 +1936,8 @@ class TestFP8Matmul(TestCase):
         (1025, 128, 96)
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
-    def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe) -> None:
+    @parametrize("use_compile", [False, True])
+    def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe, use_compile) -> None:
         if torch.version.hip and recipe == "nvfp4":
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
@@ -2139,7 +2146,8 @@ class TestFP8Matmul(TestCase):
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
 
-        C = scaled_mm_wrap(
+        scaled_mm_fn = torch.compile(scaled_mm_wrap, backend="inductor") if use_compile else scaled_mm_wrap
+        C = scaled_mm_fn(
             A,
             B.t(),
             A_scale,
