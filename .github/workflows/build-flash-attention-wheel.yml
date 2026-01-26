@@ -142,6 +142,8 @@ jobs:
             arch: "x86_64"
           - cuda_short: "126"
             arch: "aarch64"
+          - cuda_short: "130"
+            arch: "aarch64"
     permissions:
       id-token: write
       contents: read
