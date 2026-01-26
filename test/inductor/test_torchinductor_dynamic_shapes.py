@@ -83,7 +83,6 @@ test_failures = {
     "test_var_mean_div_by_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_tile_reduction_False_dynamic_shapes": TestFailure(("mps",)),
     "test_var_mean_tile_reduction_True_dynamic_shapes": TestFailure(("mps",)),
-    "test_vectorized_ops_masked_var_novec_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
