@@ -428,6 +428,69 @@ class TestCostModel(DTensorOpTestBase):
         # mesh dimensions are ordered (outer to inner in device hierarchy)
         self.assertGreater(cost_mesh_dim0, cost_mesh_dim1)
 
+    def test_all_to_all_cost(self):
+        """Test that shard->shard transitions use all_to_all_cost."""
+        from torch.distributed.tensor._collective_utils import (
+            all_to_all_cost,
+            MeshTopoInfo,
+        )
+
+        mesh_1d = self.build_device_mesh()
+        shard0_placement = (Shard(0),)
+        shard1_placement = (Shard(1),)
+
+        global_tensor = torch.randn(8, 8)
+        global_tensor_meta = extract_tensor_meta(global_tensor)
+
+        shard0_spec = DTensorSpec(mesh_1d, shard0_placement, global_tensor_meta)
+        shard1_spec = DTensorSpec(mesh_1d, shard1_placement, global_tensor_meta)
+
+        # Shard(0) -> Shard(1) should use all_to_all_cost
+        cost = redistribute_cost(shard0_spec, shard1_spec)
+        self.assertGreater(cost, 0)
+        self.assertNotEqual(cost, float("inf"))
+
+        # Verify all_to_all_cost function works directly
+        mesh_topo = MeshTopoInfo.build_from_mesh(mesh_1d)
+        direct_cost = all_to_all_cost(0.001, mesh_topo, 0)  # 1MB
+        self.assertGreater(direct_cost, 0)
+
+    def test_redistribute_cost_with_compute_cost(self):
+        """Test that include_compute_cost adds reshuffle overhead."""
+        mesh_1d = self.build_device_mesh()
+
+        # Shard on dim 1 (non-dim-0) -> Replicate requires reshuffling
+        shard1_placement = (Shard(1),)
+        replica_placement = (Replicate(),)
+
+        global_tensor = torch.randn(8, 8)
+        global_tensor_meta = extract_tensor_meta(global_tensor)
+
+        shard1_spec = DTensorSpec(mesh_1d, shard1_placement, global_tensor_meta)
+        replica_spec = DTensorSpec(mesh_1d, replica_placement, global_tensor_meta)
+
+        # Cost without compute overhead
+        cost_no_compute = redistribute_cost(shard1_spec, replica_spec)
+        # Cost with compute overhead (reshuffling for non-dim-0)
+        cost_with_compute = redistribute_cost(
+            shard1_spec, replica_spec, include_compute_cost=True
+        )
+
+        # With compute cost should be higher due to reshuffle overhead
+        self.assertGreater(cost_with_compute, cost_no_compute)
+
+        # Shard on dim 0 -> Replicate should have same cost either way
+        # (no reshuffling needed for dim-0)
+        shard0_placement = (Shard(0),)
+        shard0_spec = DTensorSpec(mesh_1d, shard0_placement, global_tensor_meta)
+
+        cost_dim0_no_compute = redistribute_cost(shard0_spec, replica_spec)
+        cost_dim0_with_compute = redistribute_cost(
+            shard0_spec, replica_spec, include_compute_cost=True
+        )
+        # Should be equal since dim-0 shard doesn't need reshuffling
+        self.assertEqual(cost_dim0_no_compute, cost_dim0_with_compute)
+
 
 # -------------Test op strategy registration-------------
 # custom op without List[Tensor] as input
