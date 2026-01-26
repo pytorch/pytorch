@@ -269,7 +269,8 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || defined(USE_ROCM)
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED) || \
+    defined(USE_ROCM)
 
 /*
 Note [Expandable Segments]
@@ -581,7 +582,8 @@ struct ExpandableSegment {
             sizeof(int));
       } else {
 #ifdef USE_ROCM
-        TORCH_INTERNAL_ASSERT(false, "expandable segment with fabric handle not supported");
+        TORCH_INTERNAL_ASSERT(
+            false, "expandable segment with fabric handle not supported");
 #else
         if (!handle.shareable_handle) {
           CUmemFabricHandle fabric_handle;
@@ -657,7 +659,7 @@ struct ExpandableSegment {
 #if ROCM_VERSION >= 70100
             reinterpret_cast<void*>(static_cast<uintptr_t>(myfd)),
 #else
-            (void*)(uintptr_t) & myfd,
+            (void*)(uintptr_t)&myfd,
 #endif
             hipMemHandleTypePosixFileDescriptor));
 #else
@@ -674,7 +676,8 @@ struct ExpandableSegment {
       close(static_cast<int>(pidfd));
     } else {
 #ifdef USE_ROCM
-      TORCH_INTERNAL_ASSERT(false, "expandable segment with fabric handle not supported");
+      TORCH_INTERNAL_ASSERT(
+          false, "expandable segment with fabric handle not supported");
 #else
       for (auto i : c10::irange(header.num_handles)) {
         (void)i;
@@ -727,8 +730,7 @@ struct ExpandableSegment {
     forEachAllocatedRange(
         [&](size_t begin, size_t end) { unmapHandles(begin, end); });
 #ifdef USE_ROCM
-    C10_HIP_CHECK(hipMemAddressFree(
-        ptr_, segment_size_ * max_handles_));
+    C10_HIP_CHECK(hipMemAddressFree(ptr_, segment_size_ * max_handles_));
 #else
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressFree_(
         ptr_, segment_size_ * max_handles_));
@@ -796,8 +798,7 @@ struct ExpandableSegment {
       Handle h = handles_.at(i).value();
       handles_.at(i) = std::nullopt;
 #ifdef USE_ROCM
-      C10_HIP_CHECK(hipMemUnmap(
-          ptr_ + segment_size_ * i, segment_size_));
+      C10_HIP_CHECK(hipMemUnmap(ptr_ + segment_size_ * i, segment_size_));
 #else
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemUnmap_(
           ptr_ + segment_size_ * i, segment_size_));
