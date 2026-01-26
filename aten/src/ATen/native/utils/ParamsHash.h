@@ -63,6 +63,9 @@ struct ParamsWrapper {
     return *this;
   }
 
+  ParamsWrapper(ParamsWrapper&& other) = delete;
+  ParamsWrapper& operator=(ParamsWrapper&& other) = delete;
+
   inline friend bool operator==(
       const ParamsWrapper& lhs,
       const ParamsWrapper& rhs) noexcept {
