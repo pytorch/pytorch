@@ -416,6 +416,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
         if (
             name == "__subclasses__"
             and len(args) == 0
@@ -442,10 +444,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value != args[0].value)
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
-            return variables.BuiltinVariable(dict).call_method(tx, name, args, kwargs)
+            return SourcelessBuilder.create(tx, dict).call_method(tx, name, args, kwargs)
         elif issubclass(self.value, (set, frozenset)) and name != "__new__":
             # __new__ is handled below
-            return variables.BuiltinVariable(set).call_method(tx, name, args, kwargs)
+            return SourcelessBuilder.create(tx, set).call_method(tx, name, args, kwargs)
         elif (
             name == "__new__"
             and self.value is collections.OrderedDict
@@ -543,7 +545,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
+            return SourcelessBuilder.create(tx, dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
             maxlen = variables.ConstantVariable.create(None)
 
@@ -725,7 +727,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 ] + args[1:]
 
             cm_obj = tx.output.side_effects.track_new_user_defined_object(
-                variables.BuiltinVariable(object),
+                SourcelessBuilder.create(tx, object),
                 self,
                 arg_new,  # type: ignore[arg-type]
             )
@@ -781,7 +783,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             from .lists import SizeVariable
 
-            tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
+            tup = SourcelessBuilder.create(tx, tuple).call_function(tx, args, kwargs)
             return SizeVariable(tup.items)  # type: ignore[missing-attribute]
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
@@ -821,7 +823,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             kwargs.update(default_kwargs)
 
             var = tx.output.side_effects.track_new_user_defined_object(
-                variables.BuiltinVariable(object),
+                SourcelessBuilder.create(tx, object),
                 self,
                 args,  # type: ignore[arg-type]
             )
@@ -1301,8 +1303,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().unpack_var_sequence(tx)
 
     def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+        from .builder import SourcelessBuilder
+
         try:
-            variables.BuiltinVariable(iter).call_function(tx, [self], {})
+            SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
             return True
         except ObservedTypeError:
             handle_observed_exception(tx)
@@ -1311,8 +1315,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def force_unpack_var_sequence(
         self, tx: "InstructionTranslator"
     ) -> list[VariableTracker]:
+        from .builder import SourcelessBuilder
+
         result = []
-        iter_ = variables.BuiltinVariable(iter).call_function(tx, [self], {})
+        iter_ = SourcelessBuilder.create(tx, iter).call_function(tx, [self], {})
 
         while True:
             try:
@@ -2417,6 +2423,8 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def __init__(
         self, value: object, set_vt: SetVariable | None = None, **kwargs: Any
     ) -> None:
+        from .builder import SourcelessBuilder
+
         tx = kwargs.pop("tx", None)
         super().__init__(value, **kwargs)
 
@@ -2437,7 +2445,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 init_args = kwargs.get("init_args", {})
                 if tx is None:
                     tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
-                self._set_vt = variables.BuiltinVariable(python_type).call_function(  # type: ignore[assignment]
+                self._set_vt = SourcelessBuilder.create(tx, python_type).call_function(  # type: ignore[assignment]
                     tx, init_args, {}
                 )
         else:
