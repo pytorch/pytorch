@@ -222,7 +222,6 @@ struct ReduceJitOp {
       value = thread_reduce<${output_vec_size}>(input_slice);
     }
 
-    
     if (config.should_block_x_reduce()) {
       value = block_x_reduce<${output_vec_size}>(value, shared_memory);
     }
