@@ -55,10 +55,18 @@ from torch._logging.scribe import open_source_signpost
 
 
 try:
-    from torch._dynamo.utils import clone_inputs, graph_break_reasons
+    from torch._dynamo.utils import (
+        clone_inputs,
+        copy_dynamo_tensor_attributes,
+        graph_break_reasons,
+    )
     from torch._inductor.utils import fresh_cache
 except ImportError:
-    from _dynamo.utils import clone_inputs, graph_break_reasons
+    from _dynamo.utils import (
+        clone_inputs,
+        copy_dynamo_tensor_attributes,
+        graph_break_reasons,
+    )
     from _inductor.utils import fresh_cache
 
 import torch._functorch.config
@@ -1665,12 +1673,15 @@ def cast_to(dtype, model, inputs):
     else:
         model = model.to(dtype)
 
-    inputs = tree_map(
-        lambda x: x.to(dtype)
-        if isinstance(x, torch.Tensor) and x.is_floating_point()
-        else x,
-        inputs,
-    )
+    def cast_and_preserve_markings(x):
+        if not isinstance(x, torch.Tensor) or not x.is_floating_point():
+            return x
+        y = x.to(dtype)
+        # Preserve dynamic/unbacked markings
+        copy_dynamo_tensor_attributes(x, y)
+        return y
+
+    inputs = tree_map(cast_and_preserve_markings, inputs)
     return model, inputs
 
 
