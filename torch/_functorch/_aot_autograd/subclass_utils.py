@@ -48,6 +48,29 @@ zip = strict_zip
 T = TypeVar("T", bound=torch.Tensor)
 
 
+def extract_runtime_device_meshes(
+    args: list[Any],
+) -> Optional["torch.distributed.DeviceMesh"]:
+    """
+    Extract a live DeviceMesh from input DTensors.
+
+    This is used in the "device mesh in, device mesh out" pattern for
+    precompilation: when loading a precompiled artifact, the output DTensors
+    should use the live DeviceMesh from the runtime inputs rather than the
+    stale DeviceMesh that was serialized during precompilation.
+
+    For simplicity, we assume all DTensor inputs share the same DeviceMesh
+    (which is the common case in distributed training). If multiple meshes
+    are found, we return the first one. If no DTensors are found, returns None.
+    """
+    from torch.distributed.tensor import DTensor
+
+    for arg in args:
+        if isinstance(arg, DTensor):
+            return arg.device_mesh
+    return None
+
+
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     args_flattened = pytree.arg_tree_leaves(*args)
     any_subclass_args = any(
@@ -417,6 +440,7 @@ def wrap_tensor_subclasses(
     included_subclass_symints: bool = False,
     is_runtime: bool = False,
     make_subclass_override: Optional[Callable] = None,
+    runtime_mesh: Optional["torch.distributed.DeviceMesh"] = None,
 ) -> tuple[Any, ...]:
     wrapped_args = []
     num_args_tallied = 0
@@ -434,7 +458,9 @@ def wrap_tensor_subclasses(
                 )
             else:
                 wrapped_args.append(
-                    subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
+                    subclass_meta.creation_fn(
+                        unwrapped_args, is_runtime=is_runtime, runtime_mesh=runtime_mesh
+                    )
                 )
             num_args_tallied += subclass_meta.arg_count
 
