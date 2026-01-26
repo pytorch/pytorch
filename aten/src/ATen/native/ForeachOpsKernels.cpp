@@ -42,6 +42,7 @@
 #include <ATen/ops/_foreach_neg_native.h>
 #include <ATen/ops/_foreach_norm_native.h>
 #include <ATen/ops/_foreach_pow_native.h>
+#include <ATen/ops/_foreach_powsum_native.h>
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
 #include <ATen/ops/_foreach_rsqrt_native.h>
@@ -56,6 +57,7 @@
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
 #include <ATen/ops/copy.h>
+#include <ATen/ops/linalg__powsum.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max.h>
 #include <ATen/ops/maximum.h>
@@ -476,6 +478,19 @@ std::vector<Tensor> foreach_tensor_norm_slow(
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
     result.emplace_back(at::linalg_vector_norm(t, ord, {}, false, dtype));
+  }
+  return result;
+}
+
+std::vector<Tensor> foreach_tensor_powsum_slow(
+    TensorList tensors,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype) {
+  check_foreach_api_restrictions(tensors);
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    result.emplace_back(at::linalg__powsum(t, ord, {}, false, dtype));
   }
   return result;
 }
