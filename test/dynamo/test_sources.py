@@ -9,6 +9,7 @@ from torch._dynamo.source import (
     GlobalSource,
     is_from_local_source,
     LocalSource,
+    MethodCallSource,
 )
 
 
@@ -26,6 +27,34 @@ class SourceTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(is_from_local_source(attr_x_a))
         self.assertEqual(is_from_local_source(attr_y_b), False)
+
+    def test_method_call_source(self):
+        """
+        Test MethodCallSource correctly tracks method call results and generates
+        proper source names for guard generation.
+        """
+        x_src = LocalSource("x")
+        y_src = GlobalSource("y")
+
+        # Test MethodCallSource with no args
+        method_src_no_args = MethodCallSource(x_src, "get_value")
+        self.assertEqual(method_src_no_args.name, "L['x'].get_value()")
+        self.assertTrue(is_from_local_source(method_src_no_args))
+
+        # Test MethodCallSource with args
+        method_src_with_args = MethodCallSource(x_src, "lookup", ("key", 42))
+        self.assertEqual(method_src_with_args.name, "L['x'].lookup('key', 42)")
+        self.assertTrue(is_from_local_source(method_src_with_args))
+
+        # Test MethodCallSource on global source
+        global_method = MethodCallSource(y_src, "config")
+        self.assertEqual(global_method.name, "G['y'].config()")
+        self.assertFalse(is_from_local_source(global_method))
+
+        # Test chained sources - AttrSource on MethodCallSource
+        attr_on_method = AttrSource(method_src_no_args, "result")
+        self.assertEqual(attr_on_method.name, "L['x'].get_value().result")
+        self.assertTrue(is_from_local_source(attr_on_method))
 
     def test_property_closure(self):
         def external_property():
