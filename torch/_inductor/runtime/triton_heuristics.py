@@ -2631,6 +2631,7 @@ def _handle_combo_kernel_per_subkernel_blocks(
     combined_kwargs: dict[str, int] = {}
     all_num_warps: list[int] = []
     all_num_stages: list[int] = []
+    unique_warp_stage_pairs: OrderedSet[tuple[int, int]] = OrderedSet()
 
     for i in range(num_kernels):
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
@@ -2679,13 +2680,17 @@ def _handle_combo_kernel_per_subkernel_blocks(
 
         all_num_warps.append(cfg.num_warps)
         all_num_stages.append(cfg.num_stages)
+        unique_warp_stage_pairs.add((cfg.num_warps, cfg.num_stages))
+
+    unique_warp_stage_pairs.add((max(all_num_warps), max(all_num_stages)))
 
     return [
         triton.Config(
             combined_kwargs,
-            num_warps=max(all_num_warps),
-            num_stages=max(all_num_stages),
+            num_warps=num_warps,
+            num_stages=num_stages,
         )
+        for num_warps, num_stages in unique_warp_stage_pairs
     ]
 
 
