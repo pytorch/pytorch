@@ -222,11 +222,13 @@ struct ReduceJitOp {
       value = thread_reduce<${output_vec_size}>(input_slice);
     }
 
-    if (config.should_block_y_reduce()) {
-      value = block_y_reduce<${output_vec_size}>(value, shared_memory);
-    }
+    
     if (config.should_block_x_reduce()) {
       value = block_x_reduce<${output_vec_size}>(value, shared_memory);
+    }
+
+    if (config.should_block_y_reduce()) {
+      value = block_y_reduce<${output_vec_size}>(value, shared_memory);
     }
 
     using out_ptr_vec_t = Array<out_scalar_t*, ${output_vec_size}>;
