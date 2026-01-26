@@ -1336,6 +1336,79 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         )
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
 
+    @with_comms
+    def test_ordered_all_gather_with_flattening(self):
+        """Test that flattened all_gather produces correct results with non-ascending shard order.
+
+        This test verifies that when we have a tensor sharded with non-ascending order
+        and redistribute to fully replicated, the flattened all_gather optimization
+        correctly avoids flattening (which would produce wrong results).
+        """
+        torch.manual_seed(42)
+
+        # Create a 3D mesh with all flattened submeshes
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("A", "B", "C")
+        )
+        mesh["A", "B"]._flatten("A_B")
+        mesh["A", "C"]._flatten("A_C")
+        mesh["B", "C"]._flatten("B_C")
+        mesh["A", "B", "C"]._flatten("A_B_C")
+
+        input_data = torch.randn((8, 8, 8), device=self.device_type)
+
+        import torch.distributed as dist
+
+        rank = dist.get_rank()
+
+        # Test case 1: ascending order (baseline - can use flattened all_gather)
+        ascending_src = _distribute_tensor(
+            input_data.clone(),
+            mesh,
+            [Shard(0), Shard(0), Shard(0)],
+            shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+        )
+        with DebugMode(record_torchfunction=False) as debug_mode_asc:
+            ascending_result = redistribute(
+                ascending_src,
+                mesh,
+                [Replicate(), Replicate(), Replicate()],
+                shard_order=(),
+            )
+        trace_asc = self._extract_redistribute_trace_from_debug_mode(
+            debug_mode_asc.debug_string()
+        )
+
+        # Test case 2: non-ascending order (1, 0, 2) - should NOT use flattened all_gather
+        non_ascending_src = _distribute_tensor(
+            input_data.clone(),
+            mesh,
+            [Shard(0), Shard(0), Shard(0)],
+            shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+        )
+        with DebugMode(record_torchfunction=False) as debug_mode_non_asc:
+            non_ascending_result = redistribute(
+                non_ascending_src,
+                mesh,
+                [Replicate(), Replicate(), Replicate()],
+                shard_order=(),
+            )
+        trace_non_asc = self._extract_redistribute_trace_from_debug_mode(
+            debug_mode_non_asc.debug_string()
+        )
+
+        # Print traces for debugging
+        if rank == 0:
+            print(f"\nAscending order trace: {trace_asc}")
+            print(f"Non-ascending order trace: {trace_non_asc}")
+
+        # Both should produce the same fully replicated tensor
+        self.assertEqual(ascending_result.to_local(), non_ascending_result.to_local())
+
+        # Verify the results are correct by comparing with the original input
+        self.assertEqual(ascending_result.to_local(), input_data)
+        self.assertEqual(non_ascending_result.to_local(), input_data)
+
 
 class DistributeWithStridedShardTest(DTensorTestBase):
     @property

@@ -255,7 +255,9 @@ def _warn_flatten_optimization_not_possible(
             "the mesh dim sizes that would need to be flattened for the optimization to work, it can not be optimized.",
         )
     elif reason == "non_ascending_mesh_dims":
-        reason_msg = "it is not possible to merge non-ascending order reduce_scatters."
+        reason_msg = (
+            f"it is not possible to merge non-ascending order {comm_type} operations."
+        )
     else:
         raise AssertionError(f"Unexpected reason: {reason}")
 
@@ -269,6 +271,7 @@ def _optimize_transform_infos(
     device_mesh: DeviceMesh,
     src_placements: tuple[Placement, ...],
     dst_placements: tuple[Placement, ...],
+    src_shard_order: ShardOrder | None = None,
 ) -> list[_TransformInfo | _FlattenedTransformInfo]:
     """
     Optimize transform infos by merging consecutive same-type collectives into
@@ -360,17 +363,35 @@ def _optimize_transform_infos(
             for info in infos
         )
         mesh_dims = tuple(info.mesh_dim for info in infos)
-        # For reduce_scatter, the order of mesh dims matters for correctness.
-        # Flattened meshes only exist for ascending dim order, so if transforms
-        # are in different order, we can't flatten reduce_scatter correctly.
-        # (For all_gather and all_reduce, order doesn't affect the final result.)
-        # TODO: if DeviceMesh supports flattening meshes in non-ascending order, we should make 2 changes here
-        # (1) ordered reduce scatter can be flattened if an appropriate mesh is found
-        # (2) all_gather, all_reduce do not care about order, and can use any flattened mesh that includes
-        # the right set of dims, not just the one with the same sorting as their transform_infos
         sorted_mesh_dims = tuple(sorted(mesh_dims))
-        if comm_type == "reduce_scatter" and mesh_dims != sorted_mesh_dims:
-            return None, "non_ascending_mesh_dims"
+
+        # For reduce_scatter and all_gather, order matters for correctness.
+        # Flattened meshes only exist for ascending dim order.
+        if comm_type == "reduce_scatter":
+            # For reduce_scatter: the transform order determines the operation sequence.
+            # If transforms are in order (1, 0) but flattened mesh is (0, 1), we can't flatten.
+            if mesh_dims != sorted_mesh_dims:
+                return None, "non_ascending_mesh_dims"
+        elif comm_type == "all_gather":
+            # For all_gather: the source shard order determines data layout.
+            # The greedy algorithm generates transforms in reversed order (inner to outer),
+            # but this is fine as long as the shard order is ascending.
+            # We need to check the actual shard order, not the transform order.
+            has_non_default_order = False
+            if src_shard_order:
+                # Find the shard order entry for the affected tensor dimension
+                src, _ = first_placements
+                if isinstance(src, Shard):
+                    affected_tensor_dim = src.dim
+                    for entry in src_shard_order:
+                        if entry.tensor_dim == affected_tensor_dim:
+                            # Check if the mesh dims in the shard order are ascending
+                            order_mesh_dims = entry.mesh_dims
+                            if order_mesh_dims != tuple(sorted(order_mesh_dims)):
+                                has_non_default_order = True
+                            break
+            if has_non_default_order:
+                return None, "non_ascending_mesh_dims"
         # Use sorted dims for mesh lookup (required by DeviceMesh API)
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, sorted_mesh_dims)
         if flattened_mesh is None:
@@ -1372,7 +1393,11 @@ def redistribute_local_tensor(
 
     # Optimize by grouping same-type collectives into flattened operations
     optimized_transform_infos = _optimize_transform_infos(
-        transform_infos, device_mesh, current_spec.placements, target_spec.placements
+        transform_infos,
+        device_mesh,
+        current_spec.placements,
+        target_spec.placements,
+        current_spec.shard_order,
     )
 
     debug_mode = get_active_debug_mode()
