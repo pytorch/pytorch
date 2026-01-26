@@ -104,6 +104,7 @@ class FxNetAccFusionsFinder:
         self.module = module
         self.nodes = list(module.graph.nodes)
         self.acc_nodes = acc_nodes
+        self.node_index = {node: i for i, node in enumerate(self.nodes)}
 
     @dataclass
     class FusionGroup:
@@ -160,7 +161,7 @@ class FxNetAccFusionsFinder:
 
             # If the node has smaller idx, it's already an upstream node of the fusion
             # group. We don't need to check it anymore.
-            if self.nodes.index(arg) < fusion_group.top_node_idx:
+            if self.node_index[arg] < fusion_group.top_node_idx:
                 continue
 
             # If the node is in the fusion group, return True.
@@ -190,7 +191,7 @@ class FxNetAccFusionsFinder:
                 continue
 
             fusion_group: FxNetAccFusionsFinder.FusionGroup = self.FusionGroup(
-                top_node_idx=self.nodes.index(node),
+                top_node_idx=self.node_index[node],
                 nodes={node},
                 inputs=set(node.all_input_nodes),
                 nodes_need_process={node},
@@ -229,7 +230,7 @@ class FxNetAccFusionsFinder:
 
                     fusion_group.add_node(arg)
                     fusion_group.top_node_idx = min(
-                        fusion_group.top_node_idx, self.nodes.index(arg)
+                        fusion_group.top_node_idx, self.node_index[arg]
                     )
                     self.recursive_add_node(
                         fusion_group,
