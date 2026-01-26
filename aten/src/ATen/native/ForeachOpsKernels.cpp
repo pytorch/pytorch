@@ -1,4 +1,5 @@
 #include <vector>
+#include <limits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
@@ -472,6 +473,29 @@ std::vector<Tensor> foreach_tensor_norm_slow(
     const Scalar& ord,
     std::optional<ScalarType> dtype) {
   check_foreach_api_restrictions(tensors);
+  
+  // Extract ord value to check for infinity
+  const auto p = [&]() -> double {
+    if (ord.isIntegral(false)) {
+      return ord.to<int64_t>();
+    } else if (ord.isFloatingPoint()) {
+      return ord.to<double>();
+    } else {
+      TORCH_CHECK(
+          false, "foreach_tensor_norm_slow expects ord to be integer or float");
+    }
+  }();
+  
+  // If the tensor is empty and norm == infty, we cannot compute the norm
+  // because the operation does not have an identity
+  if (p == std::numeric_limits<double>::infinity()) {
+    for (const auto& t : tensors) {
+      TORCH_CHECK(
+          t.numel() > 0,
+          "_foreach_norm cannot compute the infinity norm on an empty tensor because the operation does not have an identity");
+    }
+  }
+  
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
