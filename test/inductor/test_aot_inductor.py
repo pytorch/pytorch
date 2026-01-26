@@ -2888,6 +2888,7 @@ class AOTInductorTestsTemplate:
         torch._export.aot_compile(Model(), example_inputs)
 
     @skipCUDAIf(True, "Test for x86 backend")
+    @unittest.skipIf(sys.platform == "darwin", "Skip MacOS")
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
     def test_buffer_mutation_and_force_mmap_weights(self):
         """
@@ -2900,25 +2901,7 @@ class AOTInductorTestsTemplate:
             _generate_qdq_linear_module,
         )
 
-        # class Model(torch.nn.Module):
-        #     def __init__(self):
-        #         super().__init__()
-        #         N, K = 15, 16
-        #         self.linear = torch.nn.Linear(K, N)
-        #         self.w_scales, self.w_zps = torch.ops.quantized_decomposed.choose_qparams_per_token(self.linear.weight, torch.int8)
-        #         # Weight zero points must be int64 to reproduce the issue
-        #         self.w_scales, self.w_zps = self.w_scales.detach().to(torch.float32), self.w_zps.detach().to(torch.int64)
-        #         self.qw = torch.ops.quantized_decomposed.quantize_per_channel.default(self.linear.weight, self.w_scales, self.w_zps, 0, -128, 127, torch.int8)
-        #     def forward(self, x, x_scale, x_zp):
-        #         dqw = torch.ops.quantized_decomposed.dequantize_per_channel.default(self.qw, self.w_scales, self.w_zps, 0, -128, 127, torch.int8)
-        #         quantize_per_tensor_default = torch.ops.quantized_decomposed.quantize_per_tensor.default(x, x_scale, x_zp, 0, 127, torch.uint8)
-        #         dequantize_per_tensor_default = torch.ops.quantized_decomposed.dequantize_per_tensor.default(quantize_per_tensor_default, x_scale, x_zp, 0, 127, torch.uint8)
-        #         linear = torch.ops.aten.linear.default(dequantize_per_tensor_default, dqw, self.linear.bias)
-        #         return linear
-        # x = torch.randn(32, 16)
-        # x_scale, x_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(x, 0, 127, torch.finfo(torch.float32).eps, torch.uint8)
         example_inputs = (torch.randn(32, 16),)
-        # model = Model().eval()
         model = _generate_qdq_linear_module(
             N=15, K=16, bias=True, example_input=example_inputs[0]
         )
