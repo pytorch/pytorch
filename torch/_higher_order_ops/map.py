@@ -210,9 +210,31 @@ class MapAutogradOp(torch.autograd.Function):
         return None, None, *fill_none_with_masks(grads, grads_tensor_masks)
 
 
+def _broadcast_to_batch(output, batch_size):
+    """Expand each tensor in output pytree to include batch dimension.
+
+    Note: Although outputs are flattened in the compiled path (via torch.compile),
+    users may call map_impl directly with pytree outputs, so we support pytrees
+    for backward compatibility.
+    """
+
+    def expand_with_batch(t):
+        if t is None:
+            return None
+        if isinstance(t, torch.Tensor):
+            return t.unsqueeze(0).expand(batch_size, *t.shape).clone()
+        return t
+
+    return pytree.tree_map(expand_with_batch, output)
+
+
 def trace_map(proxy_mode, func_overload, f, xs, pos_args):
+    from torch._higher_order_ops.utils import first_slice_copy
+
     with disable_proxy_modes_tracing():
-        example_input = _unstack_pytree(xs)[0]
+        # Use first_slice_copy instead of _unstack_pytree to avoid
+        # iterating over batch dim, which would guard on symbolic sizes.
+        example_input = pytree.tree_map(first_slice_copy, xs)
 
         body_graph = f
 
@@ -254,20 +276,38 @@ def map_proxy_torch_dispatch_mode(mode, f, xs, args):
 
 @map_impl.py_impl(FakeTensorMode)
 def map_fake_tensor_mode(mode, f, xs, args):
+    from torch._higher_order_ops.utils import first_slice_copy
+
     with mode:
-        return map_dense(f, xs, args)
+        # Use first_slice_copy instead of _unstack_pytree to avoid
+        # iterating over batch dim, which would guard on symbolic sizes.
+        first_row = pytree.tree_map(first_slice_copy, xs)
+        example_output = f(*first_row, *args)
+
+        flat_xs, _ = pytree.tree_flatten(xs)
+        batch_size = flat_xs[0].shape[0]
+
+        return _broadcast_to_batch(example_output, batch_size)
 
 
 @map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, xs, pos_args):
-    from torch._higher_order_ops.utils import _check_alias_and_mutation
+    from torch._higher_order_ops.utils import (
+        _check_alias_and_mutation,
+        first_slice_copy,
+    )
 
     unwrapped_xs = ctx.unwrap_tensors(xs)
     unwrapped_args = ctx.unwrap_tensors(pos_args)
     wrapped_fn = ctx.functionalize(_maybe_run_with_interpreter(f))
 
     with ctx.redispatch_to_next():
-        example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
+        # Use first_slice_copy instead of _unstack_pytree to avoid
+        # iterating over batch dim, which would guard on symbolic sizes.
+        example_inputs = (
+            *pytree.tree_map(first_slice_copy, unwrapped_xs),
+            *unwrapped_args,
+        )
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         _check_alias_and_mutation(f, example_inputs, "map", pre_dispatch)
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)

@@ -6889,6 +6889,42 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         self._test_export_same_as_eager(list_tensor_map, inps)
 
+    def test_map_dynamic_batch(self):
+        # Test that map works with dynamic batch dimension
+        class Module(torch.nn.Module):
+            def forward(self, xs):
+                def body(x):
+                    return x + 1
+
+                return torch._higher_order_ops.map(body, xs)
+
+        mod = Module()
+        inps = (torch.ones(3, 4),)
+        dim_batch = torch.export.Dim("batch", min=1)
+        ep = export(mod, inps, dynamic_shapes={"xs": {0: dim_batch}})
+
+        self.assertExpectedInline(
+            normalize_gm(ep.module().print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, xs):
+        xs: "f32[s83, 4]";
+
+        xs, = fx_pytree.tree_flatten_spec(([xs], {}), self._in_spec)
+        _guards_fn = self._guards_fn(xs);  _guards_fn = None
+
+        body_graph_0 = self.body_graph_0
+        map_impl = torch.ops.higher_order.map_impl(body_graph_0, [xs], []);  body_graph_0 = xs = None
+        getitem: "f32[s83, 4]" = map_impl[0];  map_impl = None
+        return pytree.tree_unflatten((getitem,), self._out_spec)
+
+    class body_graph_0(torch.nn.Module):
+        def forward(self, xs: "f32[4]"):
+            add: "f32[4]" = torch.ops.aten.add.Tensor(xs, 1);  xs = None
+            return (add,)
+""",
+        )
+
     @unittest.expectedFailure
     def test_crop_like(self):
         # https://fb.workplace.com/groups/1405155842844877/posts/8195050017188725/
