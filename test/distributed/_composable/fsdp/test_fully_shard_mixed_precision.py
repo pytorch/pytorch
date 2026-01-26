@@ -597,28 +597,133 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             loss.backward()
 
     @skip_if_lt_x_gpu(1)
-    def test_dataclass_input(self):
+    def test_dataclass_input_output(self):
+        from unittest.mock import patch
+
+        from torch.distributed._composable_state import _get_module_state
+
         @dataclasses.dataclass
         class Input:
             x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Output:
+            x: torch.Tensor
+            y: torch.Tensor
+
+        @dataclasses.dataclass
+        class Scale:
+            factor: torch.Tensor
 
         class Model(nn.Module):
             def __init__(self, *args, **kwargs) -> None:
                 super().__init__(*args, **kwargs)
                 self._layer = nn.Linear(10, 10)
 
-            def forward(self, input: Input):
-                return self._layer(input.x)
+            def forward(self, input: Input, *, scale: Scale | None = None):
+                x = self._layer(input.x)
+                y = self._layer(input.y)
+                if scale is not None:
+                    x = x * scale.factor
+                    y = y * scale.factor
+                return Output(x=x, y=y)
 
-        mp_policy = MixedPrecisionPolicy(
-            torch.bfloat16, torch.bfloat16, torch.bfloat16, True
-        )
-        model = Model()
-        inp = Input(torch.randn(2, 10).to(device_type))
+        class TensorModel(nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self._layer = nn.Linear(10, 10)
 
-        fully_shard(model, mp_policy=mp_policy)
-        loss = model(inp).sum()
-        loss.backward()
+            def forward(self, x: torch.Tensor, *, scale: torch.Tensor | None = None):
+                out = self._layer(x)
+                if scale is not None:
+                    out = out * scale
+                return out
+
+        # Test with different MixedPrecisionPolicy configurations
+        mp_policies = [
+            MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.bfloat16,
+            ),
+            MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                reduce_dtype=torch.float32,
+            ),
+        ]
+
+        for mp_policy in mp_policies:
+            # Test with normal torch.Tensor as arg
+            tensor_model = TensorModel()
+            fully_shard(tensor_model, mp_policy=mp_policy)
+            fsdp_state = _get_module_state(tensor_model)
+            x = torch.randn(10, 10, device=device_type, requires_grad=True)
+            with patch.object(
+                fsdp_state, "_pre_backward", wraps=fsdp_state._pre_backward
+            ) as mock_pre_backward:
+                loss = tensor_model(x).sum()
+                loss.backward()
+                mock_pre_backward.assert_called()
+
+            # Test with normal torch.Tensor as both arg and kwarg
+            tensor_model.zero_grad()
+            x = torch.randn(10, 10, device=device_type, requires_grad=True)
+            scale = torch.randn(10, 10, device=device_type, requires_grad=True)
+            with patch.object(
+                fsdp_state, "_pre_backward", wraps=fsdp_state._pre_backward
+            ) as mock_pre_backward:
+                loss = tensor_model(x, scale=scale).sum()
+                loss.backward()
+                mock_pre_backward.assert_called()
+
+            # Test with dataclass as positional arg only
+            model = nn.Sequential(*[Model(), Model()])
+            inp = Input(
+                x=torch.randn(10, 10, device=device_type, requires_grad=True),
+                y=torch.randn(10, 10, device=device_type, requires_grad=True),
+            )
+
+            for layer in model:
+                fully_shard(layer, mp_policy=mp_policy, reshard_after_forward=True)
+            fully_shard(model, mp_policy=mp_policy, reshard_after_forward=True)
+
+            # Patch _pre_backward on all FSDP states
+            layer0_state = _get_module_state(model[0])
+            layer1_state = _get_module_state(model[1])
+            root_state = _get_module_state(model)
+            with (
+                patch.object(
+                    layer0_state, "_pre_backward", wraps=layer0_state._pre_backward
+                ) as layer0_mock,
+                patch.object(
+                    layer1_state, "_pre_backward", wraps=layer1_state._pre_backward
+                ) as layer1_mock,
+                patch.object(
+                    root_state, "_pre_backward", wraps=root_state._pre_backward
+                ) as root_mock,
+            ):
+                output = model(inp)
+                loss = output.x.sum() + output.y.sum()
+                loss.backward()
+                layer0_mock.assert_called()
+                layer1_mock.assert_called()
+                root_mock.assert_called()
+
+            # Test with dataclass as both positional arg and kwarg
+            inp = Input(
+                x=torch.randn(10, 10, device=device_type, requires_grad=True),
+                y=torch.randn(10, 10, device=device_type, requires_grad=True),
+            )
+            scale = Scale(
+                factor=torch.randn(10, 10, device=device_type, requires_grad=True)
+            )
+            with patch.object(
+                layer0_state, "_pre_backward", wraps=layer0_state._pre_backward
+            ) as layer0_mock:
+                output = model[0](inp, scale=scale)
+                loss = output.x.sum() + output.y.sum()
+                loss.backward()
+                layer0_mock.assert_called()
 
 
 if __name__ == "__main__":
