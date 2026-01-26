@@ -315,25 +315,86 @@ __device__ __forceinline__ void countRadixLoop(
     index_t loopBound, // the upper bound of the loop.
     DataAccessor&& getData){ // a function that returns the input data value at index i. It could potentially be a global memory accessor or a shared memory accessor.
 
+  // the kernel consists of two parts:
+  // 1. a vectorized part that reads 4 values at a time
+  // 2. a non-vectorized part that reads 1 value at a time
+
+  // we vectorize the loop by 4.
+  constexpr index_t unroll_factor = 4;
+  // number of elements to be read in a vectorized fashion.
+  index_t vectorized_segment = (loopBound / (blockDim.x * unroll_factor)) * blockDim.x * unroll_factor;
+
+  // loop over the vectorized segment.
+  for (index_t i = threadIdx.x * unroll_factor; i < vectorized_segment; i += blockDim.x * unroll_factor) {
+
+    // read 4 values at a time.
+    scalar_t v0 = getData(i);
+    scalar_t v1 = getData(i + 1);
+    scalar_t v2 = getData(i + 2);
+    scalar_t v3 = getData(i + 3);
+
+    // convert the values to bitwise_t.
+    bitwise_t val0 = TopKTypeConfig<scalar_t>::convert(v0);
+    bitwise_t val1 = TopKTypeConfig<scalar_t>::convert(v1);
+    bitwise_t val2 = TopKTypeConfig<scalar_t>::convert(v2);
+    bitwise_t val3 = TopKTypeConfig<scalar_t>::convert(v3);
+
+    // check if the values match the desired pattern.
+    bool hasVal0 = ((val0 & desiredMask) == desired);
+    bool hasVal1 = ((val1 & desiredMask) == desired);
+    bool hasVal2 = ((val2 & desiredMask) == desired);
+    bool hasVal3 = ((val3 & desiredMask) == desired);
+
+    // get the bits [radixDigitPos, radixDigitPos+RADIX_BITS-1] of the values.
+    bitwise_t digitInRadix0 = at::cuda::Bitfield<bitwise_t>::getBitfield(val0, radixDigitPos, RadixBits);
+    bitwise_t digitInRadix1 = at::cuda::Bitfield<bitwise_t>::getBitfield(val1, radixDigitPos, RadixBits);
+    bitwise_t digitInRadix2 = at::cuda::Bitfield<bitwise_t>::getBitfield(val2, radixDigitPos, RadixBits);
+    bitwise_t digitInRadix3 = at::cuda::Bitfield<bitwise_t>::getBitfield(val3, radixDigitPos, RadixBits);
+
+    // counting across the warp.
+    #pragma unroll
+    for (uint32_t j = 0; j < RadixSize; ++j) {
+
+      // checking pattern match & digit match.
+      bool vote0 = hasVal0 && (digitInRadix0 == j);
+      bool vote1 = hasVal1 && (digitInRadix1 == j);
+      bool vote2 = hasVal2 && (digitInRadix2 == j);
+      bool vote3 = hasVal3 && (digitInRadix3 == j);
+      
+      // how many threads in this warp found digitInRadix == j while matching the desired pattern?
+      counts[j] += __popcll(WARP_BALLOT(vote0))
+                +  __popcll(WARP_BALLOT(vote1))
+                +  __popcll(WARP_BALLOT(vote2)) 
+                +  __popcll(WARP_BALLOT(vote3));
+    }
+  }
+
+  // non-vectorized part. Loop over the remaining elements
+
   // prefetching. This is specifically useful for global memory access.
-  scalar_t v      = threadIdx.x < loopBound ? getData(threadIdx.x) : static_cast<scalar_t>(0);
+  scalar_t v      = vectorized_segment + threadIdx.x < loopBound ? getData(vectorized_segment + threadIdx.x) : static_cast<scalar_t>(0);
   // we pad loopbound to round_up(loopbound, warpSize) to make sure all threads in the warp participate in the ballot.
-  for (index_t i = threadIdx.x; i < round_up(static_cast<index_t>(loopBound), static_cast<index_t>(warpSize)); i += blockDim.x) {
-    scalar_t v_next = i + blockDim.x < loopBound ? getData(i + blockDim.x) : static_cast<scalar_t>(0); // prefetch the next value.
+  for (index_t i = vectorized_segment + threadIdx.x; i < round_up(static_cast<index_t>(loopBound), static_cast<index_t>(warpSize)); i += blockDim.x) {
+    // prefetch the next value.
+    scalar_t v_next = i + blockDim.x < loopBound ? getData(i + blockDim.x) : static_cast<scalar_t>(0);
 
     bool hasVal = false;
     bitwise_t digitInRadix = static_cast<bitwise_t>(0);
     if (i < loopBound) {
       bitwise_t val = TopKTypeConfig<scalar_t>::convert(v);
-      hasVal = ((val & desiredMask) == desired); // true if bit pattern matches the pattern we have already discovered for topk value v.
-      digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(val, radixDigitPos, RadixBits); // get the bits [radixDigitPos, radixDigitPos+RADIX_BITS-1] of the value v.
+      // check if bit pattern matches the pattern we have already discovered for topk value v.
+      hasVal = ((val & desiredMask) == desired);
+      // get the bits [radixDigitPos, radixDigitPos+RADIX_BITS-1] of the value v.
+      digitInRadix = at::cuda::Bitfield<bitwise_t>::getBitfield(val, radixDigitPos, RadixBits);
     }
 
     // counting across the warp.
     #pragma unroll
     for (uint32_t j = 0; j < RadixSize; ++j) {
+      // checking pattern match & digit match.
       bool vote = hasVal && (digitInRadix == j);
-      counts[j] += __popcll(WARP_BALLOT(vote)); // how many threads in this warp found digitInRadix == j while matching the desired pattern?
+      // how many threads in this warp found digitInRadix == j while matching the desired pattern?
+      counts[j] += __popcll(WARP_BALLOT(vote));
     }
 
     v = v_next; // closing the prefetching loop.
