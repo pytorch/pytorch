@@ -3,6 +3,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/c/macros.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_deprecated.h>
+#include <torch/csrc/stable/version.h>
 
 // This header defines a stable C API for certain ATen functionality in
 // libtorch. The AOTInductor compiled model.so will only refer to this header
@@ -337,6 +338,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob_v2(
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 // Like v2, but with an optional deleter callback that will be invoked when
 // the tensor's storage is deallocated. The deleter receives the data pointer.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob_v3(
@@ -353,6 +355,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob_v3(
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size,
     void (*deleter)(void*)); // optional deleter callback
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 
 // This function will create a new uninitialized tensor object
 // and its pointer is returned through *ret.

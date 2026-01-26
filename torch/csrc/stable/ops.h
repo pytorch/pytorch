@@ -717,6 +717,7 @@ inline torch::stable::Tensor from_blob(
   return torch::stable::Tensor(ath);
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 /// Creates a tensor from an existing data blob with a custom deleter.
 ///
 /// Creates a tensor that uses the provided data pointer as its storage.
@@ -724,7 +725,7 @@ inline torch::stable::Tensor from_blob(
 /// called with the data pointer. This allows proper cleanup of externally
 /// owned memory.
 ///
-/// Minimum compatible version: PyTorch 2.10.
+/// Minimum compatible version: PyTorch 2.11.
 ///
 /// @param data Pointer to the data buffer.
 /// @param sizes The size of each dimension of the tensor.
@@ -768,6 +769,7 @@ inline torch::stable::Tensor from_blob(
       deleter));
   return torch::stable::Tensor(ath);
 }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 
 /// Stable version of the to.dtype_layout op.
 ///
