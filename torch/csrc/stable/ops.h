@@ -753,7 +753,7 @@ inline torch::stable::Tensor from_blob(
   auto shim_layout =
       torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout));
   AtenTensorHandle ath;
-  TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v3(
+  TORCH_ERROR_CODE_CHECK(torch_from_blob(
       data,
       sizes.size(),
       sizes.data(),

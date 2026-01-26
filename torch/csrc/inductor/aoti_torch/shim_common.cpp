@@ -564,67 +564,6 @@ AOTITorchError aoti_torch_create_tensor_from_blob_v2(
   });
 }
 
-AOTITorchError aoti_torch_create_tensor_from_blob_v3(
-    void* data,
-    int64_t ndim,
-    const int64_t* sizes_ptr,
-    const int64_t* strides_ptr,
-    int64_t storage_offset,
-    int32_t dtype,
-    int32_t device_type,
-    int32_t device_index,
-    AtenTensorHandle* ret_new_tensor,
-    int32_t layout,
-    const uint8_t* opaque_metadata,
-    int64_t opaque_metadata_size,
-    void (*deleter)(void*)) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    if (layout == static_cast<int32_t>(at::kMkldnn)) {
-      TORCH_CHECK(
-          deleter == nullptr,
-          "from_blob with deleter is not supported for mkldnn tensors");
-      c10::IntArrayRef sizes(sizes_ptr, ndim);
-      c10::IntArrayRef strides(strides_ptr, ndim);
-      c10::Device device = c10_device(device_type, device_index);
-      // get a mkldnn tensor wrapped by a torch Tensor(OpaqueTensorImpl),
-      // which used by later mkldnn op.
-      *ret_new_tensor = new_tensor_handle(mkldnn_tensor_from_data_ptr(
-          data,
-          sizes,
-          static_cast<c10::ScalarType>(dtype),
-          device,
-          opaque_metadata,
-          opaque_metadata_size));
-    } else {
-      c10::IntArrayRef sizes(sizes_ptr, ndim);
-      c10::IntArrayRef strides(strides_ptr, ndim);
-      c10::Device device = c10_device(device_type, device_index);
-      c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
-          static_cast<c10::ScalarType>(dtype));
-      at::Tensor tensor;
-      if (data != nullptr) {
-        if (deleter != nullptr) {
-          tensor = at::for_blob(data, sizes)
-                       .strides(strides)
-                       .storage_offset(storage_offset)
-                       .deleter(deleter)
-                       .options(options)
-                       .make_tensor();
-        } else {
-          tensor = at::for_blob(data, sizes)
-                       .strides(strides)
-                       .storage_offset(storage_offset)
-                       .options(options)
-                       .make_tensor();
-        }
-      } else {
-        tensor = at::empty_strided(sizes, strides, options);
-      }
-      *ret_new_tensor = new_tensor_handle(std::move(tensor));
-    }
-  });
-}
-
 AOTITorchError aoti_torch__embedding_bag(
     AtenTensorHandle weight,
     AtenTensorHandle indices,
