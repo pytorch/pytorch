@@ -183,7 +183,7 @@ def _get_entrypoint_name(entrypoint: Callable | str | None, args: list[Any]) -> 
         return entrypoint.__name__  # type: ignore[union-attr]
     elif isinstance(entrypoint, str):
         if entrypoint == sys.executable:
-            return next((arg for arg in args if arg and arg[0] != "-"), "")
+            return next((arg for arg in args if arg[0] != "-"), "")
         else:
             return entrypoint
     else:
