@@ -5437,12 +5437,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             looped_mem = memory_stats.looped.memory.bytes
             persistent_mem = memory_stats.persistent.memory.bytes
             # check that we save significant memory by doing persistent
-            saved_bytes_ratio = V.graph.sizevars.size_hint(
-                looped_mem, fallback=config.unbacked_symint_fallback
-            ) / max(
-                V.graph.sizevars.size_hint(
-                    persistent_mem, fallback=config.unbacked_symint_fallback
-                ),
+            saved_bytes_ratio = V.graph.sizevars.optimization_hint(looped_mem) / max(
+                V.graph.sizevars.optimization_hint(persistent_mem),
                 1,
             )
 
