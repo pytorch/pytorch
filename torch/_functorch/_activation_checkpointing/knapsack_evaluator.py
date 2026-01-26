@@ -78,7 +78,6 @@ class KnapsackEvaluator:
             predecessor_queue = deque(
                 [
                     dependency
-                    # pyrefly: ignore [bad-unpacking]
                     for dependency, v in node_graph.in_edges(node)
                     if dependency not in already_computed
                 ]
@@ -94,7 +93,6 @@ class KnapsackEvaluator:
                     )
                 )
                 # Add predecessors of the predecessor to the queue if they haven't been recomputed yet
-                # pyrefly: ignore [bad-unpacking]
                 for dependency_of_dependency, _ in node_graph.in_edges(dep):
                     if (
                         dependency_of_dependency in already_computed

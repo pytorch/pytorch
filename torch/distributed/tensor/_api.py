@@ -13,7 +13,11 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.device_mesh import (
+    _mesh_resources,
+    _register_distributed_opaque_types,
+    DeviceMesh,
+)
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
@@ -21,7 +25,6 @@ from torch.distributed.tensor._redistribute import (
     redistribute_local_tensor,
 )
 from torch.distributed.tensor._utils import (
-    assert_no_mixed_partial_types,
     compute_global_tensor_info,
     compute_local_shape_and_global_offset,
     normalize_to_torch_size,
@@ -416,11 +419,6 @@ class DTensor(torch.Tensor):
         Returns:
             A :class:`DTensor` object
 
-        Raises:
-            ValueError: If ``placements`` contains mixed :class:`Partial` reduce types
-                (e.g., both ``Partial("sum")`` and ``Partial("max")``). All Partial
-                placements must use the same reduce operation.
-
         .. note:: When ``run_check=False``, it is the user's responsibility to ensure the
             local tensor passed in is correct across ranks (i.e. the tensor is sharded for
             the ``Shard(dim)`` placement or replicated for the ``Replicate()`` placement).
@@ -463,9 +461,6 @@ class DTensor(torch.Tensor):
                             )
                         elif type(placement) is Shard:
                             placements[idx] = Shard(normalized_dim)
-
-        # Validate that placements don't contain mixed Partial reduce types
-        assert_no_mixed_partial_types(placements)
 
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
@@ -766,11 +761,6 @@ def distribute_tensor(
     Returns:
         A :class:`DTensor` or ``XLAShardedTensor`` object.
 
-    Raises:
-        ValueError: If ``placements`` contains mixed :class:`Partial` reduce types
-            (e.g., both ``Partial("sum")`` and ``Partial("max")``). All Partial
-            placements must use the same reduce operation.
-
     .. note::
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_tensor``
         return `XLAShardedTensor` instead. see `this issue <https://github.com/pytorch/pytorch/issues/92909>`__
@@ -813,9 +803,6 @@ def distribute_tensor(
             f"`placements` must have the same length as `device_mesh.ndim`! "
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
-
-    # Validate that placements don't contain mixed Partial reduce types
-    assert_no_mixed_partial_types(placements)
     if isinstance(tensor, DTensor):
         # if the tensor is already a DTensor, we need to check:
         # 1. if the we can further shard this DTensor if the two device mesh belong to
@@ -1418,3 +1405,6 @@ def zeros(  # type: ignore[no-untyped-def]
         device_mesh=device_mesh,
         placements=placements,
     )
+
+
+_register_distributed_opaque_types()

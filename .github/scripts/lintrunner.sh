@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -ex
 
-# setuptools is needed for lintrunner init
-python3 -m pip install -U setuptools
+# Use uv to speed up lintrunner init
+python3 -m pip install -U uv==0.8.* setuptools
 
 CACHE_DIRECTORY="/tmp/.lintbin"
 # Try to recover the cached binaries

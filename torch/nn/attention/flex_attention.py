@@ -49,8 +49,7 @@ def _warn_once(
 ) -> None:
     """Helper to ensure each warning is shown only once per process."""
     if warning_id not in _WARNINGS_SHOWN:
-        if not torch.compiler.is_compiling():
-            warnings.warn(message, category, stacklevel=2)
+        warnings.warn(message, category, stacklevel=2)
         _WARNINGS_SHOWN.add(warning_id)
 
 

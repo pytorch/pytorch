@@ -440,7 +440,15 @@ at::BlasBackend Context::blasPreferredBackend() {
 #ifdef USE_ROCM
     // AMD Instinct targets prefer hipblaslt
     static const bool hipblaslt_preferred = []() {
-      const auto& archs = detail::getCUDAHooks().getHipblasltPreferredArchs();
+      static const std::vector<std::string> archs = {
+          "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60400
+          "gfx1200", "gfx1201",
+#endif
+#if ROCM_VERSION >= 60500
+          "gfx950"
+#endif
+      };
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           return false;
@@ -462,7 +470,15 @@ at::BlasBackend Context::blasPreferredBackend() {
       {
           return true;
       }
-      const auto& archs = detail::getCUDAHooks().getHipblasltSupportedArchs();
+      static const std::vector<std::string> archs = {
+          "gfx90a", "gfx942",
+#if ROCM_VERSION >= 60300
+          "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
+#endif
+#if ROCM_VERSION >= 70000
+          "gfx950", "gfx1150", "gfx1151"
+#endif
+      };
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
         if (!detail::getCUDAHooks().isGPUArch(archs, index)) {
           TORCH_WARN_ONCE(

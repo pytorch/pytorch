@@ -22,7 +22,7 @@
 #include <ATen/native/cuda/GroupMM.h>
 #include <ATen/ceil_div.h>
 
-#ifdef USE_MSLK
+#ifdef USE_FBGEMM_GENAI
 #include <mslk/gemm/gemm_torch.h>
 #endif
 
