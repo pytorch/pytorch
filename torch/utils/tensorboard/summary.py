@@ -808,8 +808,9 @@ def text(tag, text):
 def pr_curve_raw(
     tag, tp, fp, tn, fn, precision, recall, num_thresholds=127, weights=None
 ):
-    if num_thresholds > 127:  # weird, value > 127 breaks protobuf
-        num_thresholds = 127
+    # Note: The previous num_thresholds > 127 restriction was removed as it was
+    # based on an outdated protobuf limitation that no longer applies.
+    # See https://github.com/pytorch/pytorch/issues/173311
     data = np.stack((tp, fp, tn, fn, precision, recall))
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds
@@ -836,8 +837,9 @@ def pr_curve_raw(
 
 
 def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
-    # weird, value > 127 breaks protobuf
-    num_thresholds = min(num_thresholds, 127)
+    # Note: The previous num_thresholds > 127 restriction was removed as it was
+    # based on an outdated protobuf limitation that no longer applies.
+    # See https://github.com/pytorch/pytorch/issues/173311
     data = compute_curve(
         labels, predictions, num_thresholds=num_thresholds, weights=weights
     )
