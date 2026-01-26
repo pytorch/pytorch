@@ -1559,6 +1559,25 @@ class TestForeach(TestCase):
                 )
                 self.assertEqual(hook_buffer, list(reversed(range(len(inputs)))))
 
+    @onlyCUDA
+    def test_foreach_copy_mixed_dtype_fix(self):
+        """Test fix for _foreach_copy_ mixed destination dtype corruption."""
+        # Original bug case that caused silent data corruption
+        src = [torch.tensor([1.0, 2.0, 3.0, 4.0], device="cuda") for _ in range(3)]
+        dst = [
+            torch.empty(4, dtype=dt, device="cuda")
+            for dt in [torch.float32, torch.bfloat16, torch.float32]
+        ]
+
+        torch._foreach_copy_(dst, src)
+
+        # Verify results are correct (was corrupted before fix)
+        expected = [[1.0, 2.0, 3.0, 4.0]] * 3
+        for i, (actual, exp) in enumerate(zip(dst, expected)):
+            self.assertEqual(
+                actual.tolist(), exp, msg=f"Mixed destination tensor {i} corrupted"
+            )
+
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.
 # would end up adding another layer to `foreach_inputs_sample_func.__call__`

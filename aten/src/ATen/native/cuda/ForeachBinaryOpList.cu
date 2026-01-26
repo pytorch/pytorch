@@ -6,6 +6,7 @@
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
 #include <functional>
 #include <type_traits>
+#include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -415,17 +416,58 @@ void foreach_tensor_copy_list_kernel_cuda_(
     TensorList src,
     const bool non_blocking) {
   check_foreach_api_restrictions(self, src);
-  if (!(_check_tensors_share_device_and_dtype(
-            {self, src}, /* skip_dtype_check */ true) &&
-        std::all_of(
-            src.cbegin(),
-            src.cend(),
-            [&](const auto& t) -> bool {
-              return t.dtype() == src[0].dtype();
-            }) &&
-        _check_tensors_share_sizes_and_strides({self, src}))) {
-    return at::native::foreach_tensor_copy_list_kernel_slow_(
-        self, src, non_blocking);
+
+  // Check destination dtype uniformity to prevent corruption
+  bool dst_uniform =
+      std::all_of(self.cbegin() + 1, self.cend(), [&](const auto& t) {
+        return t.dtype() == self[0].dtype();
+      });
+
+  if (dst_uniform) {
+    // Fast path: uniform destination dtypes - use original logic
+    if (!(_check_tensors_share_device_and_dtype(
+              {self, src}, /* skip_dtype_check */ true) &&
+          std::all_of(
+              src.cbegin(),
+              src.cend(),
+              [&](const auto& t) -> bool {
+                return t.dtype() == src[0].dtype();
+              }) &&
+          _check_tensors_share_sizes_and_strides({self, src}))) {
+      return at::native::foreach_tensor_copy_list_kernel_slow_(
+          self, src, non_blocking);
+    }
+  } else {
+    // Mixed destination dtypes: group by dtype for optimal performance
+    std::unordered_map<ScalarType, std::vector<size_t>> dtype_groups;
+
+    // Group tensor indices by destination dtype
+    for (size_t i = 0; i < self.size(); ++i) {
+      dtype_groups[self[i].scalar_type()].push_back(i);
+    }
+
+    // Process each dtype group separately
+    for (const auto& [dtype, indices] : dtype_groups) {
+      if (indices.size() == 1) {
+        // Single tensor: use individual copy
+        self[indices[0]].copy_(src[indices[0]], non_blocking);
+      } else {
+        // Multiple tensors of same dtype: create sublists and use fast path
+        std::vector<Tensor> dst_group, src_group;
+        dst_group.reserve(indices.size());
+        src_group.reserve(indices.size());
+
+        for (size_t idx : indices) {
+          dst_group.push_back(self[idx]);
+          src_group.push_back(src[idx]);
+        }
+
+        // Recursively call fast path for this uniform group
+        foreach_tensor_copy_list_kernel_cuda_(
+            TensorList(dst_group), TensorList(src_group), non_blocking);
+      }
+    }
+    return; // All groups processed
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists{src.vec(), self.vec()};
