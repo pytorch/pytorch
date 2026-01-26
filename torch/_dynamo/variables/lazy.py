@@ -73,8 +73,9 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
 
     @staticmethod
     def create(value: Any, source: Any, **options: Any) -> VariableTracker:
-        if type(value) in LazyConstantVariable.supported_types:
-            return LazyConstantVariable.create(value, source, **options)
+        # FIXME: re-enable LazyConstantVariable once compile time issues have been resolved
+        # if type(value) in LazyConstantVariable.supported_types:
+        #     return LazyConstantVariable.create(value, source, **options)
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
