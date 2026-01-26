@@ -3436,8 +3436,8 @@ class InstructionTranslatorBase(
         self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
     def BUILD_LIST(self, inst: Instruction) -> None:
-        # Check for list comprehension in Python 3.12+
-        if sys.version_info >= (3, 12) and inst.argval == 0:
+        # Nested graph breaks are currently not supported for 3.12+ comprehension handling
+        if sys.version_info >= (3, 12) and inst.argval == 0 and not config.nested_graph_breaks:
             is_comp_start = self._is_comprehension_start()
             log.debug("BUILD_LIST: argval=0, is_comprehension_start=%s", is_comp_start)
             if is_comp_start:
@@ -3512,8 +3512,8 @@ class InstructionTranslatorBase(
     BUILD_TUPLE_UNPACK_WITH_CALL = BUILD_TUPLE_UNPACK
 
     def BUILD_MAP(self, inst: Instruction) -> None:
-        # Check for dict comprehension in Python 3.12+
-        if sys.version_info >= (3, 12) and inst.argval == 0:
+        # Nested graph breaks are currently not supported for 3.12+ comprehension handling
+        if sys.version_info >= (3, 12) and inst.argval == 0 and not config.nested_graph_breaks:
             is_comp_start = self._is_comprehension_start()
             log.debug("BUILD_MAP: argval=0, is_comprehension_start=%s", is_comp_start)
             if is_comp_start:
