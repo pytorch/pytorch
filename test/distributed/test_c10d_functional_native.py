@@ -735,6 +735,7 @@ class CompileTest(TestCase):
     def tearDown(self):
         dist.destroy_process_group()
 
+    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_inductor_all_reduce_single(self):
@@ -772,6 +773,7 @@ class CompileTest(TestCase):
         AOTIRunnerUtil.run(func, (arg,))
         torch.cuda.synchronize()
 
+    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_inductor_all_reduce_coalesced(self):
@@ -1094,6 +1096,7 @@ class CompileTest(TestCase):
             .run(code)
         )
 
+    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_inductor_broadcast(self):
