@@ -1194,6 +1194,10 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch("test_configs.static_cpp_dtype_assert", True)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
+        if "xpu" in device:
+            if "nn.functional.max_unpool2d" in op.name and (dtype in (f16, f32)):
+                raise unittest.SkipTest("Update driver")
+
         device_type = torch.device(device).type
 
         assert device_type in (GPU_TYPE, "cpu")
