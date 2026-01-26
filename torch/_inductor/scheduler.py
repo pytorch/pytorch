@@ -253,7 +253,7 @@ class MixOrderReduction:
     @classmethod
     def get_numel(cls, node: BaseSchedulerNode) -> int:
         g1 = cls.get_numel_rnumel(node)
-        return V.graph.sizevars.size_hint(g1[0] * g1[1], fallback=0)
+        return V.graph.sizevars.optimization_hint(g1[0] * g1[1], fallback=0)
 
     @classmethod
     def get_fusion_score(
@@ -1063,7 +1063,7 @@ class BaseSchedulerNode:
             return {}
 
         def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.size_hint(s, fallback=0)
+            return V.graph.sizevars.optimization_hint(s, fallback=0)
 
         if isinstance(self, SchedulerNode):
             node_numel = try_size_hint(
@@ -1175,7 +1175,7 @@ class BaseSchedulerNode:
         if isinstance(flops, torch.SymInt):
             flops = flops.node.expr
 
-        resolved_flops = V.graph.sizevars.size_hint(flops, fallback=0)
+        resolved_flops = V.graph.sizevars.optimization_hint(flops, fallback=0)
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops
 
