@@ -1683,10 +1683,8 @@ class PythonWrapperCodegen(CodeGen):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = tuple(V.graph.sizevars.atomically_apply_size_hint(d) for d in dims)
-            block_dims = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims
-            )
+            dims = V.graph.sizevars.optimization_hint(dims)
+            block_dims = V.graph.sizevars.optimization_hints(block_dims)
 
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
         # Explicitly call the Python version of val_to_arg_str
@@ -1704,9 +1702,7 @@ class PythonWrapperCodegen(CodeGen):
     def _generate_tma_descriptor_call_stable(self, desc, apply_size_hints=False):
         block_shape = desc.block_shape
         if apply_size_hints:
-            block_shape = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_shape
-            )
+            block_shape = V.graph.sizevars.optimization_hints(block_shape)
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
         fn = f"{prefix}.from_tensor"
@@ -2307,7 +2303,7 @@ class PythonWrapperCodegen(CodeGen):
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value, sympy.Symbol) and isinstance(
-                    V.graph.sizevars.var_to_val.get(value, None), SingletonInt
+                    V.graph.sizevars.backed_var_to_val.get(value, None), SingletonInt
                 ):
                     # Inductor should only work with dense -> dense graph, and
                     # SingletonInts belong to metadata that should only live on
@@ -2324,7 +2320,9 @@ class PythonWrapperCodegen(CodeGen):
                     # invalid benchmark code, because it's not guaranteed 42
                     # is actually a valid value for the kernel in question.
                     # See https://github.com/pytorch/pytorch/issues/124686
-                    add_expr_input(name, V.graph.sizevars.size_hint(value, fallback=42))
+                    add_expr_input(
+                        name, V.graph.sizevars.optimization_hint(value, fallback=42)
+                    )
                 elif isinstance(value, ir.GeneratorState):
                     add_expr_input(
                         name,
@@ -2332,7 +2330,7 @@ class PythonWrapperCodegen(CodeGen):
                     )
                 else:
                     shape = [
-                        V.graph.sizevars.size_hint(x, fallback=42)
+                        V.graph.sizevars.optimization_hint(x, fallback=42)
                         for x in value.get_size()
                     ]
                     stride = [
@@ -2853,33 +2851,15 @@ class PythonWrapperCodegen(CodeGen):
                 self.kernel_autotune_tmp_arg_idx += 1
 
             assert buf is not None, f"Failed to find a buffer for arg {arg}"
-            size = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in buf.get_size()
+            size = V.graph.sizevars.optimization_hints(buf.get_size())
+            allocation_size = V.graph.sizevars.optimization_hints(
+                V.graph.get_allocation_size(buf)
             )
-            allocation_size = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in V.graph.get_allocation_size(buf)
-            )
-            stride = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in buf.get_stride()
-            )
+            stride = V.graph.sizevars.optimization_hints(buf.get_stride())
+
             device = buf.get_device()
             dtype = buf.get_dtype()
-            offset = V.graph.sizevars.size_hint(
-                buf.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            )
+            offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
@@ -2907,11 +2887,7 @@ class PythonWrapperCodegen(CodeGen):
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
 
-            return str(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    arg, fallback=config.unbacked_symint_fallback
-                )
-            )
+            return str(V.graph.sizevars.optimization_hint(arg))
 
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
