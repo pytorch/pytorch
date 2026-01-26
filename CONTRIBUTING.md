@@ -14,6 +14,7 @@ aspects of contributing to PyTorch.
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
+- [AI-Assisted Development](#ai-assisted-development)
 - [Spin](#spin)
   - [Linting](#linting)
     - [default lint](#default-lint)
@@ -277,6 +278,19 @@ dependencies as well as the nightly binaries into the repo directory.
     blobs, etc.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
+
+## AI-Assisted Development
+
+PyTorch is a project developed and reviewed by humans.
+PyTorch encourages the use of AI in its development, however, PyTorch is a large and technically complex project and it is easy for current LLMs, 
+if not properly guided, to produce seemingly correct PRs with major flaws. Because of this, we must limit how contributors, especially those new to the project, 
+submit PRs and open issues. In order to prevent bad actors we may ban users who consistently submit low effort PRs that appear to be heavily driven by AI. 
+We also require contributors to mark their PRs with the label 'AI-assistance' to denote that they have been authored in part by AI tooling. 
+
+In order to increase the probability of your changes being accepted, we ask that you follow the standard contribution guidelines from our [README](README.md#contributing):
+
+- **Bug fixes with an associated Issue**: Submit directly without prior discussion. We note that this can cause a negative feedback loop where PR authors create an issue and then open a PR immediately after fixing said issue.  We have noticed an increasing trend in this behavior and if we deem that you are using issues as a workaround to submit low-quality PRs we will ban you.
+- **New features, utility functions, or core extensions**: Open an issue first and discuss the feature with maintainers before submitting a PR. This avoids wasted effort if the project is heading in a different direction.
 
 ## Spin
 
