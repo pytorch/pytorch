@@ -506,11 +506,7 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
 
 @functools.cache
 def get_comprehension_bytecode_prefix() -> list[str]:
-    """Get the bytecode instructions that precede BUILD_LIST in a list comprehension.
-
-    This dynamically discovers the bytecode pattern for list comprehensions,
-    making the code resilient to bytecode changes across Python versions.
-    """
+    """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
     def fn():
         return [i for i in range(1)]
 
@@ -524,7 +520,7 @@ def get_comprehension_bytecode_prefix() -> list[str]:
 
 @functools.cache
 def get_comprehension_result_patterns() -> dict[str, str]:
-    """Dynamically discover bytecode patterns for comprehension result handling.
+    """Discover bytecode patterns for comprehension result handling.
 
     Returns dict with:
         - "stored_indicator": opcode after END_FOR when result is stored in variable
@@ -547,7 +543,6 @@ def get_comprehension_result_patterns() -> dict[str, str]:
         return [i for i in range(1)]
 
     def find_post_end_for_opcode(fn):
-        """Find the opcode immediately after END_FOR."""
         insts = list(dis.get_instructions(fn))
         for i, inst in enumerate(insts):
             if inst.opname == "END_FOR" and i + 1 < len(insts):
@@ -555,7 +550,6 @@ def get_comprehension_result_patterns() -> dict[str, str]:
         return None
 
     def find_discard_opcode(fn):
-        """Find the opcode after STORE_FAST that discards the result."""
         insts = list(dis.get_instructions(fn))
         for i, inst in enumerate(insts):
             if inst.opname == "END_FOR":
@@ -568,7 +562,6 @@ def get_comprehension_result_patterns() -> dict[str, str]:
         return None
 
     def find_return_after_iterator_restore(fn):
-        """Find the return opcode after iterator restoration."""
         insts = list(dis.get_instructions(fn))
         for i, inst in enumerate(insts):
             if inst.opname == "END_FOR":
@@ -3460,11 +3453,9 @@ class InstructionTranslatorBase(
                         # Graph break occurred in comprehension on previous attempt
                         self._handle_comprehension_graph_break(inst)
                         return
-                    # Store speculation for later graph break handling
                     self.current_speculation = speculation
-                # Track nesting depth for nested comprehensions
                 self._comprehension_depth += 1
-        # Normal BUILD_LIST handling
+
         items = self.popn(inst.argval)
         self.push(ListVariable(items, mutation_type=ValueMutationNew()))
 
@@ -3517,7 +3508,7 @@ class InstructionTranslatorBase(
                     and not self.is_tracing_resume_prologue
                     and not self.active_generic_context_managers
                     and self.output.current_tracer.parent is None
-                    and self.parent is None  # Not inside an inlined function
+                    and self.parent is None
                 )
                 # Only set up speculation at depth 0 (outermost comprehension)
                 if can_speculate and self._comprehension_depth == 0:
@@ -3526,11 +3517,9 @@ class InstructionTranslatorBase(
                         # Graph break occurred in comprehension on previous attempt
                         self._handle_comprehension_graph_break(inst)
                         return
-                    # Store speculation for later graph break handling
                     self.current_speculation = speculation
-                # Track nesting depth for nested comprehensions
                 self._comprehension_depth += 1
-        # Normal BUILD_MAP handling
+
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
         self.push(ConstDictVariable(d, mutation_type=ValueMutationNew()))
@@ -4445,8 +4434,7 @@ class InstructionTranslatorBase(
         """Detect if we're at the start of a list/dict comprehension in 3.12+.
 
         In Python 3.12+, comprehensions are inlined with a bytecode pattern that
-        precedes BUILD_LIST/BUILD_MAP. This function dynamically discovers that
-        pattern to be resilient to bytecode changes across Python versions.
+        precedes BUILD_LIST/BUILD_MAP.
         """
         if sys.version_info < (3, 12):
             return False
@@ -4587,7 +4575,6 @@ class InstructionTranslatorBase(
         post_end_for_inst = self.instructions[ip]
 
         if post_end_for_inst.opname == patterns["stored_indicator"]:
-            # Pattern: END_FOR → STORE_FAST result → STORE_FAST iterator(s)
             result_var = post_end_for_inst.argval
             ip += 1
             # Consume iterator STORE_FASTs
@@ -4604,18 +4591,16 @@ class InstructionTranslatorBase(
             )
 
         elif post_end_for_inst.opname == patterns["on_stack_indicator"]:
-            # Pattern: END_FOR → SWAP → STORE_FAST iterator(s) → ???
             # Result stays on stack, skip SWAP and iterator STORE_FASTs
             ip += 1  # Skip SWAP
             while ip < len(self.instructions) and self.instructions[ip].opname == "STORE_FAST":
                 ip += 1
 
-            # Now check what happens to the result on stack
+            # Check what happens to the result on stack
             if ip < len(self.instructions):
                 disposition_inst = self.instructions[ip]
 
                 if disposition_inst.opname == patterns["discard_indicator"]:
-                    # Pattern: ... → POP_TOP (result discarded)
                     return ComprehensionAnalysis(
                         end_ip=ip + 1,  # After POP_TOP
                         result_var=None,
@@ -4627,7 +4612,6 @@ class InstructionTranslatorBase(
                     )
 
                 elif disposition_inst.opname == patterns["return_indicator"]:
-                    # Pattern: ... → RETURN_VALUE (result returned directly)
                     return ComprehensionAnalysis(
                         end_ip=ip,  # At RETURN_VALUE (resume will handle it)
                         result_var=None,
@@ -4639,7 +4623,6 @@ class InstructionTranslatorBase(
                     )
 
                 else:
-                    # Pattern: ... → CALL/other (result consumed by expression)
                     # We don't expand to include the consuming call - just mark as consumed
                     return ComprehensionAnalysis(
                         end_ip=ip,  # At the consuming instruction
@@ -4682,7 +4665,7 @@ class InstructionTranslatorBase(
     ) -> None:
         """Handle graph break for a comprehension by skipping the comprehension bytecode.
 
-        This is a complex operation that:
+        Steps
         1. Compiles the graph up to the comprehension
         2. Adds the comprehension bytecode (runs eagerly at runtime)
         3. Generates code to load comprehension-created locals
@@ -4833,7 +4816,6 @@ class InstructionTranslatorBase(
 
         cg = PyCodegen(self)
 
-        # Only generate extension bytecode if we have a result variable
         if analysis.result_var is not None:
             # Stack: [..., frame_values_list]
             cg.append_output(create_dup_top())
@@ -4876,7 +4858,6 @@ class InstructionTranslatorBase(
             self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
         )
 
-        # Set output to exit after this
         self.output.should_exit = True
         self.instruction_pointer = None
 
@@ -5078,7 +5059,7 @@ class InstructionTranslatorBase(
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
-        self._comprehension_depth = 0  # Track nesting level for comprehension speculation
+        self._comprehension_depth = 0
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
