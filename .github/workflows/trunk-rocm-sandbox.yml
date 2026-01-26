@@ -1,4 +1,4 @@
-name: trunk-rocm-mi300
+name: trunk-rocm-sandbox
 
 on:
   push:
