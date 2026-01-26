@@ -1191,6 +1191,14 @@ if HAS_CUDA_AND_TRITON:
             W2 = torch.randn(8, 8, device="cuda")
 
             def f(q):
+                # input q is on gpu. Here, we have 1 cuda addition op followed by cpu <> gpu device copy
+                # to enforce 1 graph partition. `torch._inductor.config.cudagraph_unsafe_unbacked_ops`
+                # will decide whether we have 1 more graph partition (i.e., 1 graph partition
+                # or 2 graph partitions in total).
+                q = q + 1
+                q_cpu = q.cpu()
+                q = q_cpu.cuda()
+
                 num_decode = torch.ops.mylib.get_size(q)  # Returns unbacked SymInt
 
                 torch._check(num_decode >= 0)
@@ -1211,8 +1219,8 @@ if HAS_CUDA_AND_TRITON:
             f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
             _, code = run_and_get_code(f_compiled, x)
             num_partitions_before = get_num_partitions(code)
-            # 1 partition since ops using unbacked symints are kept in graph partitions
-            self.assertEqual(num_partitions_before, 1)
+            # 2 partition since ops using unbacked symints are kept in graph partitions
+            self.assertEqual(num_partitions_before, 2)
 
             # With config, ops using the unbacked symint should be partitioned out
             torch._inductor.config.cudagraph_unsafe_unbacked_ops = ["mylib::get_size"]
@@ -1220,11 +1228,8 @@ if HAS_CUDA_AND_TRITON:
             f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
             _, code = run_and_get_code(f_compiled, x)
             num_partitions_after = get_num_partitions(code)
-            # 0 partition since ops using unbacked symints are excluded from graph partitions
-            self.assertEqual(num_partitions_after, 0)
-
-            # Reset config
-            torch._inductor.config.cudagraph_unsafe_unbacked_ops = []
+            # 1 partition since ops using unbacked symints are excluded from graph partitions
+            self.assertEqual(num_partitions_after, 1)
 
             # Test with op_overload name (with .default suffix)
             torch._inductor.config.cudagraph_unsafe_unbacked_ops = [
@@ -1234,8 +1239,8 @@ if HAS_CUDA_AND_TRITON:
             f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
             _, code = run_and_get_code(f_compiled, x)
             num_partitions_overload = get_num_partitions(code)
-            # 0 partition since ops using unbacked symints are excluded from graph partitions
-            self.assertEqual(num_partitions_overload, 0)
+            # 1 partition since ops using unbacked symints are excluded from graph partitions
+            self.assertEqual(num_partitions_overload, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
