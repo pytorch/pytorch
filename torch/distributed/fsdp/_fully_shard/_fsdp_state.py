@@ -56,16 +56,45 @@ class FSDPStateContext:
 
 
 def disable_if_config_true(func):
+    """
+    Decorator that conditionally wraps FSDP hooks to disable dynamo tracing.
+
+    When skip_fsdp_hooks is True (default):
+    - Outside of dynamo tracing: disables dynamo by setting eval_frame to None
+    - During dynamo tracing: returns original function to allow tracing
+      (the hook code must be traceable for fullgraph export to work)
+
+    When skip_fsdp_hooks is False (for traceable FSDP):
+    - Always returns original function to allow tracing
+
+    This approach solves the graph break issue in fullgraph export by:
+    1. Not calling torch._dynamo.disable() during tracing (avoids graph break)
+    2. Allowing the hooks to be traced - hook code must be dynamo-compatible
+    3. Disabling dynamo only during actual execution (not tracing)
+    """
+
     @functools.wraps(func)
     def fsdp_hook_wrapper(*args, **kwargs):
-        if torch._dynamo.config.skip_fsdp_hooks:
-            return torch._dynamo.disable(
-                func,
-                recursive=True,
-                reason="skipping FSDP hooks since torch._dynamo.config.skip_fsdp_hooks is set",
-            )(*args, **kwargs)
-        else:
+        # Import lazily to avoid circular imports
+        import torch._dynamo.config
+
+        if not torch._dynamo.config.skip_fsdp_hooks:
+            # Tracing through hooks is enabled, call function directly
             return func(*args, **kwargs)
+
+        # Check if we're being traced by dynamo (fullgraph export or compile)
+        # If so, we should NOT disable dynamo - let it trace through the hook
+        if torch.compiler.is_compiling():
+            return func(*args, **kwargs)
+
+        # Not being traced by dynamo, so we can safely disable it
+        from torch._C._dynamo.eval_frame import set_eval_frame
+
+        prior = set_eval_frame(None)
+        try:
+            return func(*args, **kwargs)
+        finally:
+            set_eval_frame(prior)
 
     return fsdp_hook_wrapper
 

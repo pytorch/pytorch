@@ -738,6 +738,72 @@ def autograd_function_forward_rewritten(original_forward, original_setup_context
     return new_forward
 
 
+def _functionalize_graph(gm: "torch.fx.GraphModule") -> "torch.fx.GraphModule":
+    """
+    Transform a graph to replace in-place mutations with out-of-place equivalents.
+
+    This is needed for autograd.Function backward graphs that contain in-place
+    mutations on saved tensors (e.g., module buffers). During AOT export,
+    the graph must be functional, but these in-place ops would fail the
+    functionalization check.
+
+    The transformation converts patterns like:
+        buf.add_(value)  ->  _buf = buf + value (dropped, not used in output)
+        torch.maximum(a, b, out=c)  ->  _c = torch.maximum(a, b) (dropped)
+
+    Since the mutated buffers are not used in the backward output (they return
+    gradients), we simply replace in-place ops with their out-of-place equivalents
+    and let DCE remove them if unused.
+    """
+    import copy
+
+    import torch.fx
+
+    gm = copy.deepcopy(gm)
+    graph = gm.graph
+
+    for node in list(graph.nodes):
+        if node.op == "call_method":
+            # Handle tensor in-place methods like add_, mul_, etc.
+            method_name = node.target
+            if isinstance(method_name, str) and method_name.endswith("_"):
+                out_of_place_name = method_name[:-1]  # remove trailing underscore
+                # Check if this is a valid in-place op (not something like __init__)
+                if out_of_place_name and not out_of_place_name.startswith("_"):
+                    node.target = out_of_place_name
+        elif node.op == "call_function":
+            target = node.target
+            if isinstance(target, torch._ops.OpOverload):
+                # Check if this is an in-place ATen op
+                if target._schema.is_mutable:
+                    # Try to find the out-of-place equivalent
+                    op_name = str(target).split("::")[-1]
+                    if op_name.endswith("_"):
+                        # e.g., aten.add_.Tensor -> aten.add.Tensor
+                        base_name = op_name[:-1]  # remove trailing underscore
+                        try:
+                            # Try to get the out-of-place variant
+                            out_of_place_op = getattr(
+                                torch.ops.aten, base_name.split(".")[0]
+                            )
+                            # Use the default overload
+                            if hasattr(out_of_place_op, "default"):
+                                node.target = out_of_place_op.default
+                            elif hasattr(out_of_place_op, "Tensor"):
+                                node.target = out_of_place_op.Tensor
+                        except AttributeError:
+                            pass
+            # Handle "out" parameter - convert to regular call
+            if "out" in node.kwargs:
+                new_kwargs = dict(node.kwargs)
+                del new_kwargs["out"]
+                node.kwargs = new_kwargs
+
+    graph.lint()
+    gm.recompile()
+    return gm
+
+
 class AutogradFunctionApply(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("autograd_function_apply")
@@ -785,8 +851,33 @@ class AutogradFunctionApply(HigherOrderOperator):
                 # from the dynamo graph body to the local_map graph body.
                 # This is required for fx_traceback.annotate for work.
 
-                # pyrefly: ignore [not-iterable]
-                return torch.fx.Interpreter(bwd).run(*grad, *saved_values)
+                from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+                # Check if we're running under proxy tracing mode
+                # (e.g., during joint graph capture in AOT autograd)
+                proxy_mode = get_proxy_mode()
+
+                if proxy_mode is not None and isinstance(bwd, torch.fx.GraphModule):
+                    # When tracing the joint graph, we need to functionalize
+                    # the backward subgraph to ensure in-place mutations don't
+                    # leak into the joint graph.
+                    #
+                    # The backward graph may contain in-place ops like:
+                    #   buf.add_(value)
+                    #   torch.maximum(a, b, out=buf)
+                    #
+                    # These are converted to out-of-place equivalents. Since the
+                    # mutated buffers are typically not used in the backward
+                    # output (they're side effects), the ops become dead code
+                    # and are removed by DCE.
+                    functionalized_bwd = _functionalize_graph(bwd)
+                    return torch.fx.Interpreter(functionalized_bwd).run(
+                        *grad, *saved_values
+                    )
+                else:
+                    # Normal execution path
+                    # pyrefly: ignore [not-iterable]
+                    return torch.fx.Interpreter(bwd).run(*grad, *saved_values)
 
         return ApplyTemplate.apply(*fwd_args)
 

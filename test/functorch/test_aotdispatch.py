@@ -3872,6 +3872,120 @@ def forward(self, tangents_1):
 
         self.verify_aot_autograd(f, [torch.randn(3)])
 
+    def test_autograd_function_with_module_state(self):
+        """
+        Test autograd.Function that receives module state (buffer) tensors
+        in addition to the main input. This pattern is used in per-token
+        gradient clipping and other advanced gradient manipulation techniques.
+
+        The key challenge is that module buffer tensors passed to Function.apply()
+        may not be tracked by the proxy tracer during AOT export. The fix in
+        _get_proxies() gracefully handles untracked tensors by passing default=None
+        to get_proxy_slot().
+        """
+
+        class ModuleWithAutogradFn(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Module state tensors that will be passed to Function.apply()
+                self.register_buffer("scale_factor", torch.tensor(2.0))
+                self.register_buffer("should_apply", torch.tensor(True))
+                # Accumulator buffer that gets modified in backward
+                self.register_buffer("grad_sum", torch.zeros(()))
+
+            def forward(self, x):
+                return ScaledGradFunction.apply(
+                    x,
+                    self.scale_factor,
+                    self.should_apply,
+                    self.grad_sum,
+                )
+
+        class ScaledGradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, scale_factor, should_apply, grad_sum):
+                # Save module state tensors for use in backward
+                ctx.scale_factor = scale_factor
+                ctx.should_apply = should_apply
+                ctx.grad_sum = grad_sum
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                # Use the saved module state tensors
+                scaled_grad = grad_output * ctx.scale_factor
+                # Conditionally apply scaling
+                result = torch.where(
+                    ctx.should_apply,
+                    scaled_grad,
+                    grad_output,
+                )
+                return result, None, None, None
+
+        mod = ModuleWithAutogradFn()
+        x = torch.randn(4, 4, requires_grad=True)
+
+        # Test with torch.compile using aot_eager backend
+        compiled_mod = torch.compile(mod, backend="aot_eager", fullgraph=True)
+
+        # Forward pass
+        out = compiled_mod(x)
+        self.assertEqual(out, x)
+
+        # Backward pass - exercises the autograd.Function with module state
+        loss = out.sum()
+        loss.backward()
+
+        # Verify gradient was scaled correctly
+        expected_grad = torch.ones_like(x) * 2.0  # scale_factor = 2.0
+        self.assertEqual(x.grad, expected_grad)
+
+    def test_autograd_function_with_scalar_module_state(self):
+        """
+        Test autograd.Function with scalar (0-dimensional) module state tensors.
+        This is a common pattern for boolean flags and scalar thresholds.
+        """
+
+        class ModuleWithScalarState(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Scalar tensors (0-dimensional)
+                self.register_buffer("threshold", torch.tensor(0.5))
+                self.register_buffer("enabled", torch.tensor(True))
+
+            def forward(self, x):
+                return ThresholdGradFunction.apply(
+                    x,
+                    self.threshold,
+                    self.enabled,
+                )
+
+        class ThresholdGradFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, threshold, enabled):
+                ctx.threshold = threshold
+                ctx.enabled = enabled
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                # Clamp gradients based on threshold
+                clamped = torch.clamp(grad_output, -ctx.threshold, ctx.threshold)
+                result = torch.where(ctx.enabled, clamped, grad_output)
+                return result, None, None
+
+        mod = ModuleWithScalarState()
+        x = torch.randn(4, 4, requires_grad=True)
+
+        compiled_mod = torch.compile(mod, backend="aot_eager", fullgraph=True)
+        out = compiled_mod(x)
+        loss = out.sum()
+        loss.backward()
+
+        # Gradient should be clamped to [-0.5, 0.5]
+        expected_grad = torch.clamp(torch.ones_like(x), -0.5, 0.5)
+        self.assertEqual(x.grad, expected_grad)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_autocast_disable_guard(self):
         with torch._C._DisableAutocast():

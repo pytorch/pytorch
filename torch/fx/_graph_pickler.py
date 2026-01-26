@@ -35,6 +35,8 @@ def _ops_filter_safe(name: str) -> bool:
         (
             "torch.ops.aten",
             "torch.ops.fbgemm",
+            "torch.ops._dtensor",
+            "torch.ops._c10d_functional",
         )
     )
 
@@ -111,6 +113,8 @@ class GraphPickler(pickle.Pickler):
             return _SymNodePickleData.reduce_helper(self, obj)
         elif isinstance(obj, torch._guards.TracingContext):
             return _TracingContextPickleData.reduce_helper(self, obj)
+        elif reduce := _DynamicFSDPClassPickleData.reduce_helper(self, obj):
+            return reduce
         else:
             # We should never get a raw Node!
             assert not isinstance(obj, torch.fx.Node)
@@ -665,3 +669,128 @@ class _TracingContextPickleData:
             self.force_unspec_int_unbacked_size_like
         )
         return context
+
+
+def _is_dynamic_fsdp_class(obj: object) -> bool:
+    """
+    Check if obj is a dynamically created FSDP wrapper class.
+
+    FSDP creates dynamic classes via type() like:
+        type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+
+    These classes have:
+    - A name starting with "FSDP"
+    - FSDPModule as the second element in their MRO
+    - An original wrapped class as the third element in MRO
+    """
+    if not isinstance(obj, type):
+        return False
+
+    # Check if this looks like an FSDP-wrapped class
+    mro = obj.__mro__
+    if len(mro) < 3:
+        return False
+
+    # Check if name starts with FSDP
+    if not obj.__name__.startswith("FSDP"):
+        return False
+
+    # Check if second element is FSDPModule (from sixlib or torch.distributed)
+    fsdp_module_cls = mro[1]
+    if fsdp_module_cls.__name__ != "FSDPModule":
+        return False
+
+    return True
+
+
+def _unpickle_dynamic_fsdp_class(
+    fsdp_mixin_module: str,
+    fsdp_mixin_qualname: str,
+    orig_cls_module: str,
+    orig_cls_qualname: str,
+    class_name: str,
+    class_dict_keys: list[str],
+) -> type:
+    """
+    Reconstruct a dynamically created FSDP wrapper class.
+
+    This recreates a class that was originally created via:
+        type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
+    """
+    # Import the FSDPModule mixin class
+    fsdp_mixin_mod = importlib.import_module(fsdp_mixin_module)
+    fsdp_mixin_cls = _getattr_by_qualname(fsdp_mixin_mod, fsdp_mixin_qualname)
+
+    # Import the original wrapped class
+    orig_mod = importlib.import_module(orig_cls_module)
+    orig_cls = _getattr_by_qualname(orig_mod, orig_cls_qualname)
+
+    # Reconstruct the dynamic class
+    # Note: We don't need to restore the full class dict since FSDP only adds
+    # __deepcopy__ which is a simple function that raises an error
+    dct: dict[str, Any] = {}
+    if "__deepcopy__" in class_dict_keys:
+        # FSDP doesn't support deepcopy, so we add a function that raises
+        def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> None:
+            raise AssertionError(
+                "FSDP does not support deepcopy. Please use state dict for serialization."
+            )
+
+        dct["__deepcopy__"] = _unimplemented_deepcopy
+
+    new_cls = type(class_name, (fsdp_mixin_cls, orig_cls), dct)
+    return new_cls
+
+
+def _getattr_by_qualname(obj: object, qualname: str) -> Any:
+    """Get attribute by qualified name (handles nested classes)."""
+    for part in qualname.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
+class _DynamicFSDPClassPickleData:
+    """
+    Handles pickling of dynamically created FSDP wrapper classes.
+
+    FSDP creates wrapper classes at runtime using type(), which cannot be
+    pickled normally because they don't exist in a module's namespace.
+    This class serializes the base classes and reconstructs the dynamic
+    class on unpickling.
+    """
+
+    @classmethod
+    def reduce_helper(
+        cls, pickler: GraphPickler, obj: object
+    ) -> Optional[tuple[Callable[..., type], tuple[Any, ...]]]:
+        if not _is_dynamic_fsdp_class(obj):
+            return None
+
+        assert isinstance(obj, type)
+        data = cls(obj)
+        return (_unpickle_dynamic_fsdp_class, data.as_tuple())
+
+    def __init__(self, dynamic_cls: type) -> None:
+        mro = dynamic_cls.__mro__
+        fsdp_mixin_cls = mro[1]  # FSDPModule
+        orig_cls = mro[2]  # Original wrapped class
+
+        self.fsdp_mixin_module = fsdp_mixin_cls.__module__
+        self.fsdp_mixin_qualname = fsdp_mixin_cls.__qualname__
+        self.orig_cls_module = orig_cls.__module__
+        self.orig_cls_qualname = orig_cls.__qualname__
+        self.class_name = dynamic_cls.__name__
+        # Only save keys, not values (values may not be picklable)
+        self.class_dict_keys = list(dynamic_cls.__dict__.keys())
+
+    def as_tuple(
+        self,
+    ) -> tuple[str, str, str, str, str, list[str]]:
+        return (
+            self.fsdp_mixin_module,
+            self.fsdp_mixin_qualname,
+            self.orig_cls_module,
+            self.orig_cls_qualname,
+            self.class_name,
+            self.class_dict_keys,
+        )
