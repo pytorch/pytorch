@@ -548,7 +548,7 @@ class TestMkldnn(TestCase):
         """Regression test for shape inference bug in mkldnn._convolution_transpose_pointwise.
 
         Bug: torch.compile was incorrectly transposing weight dimensions for regular PyTorch
-        tensors causing wrong output channel prediction (e.g 3 instead of 8 channels).
+        tensors, causing wrong output channel prediction (e.g., 3 instead of 8 channels).
         """
         torch.set_num_threads(1)
 
