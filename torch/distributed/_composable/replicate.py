@@ -112,7 +112,14 @@ class _ReplicateState(_State):
                 kwargs["device_ids"] = None
             kwargs.pop("device_id")
 
-        self._ddp = DistributedDataParallel(self._param_list, **kwargs)
+        ddp_ignored = set(getattr(module, "_ddp_params_and_buffers_to_ignore", []))
+        ddp_ignored.update(
+            n for n, _ in module.named_parameters() if n not in self._param_names
+        )
+        DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+            module, ddp_ignored
+        )
+        self._ddp = DistributedDataParallel(module, **kwargs)
         # Weakref to the DDP instance is currently only used for testing.
         replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 
@@ -128,10 +135,29 @@ class _ReplicateState(_State):
     def forward_pre_hook(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> Any:
-        if self._init_args or self._init_kwargs:
+        should_init = bool(self._init_args or self._init_kwargs)
+        if should_init:
             self.lazy_init()
+            state = replicate.state(module)
+            module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
+
         self._ddp.require_backward_grad_sync = not self._no_sync
-        return self._ddp._pre_forward(*args, **kwargs)
+        results = self._ddp._pre_forward(*args, **kwargs)
+        self._ddp._active_ddp_module = self._ddp
+        if not should_init:
+            return results
+
+        # Manually call DDP native mixed_precision-related hooks on the first forward pass.
+        device_mesh = getattr(self._ddp, "device_mesh", None)
+        if device_mesh and device_mesh != device_mesh._get_root_mesh():
+            from torch.distributed.tensor.parallel.ddp import (
+                _reconstruct_dtensor,
+            )
+
+            _reconstruct_dtensor(module, args)
+        if self._ddp.mixed_precision:
+            self._ddp._root_copy_hook(*args, **kwargs)
+        return results
 
     def forward_post_hook(
         self,
@@ -214,27 +240,6 @@ def replicate(
 
     state = replicate.state(module)
     module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
-    device_mesh = kwargs.get("device_mesh")
-    if device_mesh is not None:
-        root_mesh = device_mesh._get_root_mesh()
-        # if a root mesh is not the same as device_mesh,
-        # meaning the device_mesh is sliced out from the root mesh.
-        if root_mesh != device_mesh:
-            # TODO: This is a temporary work around to enable DDP + TP.
-            # We should do the logic in DDP so that the 2D implementation is
-            # sound and the state_dict works out of the box.
-            #
-            # This won't conflict with what is done in DDP class as the module
-            # replicate is going to pass is NOT the original module.
-            from torch.distributed.tensor.parallel.ddp import (
-                _localize_dtensor,
-                _reconstruct_dtensor,
-            )
-
-            module.register_forward_pre_hook(_reconstruct_dtensor)
-            module.register_forward_hook(_localize_dtensor)
-
-    module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
 
     state.record_init_args(module, ignored_modules, **kwargs)
 
