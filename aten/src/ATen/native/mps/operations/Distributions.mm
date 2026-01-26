@@ -17,6 +17,7 @@
 #include <ATen/ops/div.h>
 #include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/geometric_native.h>
 #include <ATen/ops/log_normal_native.h>
 #include <ATen/ops/multinomial_native.h>
 #include <ATen/ops/normal_native.h>
@@ -494,6 +495,37 @@ Tensor& cauchy_mps_(Tensor& self, double median, double sigma, std::optional<Gen
                                       MPSGraphRandomDistributionUniform,
                                       gen,
                                       "cauchy_mps_:" + std::to_string(median) + ":" + std::to_string(sigma),
+                                      random_op_block);
+}
+
+Tensor& geometric_mps_(Tensor& self, double p, std::optional<Generator> gen) {
+  TORCH_CHECK(p > 0.0 && p < 1.0, "geometric_ expects p to be in (0, 1), but got p=", p);
+
+  mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
+    auto mpsGraph = cachedGraph->graph();
+    // inverse CDF: ceil(log(U) / log(1-p))
+    // where U is a uniform random variable in (0, 1)
+    const auto logOneMinusP = std::log(1.0 - p);
+    const auto logOneMinusPTensor = [mpsGraph constantWithScalar:logOneMinusP dataType:randomTensor.dataType];
+
+    // log(U)
+    const auto logUTensor = [mpsGraph logarithmWithTensor:randomTensor name:nil];
+
+    // log(U) / log(1-p)
+    const auto divTensor = [mpsGraph divisionWithPrimaryTensor:logUTensor secondaryTensor:logOneMinusPTensor name:nil];
+    // ceil(log(U) / log(1-p))
+    return [mpsGraph ceilWithTensor:divTensor name:nil];
+  };
+
+  auto eps = std::numeric_limits<float>::epsilon();
+  return mps::random_mps_impl<double>(self,
+                                      eps,
+                                      1.0 - eps,
+                                      std::nullopt,
+                                      std::nullopt,
+                                      MPSGraphRandomDistributionUniform,
+                                      gen,
+                                      "geometric_mps_:" + std::to_string(p),
                                       random_op_block);
 }
 
