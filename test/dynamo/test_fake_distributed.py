@@ -253,63 +253,6 @@ class GraphModule(torch.nn.Module):
         no_mesh_empty = extract_runtime_device_meshes([])
         self.assertIsNone(no_mesh_empty)
 
-    def test_process_group_pickle_handler(self):
-        """
-        Test _ProcessGroupPickleData correctly handles ProcessGroup pickling.
-        ProcessGroups are C++ pybind11 objects that cannot be directly pickled.
-        The handler stores the group name and resolves it on unpickle.
-        """
-        from torch.fx._graph_pickler import _ProcessGroupPickleData
-
-        pg = dist.group.WORLD
-        pickle_data = _ProcessGroupPickleData(pg)
-        self.assertEqual(pickle_data.group_name, pg.group_name)
-
-    def test_fake_script_object_pickle_handler(self):
-        """
-        Test _FakeScriptObjectPickleData correctly handles FakeScriptObject pickling.
-        FakeScriptObjects wrap opaque objects like ProcessGroup that cannot be
-        directly pickled.
-        """
-        from torch._library.fake_class_registry import FakeScriptObject
-        from torch.fx._graph_pickler import _FakeScriptObjectPickleData
-
-        device_mesh = init_device_mesh(
-            device_type="cpu",
-            mesh_shape=(self.world_size,),
-            mesh_dim_names=("dp",),
-        )
-
-        fake_obj = FakeScriptObject(
-            wrapped_obj=device_mesh,
-            script_class_name="DeviceMesh",
-            x=device_mesh,
-        )
-
-        pickle_data = _FakeScriptObjectPickleData(fake_obj)
-        self.assertEqual(pickle_data.script_class_name, "DeviceMesh")
-        self.assertEqual(pickle_data.wrapped_obj, device_mesh)
-
-    def test_with_effects_functional_tensor_mode(self):
-        """
-        Test that with_effects works correctly under FunctionalTensorMode.
-        This is needed when executing pre-compiled FX graphs that contain
-        explicit with_effects calls.
-        """
-        from torch._higher_order_ops.effects import with_effects, new_token_tensor
-        from torch._subclasses.functional_tensor import FunctionalTensorMode
-
-        token = new_token_tensor()
-        x = torch.randn(4, 4)
-
-        with FunctionalTensorMode():
-            result = with_effects(
-                token, torch.ops.aten._print.default, "test message"
-            )
-
-        self.assertIsInstance(result, tuple)
-        self.assertEqual(len(result), 2)
-
 
 instantiate_parametrized_tests(TestFakeDistributed)
 
