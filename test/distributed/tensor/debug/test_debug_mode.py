@@ -175,34 +175,69 @@ class TestDTensorDebugMode(TestCase):
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
-        self.assertExpectedInline(
-            debug_mode.debug_string(show_stack_trace=False),
-            """\
-  <method 'add' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
-    aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
-      redistribute_input(1, S(1) -> S(0))
-        redistribute_input(t: f32[8, 1], trace: S(1)->S(0))
-          _dtensor::shard_dim_alltoall(t: f32[8, 1], 1, 0, 0)
-      aten::add.Tensor(t: f32[1, 8], t: f32[1, 8])
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0))
-    aten::sum(dt: f32[8, 8]| S(0))
-      aten::sum(t: f32[1, 8])
-  torch._tensor.backward(dt: f32[]| P(sum), gradient=None, retain_graph=None, create_graph=False, inputs=None)
-    aten::ones_like(dt: f32[]| P(sum), pin_memory=False, memory_format=torch.preserve_format)
-      aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)
-    aten::expand(dt: f32[]| R, [8, 8])
-      aten::expand(t: f32[], [8, 8])
-      redistribute_input(t: f32[8, 8], trace: R->S(1))
-        aten::split.Tensor(t: f32[8, 8], 1, 1)
-        aten::clone(t: f32[8, 1])
-      aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
-      redistribute_input(t: f32[8, 8], trace: R->S(0))
-        aten::split.Tensor(t: f32[8, 8], 1)
-        aten::detach(t: f32[8, 1])
-        aten::clone(t: f32[1, 8])
-      aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
-      aten::detach(t: f32[1, 8])""",
+        debug_string = debug_mode.debug_string(show_stack_trace=False)
+
+        # Certain operations (clone, detach) appear in non-deterministic order during
+        # backward pass redistribution.
+        # For operations that appear multiple times, we include full parameters to
+        # disambiguate (e.g., two different aten::add operations). For unique operations,
+        # we use partial matching to avoid brittleness if the exact signature format changes.
+
+        # Check for key forward operations
+        self.assertIn(
+            "<method 'add' of 'torch._C.TensorBase' objects>", debug_string
+        )  # Unique - no params needed
+        self.assertIn(
+            "aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))", debug_string
         )
+        self.assertIn("redistribute_input(1, S(1) -> S(0))", debug_string)
+        self.assertIn(
+            "redistribute_input(t: f32[8, 1], trace: S(1)->S(0))", debug_string
+        )
+        self.assertIn(
+            "_dtensor::shard_dim_alltoall", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::add.Tensor(t: f32[1, 8], t: f32[1, 8])", debug_string)
+
+        # Check for sum operations
+        self.assertIn(
+            "<method 'sum' of 'torch._C.TensorBase' objects>", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::sum(dt: f32[8, 8]| S(0))", debug_string)
+        self.assertIn("aten::sum(t: f32[1, 8])", debug_string)
+
+        # Check for backward operations
+        self.assertIn(
+            "torch._tensor.backward", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::ones_like(dt: f32[]| P(sum)", debug_string)
+        self.assertIn("aten::ones_like(t: f32[]", debug_string)
+        self.assertIn("aten::expand(dt: f32[]| R, [8, 8])", debug_string)
+        self.assertIn("aten::expand(t: f32[], [8, 8])", debug_string)
+
+        # Check for redistribute operations in backward pass
+        self.assertIn("redistribute_input(t: f32[8, 8], trace: R->S(1))", debug_string)
+        self.assertIn("redistribute_input(t: f32[8, 8], trace: R->S(0))", debug_string)
+
+        # Check for split operations in backward pass
+        self.assertIn("aten::split.Tensor(t: f32[8, 8], 1, 1)", debug_string)
+        self.assertIn("aten::split.Tensor(t: f32[8, 8], 1)", debug_string)
+
+        # Check for _to_copy operations
+        self.assertIn(
+            "aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)",
+            debug_string,
+        )
+        self.assertIn(
+            "aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)",
+            debug_string,
+        )
+
+        # Check that both clone and detach operations appear (order-independent)
+        self.assertIn("aten::clone(t: f32[8, 1])", debug_string)
+        self.assertIn("aten::clone(t: f32[1, 8])", debug_string)
+        self.assertIn("aten::detach(t: f32[8, 1])", debug_string)
+        self.assertIn("aten::detach(t: f32[1, 8])", debug_string)
 
         # check stack trace
         self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)

@@ -4,16 +4,14 @@ import importlib
 import unittest
 from unittest.mock import patch
 
+from _fa_test_common import FlashAttentionTestMixin, SdpaShape
+
 import torch
 import torch.nn.functional as F
 from torch.backends.cuda import SDPBackend
-from torch.nn.attention import (
-    activate_flash_attention_impl,
-    sdpa_kernel,
-)
+from torch.nn.attention import activate_flash_attention_impl, sdpa_kernel
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
-from _fa_test_common import FlashAttentionTestMixin, SdpaShape
 
 
 def _fa4_dependencies_available() -> bool:

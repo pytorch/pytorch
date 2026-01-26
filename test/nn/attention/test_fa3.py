@@ -3,6 +3,8 @@
 import importlib
 import unittest
 
+from _fa_test_common import FlashAttentionTestMixin, SdpaShape
+
 import torch
 import torch.nn.functional as F
 from torch.backends.cuda import SDPBackend
@@ -13,7 +15,6 @@ from torch.nn.attention.experimental._scaled_dot_product_attention_quantized imp
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
-from _fa_test_common import FlashAttentionTestMixin, SdpaShape
 
 
 def _fa3_dependencies_available() -> bool:

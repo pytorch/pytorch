@@ -7,9 +7,8 @@ test_fa3.py and test_fa4.py.
 """
 
 import itertools
-from collections import namedtuple
 from contextlib import contextmanager
-from typing import Optional
+from typing import NamedTuple, Optional
 
 import torch
 import torch.nn.functional as F
@@ -25,7 +24,11 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_utils import TestCase
 
 
-SdpaShape = namedtuple("Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"])
+class SdpaShape(NamedTuple):
+    batch: int
+    num_heads: int
+    seq_len: int
+    head_dim: int
 
 
 @contextmanager
