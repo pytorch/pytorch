@@ -599,7 +599,11 @@ def narrow_copy(
     start: int,
     length: int,
 ) -> torch.Tensor:
-    return torch.narrow(self, dim, start, length).clone()
+    # Use memory_format=torch.contiguous_format to ensure correct strides.
+    # For empty tensors, a plain clone() preserves the input view's strides.
+    return torch.narrow(self, dim, start, length).clone(
+        memory_format=torch.contiguous_format
+    )
 
 
 @register_decomposition([aten.view_copy.default])
@@ -1210,6 +1214,22 @@ def searchsorted_scalar(
         side=side,
         sorter=sorter,
     )[0]
+
+
+@register_decomposition(aten.bucketize.Scalar)
+def bucketize_scalar(
+    self: torch.types.Number,
+    boundaries: torch.Tensor,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+) -> torch.Tensor:
+    return aten.bucketize(
+        torch.tensor([self], device=boundaries.device),
+        boundaries,
+        out_int32=out_int32,
+        right=right,
+    ).squeeze(0)
 
 
 @register_decomposition(aten.rrelu_with_noise_functional)

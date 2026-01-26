@@ -70,6 +70,12 @@ else:
     BackendConfig = tuple[str | None, C10dBackend.Options | None]
     torch.serialization.add_safe_globals([_MeshLayout])
 
+    def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> Optional[ProcessGroup]:
+        if torch.compiler.is_compiling():
+            return mesh._pg_registry.get(name)
+        else:
+            return _resolve_process_group(name)  # pyrefly: ignore[bad-argument-type]
+
     class _MeshEnv(threading.local):
         def __init__(self) -> None:
             self.mesh_stack: list[DeviceMesh] = []
@@ -731,14 +737,14 @@ else:
 
             # Quick return if the current device_mesh is a 1D mesh.
             if len(self._layout) == 1 and mesh_dim is None:
-                return not_none(root_mesh._pg_registry.get(self._dim_group_names[0]))
+                return not_none(_get_pg_from_name(root_mesh, self._dim_group_names[0]))
 
             root_to_flatten_mapping = root_mesh._flatten_mapping
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
                 dim_group_name = root_to_flatten_mapping[
                     mesh_dim  # type: ignore[index]
                 ]._dim_group_names[0]
-                return not_none(root_mesh._pg_registry.get(dim_group_name))
+                return not_none(_get_pg_from_name(root_mesh, dim_group_name))
             else:
                 mesh_dim = (
                     self._get_mesh_dim_by_name(mesh_dim)
@@ -750,7 +756,7 @@ else:
                         f"mesh_dim must be an int, got {type(mesh_dim)}"
                     )
                 return not_none(
-                    root_mesh._pg_registry.get(self._dim_group_names[mesh_dim])
+                    _get_pg_from_name(root_mesh, self._dim_group_names[mesh_dim])
                 )
 
         def get_all_groups(self) -> list[ProcessGroup]:

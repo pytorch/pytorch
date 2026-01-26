@@ -30,9 +30,8 @@ from torch.testing._internal.common_utils import \
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
-     onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
+    (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
+     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -1908,6 +1907,99 @@ class TestLinalg(TestCase):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             self.assertEqual(result, result_numpy, msg=msg)
 
+    @dtypes(torch.float, torch.double)
+    def test_powsum(self, device, dtype):
+        ords = [0.5, 1, 2, 3, 4.5, -1, -2, -0.5, 0, float('inf'), float('-inf')]
+        input_sizes = [(10,), (4, 5), (3, 4, 5), (0,), (0, 10)]
+
+        for input_size, ord in product(input_sizes, ords):
+            x = make_tensor(input_size, dtype=dtype, device=device, low=0.1, high=0.9)
+            for dim in [None, 0, -1]:
+                if dim == -1 and len(input_size) <= 1:
+                    continue
+                for keepdim in [True, False]:
+                    result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim)
+                    expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
+                    self.assertEqual(result, expected)
+
+    @onlyCUDA
+    def test_powsum_dtype_kwarg(self, device):
+        # Test dtype kwarg with bfloat16 input and float32 computation
+        # This tests the dtype conversion path in the kernel
+        ords = [0.5, 1, 2, 3]
+        input_sizes = [(10,), (4, 5), (3, 4, 5)]
+
+        for input_size, ord in product(input_sizes, ords):
+            x = make_tensor(input_size, dtype=torch.bfloat16, device=device, low=0.1, high=0.9)
+            for dim in [None, 0, -1]:
+                if dim == -1 and len(input_size) <= 1:
+                    continue
+                for keepdim in [True, False]:
+                    result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim, dtype=torch.float32)
+                    # Expected: convert to float32 first, then compute
+                    expected = x.to(torch.float32).abs().pow(ord).sum(dim=dim, keepdim=keepdim)
+                    self.assertEqual(result.dtype, torch.float32)
+                    self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_powsum_dtype_kwarg_1d_reduction(self, device):
+        # Test dtype kwarg on CPU with bfloat16 input and float32 computation
+        # Tests both the 1D reduction path (explicit conversion) and larger reductions (kernel handles it)
+        ords = [0.5, 1, 2, 3]
+
+        # Test case where reduction dims have size > 1 (kernel handles dtype conversion)
+        for input_size in [(10,), (4, 5), (3, 4, 5)]:
+            for ord in ords:
+                x = make_tensor(input_size, dtype=torch.bfloat16, device=device, low=0.1, high=0.9)
+                for dim in [None, 0, -1]:
+                    if dim == -1 and len(input_size) <= 1:
+                        continue
+                    for keepdim in [True, False]:
+                        result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim, dtype=torch.float32)
+                        expected = x.to(torch.float32).abs().pow(ord).sum(dim=dim, keepdim=keepdim)
+                        self.assertEqual(result.dtype, torch.float32)
+                        self.assertEqual(result, expected)
+
+        # Test case where reduction dims have size 1 (explicit conversion path)
+        x = make_tensor((1, 5), dtype=torch.bfloat16, device=device, low=0.1, high=0.9)
+        for ord in ords:
+            result = torch.linalg._powsum(x, ord, dim=0, keepdim=True, dtype=torch.float32)
+            expected = x.to(torch.float32).abs().pow(ord).sum(dim=0, keepdim=True)
+            self.assertEqual(result.dtype, torch.float32)
+            self.assertEqual(result, expected)
+
+    @dtypes(torch.float, torch.double)
+    def test_foreach_powsum(self, device, dtype):
+        ords = [0.5, 1, 2, 3, 4.5, -1, -2, 0]
+        tensors = [make_tensor((10,), dtype=dtype, device=device, low=0.1, high=0.9) for _ in range(3)]
+        for ord in ords:
+            results = torch._foreach_powsum(tensors, ord)
+            for t, r in zip(tensors, results):
+                expected = t.abs().pow(ord).sum()
+                self.assertEqual(r, expected)
+
+    @onlyCUDA
+    def test_foreach_powsum_dtype_kwarg(self, device):
+        # Test dtype kwarg with bfloat16 input and float32 computation
+        # This tests the dtype conversion path in both slow and fast CUDA paths
+        ords = [1, 2]  # Fast path for p=1 and p=2
+        tensors = [make_tensor((10,), dtype=torch.bfloat16, device=device, low=0.1, high=0.9) for _ in range(3)]
+        for ord in ords:
+            results = torch._foreach_powsum(tensors, ord, dtype=torch.float32)
+            for t, r in zip(tensors, results):
+                # Expected: convert to float32 first, then compute
+                expected = t.to(torch.float32).abs().pow(ord).sum()
+                self.assertEqual(r.dtype, torch.float32)
+                self.assertEqual(r, expected)
+
+        # Also test slow path (p != 1, 2)
+        for ord in [0.5, 3]:
+            results = torch._foreach_powsum(tensors, ord, dtype=torch.float32)
+            for t, r in zip(tensors, results):
+                expected = t.to(torch.float32).abs().pow(ord).sum()
+                self.assertEqual(r.dtype, torch.float32)
+                self.assertEqual(r, expected)
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
@@ -2965,7 +3057,7 @@ class TestLinalg(TestCase):
         actual_rank, size, batches = 2, (17, 4), ()
         run_subtest(actual_rank, size, batches, device, jitted)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4})
     @setLinalgBackendsToDefaultFinally
@@ -2976,46 +3068,43 @@ class TestLinalg(TestCase):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
         backends = ["default"]
-
         if torch.device(device).type == 'cuda':
-            if torch.cuda.has_magma:
-                backends.append("magma")
-            if has_cusolver() or has_hipsolver():
-                backends.append("cusolver")
+            backends.append("cusolver")
+
+        drivers = {
+            "cpu": (None,),
+            "cuda": (None, "gesvd", "gesvdj", "gesvda"),
+        }
 
         ns = (12, 4, 2, 0)
         batches = ((), (0,), (1,), (2,), (2, 1), (0, 2))
-        drivers = (None, 'gesvd', 'gesvdj', 'gesvda')
 
-        for backend in backends:
-            torch.backends.cuda.preferred_linalg_library(backend)
+        def mul_svd_factors(U, S, Vh):
+            return (U * S.to(dtype).unsqueeze(-2)) @ Vh
 
-            for batch, m, n, driver in product(batches, ns, ns, drivers):
-                if not (backend == 'cusolver' or driver is None):
-                    # only test cases below and skip otherwise:
-                    # - backend == 'cusolver' (driver can be anything)
-                    # - backend != 'cusolver' (driver should only be None)
-                    continue
+        for batch, m, n in product(batches, ns, ns):
+            for backend, driver in product(backends, drivers[torch.device(device).type]):
+                torch.backends.cuda.preferred_linalg_library(backend)
 
                 shape = batch + (m, n)
                 k = min(m, n)
                 A = make_arg(shape)
                 U, S, Vh = torch.linalg.svd(A, full_matrices=False, driver=driver)
-                self.assertEqual((U @ S.to(A.dtype).diag_embed()) @ Vh, A)
+                self.assertEqual(mul_svd_factors(U, S, Vh), A)
 
                 U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True, driver=driver)
                 self.assertEqual(S_f, S)
-                self.assertEqual((U_f[..., :k] @ S_f.to(A.dtype).diag_embed()) @ Vh_f[..., :k, :], A)
+                self.assertEqual(mul_svd_factors(U_f[..., :k], S_f, Vh_f[..., :k, :]), A)
 
                 S_s = torch.linalg.svdvals(A, driver=driver)
                 self.assertEqual(S_s, S)
 
                 U, S, V = torch.svd(A, some=True)
-                self.assertEqual((U @ S.to(A.dtype).diag_embed()) @ V.mH, A)
+                self.assertEqual(mul_svd_factors(U, S, V.mH), A)
 
                 U_f, S_f, V_f = torch.svd(A, some=False)
                 self.assertEqual(S_f, S)
-                self.assertEqual((U_f[..., :k] @ S_f.to(A.dtype).diag_embed()) @ V_f[..., :k].mH, A)
+                self.assertEqual(mul_svd_factors(U_f[..., :k], S_f, V_f[..., :, :k].mH), A)
 
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
