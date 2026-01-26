@@ -858,7 +858,7 @@ def repro_minify(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     minifier(
         mod,
-        args,
+        list(args),
         module_fails=functools.partial(module_fails, check_str=options.check_str),
         dump_state=functools.partial(
             dump_compiler_graph_state, compiler_name=compiler_name

@@ -348,7 +348,7 @@ def dynamo_minifier_backend(
         )
         minifier(
             gm,
-            example_inputs,
+            list(example_inputs),
             module_fails=fails_fn,
             dump_state=dump_state_fn,
         )
@@ -379,7 +379,7 @@ def dynamo_accuracy_minifier_backend(
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
         minifier(
             gm,
-            example_inputs,
+            list(example_inputs),
             module_fails=fails_fn,
             dump_state=dump_state_fn,
         )
