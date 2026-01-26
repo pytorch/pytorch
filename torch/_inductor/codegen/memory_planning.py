@@ -572,7 +572,7 @@ class BufferGroup:
         nbytes = self.sym_nbytes()
         # For now, fallback value will be used if we encounter an unbacked SymInt. The longer-term plan is to have
         # size_hint() use better heuristics for unbackeds, at which point the fallback value will be ignored.
-        size_hint = V.graph.sizevars.size_hint(nbytes, fallback=64)
+        size_hint = V.graph.sizevars.optimization_hint(nbytes, fallback=64)
         self.allocation = Allocation(
             self.node,
             self.live_range,
