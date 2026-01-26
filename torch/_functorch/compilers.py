@@ -7,7 +7,8 @@ import pickle
 import random
 from contextlib import contextmanager
 from functools import partial
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
+from typing_extensions import ParamSpec, TypeVar
 
 import sympy
 
@@ -34,6 +35,9 @@ if TYPE_CHECKING:
     from torch.fx.node import Node
     from torch.types import IntLikeType
 
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 log = logging.getLogger(__name__)
 
@@ -259,9 +263,9 @@ def print_compile(fx_g: fx.GraphModule, _: Any) -> fx.GraphModule:
 
 
 def memory_efficient_fusion(
-    fn: Union[Callable[..., Any], nn.Module],
+    fn: Callable[_P, _R] | nn.Module,
     **kwargs: Any,
-) -> Union[Callable[..., Any], nn.Module]:
+) -> Callable[_P, _R] | nn.Module:
     """
     Wrapper function over :func:`aot_function` and :func:`aot_module` to perform
     memory efficient fusion. It uses the
@@ -335,14 +339,14 @@ def get_inputs(input_data_path: str) -> list[torch.Tensor]:
     """
     Return a random input for the given inputs meta generated from _save_fx_default.
     """
-    inputs = []
+    inputs: list[torch.Tensor] = []
     with open(input_data_path, "rb") as f:
         inputs_meta = pickle.load(f)
         inputs = []
         for meta in inputs_meta:
             if len(meta) == 1:
                 type = meta
-                input = type(random.random())
+                input_ = type(random.random())
             else:
                 type, shape, _stride, dtype, device = meta
                 if dtype in {
@@ -355,10 +359,10 @@ def get_inputs(input_data_path: str) -> list[torch.Tensor]:
                     int,
                     float,
                 }:
-                    input = torch.randint(0, 1, shape, dtype=dtype, device=device)
+                    input_ = torch.randint(0, 1, shape, dtype=dtype, device=device)
                 else:
-                    input = torch.rand(shape, dtype=dtype, device=device)
-            inputs.append(input)
+                    input_ = torch.rand(shape, dtype=dtype, device=device)
+            inputs.append(input_)
     return inputs
 
 
