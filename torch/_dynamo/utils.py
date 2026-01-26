@@ -3497,12 +3497,12 @@ def get_concrete_sizes_from_symints(
     pattern = r"\(s(\d+)\)"
     assert fake_mode.shape_env is not None
     shape_env = fake_mode.shape_env
-    var_to_val = shape_env.var_to_val
+    backed_var_to_val = shape_env.backed_var_to_val
 
     def replace_sym(match: Any) -> str:
         sym_name = f"s{match.group(1)}"
         val = next(
-            (v for k, v in var_to_val.items() if k.name == sym_name),
+            (v for k, v in backed_var_to_val.items() if k.name == sym_name),
             None,
         )
         if isinstance(val, (int, Integer)):
@@ -4008,7 +4008,12 @@ def format_bytecode(
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
-forward_hook_names = ["_forward_pre_hooks", "_forward_hooks"]
+forward_hook_names = [
+    "_forward_pre_hooks",
+    "_forward_pre_hooks_with_kwargs",
+    "_forward_hooks_with_kwargs",
+    "_forward_hooks",
+]
 backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
 state_dict_hook_names = [
     "_state_dict_pre_hooks",
