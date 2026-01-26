@@ -2694,7 +2694,7 @@ def searchsorted(
 
 
 @register_lowering(
-    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+    aten.bucketize.Tensor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
 )
 def bucketize(
     input: TensorBox,
@@ -3140,6 +3140,10 @@ make_fallback(
     warn=False,
 )
 make_fallback(
+    aten._scaled_dot_product_flash_attention.quantized,
+    warn=False,
+)
+make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
     sdpa_constraint,
     warn=False,
@@ -3175,6 +3179,7 @@ make_fallback(
     warn=False,
 )
 make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_forward.quantized)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
@@ -6986,6 +6991,9 @@ def addcmul(self, tensor1, tensor2, *, value=1):
         t1_val = t1_loader(idx)
         t2_val = t2_loader(idx)
 
+        if value == 1 and use_fma:
+            return ops.fma(t1_val, t2_val, self_val)
+
         # Match eager order: self + value * (tensor1 * tensor2)
         # Compute tensor1 * tensor2 first
         t1_times_t2 = ops.mul(t1_val, t2_val)
@@ -7819,6 +7827,49 @@ def prepare_softmax_online(x, dim):
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
         return amax, xsum
+
+
+def _is_sm100_or_later():
+    """Check if we're on SM100+ hardware (Blackwell)."""
+    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0)
+
+
+@register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
+def cvt_e8m0_rceil_lowering(inp):
+    """
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on SM100+.
+
+    The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
+    Currently we pass 0.0 as the second input and only use the low byte result.
+    """
+    # TODO: Optimize to process pairs (pack=2) by creating a custom Pointwise
+    # that loads adjacent elements, applies PTX to both, and uses a follow-up
+    # kernel to extract the packed uint16 results as uint8.
+    if not _is_sm100_or_later():
+        raise NotImplementedError(
+            "cvt_e8m0_rceil requires SM100+ (Blackwell) for PTX instruction support"
+        )
+
+    dtype = inp.get_dtype()
+    if dtype not in (torch.float32, torch.float16, torch.bfloat16):
+        raise ValueError(
+            f"cvt_e8m0_rceil requires float32, float16, or bfloat16 input, got {dtype}"
+        )
+
+    # Upcast bf16/fp16 to float32 for PTX instruction
+    if dtype != torch.float32:
+        inp = to_dtype(inp, torch.float32)
+
+    fn = functools.partial(
+        ops.inline_asm_elementwise,
+        asm="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+        constraints="=h,r",
+        dtype=torch.uint16,
+        is_pure=True,
+        pack=1,
+    )
+    result = make_pointwise(fn)(inp)
+    return to_dtype(result, torch.uint8)
 
 
 # populate lowerings defined in kernel/*
