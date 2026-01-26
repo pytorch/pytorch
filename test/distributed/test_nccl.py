@@ -309,7 +309,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         if self.rank == 1:
             torch.ops.symm_mem.nccl_put_with_signal(tensor, signal_val, 0)
         elif self.rank == 0:
-            torch.ops.symm_mem.nccl_wait_for_signal(tensor, signal_val, 1)
+            torch.ops.symm_mem.nccl_wait_for_signal(tensor, signal_val)
             torch.testing.assert_close(
                 tensor, torch.ones(numel, dtype=dtype, device=self.device)
             )

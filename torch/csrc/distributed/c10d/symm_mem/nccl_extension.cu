@@ -184,7 +184,7 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
 #endif
 }
 
-void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer) {
+void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
