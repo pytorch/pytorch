@@ -2955,7 +2955,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     match_mod_div_block,
                 ):
                     factored_index_expr = BlockPatternMatcher.factor_index_expr(
-                        expr, range_tree
+                        expr, range_tree.symbol()
                     )
                     match = match_func(factored_index_expr, range_tree)
                     if match is not None:
