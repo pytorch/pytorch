@@ -2178,9 +2178,10 @@ class TestBinaryUfuncs(TestCase):
         # Test minimum as well
         b1.zero_()
         result_min = torch.minimum(b0, l0, out=b1)
-        expected_min = torch.minimum(b0, l0)
+        # expected_min computed in promoted dtype (int64), then cast to out dtype (uint8)
+        expected_min = torch.minimum(b0, l0).to(b1.dtype)
         self.assertEqual(result_min.item(), expected_min.item())
-        self.assertEqual(result_min.item(), -9 % 256)  # -9 cast to uint8 after comparison
+        self.assertEqual(result_min.item(), (-9) % 256)  # -9 cast to uint8 after comparison
 
         # Test with different dtype combinations
         test_cases = [

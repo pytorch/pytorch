@@ -16,7 +16,7 @@ void maximum_kernel_cuda(TensorIteratorBase& iter) {
   // the correct type before comparison. This is important when inputs have
   // different dtypes (e.g., uint8 and int64) and an output tensor is provided.
   // Using dtype() (output dtype) would incorrectly cast inputs before comparison.
-  // See https://github.com/pytorch/pytorch/issues/XXXXX
+  // See https://github.com/pytorch/pytorch/issues/173110
   auto common_dtype = iter.common_dtype();
   if (common_dtype == ScalarType::Bool) {
     opmath_symmetric_gpu_kernel_with_scalars<bool>(
@@ -51,6 +51,7 @@ void minimum_kernel_cuda(TensorIteratorBase& iter) {
   // the correct type before comparison. This is important when inputs have
   // different dtypes (e.g., uint8 and int64) and an output tensor is provided.
   // Using dtype() (output dtype) would incorrectly cast inputs before comparison.
+  // See https://github.com/pytorch/pytorch/issues/173110
   auto common_dtype = iter.common_dtype();
   if (common_dtype == ScalarType::Bool) {
     opmath_symmetric_gpu_kernel_with_scalars<bool>(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
