@@ -647,9 +647,8 @@ AOTITorchError torch_from_blob(
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
     c10::Device device(static_cast<c10::DeviceType>(device_type), device_index);
-    c10::TensorOptions options =
-        c10::TensorOptions().device(device).dtype(
-            static_cast<c10::ScalarType>(dtype));
+    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
+        static_cast<c10::ScalarType>(dtype));
     at::Tensor tensor;
     if (data != nullptr) {
       if (deleter != nullptr) {
@@ -669,7 +668,6 @@ AOTITorchError torch_from_blob(
     } else {
       tensor = at::empty_strided(sizes, strides, options);
     }
-    *ret_new_tensor =
-        torch::aot_inductor::new_tensor_handle(std::move(tensor));
+    *ret_new_tensor = torch::aot_inductor::new_tensor_handle(std::move(tensor));
   });
 }
