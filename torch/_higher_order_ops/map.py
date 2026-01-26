@@ -219,8 +219,6 @@ def _broadcast_to_batch(output, batch_size):
     """
 
     def expand_with_batch(t):
-        if t is None:
-            return None
         if isinstance(t, torch.Tensor):
             return t.unsqueeze(0).expand(batch_size, *t.shape).clone()
         return t

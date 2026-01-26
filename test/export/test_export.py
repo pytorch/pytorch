@@ -6902,28 +6902,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         inps = (torch.ones(3, 4),)
         dim_batch = torch.export.Dim("batch", min=1)
         ep = export(mod, inps, dynamic_shapes={"xs": {0: dim_batch}})
+        self.assertEqual(ep.module()(*inps), mod(*inps))
 
-        self.assertExpectedInline(
-            normalize_gm(ep.module().print_readable(print_output=False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, xs):
-        xs: "f32[s83, 4]";
-
-        xs, = fx_pytree.tree_flatten_spec(([xs], {}), self._in_spec)
-        _guards_fn = self._guards_fn(xs);  _guards_fn = None
-
-        body_graph_0 = self.body_graph_0
-        map_impl = torch.ops.higher_order.map_impl(body_graph_0, [xs], []);  body_graph_0 = xs = None
-        getitem: "f32[s83, 4]" = map_impl[0];  map_impl = None
-        return pytree.tree_unflatten((getitem,), self._out_spec)
-
-    class body_graph_0(torch.nn.Module):
-        def forward(self, xs: "f32[4]"):
-            add: "f32[4]" = torch.ops.aten.add.Tensor(xs, 1);  xs = None
-            return (add,)
-""",
-        )
+        diff_batch_size_inp = (torch.randn(4, 4),)
+        self.assertEqual(ep.module()(*diff_batch_size_inp), mod(*diff_batch_size_inp))
 
     @unittest.expectedFailure
     def test_crop_like(self):
