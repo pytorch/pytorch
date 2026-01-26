@@ -380,14 +380,19 @@ Tensor& addmv_out(
   }
 
   Tensor vec_v = vec.view({vec.size(0), 1});
+
+  bool is_float64 = mat.scalar_type() == at::kDouble ||
+                    vec.scalar_type() == at::kDouble;
   bool is_inplace = self.is_same(out);
-  Tensor self_v_copy;
-  if (is_inplace && beta.to<double>() != 0.0) {
+  bool beta_non_zero = beta.to<double>() != 0.0;
+  if (is_float64 && is_inplace && beta_non_zero) {
+    Tensor self_v_copy;
     self_v_copy = self_v.clone();
     at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, out);
   } else {
     at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
   }
+
   out.resize_({mat.size(0)});
   return out;
 }
