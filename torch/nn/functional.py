@@ -11,15 +11,15 @@ from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import (
     _add_docstr,
     _infer_size,
-    _ScalingType as ScalingType,
-    _SwizzleType as SwizzleType,
+    _ScalingType as ScalingType,  # pyrefly: ignore [missing-module-attribute]
+    _SwizzleType as SwizzleType,  # pyrefly: ignore [missing-module-attribute]
 )
 from torch._jit_internal import (
     _overload,
     boolean_dispatch,
     BroadcastingList1,
-    BroadcastingList2,
-    BroadcastingList3,
+    BroadcastingList2,  # pyrefly: ignore [missing-module-attribute]
+    BroadcastingList3,  # pyrefly: ignore [missing-module-attribute]
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
@@ -2481,7 +2481,7 @@ def embedding(
 
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
-        weight (Tensor): The embedding matrix with number of rows equal to the maximum possible index + 1,
+        weight (Tensor): The embedding matrix (must be 2-D) with number of rows equal to the maximum possible index + 1,
             and number of columns equal to the embedding size
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the gradient;
                                      therefore, the embedding vector at :attr:`padding_idx` is not updated during training,
@@ -4654,7 +4654,8 @@ def interpolate(  # noqa: F811
             for out-of-boundary values, making this operation *independent* of input size
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
-            Default: ``False``
+            Default: ``None``. When ``None`` and :attr:`mode` is one of the linear modes,
+            it is treated as ``False``.
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation. If `recompute_scale_factor` is ``True``, then
             `scale_factor` must be passed in and `scale_factor` is used to compute the

@@ -1117,6 +1117,19 @@ else:
         def _is_current_rank_part_of_mesh(self) -> bool:
             """
             Return True if the current rank is part of this mesh.
+
+            When a DeviceMesh is created with a subset of ranks (a sub-mesh),
+            ranks not included in the mesh are "non-participating ranks". These
+            ranks:
+
+            - Return None from get_coordinate()
+            - Hold empty tensors as their local DTensor representation
+            - Skip computation during DTensor dispatch (returning default values)
+            - Skip collective operations during redistribute
+            - Return 0 cost for redistribute cost calculations
+
+            This allows DTensor operations to execute correctly across the entire
+            process group while only performing actual work on participating ranks.
             """
             return self._coordinate_on_dim is not None
 
