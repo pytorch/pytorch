@@ -117,7 +117,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
-#include <torch/csrc/inductor/static_cuda_launcher.h>
+#include <torch/csrc/inductor/static_launcher/cuda.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
@@ -2105,6 +2105,7 @@ void initModule(PyObject* module);
 PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
 void THXPEvent_init(PyObject* module);
+void THXPMemPool_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
@@ -2327,6 +2328,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THXPStream_init(module);
   THXPEvent_init(module);
+  THXPMemPool_init(module);
 #endif
 
   torch::distributed::initPlacementBindings(module);
