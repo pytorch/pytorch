@@ -85,6 +85,33 @@ Tensor& addmm_out(
       " but got:",
       self.sizes());
 
+  // Different float64 handling.
+  if (mat1.scalar_type() == at::kDouble) {
+    bool is_inplace = self.is_same(result);
+    bool beta_not_zero = beta.to<double>() != 0.0;
+    Tensor self_copy;
+
+    if (is_inplace && beta_not_zero) {
+      self_copy = self.clone();
+    }
+
+    onednn::matmul(result, mat1, mat2, Tensor(), true, onednn::Attr());
+
+    if (alpha.to<double>() != 1.0) {
+      result.mul_(alpha);
+    }
+
+    if (beta_not_zero) {
+      if (is_inplace) {
+        result.add_(self_copy, beta);
+      } else {
+        result.add_(self, beta);
+      }
+    }
+
+    return result;
+  }
+
   // general case
   Tensor bias = Tensor();
   onednn::Attr attr;
@@ -223,6 +250,33 @@ Tensor& baddbmm_out(
     return result;
   }
 
+  // Different float64 handling.
+  if (batch1.scalar_type() == at::kDouble || batch2.scalar_type() == at::kDouble) {
+    bool is_inplace = input.is_same(result);
+    bool beta_not_zero = beta.to<double>() != 0.0;
+    Tensor input_copy;
+
+    if (is_inplace && beta_not_zero) {
+      input_copy = input.clone();
+    }
+
+    onednn::matmul(result, batch1, batch2, Tensor(), true, onednn::Attr());
+
+    if (alpha.to<double>() != 1.0) {
+      result.mul_(alpha);
+    }
+
+    if (beta_not_zero) {
+      if (is_inplace) {
+        result.add_(input_copy, beta);
+      } else {
+        result.add_(input, beta);
+      }
+    }
+
+    return result;
+  }
+
   // general case
   onednn::Attr attr;
   float beta_ = beta.to<float>();
@@ -326,7 +380,14 @@ Tensor& addmv_out(
   }
 
   Tensor vec_v = vec.view({vec.size(0), 1});
-  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
+  bool is_inplace = self.is_same(out);
+  Tensor self_v_copy;
+  if (is_inplace && beta.to<double>() != 0.0) {
+    self_v_copy = self_v.clone();
+    at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, out);
+  } else {
+    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
+  }
   out.resize_({mat.size(0)});
   return out;
 }
