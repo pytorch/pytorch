@@ -1294,7 +1294,8 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> tuple[Tensor, Tensor, Te
     sizes = list(A.shape)
     m = sizes[-2]
     n = sizes[-1]
-    k = min(m, n)
+    # Use sym_min to handle unbacked symbolic dimensions
+    k = sym_min(m, n)
 
     sizes[-1] = m
     if pivot:
