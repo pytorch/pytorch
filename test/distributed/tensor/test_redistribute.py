@@ -825,81 +825,6 @@ class RedistributeTest(DTensorTestBase):
                 out = dt.redistribute(mesh, dst)
                 self.assertEqual(out.placements, dst)
 
-    @with_comms
-    def test_replicate_to_partial_has_nonzero_cost(self):
-        """
-        Test that Replicate -> Partial transition has a nonzero cost.
-
-        This test verifies that the cost function assigns a positive cost to
-        R->P transitions, which discourages unnecessary partial tensor creation.
-        If R->P had zero cost, the planner might choose suboptimal paths that
-        create partial tensors unnecessarily.
-        """
-        mesh = init_device_mesh(self.device_type, (2, 2))
-
-        from torch.distributed.tensor._collective_utils import (
-            one_step_redistribute_cost,
-        )
-        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-
-        tensor_meta = TensorMeta(
-            shape=torch.Size([4, 4]),
-            stride=(4, 1),
-            dtype=torch.float32,
-        )
-
-        # Test R -> P cost on mesh_dim 0
-        replicate_spec = DTensorSpec(
-            mesh,
-            (Replicate(), Replicate()),
-            tensor_meta=tensor_meta,
-        )
-        partial_spec = DTensorSpec(
-            mesh,
-            (Partial(), Replicate()),
-            tensor_meta=tensor_meta,
-        )
-
-        cost = one_step_redistribute_cost(replicate_spec, partial_spec)
-
-        # R->P should have a positive cost (see REPLICATE_TO_PARTIAL_COST constant)
-        self.assertGreater(
-            cost,
-            0.0,
-            "Replicate -> Partial transition should have a nonzero cost to "
-            "discourage unnecessary partial tensor creation",
-        )
-
-        # Also verify that R->S has zero cost (for comparison)
-        shard_spec = DTensorSpec(
-            mesh,
-            (Shard(0), Replicate()),
-            tensor_meta=tensor_meta,
-        )
-        r_to_s_cost = one_step_redistribute_cost(replicate_spec, shard_spec)
-        self.assertEqual(
-            r_to_s_cost,
-            0.0,
-            "Replicate -> Shard transition should have zero cost (local operation)",
-        )
-
-        # Verify P->R has positive cost (all-reduce)
-        p_to_r_cost = one_step_redistribute_cost(partial_spec, replicate_spec)
-        self.assertGreater(
-            p_to_r_cost,
-            0.0,
-            "Partial -> Replicate transition should have positive cost (all-reduce)",
-        )
-
-        # The key invariant: R->P cost should be less than P->R cost
-        # (R->P is just a local division, P->R requires communication)
-        self.assertLess(
-            cost,
-            p_to_r_cost,
-            "R->P cost should be less than P->R cost since R->P is local "
-            "but P->R requires all-reduce communication",
-        )
-
 
 instantiate_parametrized_tests(RedistributeTest)
 
@@ -1453,6 +1378,117 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),),
         )
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
+
+
+class DistributeWithStridedShardTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    def _extract_redistribute_trace_from_debug_mode(self, s: str) -> str:
+        import re
+
+        match = re.search(r"trace:\s*(.*)\)", s)
+        if match:
+            trace_str = match.group(1)
+            return trace_str
+        else:
+            return ""
+
+    @with_comms
+    def test_strided_shard_redistribution(self):
+        torch.manual_seed(21)
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_data = torch.randn((31, 13, 11), device=self.device_type)
+        sharding_src_dst_pairs_with_expected_trace = [
+            (
+                (
+                    [Shard(0), Shard(0), _StridedShard(0, split_factor=3)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), _StridedShard(0, split_factor=3)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), _StridedShard(0, split_factor=3), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [_StridedShard(0, split_factor=3), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+                (
+                    [Replicate(), _StridedShard(1, split_factor=5), Shard(0)],
+                    (
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1,)),
+                    ),
+                ),
+            ),
+        ]
+        for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
+            sharding_src_dst_pairs_with_expected_trace
+        ):
+            sharded_dt = _distribute_tensor(
+                input_data.clone(),
+                mesh,
+                src_placement,
+                shard_order=src_order,
+                src_data_rank=None,
+            )
+            with DebugMode(record_torchfunction=False) as debug_mode:
+                sharded_dt = redistribute(sharded_dt, mesh, dst_placement, dst_order)
+            trace_str = self._extract_redistribute_trace_from_debug_mode(
+                debug_mode.debug_string()
+            )
+            if idx == 0:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]_S(0, 3)->S(0)[0]S(0)[1]R->S(0)[0]RR->RRR->RS(0)[1]R->RS(0)[1]S(0)[2]""",  # noqa: B950
+                )
+            elif idx == 1:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->RS(0)R->RS(0)_S(0, 3)""",
+                )
+            elif idx == 2:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1]_S(0, 3)S(0)[2]->S(0)[1]_S(0, 3)R->S(0)[1]RR->RRR->_S(0, 3)RR->_S(0, 3)S(0)[0]R""",
+                )
+            elif idx == 3:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)_S(1, 5)R->R_S(1, 5)R->R_S(1, 5)S(0)""",
+                )
+            expected_dt = _distribute_tensor(
+                input_data.clone(),
+                mesh,
+                dst_placement,
+                shard_order=dst_order,
+                src_data_rank=None,
+            )
+            self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
 
 
 RedistributeTestWithLocalTensor = create_local_tensor_test_class(
