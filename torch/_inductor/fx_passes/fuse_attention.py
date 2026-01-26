@@ -731,7 +731,7 @@ def _sfdp_params_check(match):
         return False
     # fused kernels use tf32
     if (
-        query.device.type == "cuda"
+        query.device.type != "cpu"
         and query.dtype == torch.float32
         and not torch.backends.cuda.matmul.allow_tf32
     ):

@@ -1254,10 +1254,10 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
                         t4 = t3.softmax(dim=-1)
                         t5 = t4.matmul(v)
                         return t5
-
-                func = Model().to("cuda")
-                x1 = torch.randn(1, 16, 64, 64, device="cuda")
-                attn_mask = torch.zeros(1, 1, 16, 16, device="cuda")
+                device = torch.accelerator.current_accelerator().type
+                func = Model().to(device)
+                x1 = torch.randn(1, 16, 64, 64, device=device)
+                attn_mask = torch.zeros(1, 1, 16, 16, device=device)
                 test_inputs = [x1, attn_mask]
 
                 out, code = run_and_get_code(torch.compile(func), *test_inputs)
