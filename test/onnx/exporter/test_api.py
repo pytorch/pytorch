@@ -65,9 +65,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
     def assert_export(
         self, *args, strategy: str | None = "TorchExportNonStrictStrategy", **kwargs
     ):
-        onnx_program = torch.onnx.export(
-            *args, **kwargs, dynamo=True, fallback=False, verbose=False
-        )
+        onnx_program = torch.onnx.export(*args, **kwargs, dynamo=True, verbose=False)
         assert onnx_program is not None
         onnx_testing.assert_onnx_program(onnx_program, strategy=strategy)
         return onnx_program
@@ -413,7 +411,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             Mod(),
             (torch.randn(3, 4),),
             dynamo=True,
-            fallback=False,
         )
         self.assertFalse(torch.onnx.is_in_onnx_export())
 
