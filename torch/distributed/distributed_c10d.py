@@ -16,6 +16,7 @@ import time
 import warnings
 from collections import namedtuple
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, NewType, TYPE_CHECKING
 from typing_extensions import deprecated
@@ -749,6 +750,11 @@ class GroupMember(metaclass=_WorldMeta):
     """Group member class."""
 
     NON_GROUP_MEMBER = -100
+
+
+@dataclass
+class _NonGroupMember:
+    group_name: GroupName
 
 
 def _get_default_timeout(backend: Backend) -> timedelta:
@@ -5301,6 +5307,7 @@ def new_group(
     use_local_synchronization: bool = False,
     group_desc=None,
     device_id: torch.device | None = None,
+    always_return_group_name: bool = False,
 ):
     """
     Create a new distributed group.
@@ -5379,6 +5386,7 @@ def new_group(
         use_local_synchronization=use_local_synchronization,
         group_desc=group_desc,
         device_id=device_id,
+        always_return_group_name=always_return_group_name,
     )
 
 
@@ -5391,6 +5399,7 @@ def _new_group_with_tag(
     use_local_synchronization=False,
     group_desc=None,
     device_id: torch.device | None = None,
+    always_return_group_name: bool = False,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -5504,6 +5513,9 @@ def _new_group_with_tag(
             _store_based_barrier(
                 global_rank, barrier_store, group_name, world_size, timeout
             )
+
+    if always_return_group_name and pg == GroupMember.NON_GROUP_MEMBER:
+        return _NonGroupMember(group_name)
 
     return pg
 
