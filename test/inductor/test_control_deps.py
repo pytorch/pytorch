@@ -115,6 +115,128 @@ class TestControlDeps(InductorTestCase):
                 "extern_kernels.mm", 2, exactly=True
             ).check("del buf0").run(code[0])
 
+    @config.patch(reorder_for_locality=False)
+    @requires_gpu()
+    def test_control_deps_with_nested_args(self):
+        """Test control_deps with operations that have nested args (e.g., torch.cat)."""
+
+        def fn(a, b, c):
+            x = a + 1
+            y = b * 2
+            # torch.cat has nested args: (List[Tensor], dim)
+            cat_result = torch.cat([x, y], dim=0)
+            z = cat_result + c
+            return z
+
+        def add_control_deps(graph):
+            from torch.utils._ordered_set import OrderedSet
+
+            # Find the cat node which has nested args
+            cat_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.cat.default
+            )
+            assert len(cat_nodes) == 1, f"Expected 1 cat node, got {len(cat_nodes)}"
+            cat_node = cat_nodes[0]
+
+            # Verify it has nested args (list of tensors)
+            assert isinstance(cat_node.args[0], (list, tuple)), (
+                f"Expected nested args, got {type(cat_node.args[0])}"
+            )
+
+            # Find a node that comes before cat to use as dependency
+            add_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
+            # Use the first add node (x = a + 1)
+            dep_node = add_nodes[0]
+
+            deps_map = {cat_node: OrderedSet([dep_node])}
+            torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                graph, deps_map
+            )
+
+            # Verify control_deps was created
+            control_deps_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.control_deps
+            )
+            assert len(control_deps_nodes) == 1
+            return graph
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=add_control_deps,
+        ):
+            a = torch.rand([128, 64], device=GPU_TYPE)
+            b = torch.rand([128, 64], device=GPU_TYPE)
+            c = torch.rand([256, 64], device=GPU_TYPE)
+
+            compiled_fn = torch.compile(fn)
+            result = compiled_fn(a, b, c)
+
+            expected = fn(a, b, c)
+            torch.testing.assert_close(result, expected)
+
+    @requires_gpu()
+    def test_control_deps_with_triton_kernel(self):
+        """Test control_deps with triton_kernel_wrapper_mutation."""
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+
+        def fn(x, y):
+            z = x * 2
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+            return output + z
+
+        def add_control_deps(graph):
+            from torch.utils._ordered_set import OrderedSet
+
+            # Find triton_kernel_wrapper_mutation nodes
+            triton_nodes = graph.find_nodes(
+                op="call_function",
+                target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+            )
+            assert triton_nodes
+            # Find mul node (z = x * 2) to use as dependency
+            mul_nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mul.Tensor
+            )
+            assert mul_nodes
+            deps_map = {triton_nodes[0]: OrderedSet([mul_nodes[0]])}
+            torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
+                graph, deps_map
+            )
+            return graph
+
+        with torch._inductor.config.patch(
+            post_grad_custom_post_pass=add_control_deps,
+        ):
+            x = torch.rand([256], device=GPU_TYPE)
+            y = torch.rand([256], device=GPU_TYPE)
+
+            compiled_fn = torch.compile(fn)
+            result = compiled_fn(x, y)
+
+            expected = fn(x, y)
+            torch.testing.assert_close(result, expected)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA_AND_TRITON:
