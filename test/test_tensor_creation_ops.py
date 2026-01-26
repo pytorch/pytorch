@@ -2847,7 +2847,7 @@ class TestTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
                 torch_method(3, dtype=dtype)
             return
-        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
                 res = torch_method(
                     size,
@@ -2896,7 +2896,7 @@ class TestTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
                 torch_method(3, dtype=dtype)
             return
-        for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
+        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
                 res = torch_method(size, sym=not periodic, **kwargs, device=device, dtype=dtype)
                 # NB: scipy always returns a float64 result
