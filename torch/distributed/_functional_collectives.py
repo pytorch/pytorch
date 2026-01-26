@@ -1185,7 +1185,9 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
     # `tag` will be deprecated. See details in:
     # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
     if isinstance(group, dist.ProcessGroup):
-        return group.group_name
+        # Use group_name_or_alias to get the canonical aliased name that's
+        # consistent across all ranks for precompilation.
+        return group.group_name_or_alias
     elif isinstance(group, str):
         # In some cases Dynamo doesn't like tracing through NewType constructors
         # - so use a cast instead (the actual newtype representation is
