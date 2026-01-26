@@ -2898,11 +2898,13 @@ def iter_contains(
                 if search is _get_fake_tensor(x):  # Object equivalence
                     return ConstantVariable.create(True)
         else:
-            check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+            from torch._dynamo.variables.builder import SourcelessBuilder
+
+            check = SourcelessBuilder.create(tx, operator.eq).call_function(tx, [x, search], {})
             if found is None:
                 found = check
             else:
-                found = BuiltinVariable(operator.or_).call_function(
+                found = SourcelessBuilder.create(tx, operator.or_).call_function(
                     tx, [check, found], {}
                 )
     if found is None:
