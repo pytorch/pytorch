@@ -3869,7 +3869,9 @@ class CheckFunctionManager:
                         ret.append(True)
                 return ret
 
-        sorted_guards = sorted(guards or (), key=Guard.sort_key)
+        sorted_guards = sorted(
+            (g for g in (guards or ()) if not g.skip), key=Guard.sort_key
+        )
 
         if guard_filter_fn:
             # If we're filtering guards, we need to build it an extra time first
@@ -4887,6 +4889,8 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
+        if guard.skip:
+            continue
         if is_from_skip_guard_source(guard.originating_source):
             continue
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)

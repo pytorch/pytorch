@@ -274,6 +274,7 @@ class Guard:
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
     _unserializable: bool = False
+    skip: bool = False
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -676,9 +677,9 @@ class GuardsSet:
         """Delete all guards that contains a given source"""
         from ._dynamo.source import is_from_source
 
-        self.inner = OrderedSet(
-            g for g in self.inner if not is_from_source(g.originating_source, source)
-        )
+        for g in self.inner:
+            if is_from_source(g.originating_source, source):
+                g.skip = True
 
 
 """
