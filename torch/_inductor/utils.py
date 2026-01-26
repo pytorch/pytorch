@@ -144,7 +144,11 @@ XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
 )
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
+GPU_KERNEL_BIN_EXTS = {
+    "cuda": ".cubin",
+    "hip": ".hsaco",
+    "xpu": f".{XPU_KERNEL_FORMAT}",
+}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -1172,8 +1176,7 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
 
 def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
     return isinstance(a, torch.SymInt) or (
-        isinstance(a, torch.Tensor)
-        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+        isinstance(a, torch.Tensor) and a._has_symbolic_sizes_strides
     )
 
 
@@ -2052,7 +2055,7 @@ def use_blackwell_cutedsl_grouped_mm(
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 
-    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cuda.cutlass_backend_min_gemm_size:
         return False
     from .codegen.cuda.cutlass_utils import try_import_cutlass
@@ -2332,7 +2335,7 @@ def use_ck_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return (
         _use_autotune_backend("CK")
         and use_ck_template(layout)
-        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+        and V.graph.sizevars.optimization_hint(m * n * k, fallback=-1) > 0
     )
 
 
@@ -2342,7 +2345,7 @@ def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return (
         _use_autotune_backend("CKTILE")
         and use_ck_template(layout)
-        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+        and V.graph.sizevars.optimization_hint(m * n * k, fallback=-1) > 0
     )
 
 
