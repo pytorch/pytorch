@@ -260,15 +260,8 @@ class IterationRangesRoot(IterationRanges):
             node.length. Returns `not length_is_one_hint` for ascending
             sort.
             """
-            divisor_hint = V.graph.sizevars.size_hint(
-                x.divisor, fallback=config.unbacked_symint_fallback
-            )
-            length_is_one_hint = (
-                V.graph.sizevars.size_hint(
-                    x.length, fallback=config.unbacked_symint_fallback
-                )
-                == 1
-            )
+            divisor_hint = V.graph.sizevars.optimization_hint(x.divisor)
+            length_is_one_hint = V.graph.sizevars.optimization_hint(x.length) == 1
             return (divisor_hint, not length_is_one_hint)
 
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
@@ -1140,9 +1133,8 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # for the "cat". However, I think it might be a bit overwhelming that
         # we add such complexity only for handling some particular cases for
         # benchmarking.
-        out_numel = V.graph.sizevars.size_hint(
-            sympy_product(self.numels.values()),
-            fallback=config.unbacked_symint_fallback,
+        out_numel = V.graph.sizevars.optimization_hint(
+            sympy_product(self.numels.values())
         )
         for i, arg in enumerate(call_args):
             # "buf" may be narrowed. In this case, the number of memory accesses
@@ -1154,9 +1146,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 nbytes.append(0)
                 continue
             arg_numel = V.graph.get_numel(arg)
-            buf_size = V.graph.sizevars.size_hint(
-                arg_numel, fallback=config.unbacked_symint_fallback
-            )
+            buf_size = V.graph.sizevars.optimization_hint(arg_numel)
             if buf_size > out_numel:
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
@@ -2749,9 +2739,7 @@ class SIMDScheduling(BaseScheduling):
         red_ranges = [ranges[v] for v in all_red_vars]
 
         # Sometimes dynamic shapes is unable to prove equality without hint
-        get_hint = functools.partial(
-            V.graph.sizevars.size_hint, fallback=config.unbacked_symint_fallback
-        )
+        get_hint = V.graph.sizevars.optimization_hint
         torch._check(
             get_hint(sympy_product(pw_ranges)) == get_hint(pointwise_numel),
             lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
@@ -2839,7 +2827,7 @@ class SIMDScheduling(BaseScheduling):
             # TODO: incorporate exact bitwidth, and read/write
             # coalesced write is 2x more important
             for i in range(len(splits)):
-                s = V.graph.sizevars.size_hint(splits[i], fallback=32)
+                s = V.graph.sizevars.optimization_hint(splits[i], fallback=32)
                 s = min(s, 8)
                 split_scores[i] = int(split_scores[i] * s / 8)
 
@@ -3188,7 +3176,7 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s, fallback=8192)
+        s = V.graph.sizevars.optimization_hint(s, fallback=8192)
         return s >= 32 and (s % 32 == 0)
 
 
