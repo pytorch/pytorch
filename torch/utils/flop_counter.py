@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 try:
     from triton.runtime.jit import JITFunction as _JITFunction
 except ImportError:
-    if any(x is not None for x in [torch.version.cuda, torch.version.hip, torch.version.xpu]):
+    if any(getattr(torch.version, attr, None) is not None for attr in ["cuda", "hip", "xpu"]):
         log.warning("triton not found; flop counting will not work for triton kernels")
     _JITFunction = NoneType
 
