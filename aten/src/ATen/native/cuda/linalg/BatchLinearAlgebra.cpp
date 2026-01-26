@@ -136,14 +136,6 @@ void magmaSyevd(
     value_t* w, scalar_t* wA, magma_int_t ldwa, scalar_t* work, magma_int_t lwork, value_t* rwork,
     magma_int_t lrwork, magma_int_t* iwork, magma_int_t liwork, magma_int_t* info);
 
-template<class scalar_t, class value_t=scalar_t>
-void magmaEig(
-    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, scalar_t *A, magma_int_t lda,
-    scalar_t *w, scalar_t *VL, magma_int_t ldvl,
-    scalar_t *VR, magma_int_t ldvr, scalar_t *work, magma_int_t lwork,
-    value_t *rwork,
-    magma_int_t *info);
-
 template<class scalar_t>
 void magmaLuSolve(
     magma_int_t n, magma_int_t nrhs, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv,
@@ -646,86 +638,6 @@ void magmaSyevd<c10::complex<float>, float>(
   magma_cheevd_gpu(
       jobz, uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, w, reinterpret_cast<magmaFloatComplex*>(wA),
       ldwa, reinterpret_cast<magmaFloatComplex*>(work), lwork, rwork, lrwork, iwork, liwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaEig<double>(
-    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
-    double *A, magma_int_t lda,
-    double *w,
-    double *VL, magma_int_t ldvl,
-    double *VR, magma_int_t ldvr,
-    double *work, magma_int_t lwork,
-    double *rwork,
-    magma_int_t *info) {
-  MagmaStreamSyncGuard guard;
-  // magma [sd]geev wants to separate output arrays: wr and wi for the real
-  // and imaginary parts
-  double *wr = w;
-  double *wi = w + n;
-  (void)rwork; // unused
-  magma_dgeev(jobvl, jobvr, n, A, lda, wr, wi, VL, ldvl, VR, ldvr, work, lwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaEig<float>(
-    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
-    float *A, magma_int_t lda,
-    float *w,
-    float *VL, magma_int_t ldvl,
-    float *VR, magma_int_t ldvr,
-    float *work, magma_int_t lwork,
-    float *rwork,
-    magma_int_t *info) {
-  MagmaStreamSyncGuard guard;
-  float *wr = w;
-  float *wi = w + n;
-  (void)rwork; // unused
-  magma_sgeev(jobvl, jobvr, n, A, lda, wr, wi, VL, ldvl, VR, ldvr, work, lwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaEig<c10::complex<double>, double>(
-    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
-    c10::complex<double> *A, magma_int_t lda,
-    c10::complex<double> *w,
-    c10::complex<double> *VL, magma_int_t ldvl,
-    c10::complex<double> *VR, magma_int_t ldvr,
-    c10::complex<double> *work, magma_int_t lwork,
-    double *rwork,
-    magma_int_t *info) {
-  MagmaStreamSyncGuard guard;
-  magma_zgeev(jobvl, jobvr, n,
-         reinterpret_cast<magmaDoubleComplex*>(A), lda,
-         reinterpret_cast<magmaDoubleComplex*>(w),
-         reinterpret_cast<magmaDoubleComplex*>(VL), ldvl,
-         reinterpret_cast<magmaDoubleComplex*>(VR), ldvr,
-         reinterpret_cast<magmaDoubleComplex*>(work), lwork,
-         rwork, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaEig<c10::complex<float>, float>(
-    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n,
-    c10::complex<float> *A, magma_int_t lda,
-    c10::complex<float> *w,
-    c10::complex<float> *VL, magma_int_t ldvl,
-    c10::complex<float> *VR, magma_int_t ldvr,
-    c10::complex<float> *work, magma_int_t lwork,
-    float *rwork,
-    magma_int_t *info) {
-  MagmaStreamSyncGuard guard;
-  magma_cgeev(jobvl, jobvr, n,
-         reinterpret_cast<magmaFloatComplex*>(A), lda,
-         reinterpret_cast<magmaFloatComplex*>(w),
-         reinterpret_cast<magmaFloatComplex*>(VL), ldvl,
-         reinterpret_cast<magmaFloatComplex*>(VR), ldvr,
-         reinterpret_cast<magmaFloatComplex*>(work), lwork,
-         rwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1797,108 +1709,14 @@ REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/*
-Computes the eigenvalues and eigenvectors of n-by-n matrix 'input'.
-This is an in-place routine, content of 'input', 'values', 'vectors' is overwritten.
-'infos' is an int Tensor containing error codes for each matrix in the batched input.
-For more information see MAGMA's documentation for GEEV routine.
-*/
-template <typename scalar_t>
-void apply_magma_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
-#if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "Calling torch.linalg.eig with MAGMA requires compiling PyTorch with MAGMA. "
-                   "Either transfer the tensor to the CPU before calling torch.linalg.eig or use cuSolver.");
-#else
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == at::kCPU);
-  if (compute_eigenvectors) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.device() == at::kCPU);
-  }
-
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-
-  magma_vec_t jobvr = compute_eigenvectors ? MagmaVec : MagmaNoVec;
-  magma_vec_t jobvl = MagmaNoVec;  // only right eigenvectors are computed
-  magma_int_t n = magma_int_cast(input.size(-1), "n");
-  auto lda = std::max<magma_int_t>(1, n);
-  auto batch_size = batchCount(input);
-  auto input_matrix_stride = matrixStride(input);
-  auto values_stride = values.size(-1);
-  auto input_data = input.data_ptr<scalar_t>();
-  auto values_data = values.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<magma_int_t>();
-  auto rvectors_data = compute_eigenvectors ? vectors.data_ptr<scalar_t>() : nullptr;
-  scalar_t* lvectors_data = nullptr;  // only right eigenvectors are computed
-  int64_t ldvr = compute_eigenvectors ? lda : 1;
-  int64_t ldvl = 1;
-
-  Tensor rwork;
-  value_t* rwork_data = nullptr;
-  if (input.is_complex()) {
-    ScalarType real_dtype = toRealValueType(input.scalar_type());
-    rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
-    rwork_data = rwork.mutable_data_ptr<value_t>();
-  }
-
-  // call magmaEig once to get the optimal size of work_data
-  scalar_t work_query;
-  magmaEig<scalar_t, value_t>(jobvl, jobvr, n, input_data, lda, values_data,
-    lvectors_data, ldvl, rvectors_data, ldvr, &work_query, -1, rwork_data, &infos_data[0]);
-
-  magma_int_t lwork = std::max<magma_int_t>(1, static_cast<magma_int_t>(real_impl<scalar_t, value_t>(work_query)));
-  Tensor work = at::empty({lwork}, input.dtype());
-  auto work_data = work.mutable_data_ptr<scalar_t>();
-
-  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-    scalar_t* values_working_ptr = &values_data[i * values_stride];
-    scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
-    int* info_working_ptr = &infos_data[i];
-    magmaEig<scalar_t, value_t>(jobvl, jobvr, n, input_working_ptr, lda, values_working_ptr,
-      lvectors_data, ldvl, rvectors_working_ptr, ldvr, work_data, lwork, rwork_data, info_working_ptr);
-  }
-#endif
-}
-
-// MAGMA wrapper: transfers tensors to CPU, calls apply_magma_eig, then copies results back.
-void linalg_eig_magma(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors){
-  // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer to CPU
-  auto eigenvalues_cpu = eigenvalues.cpu();
-  auto eigenvectors_cpu = eigenvectors.cpu();
-  auto infos_cpu = infos.cpu();
-
-  Tensor input_cpu = at::empty(input.sizes(), input.options().device(kCPU));
-  input_cpu.transpose_(-2, -1);
-  input_cpu.copy_(input);
-
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "linalg_eig_out_cuda", [&]{
-    apply_magma_eig<scalar_t>(eigenvalues_cpu, eigenvectors_cpu, input_cpu, infos_cpu, compute_eigenvectors);
-  });
-
-  eigenvalues.copy_(eigenvalues_cpu);
-  eigenvectors.copy_(eigenvectors_cpu);
-  infos.copy_(infos_cpu);
-}
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
-  // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_magma' or
-  // 'linalg_eig_cusolver_xgeev' both geev routines modify the provided input matrix in-place, therefore we need a copy
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
-#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-    default:
-      linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
-      return;
-    case at::LinalgBackend::Magma:
-      break; // MAGMA path handled below
-  }
-#endif
-  linalg_eig_magma(eigenvalues, eigenvectors, infos, input, compute_eigenvectors);
+  // the content of eigenvalues, eigenvectors and infos is overwritten by 'linalg_eig_cusolver_xgeev'.
+  // Moreover, the routine modifies the provided input matrix in-place, therefore we need a copy
+  _warn_once_magma_deprecation("linalg.eig");
+  linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
 }
 
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
