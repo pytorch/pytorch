@@ -89,6 +89,10 @@ if [[ "$image" == *rocm* ]]; then
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
+# If no tag (no colon in image name), use the image name itself
+if [[ -z "$tag" ]]; then
+  tag="$image"
+fi
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -199,6 +203,18 @@ case "$tag" in
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi
+    ;;
+  pytorch-linux-noble-rocm-nightly-py3)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    VISION=yes
+    ROCM_VERSION=nightly
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    PYTORCH_ROCM_ARCH="gfx942"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -337,7 +353,9 @@ case "$tag" in
       extract_version_from_image_name cuda CUDA_VERSION
     fi
     if [[ "$image" == *rocm* ]]; then
-      extract_version_from_image_name rocm ROCM_VERSION
+      if [[ -z "$ROCM_VERSION" ]]; then
+        extract_version_from_image_name rocm ROCM_VERSION
+      fi
       NINJA_VERSION=1.9.0
       TRITON=yes
       # To ensure that any ROCm config will build using conda cmake
@@ -372,7 +390,7 @@ if [[ -n "${CI:-}" ]]; then
 fi
 
 # Build image
-docker build \
+docker buildx build \
        ${no_cache_flag} \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
@@ -410,6 +428,7 @@ docker build \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
+       --load \
        -t "$tmp_tag" \
        "$@" \
        .

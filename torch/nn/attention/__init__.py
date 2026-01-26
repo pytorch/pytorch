@@ -119,7 +119,7 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
 
     Args:
         backends (Union[List[SDPBackend], SDPBackend]): A backend or list of backends for scaled dot product attention.
-        set_priority_order (bool=False): Whether the ordering of the backends is interpreted as their priority order.
+        set_priority (bool=False): Whether the ordering of the backends is interpreted as their priority order.
 
     Example:
 
@@ -136,12 +136,19 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
         with sdpa_kernel([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]):
             scaled_dot_product_attention(...)
 
+        # Enable the cuDNN or flash attention backends, and in that order
+        with sdpa_kernel(
+            [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION], set_priority=True
+        ):
+            scaled_dot_product_attention(...)
+
     This context manager can be used to select which backend to use for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
     """
-    assert isinstance(backends, (list, SDPBackend)), (
-        "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
-    )
+    if not isinstance(backends, (list, SDPBackend)):
+        raise AssertionError(
+            f"Backend must be an instance of SDPBackend or a list of SDPBackend instances, got {type(backends).__name__}"
+        )
 
     if isinstance(backends, SDPBackend):
         backends = [backends]

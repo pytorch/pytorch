@@ -58,7 +58,8 @@ def _addindent(s_, numSpaces):
     if len(s) == 1:
         return s_
     first = s.pop(0)
-    s = [(numSpaces * " ") + line for line in s]
+    # Only add indentation to non-blank lines; blank lines stay empty
+    s = [(numSpaces * " ") + line if line.strip() else "" for line in s]
     s = "\n".join(s)
     s = first + "\n" + s
     return s
@@ -992,13 +993,14 @@ class Module:
                     ) from e
                 out_param = param
             elif p_should_use_set_data:
-                # pyrefly: ignore [bad-assignment]
                 param.data = param_applied
                 out_param = param
             else:
-                assert isinstance(param, Parameter)
-                assert param.is_leaf
-                # pyrefly: ignore [bad-argument-type]
+                if not isinstance(param, Parameter):
+                    raise AssertionError("param must be a Parameter")
+                if not param.is_leaf:
+                    raise AssertionError("param must be a leaf tensor")
+
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
@@ -1018,10 +1020,12 @@ class Module:
                         ) from e
                     out_param.grad = param_grad
                 elif g_should_use_set_data:
-                    assert out_param.grad is not None
+                    if out_param.grad is None:
+                        raise AssertionError("out_param.grad must not be None")
                     out_param.grad.data = grad_applied
                 else:
-                    assert param_grad.is_leaf
+                    if not param_grad.is_leaf:
+                        raise AssertionError("param_grad must be a leaf tensor")
                     out_param.grad = grad_applied.requires_grad_(
                         param_grad.requires_grad
                     )
@@ -1335,7 +1339,6 @@ class Module:
 
         """
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
-            # pyrefly: ignore [not-iterable]
             *args,
             **kwargs,
         )
@@ -2606,11 +2609,12 @@ class Module:
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
             for hook in module._load_state_dict_post_hooks.values():
                 out = hook(module, incompatible_keys)
-                assert out is None, (
-                    "Hooks registered with ``register_load_state_dict_post_hook`` are not"
-                    "expected to return new values, if incompatible_keys need to be modified,"
-                    "it should be done inplace."
-                )
+                if out is not None:
+                    raise AssertionError(
+                        "Hooks registered with ``register_load_state_dict_post_hook`` are not"
+                        "expected to return new values, if incompatible_keys need to be modified,"
+                        "it should be done inplace."
+                    )
 
         load(self, state_dict)
         del load
