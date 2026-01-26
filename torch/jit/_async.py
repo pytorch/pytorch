@@ -9,6 +9,8 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
+import warnings
+
 import torch
 from torch._jit_internal import Future
 from torch.jit._builtins import _register_builtin
@@ -21,6 +23,9 @@ set_module(Future, "torch.jit")
 def fork(func, *args, **kwargs):
     r"""
     Create an asynchronous task executing `func` and a reference to the value of the result of this execution.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     `fork` will return immediately, so the return value of `func` may not have been computed yet. To force completion
     of the task and access the return value invoke `torch.jit.wait` on the Future. `fork` invoked
@@ -96,6 +101,10 @@ def fork(func, *args, **kwargs):
         mod = Mod()
         assert mod(input) == torch.jit.script(mod).forward(input)
     """
+    warnings.warn(
+        "`torch.jit.fork` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return torch._C.fork(func, *args, **kwargs)
 
 
@@ -103,12 +112,19 @@ def wait(future):
     r"""
     Force completion of a `torch.jit.Future[T]` asynchronous task, returning the result of the task.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     See :func:`~fork` for docs and examples.
     Args:
         future (torch.jit.Future[T]): an asynchronous task reference, created through `torch.jit.fork`
     Returns:
         `T`: the return value of the completed task
     """
+    warnings.warn(
+        "`torch.jit.wait` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return torch._C.wait(future)
 
 
