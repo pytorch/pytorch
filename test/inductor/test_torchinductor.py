@@ -767,7 +767,16 @@ def _run_and_assert_no_indirect_indexing(
                 stmt = line.split(".store")[-1]
             elif "[" in line:
                 stmt = line.split("[")[-1].split("]")[0]
-            if "tl.make_block_ptr(" in line:
+            # Block descriptors do not support indirect indexing
+            if any(
+                block_descriptor_syntax in line
+                for block_descriptor_syntax in (
+                    "block_ptr",
+                    "tma_descriptor",
+                    "tl.make_block_ptr",
+                    "tl.make_tensor_descriptor",
+                )
+            ):
                 continue
 
             if stmt is None:
