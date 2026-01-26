@@ -28,6 +28,11 @@ on:
         default: 240
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
+      tests-to-include:
+        required: false
+        type: string
+        default: ""
+        description: Space-separated tests to include (empty string implies default list)
       use-gha:
         required: false
         type: string
@@ -123,19 +128,22 @@ jobs:
         uses: ./.github/actions/setup-linux
         if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(matrix.runner, 'b200')
 
-      - name: configure aws credentials
-        if: ${{ inputs.aws-role-to-assume != '' && inputs.build-environment != 'linux-s390x-binary-manywheel' }}
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-        with:
-          role-to-assume: ${{ inputs.aws-role-to-assume }}
-          role-session-name: gha-linux-test
-          aws-region: us-east-1
+      - name: Check TPU Availability
+        id: check-tpu
+        uses: ./.github/actions/check-tpu
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && !contains(matrix.runner, 'b200')
 
-      - name: Login to Amazon ECR
-        if: ${{ inputs.aws-role-to-assume != '' && contains(matrix.runner, 'b200') }}
-        id: login-ecr
-        continue-on-error: true
-        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+      - name: Setup TPU docker flags
+        id: setup-tpu-flags
+        if: steps.check-tpu.outputs.has_tpu == 'true'
+        shell: bash
+        run: echo "TPU_DOCKER_FLAGS=--privileged --network=host -e PJRT_DEVICE=TPU -e TPU_SKIP_MDS_QUERY -e TPU_TOPOLOGY -e TPU_WORKER_ID -e TPU_TOPOLOGY_WRAP -e TPU_CHIPS_PER_HOST_BOUNDS -e TPU_ACCELERATOR_TYPE -e TPU_RUNTIME_METRICS_PORTS -e TPU_TOPOLOGY_ALT -e HOST_BOUNDS -e TPU_HOST_BOUNDS -e VBAR_CONTROL_SERVICE_URL -e CHIPS_PER_HOST_BOUNDS -e TPU_WORKER_HOSTNAMES" >> "$GITHUB_ENV"
+
+      - name: Login to ECR
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/ecr-login
+        with:
+          aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
 
       - name: Calculate docker image
         id: calculate-docker-image
@@ -175,19 +183,12 @@ jobs:
       - name: Setup GPU_FLAG for docker run
         id: setup-gpu-flag
         run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
-        if: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' && (steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' || contains(matrix.runner, 'b200')) }}
+        if: ${{ steps.install-nvidia-driver.outputs.has-nvidia == 'true' || contains(matrix.runner, 'b200') }}
 
       - name: Setup SCCACHE_SERVER_PORT environment for docker run when on container
         id: setup-sscache-port-flag
         run: echo "SCCACHE_SERVER_PORT_DOCKER_FLAG=-e SCCACHE_SERVER_PORT=$((RUNNER_UID + 4226))" >> "${GITHUB_ENV}"
         if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' && !contains(matrix.runner, 'b200') }}
-
-      - name: Lock NVIDIA A100 40GB Frequency
-        run: |
-          sudo nvidia-smi -pm 1
-          sudo nvidia-smi -ac 1215,1410
-          nvidia-smi
-        if: ${{ contains(matrix.runner, 'a100') && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
       - name: Get workflow job id
         id: get-job-id
@@ -209,8 +210,7 @@ jobs:
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          python3 -m pip install psutil==5.9.8 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
-          python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
+          uv run --no-project --with psutil==5.9.8 --with dataclasses_json==0.6.7 --with nvidia-ml-py==11.525.84 python -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -332,8 +332,10 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          HF_CACHE: /mnt/hf_cache
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -367,6 +369,13 @@ jobs:
             JENKINS_USER="--user jenkins"
             DOCKER_SHELL_CMD=
             USED_IMAGE="${DOCKER_IMAGE}"
+          fi
+
+          # Just create an empty HF_CACHE dir if it doesn't exist. This dir is not
+          # used for anything besides vLLM jobs
+          if [[ ! -d "${HF_CACHE}" ]]; then
+            export HF_CACHE="${RUNNER_TEMP}/hf_cache"
+            mkdir -p "${HF_CACHE}"
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux
@@ -410,12 +419,15 @@ jobs:
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
+            -e TESTS_TO_INCLUDE \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e HUGGING_FACE_HUB_TOKEN \
             -e VLLM_TEST_HUGGING_FACE_TOKEN \
+            -e HF_CACHE \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
             -e ARTIFACTS_FILE_SUFFIX \
+            ${TPU_DOCKER_FLAGS:-} \
             --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
             --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
@@ -428,6 +440,7 @@ jobs:
             --name="${container_name}" \
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${HF_CACHE}:${HF_CACHE}" \
             -w /var/lib/jenkins/workspace \
             "${USED_IMAGE}" \
             ${DOCKER_SHELL_CMD}
@@ -435,7 +448,12 @@ jobs:
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
 
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
-            docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt"
+            # sometimes there are intermittent network errors, do a couple of retries
+            docker exec -t "${container_name}" sh -c "python3 -m pip install -r .ci/docker/requirements-ci.txt || \
+              (sleep 15 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
+              (sleep 30 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
+              (sleep 60 && python3 -m pip install -r .ci/docker/requirements-ci.txt) || \
+              (sleep 300 && python3 -m pip install -r .ci/docker/requirements-ci.txt)"
           fi
 
           docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
@@ -462,7 +480,7 @@ jobs:
 
       - name: Upload the benchmark results
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
-        if: inputs.build-environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.check-tpu.outputs.has_tpu != 'true'
         with:
           benchmark-results-dir: test/test-reports
           dry-run: false
@@ -521,81 +539,6 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false'
-
-      # NB: We are currently having an intermittent GPU-related issue on G5 runners with
-      # A10G GPU. Once this happens, trying to reset the GPU as done in setup-nvidia does
-      # not seem to help. Here are some symptoms:
-      #   * Calling nvidia-smi timeouts after 60 second
-      #   * Fail to run nvidia-smi with an unable to determine the device handle for GPU
-      #     unknown error
-      #   * Test fails with a missing CUDA GPU error when initializing CUDA in PyTorch
-      #   * Run docker --gpus all fails with error response from daemon
-      #
-      # As both the root cause and recovery path are unclear, let's take the runner out of
-      # service so that it doesn't get any more jobs
-      - name: Check NVIDIA driver installation step
-        if: failure() && steps.install-nvidia-driver.outputs.has-nvidia == 'true' && !contains(matrix.runner, 'b200')
-        shell: bash
-        run: |
-          set +e
-          set -x
-
-          nvidia-smi
-          # NB: Surprisingly, nvidia-smi command returns successfully with return code 0 even in
-          # the case where the driver has already crashed as it still can get the driver version
-          # and some basic information like the bus ID.  However, the rest of the information
-          # would be missing (ERR!), for example:
-          #
-          # +-----------------------------------------------------------------------------+
-          # | NVIDIA-SMI 525.89.02    Driver Version: 525.89.02    CUDA Version: 12.0     |
-          # |-------------------------------+----------------------+----------------------+
-          # | GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
-          # | Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
-          # |                               |                      |               MIG M. |
-          # |===============================+======================+======================|
-          # |   0  ERR!                Off  | 00000000:00:1E.0 Off |                 ERR! |
-          # |ERR!  ERR! ERR!    ERR! / ERR! |   4184MiB / 23028MiB |    ERR!      Default |
-          # |                               |                      |                 ERR! |
-          # +-------------------------------+----------------------+----------------------+
-          #
-          # +-----------------------------------------------------------------------------+
-          # | Processes:                                                                  |
-          # |  GPU   GI   CI        PID   Type   Process name                  GPU Memory |
-          # |        ID   ID                                                   Usage      |
-          # |=============================================================================|
-          # +-----------------------------------------------------------------------------+
-          #
-          # This should be reported as a failure instead as it will guarantee to fail when
-          # Docker tries to run with --gpus all
-          #
-          # So, the correct check here is to query one of the missing piece of info like
-          # GPU name, so that the command can fail accordingly
-          nvidia-smi --query-gpu=gpu_name --format=csv,noheader --id=0
-          NVIDIA_SMI_STATUS=$?
-
-          # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
-          if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
-            echo "NVIDIA driver installation has failed, shutting down the runner..."
-            .github/scripts/stop_runner_service.sh
-          fi
-
-          # For runner with multiple GPUs, we also want to confirm that the number of GPUs are the
-          # power of 2, i.e. 1, 2, 4, or 8. This is to avoid flaky test issue when one GPU fails
-          # https://github.com/pytorch/test-infra/issues/4000
-          GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
-          NVIDIA_SMI_STATUS=$?
-
-          # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
-          if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
-            echo "NVIDIA driver installation has failed, shutting down the runner..."
-            .github/scripts/stop_runner_service.sh
-          fi
-
-          # Check the GPU count to be a power of 2
-          if [ "$GPU_COUNT" -le 8 ] && [ "$GPU_COUNT" -ne 1 ] && [ "$GPU_COUNT" -ne 2 ] && [ "$GPU_COUNT" -ne 4 ] && [ "$GPU_COUNT" -ne 8 ]; then
-            echo "NVIDIA driver detects $GPU_COUNT GPUs. The runner has a broken GPU, shutting it down..."
-            .github/scripts/stop_runner_service.sh
-          fi
 
       - name: Cleanup docker
         if: always() && inputs.build-environment == 'linux-s390x-binary-manywheel'

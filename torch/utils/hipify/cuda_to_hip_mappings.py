@@ -587,7 +587,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     ]
 )
 
-# pyrefly: ignore [no-matching-overload]
+
 CUDA_INCLUDE_MAP = collections.OrderedDict(
     [
         # since pytorch uses "\b{pattern}\b" as the actual re pattern,
@@ -8367,7 +8367,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     ]
 )
 
-# pyrefly: ignore [no-matching-overload]
+
 CUDA_SPECIAL_MAP = collections.OrderedDict(
     [
         # SPARSE
@@ -8517,9 +8517,22 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("cusparseSpGEMM_compute", ("hipsparseSpGEMM_compute", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseSpGEMM_workEstimation", ("hipsparseSpGEMM_workEstimation", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseSpMatGetSize", ("hipsparseSpMatGetSize", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpMatSetAttribute", ("hipsparseSpMatSetAttribute", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseCsrSetPointers", ("hipsparseCsrSetPointers", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSM_createDescr", ("hipsparseSpSM_createDescr", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSM_destroyDescr", ("hipsparseSpSM_destroyDescr", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSM_bufferSize", ("hipsparseSpSM_bufferSize", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSM_analysis", ("hipsparseSpSM_analysis", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSM_solve", ("hipsparseSpSM_solve", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSV_createDescr", ("hipsparseSpSV_createDescr", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSV_destroyDescr", ("hipsparseSpSV_destroyDescr", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSV_bufferSize", ("hipsparseSpSV_bufferSize", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSV_analysis", ("hipsparseSpSV_analysis", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseSpSV_solve", ("hipsparseSpSV_solve", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseSpMVAlg_t", ("hipsparseSpMVAlg_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseSpMMAlg_t", ("hipsparseSpMMAlg_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseSpSMAlg_t", ("hipsparseSpSMAlg_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseSpSVAlg_t", ("hipsparseSpSVAlg_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseIndexType_t", ("hipsparseIndexType_t", CONV_TYPE, API_SPECIAL)),
         # Unsupported ("cusparseMatDescr", ("hipsparseMatDescr", CONV_TYPE, API_SPECIAL)),
         # Unsupported ("cusparseDnMatDescr", ("hipsparseDnMatDescr", CONV_TYPE, API_SPECIAL)),
@@ -8530,6 +8543,8 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("cusparseDnVecDescr_t", ("hipsparseDnVecDescr_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseSpMatDescr_t", ("hipsparseSpMatDescr_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseSpGEMMDescr_t", ("hipsparseSpGEMMDescr_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseSpSMDescr_t", ("hipsparseSpSMDescr_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseSpSVDescr_t", ("hipsparseSpSVDescr_t", CONV_TYPE, API_SPECIAL)),
         ("CUSPARSE_INDEX_32I", ("HIPSPARSE_INDEX_32I", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_INDEX_64I", ("HIPSPARSE_INDEX_64I", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_ORDER_COL", ("HIPSPARSE_ORDER_COL", CONV_NUMERIC_LITERAL, API_SPECIAL)),
@@ -8545,6 +8560,10 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("CUSPARSE_SPMM_CSR_ALG1", ("HIPSPARSE_CSRMM_ALG1", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPGEMM_DEFAULT", ("HIPSPARSE_SPGEMM_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SDDMM_ALG_DEFAULT", ("HIPSPARSE_SDDMM_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPSM_ALG_DEFAULT", ("HIPSPARSE_SPSM_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPSV_ALG_DEFAULT", ("HIPSPARSE_SPSV_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMAT_FILL_MODE", ("HIPSPARSE_SPMAT_FILL_MODE", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMAT_DIAG_TYPE", ("HIPSPARSE_SPMAT_DIAG_TYPE", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         (
             "CUSPARSE_STATUS_SUCCESS",
             ("HIPSPARSE_STATUS_SUCCESS", CONV_NUMERIC_LITERAL, API_SPECIAL),
@@ -8855,7 +8874,7 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
     ]
 )
 
-# pyrefly: ignore [no-matching-overload]
+
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
@@ -9328,7 +9347,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     ]
 )
 
-# pyrefly: ignore [no-matching-overload]
+
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("PYTORCH_NO_CUDA_MEMORY_CACHING", ("PYTORCH_NO_CUDA_MEMORY_CACHING", API_CAFFE2)),
@@ -9414,7 +9433,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 #
 # NB: if you want a transformation to ONLY apply to the c10/ directory,
 # put it as API_CAFFE2
-# pyrefly: ignore [no-matching-overload]
+
 C10_MAPPINGS = collections.OrderedDict(
     [
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),

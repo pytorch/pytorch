@@ -1463,7 +1463,6 @@ namespace {
         CACHE_ALIGN underlying qint_vals[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying qint_b[vec::size()];
-        typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
         for ([[maybe_unused]] const auto i : c10::irange(trials)) {

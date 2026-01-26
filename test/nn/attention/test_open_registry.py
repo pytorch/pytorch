@@ -5,6 +5,11 @@ from torch.nn.attention import _registry
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+class FakeHandle:
+    def remove(self):
+        pass
+
+
 class TestFlashAttentionRegistry(TestCase):
     def setUp(self):
         super().setUp()
@@ -24,6 +29,7 @@ class TestFlashAttentionRegistry(TestCase):
 
         def fake_register():
             calls["called"] = True
+            return FakeHandle()
 
         attention.register_flash_attention_impl("TEST_FA", register_fn=fake_register)
         self.assertIn("TEST_FA", attention.list_flash_attention_impls())

@@ -4,6 +4,7 @@ import contextlib
 import json
 import math
 import re
+import itertools
 import tempfile
 import unittest
 from typing import Optional
@@ -71,7 +72,7 @@ if TEST_CUDA:
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
 f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
-mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_FBGEMM_GENAI=1 on SM100+"
+mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
 
 # avoid division by zero when calculating scale
 EPS = 1e-12
@@ -695,11 +696,17 @@ class TestFP8Matmul(TestCase):
                               x_dtype: torch.dtype = e4m3_type,
                               y_dtype: torch.dtype = e4m3_type,
                               out_dtype: Optional[torch.dtype] = None,
+                              x_cm: bool = True,
+                              y_cm: bool = False,
                               size: int = 16) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
         x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
-        y_fp8 = torch.eye(size, device=device, dtype=y_dtype).t()
+        y_fp8 = torch.eye(size, device=device, dtype=y_dtype)
+        if not x_cm:
+            x_fp8 = x_fp8.t()
+        if not y_cm:
+            y_fp8 = y_fp8.t()
         out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
@@ -725,12 +732,18 @@ class TestFP8Matmul(TestCase):
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
         self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
 
+        if torch.cuda.is_available():
+            for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
+                # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
+                layouts_supported = (x_cm, y_cm) == (True, False) or torch.cuda.get_device_properties(0).major == 10
+                with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
+                    self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
+
         with self.assertRaises(
             AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
             else RuntimeError
         ):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
-
 
     def test_float8_scale(self, device) -> None:
         if not _device_supports_scaled_mm_fp8(device):
@@ -963,14 +976,20 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
-    def test_scaled_mm_vs_emulated(self, base_dtype, device="cuda"):
+    @parametrize("x_cm", [True, False])
+    @parametrize("y_cm", [True, False])
+    def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device="cuda"):
+        # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
+        if (x_cm, y_cm) != (True, False) and torch.cuda.get_device_properties(0).major != 10:
+            raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
         compare_type = torch.float32
 
-        x = torch.randn(16, 16, device=device, dtype=base_dtype)
-        y = torch.randn(32, 16, device=device, dtype=base_dtype).t()
+        M, N, K = 16, 32, 16
+        x = torch.randn(M, K, device=device, dtype=base_dtype) if x_cm else torch.randn(K, M, device=device, dtype=base_dtype).t()
+        y = torch.randn(K, N, device=device, dtype=base_dtype) if y_cm else torch.randn(N, K, device=device, dtype=base_dtype).t()
 
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
@@ -1791,7 +1810,7 @@ class TestFP8Matmul(TestCase):
 
                 self.assertEqual(no_carveout, no_carveout_again)
                 capability = torch.cuda.get_device_capability()
-                if capability in {(10, 0), (10, 3), (12, 0), (12, 1)}:
+                if capability in {(10, 0), (10, 3), (11, 0), (12, 0), (12, 1)}:
                     # expected failure
                     # CUTLASS only supports SM carveout via green contexts on SM100
                     self.assertEqual(no_carveout, carveout_66)

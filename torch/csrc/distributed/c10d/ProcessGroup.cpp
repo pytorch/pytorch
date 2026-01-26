@@ -190,6 +190,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
+    backendOpts->group_desc = groupDesc;
     auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
     if (splitBackend == nullptr) {
       continue;
@@ -397,7 +398,27 @@ void register_work(
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
+  // First try to find work in the current thread's registry (fast path)
   auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
+
+  // If no work found in current thread's registry, search all registries.
+  // This handles the case where wait() is called from a different thread
+  // than where the collective was initiated (e.g., user-created threads).
+  if (works.empty()) {
+    auto result = RankLocal<WorkRegistry>::find_across_all(
+        [&tensor](WorkRegistry& registry)
+            -> std::optional<std::vector<c10::intrusive_ptr<c10d::Work>>> {
+          auto w = registry.pop_works(tensor);
+          if (!w.empty()) {
+            return w;
+          }
+          return std::nullopt;
+        });
+    if (result.has_value()) {
+      works = std::move(result.value());
+    }
+  }
+
   for (const auto& work : works) {
     work->wait();
   }

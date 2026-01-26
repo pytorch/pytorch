@@ -48,7 +48,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import size_hint
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -149,6 +149,7 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
+        "torch.autograd.grad",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -280,6 +281,55 @@ def check_cacheable(gm: torch.fx.GraphModule):
         check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
 
 
+def _get_context_fn_cache_hash(context_fn):
+    """
+    Extract a cache hash from a context_fn used for selective activation checkpointing (SAC).
+
+    The context_fn determines which ops are saved vs recomputed in the SAC region.
+    Since context_fn can be an arbitrary Python function, we cannot reliably pickle
+    it for cache key generation (pickle only captures the function name, not the code).
+
+    Users must provide a stable hash by setting a `cache_hash` attribute on the context_fn.
+    For functools.partial objects, set the cache_hash on the partial object itself, not on
+    the underlying function.
+
+    Returns:
+        The cache hash if found
+        None: If no hash is provided (caller should bypass caching)
+    """
+    if hasattr(context_fn, "cache_hash"):
+        return context_fn.cache_hash
+
+    return None
+
+
+def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list:
+    """
+    Collect cache hashes from all context_fn used in SAC HOPs within the graph module.
+
+    Returns a list of hashes. Raises BypassAOTAutogradCache if any context_fn
+    lacks a cache_hash attribute.
+    """
+    hashes = []
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        context_fn = module.meta.get("_checkpoint_context_fn")
+        if context_fn is not None:
+            cache_hash = _get_context_fn_cache_hash(context_fn)
+            if cache_hash is None:
+                raise BypassAOTAutogradCache(
+                    "SAC context_fn does not have a cache_hash attribute. "
+                    "To enable caching with selective activation checkpointing, "
+                    "add a 'cache_hash' attribute to your context_fn. This can be "
+                    "a string or any hashable value that uniquely identifies the checkpointing "
+                    "behavior (e.g., based on source code hash and closed-over globals). "
+                    "For functools.partial objects, set cache_hash on the partial itself."
+                )
+            hashes.append(cache_hash)
+    return hashes
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -364,6 +414,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
                 gm.saved_tensors_hooks_unpack_0,
                 self.saved_tensors_hooks_fx_wrap_cache_hashes[1],
             )
+
+        self.sac_context_fn_hashes: list = _collect_context_fn_hashes(gm)
 
         try:
             # FXGraphCache has constraints on what can be pickled in its inductor
@@ -506,7 +558,7 @@ def autograd_cache_key(
         # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
         # a proper key because we are guaranteed in an AOT precompile world users are in
         # complete control of distributing and loading artifacts.
-        if torch._dynamo.config.enable_aot_compile:
+        if torch._functorch.config.bypass_autograd_cache_key:
             log.info(
                 "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
                 exc_info=True,
@@ -769,7 +821,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
     ) -> Optional[str]:
         shape_env = cls._get_shape_env()
-        assert shape_env is not None
+
+        if shape_env is None:
+            return None
+
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
         return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
@@ -787,6 +842,39 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         Get the toplevel temporary directory for storing compiled graphs.
         """
         return os.path.join(cls._get_tmp_dir(), key)
+
+    @classmethod
+    def _record_result(
+        cls: type[AOTAutogradCache],
+        _key: str,
+        local_hit: bool,
+        local_miss: bool,
+        remote_hit: bool,
+        remote_miss: bool,
+    ) -> None:
+        """
+        Called by GuardedCache to record hit/miss statistics.
+        """
+        if local_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_local_cache_hit_count",
+            )
+        if remote_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_remote_cache_hit_count",
+            )
+        if local_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_local_cache_miss_count",
+            )
+        if remote_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_remote_cache_miss_count",
+            )
 
     @staticmethod
     def evaluate_guards(guard_expr: str, hints: Union[list[int], list[torch.SymInt]]):
@@ -812,7 +900,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             remote_cache = AOTAutogradCache.get_remote_cache()
 
         symints = AOTAutogradCache._filter_backed_symints(args)
-        hints = [hint_int(s) for s in symints]
+        hints = [size_hint(s) for s in symints]
         entry = None
         pickled_content = None
         try:
@@ -890,6 +978,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
+            if config.strict_autograd_cache:
+                raise
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             if remote:
@@ -902,7 +992,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                     "bypass_aot_autograd", "Unable to serialize: " + str(e)
                 )
             if config.strict_autograd_cache:
-                raise e
+                raise
             return None
 
         if remote:

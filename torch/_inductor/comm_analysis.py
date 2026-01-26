@@ -9,7 +9,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import size_hint
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -32,6 +32,7 @@ class NVIDIA_GPU_TYPE(IntEnum):
     VOLTA = 0
     AMPERE = 1
     HOPPER = 2
+    BLACKWELL = 3
 
 
 @functools.lru_cache
@@ -43,6 +44,8 @@ def get_gpu_type() -> NVIDIA_GPU_TYPE:
         return NVIDIA_GPU_TYPE.AMPERE
     elif "H100" in gpu_info:
         return NVIDIA_GPU_TYPE.HOPPER
+    elif any(gpu in gpu_info for gpu in ("B100", "B200", "B300")):
+        return NVIDIA_GPU_TYPE.BLACKWELL
     else:
         # for other gpu types, assume Ampere
         return NVIDIA_GPU_TYPE.AMPERE
@@ -80,7 +83,7 @@ def get_ir_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int
 
 def get_fx_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
     numel = functools.reduce(operator.mul, size, 1)
-    result = hint_int(numel, fallback=fallback)
+    result = size_hint(numel, fallback=fallback)
     return result
 
 
@@ -177,9 +180,15 @@ llMaxBws = [
     ],
     # Hopper-N1/AMD-N2/AMD-N4
     [
-        87.7,
-        22.5,  # avg of ring & tree
-        19.0,
+        141.0,
+        45.0,  # avg of ring & tree
+        35.0,
+    ],
+    # Blackwell-N1/AMD-N2/AMD-N4
+    [
+        282.0,
+        90.0,  # avg of ring & tree
+        70.0,
     ],
 ]
 

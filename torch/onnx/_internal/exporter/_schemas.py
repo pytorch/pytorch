@@ -407,6 +407,7 @@ class OpSignature:
                 # Set the name of the default attribute because it may have a different name from the parameter
                 default_attr.name = param.name
             params.append(
+                # pyrefly: ignore [bad-argument-type]
                 AttributeParameter(
                     name=param.name,
                     type=ir.AttributeType(param.type),  # type: ignore[arg-type]
@@ -452,7 +453,7 @@ class OpSignature:
 
         for param in py_signature.parameters.values():
             if param.name not in type_hints:
-                logger.warning(
+                logger.debug(
                     "Missing annotation for parameter '%s' from %s. Treating as an Input.",
                     param.name,
                     py_signature,
@@ -541,7 +542,7 @@ class OpSignature:
                 if (
                     return_param_name := _get_type_constraint_name(return_type_i)
                 ) in type_constraints:
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     type_constraint = type_constraints[return_param_name]
                 else:
                     return_param_name = f"TReturn{i}"

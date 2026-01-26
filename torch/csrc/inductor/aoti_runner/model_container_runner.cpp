@@ -70,7 +70,7 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
 #define TRY_LOAD_SYMBOL(var, name_str)                                               \
   try {                                                                              \
     var = reinterpret_cast<decltype(var)>(model_so_->sym(name_str));                 \
-  } catch (const at::DynamicLibraryError& e) {                                       \
+  } catch (const at::DynamicLibraryError&) {                                         \
     std::cerr                                                                        \
         << "[WARNING] Could not dlsym " << name_str                                  \
         << ". This is okay if you don't need functionality from " << name_str        \

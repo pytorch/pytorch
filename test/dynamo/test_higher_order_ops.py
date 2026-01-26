@@ -207,7 +207,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         x = torch.randn(3)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)",
+            "HOP: Unsafe side effect",
         ):
             f(x)
 
@@ -343,9 +343,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             return dynamo_bypassing_wrapper(wrapper, outer_wrapped, x)
 
         x = torch.tensor(1.0)
-        with self.assertRaisesRegex(
-            RuntimeError, "Mutating a variable not in the current scope"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "HOP: Unsafe side effect"):
             fn_nested(x)
 
     def test_symint_input(self):
@@ -730,7 +728,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(10, 8)
+        expected_op_count = ifdynstaticdefault(9, 7)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -748,8 +746,9 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         c: "i64[u0, 1]" = l_x_.nonzero()
+
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
+
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
 
@@ -783,8 +782,9 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         c: "i64[u0, 1]" = l_x_.nonzero()
+
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
+
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int_1 <= 3
@@ -882,7 +882,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(10, 8)
+        expected_op_count = ifdynstaticdefault(9, 7)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -902,8 +902,9 @@ class GraphModule(torch.nn.Module):
         l_x_ = L_x_
 
         c: "i64[u0, 1]" = l_x_.nonzero()
+
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
+
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int <= 3
@@ -953,7 +954,7 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(3)
         arg_count = ifdynstaticdefault(5, 6)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0 and u1
-        expected_op_count = ifdynstaticdefault(17, 13)
+        expected_op_count = ifdynstaticdefault(15, 11)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x, y)),
@@ -972,16 +973,18 @@ class GraphModule(torch.nn.Module):
         l_y_ = L_y_
 
         c: "i64[u0, 1]" = l_x_.nonzero()
+
         sym_size_int_2: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_2);  _check_is_size = None
+
         ge: "Sym(u0 >= 0)" = sym_size_int_2 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
         le: "Sym(u0 <= 3)" = sym_size_int_2 <= 3
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 3 on node 'le'");  le = _assert_scalar_default_1 = None
 
         d: "i64[u1, 1]" = l_y_.nonzero();  l_y_ = None
+
         sym_size_int_3: "Sym(u1)" = torch.ops.aten.sym_size.int(d, 0)
-        _check_is_size_1 = torch._check_is_size(sym_size_int_3);  _check_is_size_1 = None
+
         ge_1: "Sym(u1 >= 0)" = sym_size_int_3 >= 0
         _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_2 = None
         le_1: "Sym(u1 <= 3)" = sym_size_int_3 <= 3
@@ -2090,13 +2093,13 @@ def forward(self, child : torch.Tensor, const_unused : int):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_eager(torch.ones(6, 4))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_compile(torch.ones(3, 4))
 
@@ -2302,13 +2305,13 @@ def forward(self):
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_eager(torch.tensor(True), torch.tensor(5))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
@@ -2349,7 +2352,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2379,7 +2382,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2522,9 +2525,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 1
-            },
+            {"HOP: Unsafe side effect": 1},
         )
 
     def test_fallback_on_graph_break_simple(self):
@@ -3191,7 +3192,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                r"Cond doesn't work unless it is captured completely with torch.compile",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
@@ -6403,9 +6404,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 3, 3]", L_y_: "f32[3, 3]"):
-        l_x_ = L_x_
+    def forward(self, L_y_: "f32[3, 3]", L_x_: "f32[3, 3, 3]"):
         l_y_ = L_y_
+        l_x_ = L_x_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
@@ -6577,9 +6578,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[5, 3]", L_x_: "f32[2, 3]"):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[2, 3]", L_y_: "f32[5, 3]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
