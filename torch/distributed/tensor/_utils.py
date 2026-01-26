@@ -26,6 +26,40 @@ from torch.distributed.tensor.placement_types import (
 logger = logging.getLogger(__name__)
 
 
+def get_mesh_dim_unsharded_shape(
+    placements: tuple[Placement, ...],
+    shard_order: tuple[tuple[int, tuple[int, ...]], ...],
+    mesh: DeviceMesh,
+    full_tensor_shape: tuple[int, ...],
+    target_mesh_dim: int,
+) -> list[int]:
+    """
+    Compute the logical tensor shape visible at a specific mesh dimension,
+    after accounting for sharding on all other mesh dimensions per the given
+    shard order. This is needed for correctly handling uneven sharding during
+    redistribution.
+    """
+    new_logical_shape = list(full_tensor_shape)
+    for entry in shard_order:
+        tensor_dim = entry[0]
+        mesh_dims = entry[1]
+        assert len(mesh_dims) > 0
+        for mdim in mesh_dims:
+            if mdim == target_mesh_dim:
+                continue
+            placement = placements[mdim]
+            if isinstance(placement, (Shard, _StridedShard)):
+                new_size, _ = placement.local_shard_size_and_offset(
+                    new_logical_shape[tensor_dim],
+                    mesh.size(mesh_dim=mdim),
+                    mesh._sym_get_coordinate(mdim),
+                )
+                new_logical_shape[tensor_dim] = new_size
+            else:
+                raise ValueError(f"Unsupported placement type: {placement}")
+    return new_logical_shape
+
+
 def _format_implicit_redistribution_msg(schema: OpSchema) -> str:
     return f"Implicit redistribution occurred for {schema} while ExplicitRedistributionContext was active"
 
