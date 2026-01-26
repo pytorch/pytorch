@@ -17,6 +17,7 @@ from functorch.compile import (
     min_cut_rematerialization_partition,
     nop,
 )
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.effects import (
@@ -1051,6 +1052,159 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         out2 = torch.compile(model)(x)
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
+
+    @skipIfTorchDynamo()
+    def test_effect_autograd_function(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            @torch.library.custom_op("mylib::log_grad", mutates_args=())
+            def log_grad(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @torch.library.register_fake("mylib::log_grad")
+            def log_grad_fake(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            log_grad.register_effect(_EffectType.ORDERED)
+
+            class NoOpWithLoggingBackward(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x * x
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    logged_grad = torch.ops.mylib.log_grad(grad_output)
+                    return logged_grad
+
+            def fn(x):
+                y = NoOpWithLoggingBackward.apply(x)
+                return y.sum()
+
+            x = torch.randn(3, 4, requires_grad=True)
+            x_clone = x.detach().clone().requires_grad_(True)
+
+            backend = AotEagerAndRecordGraphs()
+            compiled_fn = torch.compile(fn, backend=backend)
+            loss = compiled_fn(x)
+            loss.backward()
+
+            loss_ref = fn(x_clone)
+            loss_ref.backward()
+            self.assertEqual(loss, loss_ref)
+
+            self.assertExpectedInline(
+                backend.fw_graphs[0].code.strip(),
+                """\
+def forward(self, primals_1):
+    mul = torch.ops.aten.mul.Tensor(primals_1, primals_1);  primals_1 = None
+    sum_1 = torch.ops.aten.sum.default(mul);  mul = None
+    return (sum_1,)""",  # noqa: B950
+            )
+
+            self.assertExpectedInline(
+                backend.bw_graphs[0].code.strip(),
+                """\
+def forward(self, tangents_1, tangents_token):
+    expand = torch.ops.aten.expand.default(tangents_1, [3, 4]);  tangents_1 = None
+    with_effects = torch.ops.higher_order.with_effects(tangents_token, torch.ops.mylib.log_grad.default, expand);  tangents_token = expand = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    return (getitem_1, getitem)""",  # noqa: B950
+            )
+
+    def test_with_effects_through_functional_tensor_mode(self):
+        """Test that with_effects can flow through FunctionalTensorMode."""
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        def fn_with_effects(x, y):
+            token = torch.ops.prims._make_token()
+            new_token, result = with_effects(
+                token,
+                torch.ops.aten.add.Tensor,
+                x,
+                y,
+            )
+            return result
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        with (
+            torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+            ),
+            FunctionalTensorMode(),
+        ):
+            x_func = FunctionalTensor.to_functional(x)
+            y_func = FunctionalTensor.to_functional(y)
+            result = fn_with_effects(x_func, y_func)
+
+        expected = x + y
+        if isinstance(result, FunctionalTensor):
+            result = torch._from_functional_tensor(result.elem)
+        self.assertEqual(result, expected)
+
+    @unittest.skipIf(IS_WINDOWS, "triton")
+    @unittest.skipIf(not SM80OrLater, "triton")
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_effectful_op_with_flex_attention(self):
+        """Test that effectful custom ops work with flex_attention."""
+        from torch._library.effects import EffectType
+        from torch.nn.attention.flex_attention import flex_attention
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+
+            @torch.library.custom_op("mylib::noop", mutates_args=())
+            def noop(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            @noop.register_fake
+            def noop_fake(x: torch.Tensor) -> torch.Tensor:
+                return x.clone()
+
+            noop.register_effect(EffectType.ORDERED)
+
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score
+
+            def fn(q, k, v):
+                q = torch.ops.mylib.noop(q)
+                out = flex_attention(q, k, v, score_mod=score_mod)
+                return out
+
+            batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+            q = torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device="cuda",
+                dtype=torch.float16,
+            )
+            k = torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device="cuda",
+                dtype=torch.float16,
+            )
+            v = torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device="cuda",
+                dtype=torch.float16,
+            )
+
+            compiled_fn = torch.compile(fn)
+            out = compiled_fn(q, k, v)
+            self.assertEqual(out.shape, (batch_size, num_heads, seq_len, head_dim))
 
 
 if __name__ == "__main__":

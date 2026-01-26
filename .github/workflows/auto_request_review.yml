@@ -14,10 +14,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Request review based on files changes and/or groups the author belongs to
+        id: auto-request-review
         # v0.7.0
         uses: necojackarc/auto-request-review@e08cdffa277d50854744de3f76230260e61c67f4 # v0.7.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Add triaged label if reviewers are present
+        if: ${{ steps.auto-request-review.outputs.reviewers != '' || steps.auto-request-review.outputs.team_reviewers != '' }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        with:
+          script: |
+            try {
+              const { owner, repo, number } = context.issue;
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: number,
+                labels: ['triaged'],
+              });
+              console.log('Label added: triaged');
+            } catch (error) {
+              console.error('Failed to add triaged label:', error.message);
+              core.setFailed(error.message);
+            }
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

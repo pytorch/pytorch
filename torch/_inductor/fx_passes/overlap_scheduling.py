@@ -711,6 +711,20 @@ class OverlapScheduler:
                 world_size,
                 "fx_collectives_node_runtime_estimation",
             )
+        else:
+            # No benchmarking - log analytical estimations for all collectives
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_collective_benchmarks,
+            )
+
+            all_collective_nodes = [
+                info.start_node for info in self.collective_info.values()
+            ]
+            if all_collective_nodes:
+                _log_collective_benchmarks(
+                    all_collective_nodes,
+                    artifact_name="fx_collectives_analytical_estimation",
+                )
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
@@ -1403,6 +1417,9 @@ def schedule_overlap_bucketing(
             Uses minimum of absolute and ratio limits when both are specified.
         enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
     """
+    if not any(is_wait_tensor(n) for n in gm.graph.nodes):
+        return gm
+
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
@@ -1446,6 +1463,9 @@ def schedule_overlap_bucketing_from_inductor_configs(
     Reads configuration from torch._inductor.config.aten_distributed_optimizations
     and calls schedule_overlap_bucketing with those settings.
     """
+    if not any(is_wait_tensor(n) for n in gm.graph.nodes):
+        return gm
+
     from torch._inductor import config
 
     dist_opts = config.aten_distributed_optimizations

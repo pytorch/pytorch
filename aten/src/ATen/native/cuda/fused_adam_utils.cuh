@@ -36,13 +36,13 @@ C10_DEVICE inline void adam_math(
     const opmath_t& bias_correction1,
     const opmath_t& bias_correction2_sqrt) {
   static_assert(depth == 4 || depth == 5);
+  auto casted_beta1 = static_cast<opmath_t>(beta1);
+  auto casted_beta2 = static_cast<opmath_t>(beta2);
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
     // Load values.
-    opmath_t param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
-    opmath_t grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
-    opmath_t casted_beta1 = static_cast<opmath_t>(beta1);
-    opmath_t casted_beta2 = static_cast<opmath_t>(beta2);
+    auto param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
+    auto grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
     if (grad_scale_ptr) {
       grad /= (static_cast<double>(*grad_scale_ptr));
     }
@@ -50,8 +50,8 @@ C10_DEVICE inline void adam_math(
     if (maximize) {
       grad = -grad;
     }
-    opmath_t exp_avg = static_cast<opmath_t>(r_args[kExpAvgIdx][ii]);
-    opmath_t exp_avg_sq = static_cast<opmath_t>(r_args[kExpAvgSqIdx][ii]);
+    auto exp_avg = static_cast<opmath_t>(r_args[kExpAvgIdx][ii]);
+    auto exp_avg_sq = static_cast<opmath_t>(r_args[kExpAvgSqIdx][ii]);
     opmath_t max_exp_avg_sq;
     if (amsgrad) {
       max_exp_avg_sq = static_cast<opmath_t>(r_args[kMaxExpAvgSqIdx][ii]);

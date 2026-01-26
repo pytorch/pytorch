@@ -82,10 +82,10 @@ jobs:
           name: ${{ inputs.build_environment }}
           s3-bucket: gha-artifacts
 
-      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+      - uses: pytorch/test-infra/.github/actions/setup-uv@main
         with:
-          python-version: 3.12
-          activate-environment: true
+          python-version: "3.12"
+          activate-environment: "true"
 
       - name: Install build artifacts
         shell: bash
@@ -101,14 +101,11 @@ jobs:
             dist/torch-*.whl \
             dist/vision/torchvision-*.whl \
             dist/audio/torchaudio-*.whl \
+            dist/ao/torchao-*.whl \
             dist/vllm/vllm-*.whl \
+            dist/deepgemm/deep_gemm-*.whl \
             --extra-index-url https://download.pytorch.org/whl/cu129 \
             --index-strategy unsafe-best-match
-
-          # We can build and install torchao from its pinned commit in PyTorch
-          # too, but that pin is too old and nothing seems to use it. Let's
-          # install torchao from pypi then
-          uv pip install torchao==0.15.0 --torch-backend=cu129
 
       - name: Print some debug information
         env:
@@ -178,7 +175,8 @@ jobs:
             --from-benchmark-configs-dir vllm-benchmarks/benchmarks \
             --to-benchmark-configs-dir ../../vllm-project/vllm/.buildkite/performance-benchmarks/tests \
             --models "${MODELS}" \
-            --device "${DEVICE_NAME}"
+            --device "${DEVICE_NAME}" \
+            --include-eager-mode
           popd
 
           pushd vllm-project/vllm
@@ -197,6 +195,16 @@ jobs:
         run: |
           set -eux
           bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
+
+      - name: Check the benchmark results
+        env:
+          BENCHMARK_RESULTS: vllm-project/vllm/benchmarks/results
+        run: |
+          set -eux
+
+          # Fail when there is no result or if the metrics are all zero
+          python3 pytorch/pytorch-integration-testing/.github/scripts/check_benchmark_results.py \
+            --benchmark-results "${BENCHMARK_RESULTS}"
 
       - name: Authenticate with AWS
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0

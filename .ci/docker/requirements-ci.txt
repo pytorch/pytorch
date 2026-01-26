@@ -174,9 +174,9 @@ pillow==11.0.0
 #Pinned versions: 11.0.0
 #test that import:
 
-protobuf==5.29.5
+protobuf==6.33.2
 #Description:  Google's data interchange format
-#Pinned versions: 5.29.5
+#Pinned versions: 6.33.2
 #test that import: test_tensorboard.py, test/onnx/*
 
 psutil
@@ -350,7 +350,7 @@ onnxscript==0.5.4
 #Pinned versions:
 #test that import:
 
-onnx-ir==0.1.12
+onnx-ir==0.1.15
 #Description: In-memory IR for ONNX, dependency of onnxscript. Pinned to avoid breaking changes in newer versions.
 #Pinned versions: 0.1.12
 #test that import:
@@ -373,7 +373,7 @@ pwlf==2.2.1
 pyyaml==6.0.3
 pyzstd
 setuptools==78.1.1
-packaging==23.1
+packaging==24.0
 six
 
 scons==4.5.2 ; platform_machine == "aarch64"

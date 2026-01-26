@@ -21,6 +21,7 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
+from torch.distributed.tensor._utils import assert_no_mixed_partial_types
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -107,6 +108,12 @@ class _TransformInfo(NamedTuple):
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
+
+    def __post_init__(self):
+        assert self.mesh_dim >= 0
+        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
+            "TransformInfo should only be created if it is an op with some effect, not a no-op"
+        )
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -303,6 +310,7 @@ class DTensorRedistributePlanner:
         assert dtensor_meta is not None
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
+        self.strided_shard_placements_in_target: set[_StridedShard] = set()
         self.setup_cost_callbacks()
 
     def setup_cost_callbacks(
@@ -344,12 +352,13 @@ class DTensorRedistributePlanner:
         #
         # To generalize to arbitrary dimensionality, we use the following notation:
         #   S(a)[x, ...]   : tensor dimension 'a' is sharded on device mesh axes x, ... (variadic, possibly empty)
+        #   SS(a)[x, ...]  : _StridedShard on tensor dimension 'a' on device mesh axes x, ... (variadic, possibly empty)
         #   R[...]         : replicated on the listed device mesh axes (possibly empty)
         #   P[...]         : partial on the listed device mesh axes (possibly empty)
         # The ellipsis '...' denotes a variadic wildcard, i.e., zero or more device mesh axes.
         #
         # Below are possible transitions from one sharding state to another.
-        # We use `S` for Shard, `R` for Replicate, and `P` for Partial.
+        # We use `S` for Shard, `SS` for _StridedShard, `R` for Replicate, and `P` for Partial.
         #
         # Case 1. Shard(a) -> Shard(b), use all-to-all (a2a), applies to:
         #   S(a)[..., x] -> S(b)[..., x]
@@ -375,8 +384,27 @@ class DTensorRedistributePlanner:
         # Case 6. Replicate() -> Partial(), local math op, applies to:
         #   R* -> P[..., x]
         #
-        # NB: Device order in Partial placement doesn't take impact. We should be able
-        # to operate on any Partial mesh dim.
+        # (TODO) Case 7. _StridedShard(a) -> Shard(b), use all-to-all (a2a), applies to:
+        #   SS(a)[..., x] -> S(b)[..., x]
+        #
+        # Case 8. _StridedShard() -> Replicate(), use all-gather, applies to:
+        #   SS(a)[..., x, y, z] -> SS(a)[..., x, y]
+        #
+        # (TODO) Case 9. Shard(a) -> _StridedShard(b), use all-to-all (a2a), applies to:
+        #   S(a)[..., x] -> SS(b)[..., x]
+        #
+        # (TODO) Case 10. Partial() -> _StridedShard(), use reduce-scatter, applies to:
+        #   P[..., x, y] -> P[..., x]SS(a)[..., y] or P[..., x, y] -> P[..., y]SS(a)[..., x]
+        #
+        # Case 11. Replicate() -> _StridedShard(), use chunk, applies to:
+        #   R* -> SS(a)[..., x]
+        #
+        # NB: Regarding `_StridedShard``, we only allow changing `Replicate` into
+        # `_StridedShard` with the same tensor dim and split_factor that occurs in the
+        # target placement.
+        #
+        # (TODO) Verify device order impact in Partial placement. We may need to handle
+        # device ordering for Partial also.
 
         # list of [DistState, cost]
         all_next_state: dict[DTensorRedistributePlanner.DistState, float] = {}
@@ -396,6 +424,10 @@ class DTensorRedistributePlanner:
         # convert sparse tuple
         for entry in tensor_mesh_dim_tuple:
             src_tensor_dim = entry.tensor_dim
+            src_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim][-1]
+            if not isinstance(placements[src_mesh_dim], Shard):
+                # skip special case like `_StridedShard`
+                continue
             for dst_tensor_dim in range(self.tensor_dimension):
                 if src_tensor_dim == dst_tensor_dim:
                     continue
@@ -425,6 +457,10 @@ class DTensorRedistributePlanner:
         # handle case 2: Shard() -> Replicate()
         for entry in tensor_mesh_dim_tuple:
             src_tensor_dim = entry.tensor_dim
+            src_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim][-1]
+            if not isinstance(placements[src_mesh_dim], Shard):
+                # skip special case like `_StridedShard`
+                continue
             move_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim].pop()
             new_placements = list(placements)
             new_placements[move_mesh_dim] = Replicate()
@@ -512,6 +548,64 @@ class DTensorRedistributePlanner:
                 dist_state,
             )
 
+        # Additional cases handling for _StridedShard
+
+        ######################################################################
+        # TODO(zpcore): handle case 7: _StridedShard() -> Shard() on the same dim
+
+        ######################################################################
+        # handle case 8: _StridedShard() -> Replicate()
+        for entry in tensor_mesh_dim_tuple:
+            src_tensor_dim = entry.tensor_dim
+            src_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim][-1]
+            if not isinstance(placements[src_mesh_dim], _StridedShard):
+                continue
+            move_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim].pop()
+            new_placements = list(placements)
+            new_placements[move_mesh_dim] = Replicate()
+            dist_state = self.DistState(
+                self._to_tuple(new_placements),
+                DTensorRedistributePlanner._dict_to_ShardOrder(tensor_mesh_dim_dict),
+            )
+            tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
+            all_next_state[dist_state] = self.cost_function(
+                cur_dist_state,
+                dist_state,
+            )
+
+        # Early exit if no StridedShard in target
+        if not self.strided_shard_placements_in_target:
+            return all_next_state
+
+        ######################################################################
+        # TODO(zpcore): handle case 9: Shard() -> _StridedShard()
+
+        ######################################################################
+        # TODO(zpcore): handle case 10: Partial() -> _StridedShard()
+
+        ######################################################################
+        # handle case 11: Replicate() -> _StridedShard()
+        for mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, Replicate):
+                continue
+            for strided_shard_obj in self.strided_shard_placements_in_target:
+                dst_tensor_dim = strided_shard_obj.dim
+                # try convert placement[mesh_dim] to strided_shard_obj
+                new_placements = list(placements)
+                new_placements[mesh_dim] = strided_shard_obj
+                tensor_mesh_dim_dict[dst_tensor_dim].append(mesh_dim)
+                dist_state = self.DistState(
+                    self._to_tuple(new_placements),
+                    DTensorRedistributePlanner._dict_to_ShardOrder(
+                        tensor_mesh_dim_dict
+                    ),
+                )
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
+                tensor_mesh_dim_dict[dst_tensor_dim].pop()
+
         return all_next_state
 
     # TODO(zpcore): if the dst_state contains special placement like
@@ -580,11 +674,21 @@ class DTensorRedistributePlanner:
             for mdim in mesh_dims:
                 if mdim == mesh_dim:
                     continue
-                new_size = Shard.local_shard_size_and_offset(
-                    new_logical_shape[tensor_dim],
-                    self.device_mesh.size(mesh_dim=mdim),
-                    self.device_mesh._sym_get_coordinate(mdim),
-                )[0]
+                placement = src_state.placements[mdim]
+                if isinstance(placement, Shard):
+                    new_size, _ = placement.local_shard_size_and_offset(
+                        new_logical_shape[tensor_dim],
+                        self.device_mesh.size(mesh_dim=mdim),
+                        self.device_mesh._sym_get_coordinate(mdim),
+                    )
+                elif isinstance(placement, _StridedShard):
+                    new_size, _ = placement.local_shard_size_and_offset(
+                        new_logical_shape[tensor_dim],
+                        self.device_mesh.size(mesh_dim=mdim),
+                        self.device_mesh._sym_get_coordinate(mdim),
+                    )
+                else:
+                    raise ValueError(f"Unsupported placement type: {placement}")
                 new_logical_shape[tensor_dim] = new_size
         return new_logical_shape
 
@@ -596,34 +700,49 @@ class DTensorRedistributePlanner:
     ) -> list[_TransformInfo]:
         # In case _StridedShard exists in placements, we let _StridedShard have
         # higher priority to express shard_order.
-        if any(
-            isinstance(placement, _StridedShard) for placement in src_spec.placements
-        ):
-            src_placements, src_shard_order = (
-                DTensorSpec._normalize_placements_into_shard_order(
-                    src_spec.placements, src_spec.mesh
+        # TODO(zpcore): Temporary workaround for backward compatibility where
+        # _StridedShard was used to encode device shard order. We should migrate
+        # to explicit `shard_order` instead.
+        def _try_normalize_spec(
+            spec: DTensorSpec,
+        ) -> tuple[tuple[Placement, ...], ShardOrder | None]:
+            # If any _StridedShard is present, try normalize placements into
+            # explicit shard_order.
+            if any(isinstance(p, _StridedShard) for p in spec.placements):
+                new_placements, shard_order = (
+                    DTensorSpec._normalize_placements_into_shard_order(
+                        spec.placements, spec.mesh
+                    )
                 )
+            else:
+                new_placements, shard_order = spec.placements, spec.shard_order
+
+            if shard_order is not None:
+                return new_placements, shard_order
+
+            # Fallback: compute default shard_order (treat _StridedShard as
+            # normal shard for order).
+            shard_order = DTensorSpec.compute_default_shard_order(
+                spec.placements, treat_strided_shard_as_shard=True
             )
-        else:
-            src_placements = src_spec.placements
-            src_shard_order = src_spec.shard_order
-        if any(
-            isinstance(placement, _StridedShard) for placement in dst_spec.placements
-        ):
-            dst_placements, dst_shard_order = (
-                DTensorSpec._normalize_placements_into_shard_order(
-                    dst_spec.placements, dst_spec.mesh
-                )
-            )
-        else:
-            dst_placements = dst_spec.placements
-            dst_shard_order = dst_spec.shard_order
+            return spec.placements, shard_order
+
+        src_placements, src_shard_order = _try_normalize_spec(src_spec)
+        dst_placements, dst_shard_order = _try_normalize_spec(dst_spec)
+
         if src_shard_order is None or dst_shard_order is None:
-            raise NotImplementedError(
-                "Redistribution of _StridedShard placement is only supported for "
-                "_StridedShard that can be converted to ordered Shard placements. "
-                "Full _StridedShard redistribution support is not yet implemented."
+            raise ValueError(
+                f"Cannot compute redistribution plan from {src_spec} to {dst_spec}: "
+                "failed to derive a valid shard_order"
             )
+
+        # In case _StridedShard still exists in placements, collect possible
+        # split_factor values in the target placements. Need those values to
+        # redistribute from Shard into _StridedShard.
+        for placement in dst_placements:
+            if isinstance(placement, _StridedShard):
+                self.strided_shard_placements_in_target.add(placement)
+
         src_state = self.DistState(src_placements, src_shard_order)
         dst_state = self.DistState(dst_placements, dst_shard_order)
         transform_infos: list[_TransformInfo] = []
@@ -677,14 +796,18 @@ class DTensorRedistributePlanner:
         transform_infos: list[_TransformInfo] = []
         if self.device_mesh.ndim == 1:
             # if device_mesh is 1D, redistribute is a simple direct
-            # transformation
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=0,
-                    src_dst_placements=(src_spec.placements[0], dst_spec.placements[0]),
-                    logical_shape=initial_logical_shape,
+            # transformation (skip if src == dst)
+            if src_spec.placements[0] != dst_spec.placements[0]:
+                transform_infos.append(
+                    _TransformInfo(
+                        mesh_dim=0,
+                        src_dst_placements=(
+                            src_spec.placements[0],
+                            dst_spec.placements[0],
+                        ),
+                        logical_shape=initial_logical_shape,
+                    )
                 )
-            )
             return transform_infos
 
         # Handle multi-dim device mesh placement redistribution First, we need
@@ -784,17 +907,20 @@ def _gen_transform_infos_non_cached(
     dst_shard_order = dst_spec.shard_order
     # DTensorSpec should automatically generate shard_order, and it can be () if
     # no shard.
-    assert src_shard_order is not None and dst_shard_order is not None
-    # Determine which transform strategy to use:
-    # 1. Non-standard device order → always use graph-based
-    # 2. Global flag or explicit parameter True → use graph-based
-    # 3. Otherwise → use greedy
     has_non_default_order = not all(
         DTensorSpec.is_default_device_order(order)
         for order in (src_shard_order, dst_shard_order)
     )
+    has_strided_shard = any(
+        isinstance(p, _StridedShard)
+        for p in (*src_spec.placements, *dst_spec.placements)
+    )
 
-    if has_non_default_order is True:
+    # Determine which transform strategy to use:
+    # 1. Non-standard device order or contains _StridedShard → always use graph-based
+    # 2. Global flag or explicit parameter True → use graph-based
+    # 3. Otherwise → use greedy
+    if has_non_default_order or has_strided_shard:
         use_graph_based_transform = True
     elif _FORCE_MIN_COST_REDISTRIBUTION_PLAN is not None:
         use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
@@ -842,6 +968,12 @@ def redistribute_local_tensor(
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
+
+    # We do not see a valid use case for mixing different partial types in the same DTensor.
+    # in principle it could be supported, but since nonlinear reductions (e.g. max) exist, relative ordering
+    # of different partials would become semantically critical.  Without a motivating use case, we prohibit this.
+    assert_no_mixed_partial_types(current_spec.placements)
+    assert_no_mixed_partial_types(target_spec.placements)
 
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
@@ -906,6 +1038,10 @@ def redistribute_local_tensor(
                     new_local_tensor = current_placement._to_replicate_tensor(
                         local_tensor, device_mesh, i, transform_info.logical_shape
                     )
+                elif isinstance(current, _StridedShard):
+                    new_local_tensor = current._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
                 else:
                     raise RuntimeError(
                         f"redistribute from {current} to {target} not supported yet"
@@ -924,10 +1060,7 @@ def redistribute_local_tensor(
                     new_local_tensor = target_placement._replicate_to_shard(
                         local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
-                else:
-                    assert current.is_shard(), (
-                        f"Current placement should be shard but found {current}"
-                    )
+                elif current.is_shard():
                     shard_spec = cast(Shard, current)
                     if shard_spec.dim != target_placement.dim:
                         new_local_tensor = shard_spec._to_new_shard_dim(
@@ -937,13 +1070,21 @@ def redistribute_local_tensor(
                             transform_info.logical_shape,
                             target_placement.dim,
                         )
+                elif isinstance(current, _StridedShard):
+                    raise NotImplementedError(
+                        "Redistribute from _StridedShard to Shard is not implemented yet"
+                    )
+                else:
+                    raise ValueError(
+                        f"Unexpected placement {current} for redistribute to target placement {target}"
+                    )
             elif target.is_partial():
                 if current.is_replicate():
                     partial_spec = cast(Partial, target)
                     new_local_tensor = partial_spec._partition_value(
                         local_tensor, device_mesh, i
                     )
-                elif current.is_shard():
+                elif current.is_shard() or isinstance(current, _StridedShard):
                     raise RuntimeError(
                         f"redistribute from {current} to {target} not supported yet"
                     )
@@ -954,6 +1095,35 @@ def redistribute_local_tensor(
                         )
                     # partial -> partial no op, should never hit
                     new_local_tensor = local_tensor
+            elif isinstance(target, _StridedShard):
+                # Case 4: target is _StridedShard
+                if current.is_partial():
+                    raise NotImplementedError(
+                        "Redistribute from Partial to _StridedShard is not implemented yet"
+                    )
+                elif current.is_replicate():
+                    # split the tensor and return the corresponding local strided shard
+                    new_local_tensor = target._replicate_to_strided_shard(
+                        local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
+                    )
+                elif current.is_shard():
+                    # Shard -> _StridedShard on potentially different dimensions
+                    raise NotImplementedError(
+                        "Redistribute from Shard to _StridedShard is not implemented yet"
+                    )
+                elif isinstance(current, _StridedShard):
+                    # _StridedShard -> _StridedShard: go through Replicate
+                    # First convert to Replicate, then to _StridedShard
+                    replicated = current._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
+                    new_local_tensor = target._replicate_to_strided_shard(
+                        replicated, device_mesh, i, device_mesh._sym_get_coordinate(i)
+                    )
+                else:
+                    raise ValueError(
+                        f"Unexpected placement {current} for redistribute to target placement {target}"
+                    )
 
             if not async_op and isinstance(
                 new_local_tensor, funcol.AsyncCollectiveTensor
