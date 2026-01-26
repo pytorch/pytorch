@@ -48,7 +48,11 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     tf32_on_and_off,
 )
-from torch.testing._internal.common_device_type import _has_sufficient_memory, e4m3_type
+from torch.testing._internal.common_device_type import (
+    _has_sufficient_memory,
+    e4m3_type,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_quantization import (
     _group_quantize_tensor,
     skip_if_no_torchvision,
@@ -2881,6 +2885,47 @@ class AOTInductorTestsTemplate:
             torch.randint(1, size=[38], dtype=torch.int64, device=GPU_TYPE),
         )
         torch._export.aot_compile(Model(), example_inputs)
+
+    @skipCUDAIf(True, "Test for x86 backend")
+    @unittest.skipIf(IS_FBCODE, "Need newer ideep")
+    def test_buffer_mutation_and_force_mmap_weights(self):
+        """
+        This issue occurs when weight zero point is int64 and aot_inductor.force_mmap_weights is ON.
+        The lowering path of qlinear will create a new constant buffer of int32 type for weight zero point,
+        and the CodeCache computes the constant buffer size wrong.
+        Original PR: https://github.com/pytorch/pytorch/pull/139054
+        """
+        from torch.testing._internal.common_quantization import (
+            _generate_qdq_linear_module,
+        )
+
+        # class Model(torch.nn.Module):
+        #     def __init__(self):
+        #         super().__init__()
+        #         N, K = 15, 16
+        #         self.linear = torch.nn.Linear(K, N)
+        #         self.w_scales, self.w_zps = torch.ops.quantized_decomposed.choose_qparams_per_token(self.linear.weight, torch.int8)
+        #         # Weight zero points must be int64 to reproduce the issue
+        #         self.w_scales, self.w_zps = self.w_scales.detach().to(torch.float32), self.w_zps.detach().to(torch.int64)
+        #         self.qw = torch.ops.quantized_decomposed.quantize_per_channel.default(self.linear.weight, self.w_scales, self.w_zps, 0, -128, 127, torch.int8)
+        #     def forward(self, x, x_scale, x_zp):
+        #         dqw = torch.ops.quantized_decomposed.dequantize_per_channel.default(self.qw, self.w_scales, self.w_zps, 0, -128, 127, torch.int8)
+        #         quantize_per_tensor_default = torch.ops.quantized_decomposed.quantize_per_tensor.default(x, x_scale, x_zp, 0, 127, torch.uint8)
+        #         dequantize_per_tensor_default = torch.ops.quantized_decomposed.dequantize_per_tensor.default(quantize_per_tensor_default, x_scale, x_zp, 0, 127, torch.uint8)
+        #         linear = torch.ops.aten.linear.default(dequantize_per_tensor_default, dqw, self.linear.bias)
+        #         return linear
+        # x = torch.randn(32, 16)
+        # x_scale, x_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(x, 0, 127, torch.finfo(torch.float32).eps, torch.uint8)
+        example_inputs = (torch.randn(32, 16),)
+        # model = Model().eval()
+        model = _generate_qdq_linear_module(
+            N=15, K=16, bias=True, example_input=example_inputs[0]
+        )
+        with (
+            config.patch({"freezing": True, "aot_inductor.force_mmap_weights": True}),
+            torch.no_grad(),
+        ):
+            self.check_model(model, example_inputs)
 
     @skipIfMPS
     def test_fallback_mem_leak_fix(self):
