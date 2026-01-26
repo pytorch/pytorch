@@ -1432,6 +1432,59 @@ class TestIndexInversion(TestCase):
                 self.assertIsNone(reconstruction, f"Expected non-invertible: {expr}")
 
 
+class TestGetPwRedSplitsDynamicShapes(TestCase):
+    """
+    Regression test for get_pw_red_splits symbolic expression equality.
+
+    Tests that sympy expression comparison uses guard_or_false instead of
+    direct equality, which could fail for equivalent expressions with
+    different symbolic representations.
+    """
+
+    @skipUnless(HAS_GPU, "Requires GPU")
+    @inductor_config.patch(loop_ordering_after_fusion=True)
+    def test_fused_reductions_with_cat_dynamic(self):
+        """
+        Test fusing multiple reductions with cat and pointwise ops under dynamic shapes.
+        Reproduces issue from example.py where symbolic size comparison could fail.
+        """
+        torch._dynamo.reset()
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+        def foo(arg0, arg1, arg2, arg3, arg4, arg5):
+            t0 = arg0
+            t1 = arg1
+            t2 = torch.nn.functional.linear(t0, t1)
+            t3 = torch.sqrt(t2)
+            t4 = arg2
+            t5 = t4.std(dim=0)
+            t6 = t5.min(dim=0).values
+            t7 = arg3
+            t8 = t7.transpose(0, 1)
+            t9 = t8.norm(dim=0)
+            t10 = arg4
+            t11 = torch.nn.functional.relu(t10)
+            t12 = arg5
+            t13 = t12.var(dim=0)
+            t14 = torch.cat([t11, t13], dim=0)
+            t15 = torch.pow(torch.pow(torch.pow(torch.pow(t3, t6), t6), t9), t14)
+            return t15
+
+        arg0 = torch.rand([128], dtype=torch.float16, device=GPU_TYPE)
+        arg1 = torch.rand([184, 128], dtype=torch.float16, device=GPU_TYPE)
+        arg2 = torch.rand([5, 3, 184], dtype=torch.float32, device=GPU_TYPE)
+        arg3 = torch.rand([184, 2], dtype=torch.float32, device=GPU_TYPE)
+        arg4 = torch.rand([32], dtype=torch.float32, device=GPU_TYPE)
+        arg5 = torch.rand([5, 152], dtype=torch.float32, device=GPU_TYPE)
+
+        out_eager = foo(arg0, arg1, arg2, arg3, arg4, arg5)
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, arg5)
+
+        self.assertTrue(same(out_eager, out_compiled))
+
+
 if __name__ == "__main__":
     if HAS_GPU:
         run_tests()
