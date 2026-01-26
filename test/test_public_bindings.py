@@ -306,7 +306,6 @@ class TestPublicBindings(TestCase):
             "torch.onnx._internal.exporter._fx_passes",
             "torch.onnx._internal.exporter._ir_passes",
             "torch.onnx._internal.exporter._isolated",
-            "torch.onnx._internal.exporter._input_observer",
             "torch.onnx._internal.exporter._onnx_program",
             "torch.onnx._internal.exporter._registration",
             "torch.onnx._internal.exporter._reporting",
