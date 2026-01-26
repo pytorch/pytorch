@@ -343,7 +343,7 @@ class InductorChoices:
         ):
             return False
 
-        xhint = V.graph.sizevars.size_hint(features.numel, fallback=2)
+        xhint = V.graph.sizevars.optimization_hint(features.numel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
         elif xhint <= 16:
@@ -351,6 +351,8 @@ class InductorChoices:
         else:
             return False
         # TODO(jansel): should this default on for dynamic shapes?
+        # TODO(laith) What if hint(features.reduction_numel) >= threshold ?
+        # shall we compare hints instead
         return V.graph.sizevars.statically_known_geq(
             features.reduction_numel, threshold
         )
