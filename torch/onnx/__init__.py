@@ -13,6 +13,7 @@ __all__ = [
     "OnnxExporterError",
     "ONNXProgram",
     "ExportableModule",
+    "InputObserver",
 ]
 
 from typing import Any, TYPE_CHECKING
@@ -27,6 +28,7 @@ from torch._C._onnx import (  # Deprecated members that are excluded from __all_
 
 from . import errors, ops
 from ._internal.exporter._exportable_module import ExportableModule
+from ._internal.exporter._input_observer import InputObserver
 from ._internal.exporter._onnx_program import ONNXProgram
 from ._internal.torchscript_exporter import (  # Deprecated members that are excluded from __all__
     symbolic_helper,
@@ -53,6 +55,7 @@ if TYPE_CHECKING:
 ONNXProgram.__module__ = "torch.onnx"
 ExportableModule.__module__ = "torch.onnx"
 OnnxExporterError.__module__ = "torch.onnx"
+InputObserver.__module__ = "torch.onnx"
 
 # TODO(justinchuby): Remove these two properties
 producer_name = "pytorch"
