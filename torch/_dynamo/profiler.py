@@ -420,4 +420,124 @@ def clear() -> None:
     """Clear all collected trace timing data."""
     with _trace_timing_lock:
         _trace_timing_entries.clear()
+        _inlined_function_times.clear()
     _clear_trace_profiler_scratchpad()
+
+
+# =============================================================================
+# Per-Inlined-Function Timing
+#
+# Tracks time spent tracing each individual function that gets inlined
+# during a single compilation.
+# =============================================================================
+
+@dataclasses.dataclass
+class InlinedFunctionTiming:
+    """Timing for a single inlined function during tracing."""
+
+    function_name: str
+    filename: str
+    lineno: int
+    time_us: int
+    call_count: int = 1
+
+
+# Global storage for inlined function timings, keyed by (filename, lineno, name)
+_inlined_function_times: dict[tuple[str, int, str], InlinedFunctionTiming] = {}
+_inlined_function_lock = threading.Lock()
+
+
+def _record_inlined_function_time(
+    co_name: str,
+    co_filename: str,
+    co_firstlineno: int,
+    duration_us: int,
+) -> None:
+    """
+    Record time spent tracing an inlined function.
+
+    Called from InliningInstructionTranslator.inline_call_().
+    """
+    key = (co_filename, co_firstlineno, co_name)
+    with _inlined_function_lock:
+        if key in _inlined_function_times:
+            entry = _inlined_function_times[key]
+            entry.time_us += duration_us
+            entry.call_count += 1
+        else:
+            _inlined_function_times[key] = InlinedFunctionTiming(
+                function_name=co_name,
+                filename=co_filename,
+                lineno=co_firstlineno,
+                time_us=duration_us,
+                call_count=1,
+            )
+
+
+def inlined_function_breakdown(top_n: int = 50) -> list[InlinedFunctionTiming]:
+    """
+    Get breakdown of time spent tracing each inlined function.
+
+    Returns list sorted by time_us descending.
+    """
+    with _inlined_function_lock:
+        entries = list(_inlined_function_times.values())
+    entries.sort(key=lambda e: e.time_us, reverse=True)
+    return entries[:top_n]
+
+
+def print_inlined_function_breakdown(top_n: int = 30) -> None:
+    """
+    Print a table of time spent tracing each inlined function.
+
+    Shows two percentage columns:
+    - % Inlined: percentage of total inlined function time (cumulative, may exceed 100%)
+    - % Trace: percentage of top-level tracing time (what fraction of tracing this represents)
+    """
+    entries = inlined_function_breakdown(top_n=top_n)
+
+    if not entries:
+        print("No inlined function timing data collected.")
+        return
+
+    # Get total tracing time from top-level breakdown
+    trace_entries = trace_breakdown()
+    total_tracing_time_s = sum(e.tracing_time_s for e in trace_entries)
+    total_tracing_time_us = int(total_tracing_time_s * 1_000_000)
+
+    # Sum of all inlined function times (may be > tracing time due to nesting)
+    total_inlined_us = sum(e.time_us for e in entries)
+    total_inlined_s = total_inlined_us / 1_000_000.0
+
+    print(f"\nInlined Function Tracing Breakdown (top {top_n}):\n")
+    print(
+        f"{'Function':<30} {'File:Line':<30} {'Time':>9} {'% Trace':>9} {'Calls':>6}"
+    )
+    print("-" * 90)
+
+    for e in entries:
+        # Shorten filename for display
+        short_filename = e.filename.split("/")[-1] if "/" in e.filename else e.filename
+        file_line = f"{short_filename}:{e.lineno}"
+        if len(file_line) > 28:
+            file_line = "..." + file_line[-25:]
+
+        func_name = e.function_name
+        if len(func_name) > 28:
+            func_name = func_name[:25] + "..."
+
+        time_s = e.time_us / 1_000_000.0
+        # % of top-level tracing time
+        pct_trace = (e.time_us / total_tracing_time_us * 100) if total_tracing_time_us > 0 else 0
+
+        print(
+            f"{func_name:<30} {file_line:<30} {time_s:>8.3f}s {pct_trace:>8.1f}% {e.call_count:>6}"
+        )
+
+    print("-" * 90)
+    print(
+        f"{'Total (cumulative)':<30} {'':<30} {total_inlined_s:>8.3f}s "
+        f"{'':>9} {sum(e.call_count for e in entries):>6}"
+    )
+    print(f"{'Top-level tracing time':<30} {'':<30} {total_tracing_time_s:>8.3f}s")
+    print()

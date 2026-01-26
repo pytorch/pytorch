@@ -178,6 +178,52 @@ class ProfilerTests(torch._dynamo.test_case.TestCase):
         finally:
             os.unlink(filepath)
 
+    def test_inlined_function_breakdown(self):
+        """Test that inlined functions are tracked separately."""
+
+        def helper(x):
+            return x.sin()
+
+        def another_helper(x):
+            return x.cos()
+
+        @torch.compile
+        def fn(x):
+            a = helper(x)
+            b = another_helper(x)
+            return a + b
+
+        fn(torch.randn(10))
+
+        # Get inlined function breakdown
+        breakdown = profiler.inlined_function_breakdown()
+
+        # Should have entries for the helper functions
+        self.assertGreater(len(breakdown), 0)
+
+        # Check that entries have expected fields
+        entry = breakdown[0]
+        self.assertIsNotNone(entry.function_name)
+        self.assertIsNotNone(entry.filename)
+        self.assertGreater(entry.lineno, 0)
+        self.assertGreaterEqual(entry.time_us, 0)
+        self.assertGreaterEqual(entry.call_count, 1)
+
+    def test_print_inlined_function_breakdown(self):
+        """Test that print_inlined_function_breakdown runs without error."""
+
+        def inner(x):
+            return x * 2
+
+        @torch.compile
+        def fn(x):
+            return inner(x) + 1
+
+        fn(torch.randn(10))
+
+        # Should not raise
+        profiler.print_inlined_function_breakdown()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
