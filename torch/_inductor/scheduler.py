@@ -315,26 +315,31 @@ class MixOrderReduction:
             # Call evaluate_expr rather than statically_known_geq since nrow can
             # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
+            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow * ncol, size_thres)):
                 return False
 
             # We require more more row than columns since
             # 1, we prefer doing persistent reduction for each row
             # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
+            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, ncol * 2)):
                 return False
 
             # When nrow is small, ncol should also be small (due to the check
             # above). Thus the entire tensor should be well cached in L2.
             # Mix order reduction is less beneficial.
-            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
+            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, 4096)):
                 return False
 
-        contiguous_node, other_node = (
-            (node1, node2)
-            if V.graph.sizevars.evaluate_expr(sympy.Eq(g1[1], ncol))
-            else (node2, node1)
-        )
+        # Determine which node is contiguous. If we can't determine this
+        # statically (e.g., due to unbacked symbols), skip the fusion.
+        eq_expr = sympy.Eq(g1[1], ncol)
+        if V.graph.sizevars.guard_or_false(eq_expr):
+            contiguous_node, other_node = (node1, node2)
+        elif V.graph.sizevars.guard_or_false(sympy.Not(eq_expr)):
+            contiguous_node, other_node = (node2, node1)
+        else:
+            # Can't statically determine which node is contiguous, skip fusion
+            return False
 
         # We previously only check the contiguous_node has contiguous
         # access to common_reads. But that turns out to be not enough.
