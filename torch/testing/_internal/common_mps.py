@@ -314,7 +314,6 @@ if torch.backends.mps.is_available():
             "put": None,
             "cholesky_solve": None,
             "frexp": None,
-            "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
