@@ -1417,6 +1417,63 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         self.assertEqual(ascending_result.to_local(), input_data)
         self.assertEqual(non_ascending_result.to_local(), input_data)
 
+    @with_comms
+    def test_debug_mode_shows_optimized_trace(self):
+        """Test that DebugMode captures the optimized (flattened) redistribution trace.
+
+        This verifies that debug_mode.record_redistribute_calls receives the
+        optimized transform_infos, not the unoptimized ones.
+        """
+        torch.manual_seed(42)
+
+        # Create a 2D mesh with flattened submesh
+        mesh = init_device_mesh(
+            self.device_type, (4, 2), mesh_dim_names=("A", "B")
+        )
+        mesh["A", "B"]._flatten("A_B")
+
+        input_data = torch.randn((8, 8), device=self.device_type)
+
+        # Create a tensor sharded on both mesh dims with ascending order
+        sharded_src = _distribute_tensor(
+            input_data.clone(),
+            mesh,
+            [Shard(0), Shard(0)],
+            shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+        )
+
+        # Capture the debug trace during redistribution to fully replicated
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            result = redistribute(
+                sharded_src,
+                mesh,
+                [Replicate(), Replicate()],
+                shard_order=(),
+            )
+
+        trace_str = self._extract_redistribute_trace_from_debug_mode(
+            debug_mode.debug_string()
+        )
+
+        import torch.distributed as dist
+        if dist.get_rank() == 0:
+            print(f"\nDebug trace: {trace_str}")
+
+        # The trace should show the OPTIMIZED redistribution:
+        # S(0)[0]S(0)[1] -> RR in a SINGLE all_gather (flattened)
+        # Not: S(0)[0]S(0)[1] -> S(0)R -> RR (two separate all_gathers)
+        # The optimized trace should NOT contain an intermediate S(0)R state
+        self.assertNotIn("S(0)R", trace_str,
+            "Debug trace should show optimized (flattened) redistribution, "
+            "not unoptimized individual all_gathers")
+
+        # Verify the expected optimized trace format
+        self.assertIn("S(0)[0]S(0)[1]", trace_str)
+        self.assertIn("RR", trace_str)
+
+        # Verify correctness
+        self.assertEqual(result.to_local(), input_data)
+
 
 class DistributeWithStridedShardTest(DTensorTestBase):
     @property

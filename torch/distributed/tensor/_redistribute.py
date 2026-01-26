@@ -667,18 +667,34 @@ class DTensorRedistributePlanner:
         ]
         for transform_info in transform_infos:
             src_dim_placement, dst_dim_placement = transform_info.src_dst_placements
+
+            # Handle flattened transforms specially - they affect multiple mesh dims
+            if isinstance(transform_info, _FlattenedTransformInfo):
+                mesh_dims_to_update = transform_info.original_mesh_dims
+            else:
+                mesh_dims_to_update = (transform_info.mesh_dim,)
+
             if src_dim_placement.is_shard():
                 src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
                 assert (
                     src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
                 )
-                shard_order_dict[src_dim].pop()
+                # Remove mesh dims in order (from shard_order_dict perspective)
+                for _ in mesh_dims_to_update:
+                    shard_order_dict[src_dim].pop()
+
             if dst_dim_placement.is_shard():
                 dst_dim = dst_dim_placement.dim  # type: ignore[attr-defined]
                 if dst_dim not in shard_order_dict:
                     shard_order_dict[dst_dim] = []
-                shard_order_dict[dst_dim].append(transform_info.mesh_dim)
-            cur_placement[transform_info.mesh_dim] = dst_dim_placement
+                # Add mesh dims in order
+                for mesh_dim in mesh_dims_to_update:
+                    shard_order_dict[dst_dim].append(mesh_dim)
+
+            # Update placements for all affected mesh dims
+            for mesh_dim in mesh_dims_to_update:
+                cur_placement[mesh_dim] = dst_dim_placement
+
             new_state = DTensorRedistributePlanner.DistState(
                 tuple(cur_placement),
                 DTensorRedistributePlanner._dict_to_ShardOrder(shard_order_dict),
@@ -1402,7 +1418,7 @@ def redistribute_local_tensor(
             target_spec.placements,
             DTensorRedistributePlanner.stringify_transform_infos(
                 device_mesh,
-                transform_infos,
+                optimized_transform_infos,
                 current_spec.placements,
                 current_spec.shard_order,
             ),
