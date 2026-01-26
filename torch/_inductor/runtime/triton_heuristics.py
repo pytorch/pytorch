@@ -3427,7 +3427,7 @@ def reduction(
     )
     if configs is not None:
         return cached_autotune(
-            size_hints,
+            None,
             configs,
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
@@ -3671,7 +3671,7 @@ def persistent_reduction(
     )
     if configs is not None:
         return cached_autotune(
-            size_hints,
+            None,
             configs,
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
