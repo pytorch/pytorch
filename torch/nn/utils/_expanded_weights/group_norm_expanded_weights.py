@@ -96,7 +96,6 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
                 weight,
                 lambda _: torch.einsum(
                     "ni...->ni",
-                    # pyrefly: ignore [unsupported-operation]
                     F.group_norm(input, num_groups, eps=eps) * grad_output,
                 ),
             )

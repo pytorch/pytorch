@@ -43,6 +43,10 @@ GraphTransformObserver = functools.partial(
 
 log = logging.getLogger(__name__)
 
+apply_gumbel_max_trick_pass = PatternMatcherPass(
+    pass_name="apply_gumbel_max_trick_pass"
+)
+
 efficient_conv_bn_eval_pass = PatternMatcherPass(
     pass_name="efficient_conv_bn_eval_pass"
 )
@@ -167,7 +171,11 @@ def use_matmul_fuse_lce_replace_first_LCE(graph):
 
 @init_once_fakemode
 def lazy_init():
-    from . import efficient_conv_bn_eval, split_cat  # noqa: F401
+    from . import (  # noqa: F401  # noqa: F401
+        apply_gumbel_max_trick,
+        efficient_conv_bn_eval,
+        split_cat,
+    )
 
     if config.is_fbcode():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
@@ -337,11 +345,13 @@ def pre_grad_passes(
                     )
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
+            apply_gumbel_max_trick_pass.apply(gm.graph)
 
     if config.pre_grad_custom_pass is not None:
         GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
             config.pre_grad_custom_pass
         )
+
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up

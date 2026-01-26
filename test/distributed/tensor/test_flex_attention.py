@@ -252,7 +252,8 @@ class DistFlexAttentionTest(MyTestClass):
         #   shape: torch.Size([16, 8, 1024])
         #   To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
         # This is very likely to be the case where grad_logsumexp is a plain tensor.
-        flex_attention_compiled = flex_attention
+        flex_attention_compiled = torch.compile(flex_attention)
+        # flex_attention_compiled = flex_attention
 
         # Run distributed FlexAttention
         out_dt, aux_dt = flex_attention_compiled(

@@ -21,8 +21,11 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     RuntimeSchemaInfo,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
-from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
+from torch.distributed.tensor._ops.utils import (
+    expand_to_full_mesh_op_strategy,
+    register_op_strategy,
+)
 from torch.distributed.tensor.placement_types import _Partial, Replicate, Shard
 from torch.fx.graph_module import GraphModule
 from torch.utils import _cxx_pytree as pytree
@@ -324,7 +327,7 @@ def _propagate_sharding_and_redistribute(
     strategy_schema = propagator._wrap_with_op_strategy(op_schema)
     op_strategy = propagator.op_strategy_funcs[op_schema.op](strategy_schema)
     assert isinstance(op_strategy, OpStrategy)
-    output_strategy = propagator._select_strategy(op_strategy, op_schema)
+    output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
     # check if we need to redistribute the input
     needs_redistribute = False
     # check if we want to use args value from redistribute_schema

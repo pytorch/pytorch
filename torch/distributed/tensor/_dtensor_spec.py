@@ -7,8 +7,8 @@ from typing import Any, cast, NamedTuple
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _MaskPartial,
     _StridedShard,
-    MaskPartial,
     Partial,
     Placement,
     Replicate,
@@ -92,8 +92,6 @@ class DTensorSpec:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
         if self.shard_order is None:
-            # pyrefly: ignore [bad-assignment]
-
             _, self.shard_order = self._normalize_placements_into_shard_order(
                 self.placements, self.mesh
             )
@@ -321,10 +319,10 @@ class DTensorSpec:
                     # _StridedShard is not convertible to ShardOrder
                     return None
             else:
-                if not isinstance(cur_placement, Replicate | Partial | MaskPartial):
+                if not isinstance(cur_placement, Replicate | Partial | _MaskPartial):
                     raise ValueError(
                         f"Unsupported placement type {type(cur_placement)} encountered in "
-                        f"{placements}; expected Replicate, Partial, or MaskPartial."
+                        f"{placements}; expected Replicate, Partial, or _MaskPartial."
                     )
         for tensor_dim in range(max_tensor_dim):
             if len(tensor_dim_to_mesh_dims_order[tensor_dim]) > 0:

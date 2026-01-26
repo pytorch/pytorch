@@ -196,9 +196,9 @@ class ComboKernelTests(TestCase):
             return row_sum_reduced, col_sum, y_sum, z_sum
 
         inps = [
-            torch.rand(8192, 1024, device="cuda"),
-            torch.rand(2048, device="cuda"),
-            torch.rand(2048, device="cuda"),
+            torch.rand(8192, 1024, device=GPU_TYPE),
+            torch.rand(2048, device=GPU_TYPE),
+            torch.rand(2048, device=GPU_TYPE),
         ]
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
@@ -208,6 +208,26 @@ class ComboKernelTests(TestCase):
         # [row_sum_reduced] will become a separate kernel due to the consumer
         # [y_sum, z_sum] will become a combo kernel
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+
+    @requires_gpu_and_triton
+    def test_combo_kernel_scalar_store_broadcast(self):
+        def fn(a, b, c, d):
+            scalar_sum = a + b
+            vector_result = c.sum(dim=1)
+            scalar_red = (d * scalar_sum).sum()
+            return scalar_sum, vector_result, scalar_red
+
+        inps = [
+            torch.tensor(1.0, device=GPU_TYPE),
+            torch.tensor(2.0, device=GPU_TYPE),
+            torch.randn(2048, 2048, device=GPU_TYPE),
+            torch.randn(2048, 1, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        torch.testing.assert_close(out_eager, out_compiled, rtol=1e-4, atol=1e-4)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
 
 @instantiate_parametrized_tests
