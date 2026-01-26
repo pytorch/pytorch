@@ -337,6 +337,23 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob_v2(
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size);
 
+// Like v2, but with an optional deleter callback that will be invoked when
+// the tensor's storage is deallocated. The deleter receives the data pointer.
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob_v3(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret, // returns new reference
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size,
+    void (*deleter)(void*)); // optional deleter callback
+
 // This function will create a new uninitialized tensor object
 // and its pointer is returned through *ret.
 AOTI_TORCH_EXPORT AOTITorchError

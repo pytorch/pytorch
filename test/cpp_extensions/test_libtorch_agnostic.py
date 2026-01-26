@@ -1,5 +1,6 @@
 # Owner(s): ["module: cpp"]
 
+import gc
 import math
 import sysconfig
 import unittest
@@ -1217,6 +1218,38 @@ class TestLibtorchAgnostic(TestCase):
 
         reference_transposed = module.reference_from_blob(transposed)
         self.assertEqual(stable_transposed, reference_transposed)
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+    def test_my_from_blob_with_deleter(self, device):
+        """ Test for from_blob with custom deleter."""
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        libtorch_agnostic.ops.reset_deleter_call_count()
+        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+
+        # We need an original tensor to create the tensor with from_blob.
+        original = torch.rand(2, 3, device=device, dtype=torch.float32)
+        blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
+            original.data_ptr(),
+            original.size(),
+            original.stride(),
+            device,
+            torch.float32,
+        )
+
+        self.assertEqual(blob_tensor, original)
+        self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
+
+        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+
+        del blob_tensor
+        gc.collect()
+
+        # Ensure the deleter was called. The original tensor still exists and
+        # can be used.
+        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
+        original += 1
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
