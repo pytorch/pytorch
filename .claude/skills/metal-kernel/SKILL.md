@@ -11,14 +11,21 @@ This skill guides you through implementing Metal kernels for PyTorch operators o
 
 ## Overview
 
-Adding MPS support to a PyTorch operator involves three steps:
-1. **Register dispatch** in `aten/src/ATen/native/native_functions.yaml`
-2. **Write Metal kernel** in `aten/src/ATen/native/mps/kernels/`
-3. **Implement host-side operator** in `aten/src/ATen/native/mps/operations/`
+There are two workflows covered by this skill:
 
-## Step 1: Add MPS Dispatch to native_functions.yaml
+1. **Adding new MPS support** - Implementing a new operator from scratch
+2. **Migrating from MPSGraph** - Converting existing MPSGraph-based operators to native Metal
+
+Both workflows involve:
+1. **Update dispatch** in `aten/src/ATen/native/native_functions.yaml`
+2. **Write Metal kernel** in `aten/src/ATen/native/mps/kernels/`
+3. **Implement host-side stub** in `aten/src/ATen/native/mps/operations/`
+
+## Step 1: Update native_functions.yaml
 
 **Location:** `aten/src/ATen/native/native_functions.yaml`
+
+### For New Operators
 
 Find the operator entry and add MPS dispatch:
 
@@ -30,7 +37,7 @@ Find the operator entry and add MPS dispatch:
     CUDA: my_op_cuda
     MPS: my_op_mps
 
-# Shared implementation across devices
+# Shared implementation across devices (preferred for structured kernels)
 - func: my_op.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA, MPS: my_op_out
@@ -43,10 +50,32 @@ Find the operator entry and add MPS dispatch:
     CPU, CUDA, MPS: my_op_out
 ```
 
+### For Migrating from MPSGraph
+
+When migrating an existing operator from MPSGraph to native Metal, **consolidate the dispatch entry**:
+
+```yaml
+# BEFORE (MPSGraph-based, separate dispatch)
+- func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: atan2_out
+    MPS: atan2_out_mps  # Separate MPS implementation
+
+# AFTER (native Metal, shared dispatch via stub)
+- func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA, MPS: atan2_out  # MPS now uses the same stub mechanism
+```
+
+**Key change:** Replace `MPS: my_op_out_mps` with adding `MPS` to the shared dispatch line (e.g., `CPU, CUDA, MPS: my_op_out`).
+
 **Dispatch naming conventions:**
-- `MPS: function_name_mps` - MPS-specific implementation
-- `CPU, CUDA, MPS: function_name` - Shared implementation
-- `SparseMPS: function_name_sparse_mps` - Sparse tensor support
+- `MPS: function_name_mps` - MPS-specific implementation (old MPSGraph pattern)
+- `CPU, CUDA, MPS: function_name` - Shared stub implementation (native Metal pattern)
 
 ## Step 2: Implement Metal Kernel
 
@@ -91,6 +120,48 @@ REGISTER_BINARY_OP(my_binary, float, float);
 REGISTER_BINARY_OP(my_binary, half, half);
 ```
 
+### Binary Kernel Type Registration Macros
+
+For binary operations, use the convenience macros defined in `BinaryKernel.metal`:
+
+```metal
+// Floating-point types only (float, half, bfloat)
+REGISTER_FLOAT_BINARY_OP(my_op);
+
+// Integral types with float output (for math ops like atan2, copysign)
+// Registers: long->float, int->float, short->float, uchar->float, char->float, bool->float
+REGISTER_INT2FLOAT_BINARY_OP(my_op);
+
+// Integral types with same-type output (for bitwise/logical ops)
+// Registers: long, int, short, uchar, char, bool
+REGISTER_INTEGER_BINARY_OP(my_op);
+
+// Floating-point with opmath precision (for ops needing higher precision)
+REGISTER_OPMATH_FLOAT_BINARY_OP(my_op);
+```
+
+**Common patterns:**
+- Math functions (atan2, copysign, logaddexp): Use both `REGISTER_FLOAT_BINARY_OP` and `REGISTER_INT2FLOAT_BINARY_OP`
+- Comparison/logical ops (maximum, minimum): Use both `REGISTER_FLOAT_BINARY_OP` and `REGISTER_INTEGER_BINARY_OP`
+- Arithmetic ops (add, sub, mul): Use both `REGISTER_FLOAT_BINARY_OP` and `REGISTER_INTEGER_BINARY_OP`
+
+**Example for atan2 (supports both float and int inputs):**
+```metal
+struct atan2_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(precise::atan2(float(a), float(b)));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return precise::atan2(float(a), float(b));
+  }
+};
+
+REGISTER_FLOAT_BINARY_OP(atan2);
+REGISTER_INT2FLOAT_BINARY_OP(atan2);
+```
+
 ### With Scalar Parameter
 
 ```metal
@@ -131,15 +202,15 @@ struct special_functor {
 ```
 
 **Note on complex types:** Complex numbers in Metal are represented as vector types:
-- `c10::complex<float>` → `float2` (x = real, y = imaginary)
-- `c10::complex<half>` → `half2`
+- `c10::complex<float>` maps to `float2` (x = real, y = imaginary)
+- `c10::complex<half>` maps to `half2`
 
 Use `is_complex_v<T>` to specialize for complex types in functors.
 
 ### Available c10/metal Utilities
 
 **utils.h:**
-- `opmath_t<T>` - Operation math type (half→float)
+- `opmath_t<T>` - Operation math type (half->float)
 - `accum_t<T>` - Accumulation type for reductions
 - `max()`, `min()` with NaN propagation
 
@@ -153,17 +224,52 @@ Use `is_complex_v<T>` to specialize for complex types in functors.
 - `REGISTER_BINARY_OP(name, in_type, out_type)`
 - `REGISTER_UNARY_ALPHA_OP(name, in_type, alpha_type, out_type)`
 
-## Step 3: Implement Host-Side Operator
+## Step 3: Implement Host-Side Stub
 
 **Location:** `aten/src/ATen/native/mps/operations/`
 
 Choose or create an appropriate file based on operation type:
-- `UnaryOps.mm` - Single input operations (relu, sigmoid, exp, etc.)
-- `BinaryOps.mm` - Two input operations (add, mul, etc.)
+- `UnaryKernel.mm` - Single input operations via stub dispatch
+- `BinaryKernel.mm` - Two input operations via stub dispatch
+- `UnaryOps.mm` / `BinaryOps.mm` - Legacy MPSGraph implementations (for reference)
 - `ReduceOps.mm` - Reductions (sum, mean, max, etc.)
 - Create new file for distinct operation categories
 
-The host-side code dispatches to your Metal kernel. Look at existing implementations in the operations directory for patterns on how to launch Metal kernels using the `c10/metal` infrastructure.
+### Stub Registration Pattern (Preferred for Native Metal)
+
+For structured kernels that use the TensorIterator pattern:
+
+```objc
+// In BinaryKernel.mm (or appropriate file)
+
+static void my_op_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "my_op");  // "my_op" matches the functor name in .metal
+}
+
+// Register the MPS stub - this connects to the dispatch system
+REGISTER_DISPATCH(my_op_stub, &my_op_mps_kernel)
+```
+
+**For unary operations:**
+```objc
+static void my_unary_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_unary_kernel(iter, "my_unary");
+}
+
+REGISTER_DISPATCH(my_unary_stub, &my_unary_mps_kernel)
+```
+
+### Migration: Removing Old MPSGraph Implementation
+
+When migrating from MPSGraph, also remove the old implementation:
+
+1. **Remove from BinaryOps.mm (or UnaryOps.mm):**
+   - Delete the `TORCH_IMPL_FUNC(my_op_out_mps)` implementation
+   - Remove the corresponding `#include <ATen/ops/my_op_native.h>` header
+
+2. **Add to BinaryKernel.mm (or UnaryKernel.mm):**
+   - Add the static kernel function
+   - Add the `REGISTER_DISPATCH` call
 
 ## Step 4: Compile
 
@@ -172,8 +278,6 @@ After making changes, compile to verify everything builds correctly:
 ```bash
 cd build && ninja torch_cpu
 ```
-
-Fix any compilation errors before proceeding to testing.
 
 ## Testing
 
