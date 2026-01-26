@@ -5290,6 +5290,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         )
         self._choice_timings_fn = choice_timings_fn
         self._choice_timings: dict[Optional[int], dict[ChoiceCaller, float]] = {}
+        self._choices: list[ChoiceCaller] = unfiltered_choices
         self.original_inputs = inputs
         self._output_plannable = all(
             isinstance(choice, TritonTemplateCallerBase)
@@ -5307,6 +5308,10 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         Are all possible choices TritonTemplates or Extern Kernels with out variants
         """
         return self._output_plannable
+
+    @property
+    def choices(self) -> list[ChoiceCaller]:
+        return self._choices
 
     def choice_timings(
         self, hint_override: Optional[int] = None

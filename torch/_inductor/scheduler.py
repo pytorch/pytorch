@@ -4010,12 +4010,31 @@ class Scheduler:
                 assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
                 hint_override_best_fusion_choice[hint_override] = ms_fused_choice
 
-            # Eagerly compile and benchmark non-template nodes
-            choice_timings = multi_node.choice_timings()
-            min_choice, ms1 = multi_node.get_min_choice()
-
-            ms2 = float("inf")
             bench_epilogue = config.benchmark_epilogue_fusion
+            num_triton_callers = sum(
+                isinstance(c, TritonTemplateCallerBase) for c in multi_node.choices
+            )
+            # Track if the choice timings can be retrieved async after compilation
+            get_choice_timings_async = (
+                config.pipeline_max_autotune_gemm
+                and not bench_epilogue
+                and num_triton_callers <= config.max_epilogue_benchmarked_choices
+            )
+
+            ms1, ms2 = float("inf"), float("inf")
+            min_choice: ir.ChoiceCaller | None = None
+            if not get_choice_timings_async:
+                # Eagerly compile and benchmark non-template nodes
+                choice_timings = multi_node.choice_timings()
+                min_choice, ms1 = multi_node.get_min_choice()
+                choice_timings_iter = sorted(
+                    choice_timings.items(), key=operator.itemgetter(1)
+                )
+            else:
+                # Use 0 for unfused time, won't be used as bench_epilogue
+                # is guaranteed to be False here
+                choice_timings_iter = [(c, 0) for c in multi_node.choices]
+
             if bench_epilogue:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
@@ -4033,10 +4052,8 @@ class Scheduler:
             # Start compiling choices in parallel
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
-            for choice, unfused_time in sorted(
-                choice_timings.items(), key=operator.itemgetter(1)
-            ):
-                if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+            for choice, unfused_time in choice_timings_iter:
+                if not isinstance(choice, TritonTemplateCallerBase):
                     continue
 
                 # For prologue fusion we check if the underlying template of the choice
@@ -4065,9 +4082,20 @@ class Scheduler:
                 return FusionResult.fuse(False)
 
             def benchmark_when_ready() -> bool:
+                nonlocal choice_timings, future_choices, ms1, min_choice, multi_node
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
                 new_timings = {}
+
+                if get_choice_timings_async:
+                    assert multi_node and isinstance(multi_node, ir.MultiTemplateBuffer)
+                    choice_timings = multi_node.choice_timings()
+                    min_choice, ms1 = multi_node.get_min_choice()
+
+                    future_choices = sorted(
+                        future_choices,
+                        key=lambda x: choice_timings[x[0]],
+                    )
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
                     try:
