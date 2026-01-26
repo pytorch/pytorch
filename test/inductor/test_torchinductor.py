@@ -534,9 +534,22 @@ def check_model(
     actual_flat = pytree.tree_leaves(actual)
 
     def reference_to_expect(actual_flat, correct_flat):
+        def convert_dtype_preserve_strides(src, dst_dtype):
+            # Use .to() for tensors with stride 0 because copy_ into a tensor with
+            # multiple elements at the same memory location is not supported.
+            if any(s == 0 for s in src.stride()):
+                return src.to(dst_dtype)
+            # Use empty_strided + copy_ to preserve strides during dtype conversion
+            # (similar to upcast_fn above)
+            result = torch.empty_strided(
+                src.size(), src.stride(), device=src.device, dtype=dst_dtype
+            )
+            result.copy_(src)
+            return result
+
         return tuple(
             (
-                y.to(x.dtype)
+                convert_dtype_preserve_strides(y, x.dtype)
                 if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
                 else y
             )

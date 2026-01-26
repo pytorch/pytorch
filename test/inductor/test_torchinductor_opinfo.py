@@ -998,8 +998,6 @@ inductor_one_sample["xpu"] = {
 inductor_skip_exact_stride = {
     "complex",
     "empty_permuted",
-    "fft.irfftn",
-    "fft.irfft2",
     "linalg.diagonal",
     "linalg.eigvals",  # Fails for ROCM
     "linalg.lu_factor",
