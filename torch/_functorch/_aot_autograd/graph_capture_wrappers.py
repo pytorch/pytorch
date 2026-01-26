@@ -1393,7 +1393,62 @@ def create_functional_call(
                         fake_mode = detect_fake_mode()
                         assert fake_mode is not None
                         fake_mode.epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(*args)
+
+                        # When Dynamo traces a model, it may create extra placeholders
+                        # for attribute accesses (e.g., DTensor._local_tensor). The FX
+                        # Interpreter's default process_inputs uses pytree.arg_tree_leaves
+                        # which doesn't know about these extra placeholders. To fix this,
+                        # we pre-flatten the args using the module's _in_spec and then
+                        # add any derived attributes (like _local_tensor) that Dynamo
+                        # recorded as separate placeholders.
+                        placeholder_nodes = [
+                            n for n in mod.graph.nodes if n.op == "placeholder"
+                        ]
+
+                        if (
+                            hasattr(mod, "_in_spec")
+                            and mod._in_spec is not None
+                        ):
+                            from torch.fx._pytree import tree_flatten_spec
+
+                            flat_args = tree_flatten_spec(
+                                (args, {}), mod._in_spec
+                            )
+
+                            # Build a mapping from placeholder name to flat_args index.
+                            # Placeholder names follow pattern: l_flat_args_N_ where N
+                            # is the index into flat_args.
+                            placeholder_names = [n.name for n in placeholder_nodes]
+
+                            # Check if there are more placeholders than flat_args.
+                            # This happens when Dynamo created extra placeholders for
+                            # attribute accesses like DTensor._local_tensor.
+                            if len(placeholder_nodes) > len(flat_args):
+                                # Build final args list matching placeholders
+                                final_args = []
+                                flat_args_idx = 0
+                                for ph_name in placeholder_names:
+                                    if ph_name.endswith("_local_tensor"):
+                                        # This is an attribute access placeholder.
+                                        # The parent is the previous arg.
+                                        parent_arg = final_args[-1]
+                                        if hasattr(parent_arg, "_local_tensor"):
+                                            final_args.append(parent_arg._local_tensor)
+                                        else:
+                                            raise RuntimeError(
+                                                f"Placeholder {ph_name} expects _local_tensor "
+                                                f"but parent {type(parent_arg)} doesn't have it"
+                                            )
+                                    else:
+                                        final_args.append(flat_args[flat_args_idx])
+                                        flat_args_idx += 1
+                                flat_args = final_args
+
+                            out = PropagateUnbackedSymInts(mod).run(
+                                *flat_args, enable_io_processing=False
+                            )
+                        else:
+                            out = PropagateUnbackedSymInts(mod).run(*args)
             else:
                 out = mod(*args[params_len:], **kwargs)
 
