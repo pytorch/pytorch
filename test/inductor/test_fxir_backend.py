@@ -1238,6 +1238,21 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         args = (torch.randn((12, 14), device=self.device),)
         self.check(TestModule(), args, ds)
 
+    def test_extern_kernel_irnode_kwargs(self):
+        """
+        Test that IR nodes passed as kwargs to extern kernels are properly materialized.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, data, offsets):
+                return torch.segment_reduce(data, "sum", offsets=offsets)
+
+        length = 10
+        data = torch.randn(length, device=self.device)
+        offsets = torch.tensor([0, 3, 7, length], dtype=torch.int64, device=self.device)
+
+        self.check(TestModule(), (data, offsets))
+
 
 class TestReplaceFloorDiv(InductorTestCase):
     """
