@@ -625,7 +625,7 @@ class FxGraphCachePickler(pickle.Pickler):
         try:
             self.dump(obj)
             return self._stream.getvalue()
-        except (TypeError, AttributeError, pickle.PicklingError) as e:
+        except (TypeError, AttributeError, pickle.PicklingError, ValueError) as e:
             # Some configs options may not pickle.
             log.warning("Failed to pickle cache key", exc_info=True)
             raise BypassFxGraphCache("Failed to pickle cache key") from e
@@ -1044,6 +1044,8 @@ class GuardedCache(Generic[T]):
             subdir = cls._get_tmp_dir_for_key(key)
             if os.path.exists(subdir):
                 for path in sorted(os.listdir(subdir)):
+                    if path.startswith("."):
+                        continue  # Skip temp files from concurrent write_atomic() calls
                     try:
                         with open(os.path.join(subdir, path), "rb") as f:
                             content = f.read()
@@ -2480,15 +2482,18 @@ end
                                 compile_multiarch_bundle_from_llvm_ir,
                             )
 
+                            # pyrefly: ignore [unbound-name]
                             if not os.path.exists(asm_file):
                                 raise RuntimeError(
                                     f"Multi-arch ROCm compilation requires LLVM IR file, "
+                                    # pyrefly: ignore [unbound-name]
                                     f"but {asm_file} not found. "
                                     f"Ensure asm_type='ll' is captured in triton_heuristics.py"
                                 )
 
                             # Compile for multiple archs and bundle them
                             success = compile_multiarch_bundle_from_llvm_ir(
+                                # pyrefly: ignore [unbound-name]
                                 llvm_ir_path=asm_file,
                                 output_bundle_path=cubin_file,
                                 target_archs=None,
@@ -2603,10 +2608,10 @@ end
                         # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
                         # as seen in https://docs.python.org/2/library/resource.html
                         if _IS_WINDOWS:
-                            from ctypes import (  # type: ignore[attr-defined]
+                            from ctypes import (
                                 byref,
                                 Structure,
-                                windll,
+                                windll,  # pyrefly: ignore [missing-module-attribute]
                             )
                             from ctypes.wintypes import DWORD, LPVOID, WORD
 
