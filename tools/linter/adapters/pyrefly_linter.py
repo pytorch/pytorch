@@ -139,10 +139,7 @@ def in_github_actions() -> bool:
 
 
 def check_files(
-    code: str,
-    config: str,
-    remove_unused_ignores: bool,
-    suppress: bool
+    code: str, config: str, remove_unused_ignores: bool, suppress: bool
 ) -> list[LintMessage]:
     try:
         pyrefly_commands = [
