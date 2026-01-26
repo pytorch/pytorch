@@ -506,6 +506,8 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
 
 @functools.cache
 def get_comprehension_bytecode_prefix() -> list[str]:
+    assert sys.version_info >= (3, 12)
+
     """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
     def fn():
         return [i for i in range(1)]
@@ -528,6 +530,9 @@ def get_comprehension_result_patterns() -> dict[str, str]:
         - "discard_indicator": opcode that discards result from stack
         - "return_indicator": opcode that returns result directly
     """
+
+    assert sys.version_info >= (3, 12)
+
     # Pattern 1: Result assigned to variable
     def fn_assigned():
         result = [i for i in range(1)]
@@ -4459,6 +4464,7 @@ class InstructionTranslatorBase(
         - result_disposition: "stored", "discarded", "returned", or "consumed"
         - iterator_vars: variables that need restoration
         """
+        assert sys.version_info >= (3, 12)
         assert self.instruction_pointer is not None
         start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
         ip = self.instruction_pointer
@@ -4671,6 +4677,8 @@ class InstructionTranslatorBase(
         3. Generates code to load comprehension-created locals
         4. Creates a resume function for code after the comprehension
         """
+        assert sys.version_info >= (3, 12)
+
         analysis = self._analyze_comprehension()
 
         assert self.instruction_pointer is not None
