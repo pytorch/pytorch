@@ -130,6 +130,7 @@ aten::_fft_r2c.out
 aten::_fill_mem_eff_dropout_mask_
 aten::_flash_attention_backward
 aten::_flash_attention_forward
+aten::_flash_attention_forward.quantized
 aten::_foobar
 aten::_foobar.out
 aten::_foreach_abs
@@ -305,6 +306,8 @@ aten::_foreach_pow.Scalar_out
 aten::_foreach_pow_.List
 aten::_foreach_pow_.Scalar
 aten::_foreach_pow_.ScalarList
+aten::_foreach_powsum.Scalar
+aten::_foreach_powsum.Scalar_out
 aten::_foreach_reciprocal
 aten::_foreach_reciprocal.out
 aten::_foreach_reciprocal_
@@ -519,6 +522,7 @@ aten::_scaled_dot_product_cudnn_attention_backward
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
+aten::_scaled_dot_product_flash_attention.quantized
 aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_dot_product_flash_attention_for_cpu_backward
 aten::_scaled_dot_product_fused_attention_overrideable
@@ -892,6 +896,7 @@ aten::kthvalue
 aten::kthvalue.values
 aten::lift_fresh_copy
 aten::lift_fresh_copy.out
+aten::linalg__powsum
 aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_eig
