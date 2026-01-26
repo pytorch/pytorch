@@ -303,5 +303,177 @@ class TestFakePG(TestCase):
         self.assertIn("c10d.allreduce_.default", op_names)
 
 
+class TestCrossBackendProcessGroupNaming(TestCase):
+    """
+    Tests for cross-backend process group naming consistency.
+
+    These tests verify that DeviceMesh creates canonical process group names that
+    are consistent between fake and real backends. This is critical for the
+    cross-backend precompilation workflow where:
+    1. Precompile with fake backend (single process, fake PGs)
+    2. Load and run with real NCCL backend (multi-process, real PGs)
+
+    The canonical naming ensures that process group references in compiled
+    artifacts can be resolved correctly regardless of which backend was used
+    during compilation.
+    """
+
+    def setUp(self):
+        super().setUp()
+        # Ensure no process group is initialized from previous tests
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        # Clear the C++ GroupRegistry completely (including aliases from previous tests)
+        torch._C._distributed_c10d._unregister_all_process_groups()
+        # Clear device mesh resources
+        from torch.distributed.device_mesh import _mesh_resources
+
+        _mesh_resources.mesh_stack.clear()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+        # Clear the C++ GroupRegistry completely
+        torch._C._distributed_c10d._unregister_all_process_groups()
+        # Clear device mesh resources
+        from torch.distributed.device_mesh import _mesh_resources
+
+        _mesh_resources.mesh_stack.clear()
+
+    def test_canonical_naming_with_fake_backend(self):
+        """
+        Test that DeviceMesh creates canonical names with fake backend.
+
+        This verifies that process groups created with fake backend get canonical
+        names registered as aliases, which is required for cross-backend precompile.
+        """
+        world_size = 4
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=world_size, store=store
+        )
+
+        # Create a 2D mesh (simulating FSDP x TP)
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=["fsdp", "tp"])
+
+        # Verify that the mesh stores canonical names that are resolvable
+        # The canonical name format is: mesh_mesh_{dim_name}_{hash(first_subgroup_ranks)}
+        self.assertEqual(len(mesh._dim_group_names), 2)
+
+        # All canonical names stored in mesh._dim_group_names should be resolvable
+        for dim_idx, dim_name in enumerate(["fsdp", "tp"]):
+            canonical_name = mesh._dim_group_names[dim_idx]
+            # Verify the canonical name follows the expected pattern
+            self.assertTrue(
+                canonical_name.startswith(f"mesh_mesh_{dim_name}_"),
+                f"Canonical name {canonical_name} doesn't start with mesh_mesh_{dim_name}_",
+            )
+
+            # Verify the canonical name is resolvable
+            # This is critical for cross-backend precompile: the canonical name
+            # is baked into compiled artifacts and must be resolvable at load time.
+            try:
+                pg = dist.distributed_c10d._resolve_process_group(canonical_name)
+                self.assertIsNotNone(pg)
+            except LookupError:
+                self.fail(
+                    f"Failed to resolve canonical name: {canonical_name}. "
+                    "This would break cross-backend precompilation."
+                )
+
+    def test_canonical_names_are_hash_based(self):
+        """
+        Test that canonical names use hash-based naming for consistency.
+
+        The canonical name should be deterministic based on the mesh dimensions
+        and rank groups, ensuring that fake backend and real backend produce
+        compatible names.
+        """
+        world_size = 4
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=world_size, store=store
+        )
+
+        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=["fsdp", "tp"])
+
+        # Canonical names should contain a hash suffix (numeric)
+        for canonical_name in mesh._dim_group_names:
+            # Name format: mesh_mesh_{dim_name}_{hash}
+            parts = canonical_name.split("_")
+            self.assertGreaterEqual(len(parts), 4)
+            hash_part = parts[-1]
+            # The hash should be numeric
+            self.assertTrue(
+                hash_part.isdigit(),
+                f"Hash part '{hash_part}' in canonical name '{canonical_name}' "
+                "should be numeric",
+            )
+
+    @skipIfHpu
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
+    def test_fsdp2_with_fake_backend_creates_canonical_names(self):
+        """
+        Test that FSDP2 with fake backend creates resolvable canonical PG names.
+
+        This is an end-to-end test that verifies the FSDP2 + DeviceMesh workflow
+        creates process groups with canonical names that would be resolvable
+        when loading precompiled artifacts.
+
+        Note: We use a 2D mesh (fsdp, tp) because a 1D mesh that spans the entire
+        world reuses the default process group without canonical naming (an
+        optimization that avoids creating unnecessary groups).
+        """
+        from torch.distributed._composable.fsdp import fully_shard
+
+        world_size = 4
+        store = dist.HashStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=world_size, store=store
+        )
+
+        # Create 2D mesh for FSDP + TP (2x2)
+        # This ensures we go through the canonical naming path
+        mesh = init_device_mesh(
+            device_type, (2, 2), mesh_dim_names=["fsdp", "tp"]
+        )
+
+        # Create and shard a simple model using the fsdp submesh
+        model = nn.Sequential(
+            nn.Linear(10, 10, device=device_type),
+            nn.ReLU(),
+            nn.Linear(10, 10, device=device_type),
+        )
+        fully_shard(model, mesh=mesh["fsdp"])
+
+        # Verify canonical names for both dimensions are stored and resolvable
+        self.assertEqual(len(mesh._dim_group_names), 2)
+
+        for dim_idx, dim_name in enumerate(["fsdp", "tp"]):
+            canonical_name = mesh._dim_group_names[dim_idx]
+            self.assertTrue(
+                canonical_name.startswith(f"mesh_mesh_{dim_name}_"),
+                f"Canonical name {canonical_name} doesn't match expected pattern "
+                f"mesh_mesh_{dim_name}_*",
+            )
+
+            try:
+                pg = dist.distributed_c10d._resolve_process_group(canonical_name)
+                self.assertIsNotNone(pg)
+            except LookupError:
+                self.fail(
+                    f"Failed to resolve canonical name: {canonical_name}. "
+                    "FSDP2 precompiled artifacts would fail to load with real backend."
+                )
+
+        # Run a forward pass to ensure everything works
+        input_tensor = torch.randn(2, 10, device=device_type)
+        output = model(input_tensor)
+        self.assertEqual(output.shape, (2, 10))
+
+
 if __name__ == "__main__":
     run_tests()

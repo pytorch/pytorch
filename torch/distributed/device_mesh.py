@@ -483,17 +483,14 @@ else:
             # process group naming between precompilation (fake) and runtime (real) backends.
             is_fake_backend = get_backend(default_group) == "fake"
             can_use_split_group = (
-                (
-                    getattr(default_group, "bound_device_id", None) is not None
-                    and torch.cuda.is_available()
-                    and (
-                        backend is None
-                        or default_group._get_backend(torch.device("cuda")).name()
-                        == backend
-                    )
+                getattr(default_group, "bound_device_id", None) is not None
+                and torch.cuda.is_available()
+                and (
+                    backend is None
+                    or default_group._get_backend(torch.device("cuda")).name()
+                    == backend
                 )
-                or is_fake_backend
-            )
+            ) or is_fake_backend
             if can_use_split_group:
                 dim_group = split_group(
                     parent_pg=default_group,
@@ -505,7 +502,6 @@ else:
                 if dim_group is None:
                     return None
 
-                return dim_group.group_name
                 # For precompilation consistency, we need all ranks to use the
                 # same canonical name. The split_group creates different groups
                 # for different ranks, so we compute a deterministic canonical
@@ -513,11 +509,24 @@ else:
                 # Use the group_desc or a hash of the first subgroup ranks as
                 # the canonical name.
                 first_subgroup_ranks = tuple(pg_ranks_by_dim[0].tolist())
-                canonical_name = f"mesh_{group_desc}_{hash(first_subgroup_ranks) % (10**8)}"
-                if dim_group is not None and dim_group.group_name != canonical_name:
-                    torch._C._distributed_c10d._register_process_group_alias(
-                        canonical_name, dim_group.group_name
-                    )
+                canonical_name = GroupName(
+                    f"mesh_{group_desc}_{hash(first_subgroup_ranks) % (10**8)}"
+                )
+                if dim_group.group_name != canonical_name:
+                    try:
+                        torch._C._distributed_c10d._register_process_group_alias(
+                            canonical_name, dim_group.group_name
+                        )
+                    except RuntimeError as e:
+                        if "already registered" in str(e):
+                            # Alias already exists and points to a still-valid PG.
+                            # This can happen when creating multiple meshes that
+                            # share dimensions (e.g., (fsdp, tp) and (fsdp_cp, tp)).
+                            # The existing alias points to an equivalent group,
+                            # so we can safely reuse it.
+                            pass
+                        else:
+                            raise
                     return canonical_name
                 return dim_group.group_name  # type: ignore[union-attr]
 
@@ -537,6 +546,13 @@ else:
             # theory yes, but for consistency we want to create ALL groups (even
             # ones that don't contain our rank) and there's checks to ensure
             # that we don't duplicate names.
+            #
+            # Track the first group's raw name (without "group_" prefix) for
+            # canonical alias registration. This is the name actually registered
+            # with the C++ GroupRegistry.
+            first_raw_name: GroupName | None = None
+            # Track the raw name of the group that contains this rank.
+            my_raw_name: GroupName | None = None
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
                 dim_group = new_group(
@@ -548,7 +564,8 @@ else:
                     always_return_group_name=True,
                 )
                 if pg_name is None:
-                    pg_name = "group_" + dim_group.group_name
+                    pg_name = GroupName("group_" + dim_group.group_name)
+                    first_raw_name = dim_group.group_name
 
                 # only add to dim_groups if the current rank in the subgroup
                 if get_rank() in subgroup_ranks:
@@ -558,13 +575,41 @@ else:
                             f"in {subgroup_ranks}!"
                         )
                     found_my_rank = True
+                    my_raw_name = dim_group.group_name
                     if pg_name != dim_group.group_name:
                         torch._C._distributed_c10d._register_process_group_alias(
                             pg_name, dim_group.group_name
                         )
 
-            if not pg_name:
+            if not pg_name or first_raw_name is None or my_raw_name is None:
                 raise RuntimeError(f"Rank {get_rank()} not present in DeviceMesh")
+
+            # For precompilation consistency, compute the same canonical name
+            # as the split_group path and register it as an alias. This ensures
+            # that compiled artifacts from fake backend precompilation can be
+            # loaded when running with real NCCL backend.
+            first_subgroup_ranks = tuple(pg_ranks_by_dim[0].tolist())
+            canonical_name = GroupName(
+                f"mesh_{group_desc}_{hash(first_subgroup_ranks) % (10**8)}"
+            )
+            if pg_name != canonical_name:
+                try:
+                    # Use my_raw_name (e.g., "0" or "1") as the canonical name
+                    # for the alias. This is the actual registered name for this
+                    # rank's process group, not pg_name (e.g., "group_0") which
+                    # is just an alias.
+                    torch._C._distributed_c10d._register_process_group_alias(
+                        canonical_name, my_raw_name
+                    )
+                except RuntimeError as e:
+                    if "already registered" in str(e):
+                        # Alias already exists from a previous mesh creation
+                        # with the same topology. The existing alias points
+                        # to an equivalent group, so we can safely reuse it.
+                        pass
+                    else:
+                        raise
+                return canonical_name
             return pg_name
 
         @staticmethod

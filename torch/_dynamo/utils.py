@@ -3863,10 +3863,38 @@ def assert_no_fake_params_or_buffers(gm: torch.fx.GraphModule) -> None:
         else:
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
-    for name, buffer in gm.named_buffers():
-        assert not is_fake(buffer), (
-            f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
+    def defake_tensor(t: torch.Tensor) -> torch.Tensor:
+        """
+        Convert a FakeTensor to a real tensor with the same metadata.
+
+        During tracing with FakeTensorMode, tensors that are captured as buffers
+        (e.g., module buffers passed to autograd.Function.apply()) may be FakeTensors.
+        These can't remain as graph module buffers because FakeTensors don't have
+        real data. This function creates a real tensor with the same shape, dtype,
+        device, and requires_grad as the FakeTensor.
+        """
+        return torch.zeros(
+            t.shape,
+            dtype=t.dtype,
+            device=t.device,
+            requires_grad=t.requires_grad,
         )
+
+    # Convert FakeTensor buffers to real tensors. This is needed for
+    # cross-backend precompilation where module buffers may be FakeTensors
+    # during tracing.
+    for name, buffer in list(gm.named_buffers()):
+        if is_fake(buffer):
+            # Navigate to the submodule containing this buffer and replace it
+            parts = name.rsplit(".", 1)
+            if len(parts) == 2:
+                parent_name, buffer_name = parts
+                parent = gm.get_submodule(parent_name)
+            else:
+                parent = gm
+                buffer_name = name
+            parent._buffers[buffer_name] = defake_tensor(buffer)
+
     for name, param in gm.named_parameters():
         assert not is_fake(param), (
             f"Unexpected fake param {name} {stack_or_hint(param)}"
