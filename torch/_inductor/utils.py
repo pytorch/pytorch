@@ -3360,6 +3360,11 @@ def copy_misaligned_inputs(
         assert isinstance(_inp, torch.Tensor), (
             f"Expected tensors only, but got: {type(_inp)}"
         )
+        # Skip alignment check for FakeTensors since they don't have real memory
+        # addresses. FakeTensors are used during tracing/export workflows and
+        # don't need alignment fixing.
+        if isinstance(_inp, torch._subclasses.FakeTensor):
+            continue
         if _inp.data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(_inp)
 
@@ -3381,7 +3386,11 @@ def remove_unaligned_input_idxs(
     aligned_static_input_idxs = []
     for idx in static_input_idxs:
         input = inputs[idx]
-        if isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
+        # FakeTensors don't have real memory addresses, so treat them as
+        # aligned (they're only used during tracing, not actual execution)
+        if isinstance(input, torch._subclasses.FakeTensor):
+            aligned_static_input_idxs.append(idx)
+        elif isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
             aligned_static_input_idxs.append(idx)
     if len(aligned_static_input_idxs) != len(static_input_idxs):
         return aligned_static_input_idxs
