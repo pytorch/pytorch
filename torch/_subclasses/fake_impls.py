@@ -6,7 +6,7 @@ import math
 import operator
 import sys
 from functools import reduce
-from typing import Any, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast as typing_cast, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -147,7 +147,8 @@ def contains_tensor_types(type_: Any) -> bool:
 
 @functools.cache
 def _is_tensor_constructor(func: OpOverload) -> bool:
-    assert isinstance(func, OpOverload)
+    if not isinstance(func, OpOverload):
+        raise AssertionError(f"func must be an OpOverload, got {type(func)}")
     schema = func._schema
     if any(contains_tensor_types(arg.type) for arg in schema.arguments):
         return False
@@ -165,15 +166,17 @@ def register_op_impl(
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     def impl_decorator(op_impl: Callable[_P, _R]) -> Callable[_P, _R]:
         if isinstance(run_impl_check, OpOverload):
-            assert run_impl_check not in op_implementations_dict, (
-                f"duplicate registration: {run_impl_check}"
-            )
+            if run_impl_check in op_implementations_dict:
+                raise AssertionError(f"duplicate registration: {run_impl_check}")
             op_implementations_dict[run_impl_check] = op_impl
         elif isinstance(run_impl_check, (list, tuple)):
             for op in run_impl_check:
                 register_op_impl(op)(op_impl)
         else:
-            assert callable(run_impl_check)
+            if not callable(run_impl_check):
+                raise AssertionError(
+                    f"run_impl_check must be callable, got {type(run_impl_check)}"
+                )
             op_implementations_checks.append((run_impl_check, op_impl))
 
         return op_impl
@@ -205,7 +208,10 @@ def dispatch_to_op_implementations_dict(
 def constructors(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor:
-    assert func not in _non_kwarg_device_constructors
+    if func in _non_kwarg_device_constructors:
+        raise AssertionError(
+            f"func must not be in _non_kwarg_device_constructors, got {func}"
+        )
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -501,7 +507,8 @@ def meta_select(
 
     del new_size[dim]
     del new_stride[dim]
-    assert new_storage_offset is not None
+    if new_storage_offset is None:
+        raise AssertionError("new_storage_offset must not be None")
     # pyrefly: ignore[bad-return]
     return self.as_strided(new_size, new_stride, new_storage_offset)
 
@@ -630,7 +637,7 @@ def _compute_stride(
 
 
 def _view_has_unbacked_input(
-    a: FakeTensor, shape: ShapeType | tuple[ShapeType]
+    a: torch.Tensor, shape: ShapeType | tuple[ShapeType]
 ) -> bool:
     from torch.fx.experimental.symbolic_shapes import has_hint
 
@@ -644,10 +651,10 @@ def _view_has_unbacked_input(
 
 
 def _view_unbacked_meta(
-    a: FakeTensor,
+    a: torch.Tensor,
     shape: ShapeType | tuple[ShapeType],
     size_oblivious_enabled: bool = True,
-) -> FakeTensor:
+) -> torch.Tensor:
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
@@ -727,15 +734,14 @@ def _reshape_copy(
     shape = utils.infer_size(*shape, a.numel())
     if is_contiguous_or_false(a):
         view = _view_meta(fake_mode, func, a, *shape)
-        return view.clone(  # pyrefly: ignore[bad-return]
-            memory_format=torch.contiguous_format
+        return typing_cast(
+            FakeTensor, view.clone(memory_format=torch.contiguous_format)
         )
     else:
         return _view_meta(
             fake_mode,
             func,
-            # pyrefly: ignore[bad-argument-type]
-            a.clone(memory_format=torch.contiguous_format),
+            typing_cast(FakeTensor, a.clone(memory_format=torch.contiguous_format)),
             *shape,
         )
 
@@ -743,14 +749,19 @@ def _reshape_copy(
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(
-    fake_mode: FakeTensorMode, func: OpOverload, a: FakeTensor, *shape: Any
+    fake_mode: FakeTensorMode,
+    func: OpOverload,
+    a: FakeTensor,
+    *shape: Any,
 ) -> FakeTensor:
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
-        return _view_unbacked_meta(a, shape)
+        return typing_cast(FakeTensor, _view_unbacked_meta(a, shape))
     else:
-        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)  # type: ignore[return-value]
+        return typing_cast(
+            FakeTensor, torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+        )
 
 
 @register_op_impl(aten.view_copy.default)
@@ -762,6 +773,7 @@ def _view_meta_copy(
     out: FakeTensor | None = None,
 ) -> FakeTensor:
     result = _view_meta(fake_mode, func, a, *shape)
+
     if out is not None:
         return result
 
@@ -887,7 +899,10 @@ def _padded_dense_to_jagged_forward(
     total_L: IntLikeType | None = None,
 ) -> FakeTensor:
     # only one jagged dim is supported for now
-    assert len(offsets) == 1
+    if len(offsets) != 1:
+        raise AssertionError(
+            f"Only one jagged dim is supported, got {len(offsets)} offsets"
+        )
 
     if not total_L:
         if (
@@ -974,7 +989,8 @@ def slice_forward(
 
     # create unbacked if case unknown
     if new_size is None:
-        assert shape_env is not None, "Must have shape_env to create symint"
+        if shape_env is None:
+            raise AssertionError("Must have shape_env to create symint")
         new_size = shape_env.create_unbacked_symint()
         torch._check(new_size >= 0)
         torch._check(new_size <= sizes[dim])
@@ -986,7 +1002,8 @@ def slice_forward(
     if start_index is not None:
         storage_offset = self.storage_offset() + start_index * strides[dim]
     else:
-        assert shape_env is not None, "Must have shape_env to create symint"
+        if shape_env is None:
+            raise AssertionError("Must have shape_env to create symint")
         storage_offset = shape_env.create_unbacked_symint()
         torch._check(storage_offset >= 0)
 
@@ -1057,25 +1074,30 @@ def assert_tensor_metadata(
     layout: torch.layout | None = None,
 ) -> None:
     if sizes is not None:
-        assert t.size() == sizes, (
-            f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
-        )
+        if t.size() != sizes:
+            raise AssertionError(
+                f"Tensor sizes mismatch! Expected: {sizes}, Got: {t.size()}"
+            )
     if strides is not None:
-        assert t.stride() == strides, (
-            f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
-        )
+        if t.stride() != strides:
+            raise AssertionError(
+                f"Tensor strides mismatch! Expected: {strides}, Got: {t.stride()}"
+            )
     if dtype is not None:
-        assert t.dtype == dtype, (
-            f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
-        )
+        if t.dtype != dtype:
+            raise AssertionError(
+                f"Tensor dtype mismatch! Expected: {dtype}, Got: {t.dtype}"
+            )
     if layout is not None:
-        assert t.layout == layout, (
-            f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout}"
-        )
+        if t.layout != layout:
+            raise AssertionError(
+                f"Tensor layout mismatch! Expected: {layout}, Got: {t.layout}"
+            )
     if device is not None:
-        assert t.device == device, (
-            f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
-        )
+        if t.device != device:
+            raise AssertionError(
+                f"Tensor device mismatch! Expected: {device}, Got: {t.device}"
+            )
 
 
 # NB: this must be ordered after local_scalar_dense
@@ -1154,7 +1176,8 @@ def foreach_run_and_map_input_device(
     if not out_meta:
         return out_meta
 
-    assert tensor_lists
+    if not tensor_lists:
+        raise AssertionError("tensor_lists must not be empty")
     out_fake = []
 
     for i, meta_t in enumerate(out_meta):
@@ -1276,7 +1299,8 @@ def nested_tensors_unsupported(
     ]
 )
 def nyi(fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any) -> None:
-    assert func not in _device_not_kwarg_ops, f"NYI: {func}"
+    if func in _device_not_kwarg_ops:
+        raise AssertionError(f"NYI: {func}")
 
 
 @register_op_impl([aten.convolution.default, aten.convolution_backward.default])
@@ -1516,7 +1540,8 @@ def make_fast_binary_impl(
             # below if unnecessary
             # pyrefly: ignore[bad-assignment]
             final_shape = infer_size(final_shape, shape)
-        assert final_shape is not None
+        if final_shape is None:
+            raise AssertionError("final_shape must not be None")
 
         from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 

@@ -89,7 +89,8 @@ def register_philox_rand():
         dtype: _dtype,
     ):
         # stride arg will be useful for distributed usecase. Currently, its unused.
-        assert stride is None
+        if stride is not None:
+            raise AssertionError(f"stride must be None, got {stride}")
         stride = make_contiguous_strides_for(shape)
         random_values = _prims.TensorMeta(
             shape=shape, strides=stride, dtype=dtype, device=device
@@ -106,7 +107,8 @@ def register_philox_rand():
         dtype: _dtype,
     ):
         # stride arg will be useful for distributed usecase. Currently, its unused.
-        assert stride is None
+        if stride is not None:
+            raise AssertionError(f"stride must be None, got {stride}")
         if device.type == "cpu":
             devices = []
         else:
@@ -192,7 +194,8 @@ def register_run_and_save_rng_state_op():
             "xpu": impl_xpu,
         }
         device = get_device(args, kwargs)
-        assert device in impl_map, f"Backend not supported for {device}"
+        if device not in impl_map:
+            raise AssertionError(f"Backend not supported for {device}")
         impl = impl_map[device]
         return impl(op, *args, **kwargs)
 
@@ -286,7 +289,8 @@ def register_run_with_rng_state_op():
             "xpu": impl_xpu,
         }
         device = get_device(args, kwargs)
-        assert device in impl_map, f"Backend not supported for {device}"
+        if device not in impl_map:
+            raise AssertionError(f"Backend not supported for {device}")
         impl = impl_map[device]
         return impl(rng_state, op, *args, **kwargs)
 
@@ -346,9 +350,10 @@ def register_graphsafe_run_with_rng_state_op():
     @graphsafe_run_with_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, rng_state=None, **kwargs):
         device = get_device(args, kwargs)
-        assert device == "cuda", (
-            f"GraphSafe RNG operations only supported for CUDA, got {device}"
-        )
+        if device != "cuda":
+            raise AssertionError(
+                f"GraphSafe RNG operations only supported for CUDA, got {device}"
+            )
         return impl_cuda(op, *args, rng_state=rng_state, **kwargs)
 
     @graphsafe_run_with_rng_state.py_impl(FakeTensorMode)

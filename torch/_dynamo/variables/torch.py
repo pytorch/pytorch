@@ -43,7 +43,7 @@ from torch._C import DispatchKeySet
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
-from torch._guards import Source, TracingContext
+from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
@@ -61,6 +61,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    GlobalStateSource,
     SyntheticLocalSource,
     TorchSource,
 )
@@ -106,6 +107,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._library.opaque_object import OpaqueType
     from torch.utils._pytree import TreeSpec
 
 
@@ -275,7 +277,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
     grad_fns: set[torch.autograd.graph.Node] = set()
 
-    plain_tensors: list[torch.SymInt | torch.Tensor | int] = []
+    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueType] = []
     # Get all plain tensors (handles nested subclasses)
     if is_traceable_wrapper_subclass(tensor):
         get_plain_tensors(tensor, out=plain_tensors)
@@ -649,7 +651,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         from . import (
             ConstantVariable,
-            DeterministicAlgorithmsVariable,
             GradModeVariable,
             StreamContextVariable,
             SymNodeVariable,
@@ -912,13 +913,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return DeterministicAlgorithmsVariable.create(tx, mode.as_python_constant())
+
+            value = mode.as_python_constant()
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            )
+            torch._C._set_deterministic_algorithms(value)
+            return ConstantVariable.create(None)
 
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
             self, tx: "InstructionTranslator"
         ) -> ConstantVariable:
-            install_guard(DeterministicAlgorithmsVariable._guards_singleton)
+            guard = Guard(
+                GlobalStateSource(),
+                GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
+            )
+            install_guard(guard)
             return ConstantVariable.create(torch.are_deterministic_algorithms_enabled())
 
         @register(torch._C._is_torch_function_enabled)
@@ -1383,7 +1394,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
-        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
+        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
         ) -> VariableTracker | None:
@@ -1391,7 +1402,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
-                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(
+                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(  # type: ignore[deprecated]
                         expr.sym_num
                     )
                 )
