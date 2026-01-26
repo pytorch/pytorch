@@ -16,9 +16,10 @@ __all__ = ["compile_on_one_rank"]
 # When enabled, coordinates are computed at runtime via a custom op rather
 # than being baked in at compile time. This allows compiling on one rank
 # and running on multiple ranks.
-compile_on_one_rank: bool = bool(
-    os.environ.get("TORCH_DISTRIBUTED_COMPILE_ON_ONE_RANK", False)
-)
+compile_on_one_rank: bool = True
+# bool(
+#     os.environ.get("TORCH_DISTRIBUTED_COMPILE_ON_ONE_RANK", False)
+# )
 
 
 if TYPE_CHECKING:
