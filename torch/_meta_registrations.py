@@ -29,6 +29,7 @@ from torch._prims_common import (
     Number,
     NumberType,
     suggest_memory_format,
+    sym_min,
     TensorLike,
 )
 from torch._prims_common.wrappers import (
@@ -40,6 +41,7 @@ from torch._prims_common.wrappers import (
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils import _pytree as pytree
 
@@ -931,10 +933,12 @@ def squareCheckInputs(self: Tensor, f_name: str):
         raise AssertionError(
             f"{f_name}: The input tensor must have at least 2 dimensions, got {self.dim()}"
         )
-    if self.size(-1) != self.size(-2):
-        raise AssertionError(
-            f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
-        )
+    # Use torch._check to defer validation to runtime for unbacked symbolic dimensions.
+    torch._check(
+        self.size(-1) == self.size(-2),
+        lambda: f"{f_name}: A must be batches of square matrices, "
+        f"but they are {self.size(-2)} by {self.size(-1)} matrices",
+    )
 
 
 # Validates input shapes and devices
@@ -1333,7 +1337,8 @@ def linalg_lu_factor_ex_meta(
 
     # Sets sizes to the size of pivots
     sizes.pop()
-    sizes[-1] = min(m, n)
+    # Use sym_min to handle unbacked symbolic dimensions
+    sizes[-1] = sym_min(m, n)
     pivots = A.new_empty(sizes, dtype=torch.int)
 
     # Sets sizes to the size of info
@@ -3582,7 +3587,6 @@ def meta_index_Tensor(self, indices):
         return self.as_strided(shape, strides)
 
     out = self.new_empty(before_shape + replacement_shape + after_shape)
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if guard_or_false(self.numel() == 0):
         # No need to worry about the output strides if self is empty.
@@ -5621,8 +5625,6 @@ def gather_shape_check(self, dim, index):
 
 @register_meta(aten.gather.default)
 def meta_gather(self, dim, index, sparse_grad=False):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
     is_index_empty = guard_or_false(index.numel() == 0)
     if not is_index_empty:
@@ -5684,8 +5686,6 @@ def ensure_nonempty_dim(dim):
 
 # From aten/src/ATen/native/ScatterGatherChecks.h
 def scatter_shape_check(self, dim, index, src_opt=None):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
-
     if guard_or_false(index.numel() == 0):
         return
     torch._check(
