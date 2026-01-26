@@ -103,7 +103,7 @@ class TestLibtorchAgnostic(TestCase):
                 extension_root=base_dir / "libtorch_agn_2_9_extension"
             )
 
-        # Only build 2.10 extension if running on PyTorch 2.10+
+        # Only build 2.X extension if running on PyTorch 2.X+
         import re
 
         version_parts = torch.__version__.split(".")
