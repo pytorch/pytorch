@@ -8,44 +8,6 @@
 
 namespace torch::cpu {
 
-static uint32_t get_cache_size(int level) {
-#if !defined(__s390x__) && !defined(__powerpc__)
-  if (!cpuinfo_initialize()) {
-    return 0;
-  }
-  const struct cpuinfo_processor* processors = cpuinfo_get_processors();
-  if (!processors) {
-    return 0;
-  }
-  const struct cpuinfo_cache* cache = nullptr;
-  switch (level) {
-    case 1:
-      cache = processors[0].cache.l1d;
-      break;
-    case 2:
-      cache = processors[0].cache.l2;
-      break;
-    default:
-      assert(false && "Unsupported cache level");
-  }
-
-  if (!cache) {
-    return 0;
-  }
-  return cache->size;
-#else
-  return 0;
-#endif
-}
-
-static uint32_t L1d_cache_size() {
-  return get_cache_size(1);
-}
-
-static uint32_t L2_cache_size() {
-  return get_cache_size(2);
-}
-
 static const char* get_cpu_architecture() {
 #if defined(__x86_64__) || defined(_M_X64)
   return "x86_64";
@@ -73,9 +35,29 @@ static py::dict get_cpu_capabilities() {
     return capabilities;
   }
 
+  auto get_cache_size = [](int level) -> uint32_t {
+    const struct cpuinfo_processor* processors = cpuinfo_get_processors();
+    if (!processors) {
+      return 0;
+    }
+    const struct cpuinfo_cache* cache = nullptr;
+    switch (level) {
+      case 1:
+        cache = processors[0].cache.l1d;
+        break;
+      case 2:
+        cache = processors[0].cache.l2;
+        break;
+      default:
+        TORCH_CHECK(false, "Unsupported cache level");
+    }
+
+    return cache ? cache->size : 0;
+  };
+
   // Cache sizes (in bytes)
-  capabilities["l1d_cache_size"] = L1d_cache_size();
-  capabilities["l2_cache_size"] = L2_cache_size();
+  capabilities["l1d_cache_size"] = get_cache_size(1);
+  capabilities["l2_cache_size"] = get_cache_size(2);
 
   // x86_64 specific capabilities
 #if defined(__x86_64__) || defined(_M_X64)

@@ -4,10 +4,10 @@ This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.
 """
 
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from types import MappingProxyType
 from typing import Any
-from collections.abc import Mapping
 
 import torch
 
