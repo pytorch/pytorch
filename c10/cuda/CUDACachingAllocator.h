@@ -6,7 +6,6 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
@@ -51,113 +50,16 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
+using c10::CachingDeviceAllocator::AllocatorTraceTracker;
+using c10::CachingDeviceAllocator::BlockInfo;
+using c10::CachingDeviceAllocator::CreateContextFn;
 using c10::CachingDeviceAllocator::DeviceStats;
-
-typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
-
-// Struct containing info of an allocation block (i.e. a fractional part of a
-// cudaMalloc)..
-struct BlockInfo {
-  size_t size = 0;
-  size_t requested_size = 0;
-  int32_t gc_counter = 0;
-  bool allocated = false;
-  bool active = false;
-  std::shared_ptr<GatheredContext>
-      context_when_allocated; // per-watcher context
-};
-
-// Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
-struct SegmentInfo {
-  c10::DeviceIndex device = 0;
-  int32_t registration_counter = -1;
-  size_t address = 0;
-  size_t total_size = 0;
-  size_t requested_size = 0; // unrounded, actually requested size
-  size_t allocated_size = 0;
-  size_t active_size = 0;
-  cudaStream_t stream = nullptr;
-  bool is_large = false;
-  bool is_expandable = false;
-  MempoolId_t owner_private_pool_id = {0, 0};
-  std::vector<BlockInfo> blocks;
-  std::shared_ptr<GatheredContext> context_when_allocated;
-};
+using c10::CachingDeviceAllocator::RecordContext;
+using c10::CachingDeviceAllocator::SegmentInfo;
+using c10::CachingDeviceAllocator::TraceEntry;
 
 struct AllocatorState {
   virtual ~AllocatorState() = default;
-};
-
-union trace_time_ {
-  time_t t_;
-  approx_time_t approx_t_;
-};
-
-struct TraceEntry {
-  enum Action {
-    ALLOC, // API made to the caching allocator for new memory
-    FREE_REQUESTED, // API call made to the caching allocator to free memory
-    FREE_COMPLETED, // The allocator might have to delay a free because
-                    // it is still in use on another stream via record_stream
-                    // This event is generated when a free actually completes.
-    SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
-    SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
-                  // defragment or empty_caches)
-    SEGMENT_MAP, // a call to cuMemMap (used with expandable_segments)
-    SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
-    SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
-              // events
-    OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
-        // bytes reported by cuda)
-  };
-  TraceEntry(
-      Action action,
-      c10::DeviceIndex device,
-      size_t addr,
-      size_t size,
-      cudaStream_t stream,
-      MempoolId_t mempool,
-      approx_time_t time,
-      std::shared_ptr<GatheredContext> context = nullptr,
-      std::string compile_context = "",
-      std::string user_metadata = "")
-      : action_(action),
-        device_(device),
-        addr_(addr),
-        context_(std::move(context)),
-        stream_(stream),
-        size_(size),
-        mempool_(std::move(mempool)),
-        compile_context_(std::move(compile_context)),
-        user_metadata_(std::move(user_metadata)) {
-    time_.approx_t_ = time;
-  }
-  Action action_;
-  c10::DeviceIndex device_;
-  size_t addr_; // for OOM, this is the amount of free bytes reported by cuda
-  std::shared_ptr<GatheredContext> context_;
-  cudaStream_t stream_{};
-  size_t size_;
-  MempoolId_t mempool_;
-  trace_time_ time_{};
-  std::string compile_context_;
-  std::string user_metadata_;
-};
-
-// Calls made by record_function will save annotations
-struct AnnotationEntry {
-  AnnotationEntry(c10::DeviceIndex device, approx_time_t time)
-      : device_(device) {
-    time_.approx_t_ = time;
-  }
-
-  void recordUserMetadata(const std::string& name, std::string value) {
-    metadata_[name] = std::move(value);
-  }
-
-  c10::DeviceIndex device_;
-  trace_time_ time_{};
-  std::unordered_map<std::string, std::string> metadata_;
 };
 
 struct AllocatorConfigInfo {
@@ -173,9 +75,9 @@ struct AllocatorConfigInfo {
 };
 
 struct SnapshotInfo {
-  std::vector<SegmentInfo> segments;
-  std::vector<std::vector<TraceEntry>> device_traces;
-  std::vector<AnnotationEntry> external_annotations;
+  std::vector<CachingDeviceAllocator::SegmentInfo> segments;
+  std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
+  std::vector<CachingDeviceAllocator::AnnotationEntry> external_annotations;
   AllocatorConfigInfo config_metadata;
 };
 
@@ -187,20 +89,11 @@ struct CheckpointDelta {
   std::vector<at::DataPtr> dataptrs_allocd;
 };
 
-enum struct RecordContext {
-  NEVER = 0,
-  STATE = 1, // only keep stacks for active allocations
-  ALLOC = 2, // additionally keep stacks for allocations in the trace history
-  ALL = 3, // additionally record stacks for when something is freed
-};
-
 using OutOfMemoryObserver = std::function<void(
     int64_t device,
     size_t allocated,
     size_t device_total,
     size_t device_free)>;
-
-using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 
 struct ShareableHandle {
   ptrdiff_t offset;

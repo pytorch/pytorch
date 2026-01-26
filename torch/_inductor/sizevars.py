@@ -743,12 +743,16 @@ class SizeVarAllocator:
     def optimization_hints(
         self,
         exprs: Iterable[Union[Expr, int]],
+        fallback: Optional[int] = None,
     ) -> tuple[int, ...]:
         """
         Like optimization_hint but for a sequence of expressions.
         Returns a tuple of concrete integer hints.
         """
-        return tuple(self.optimization_hint(x) for x in exprs)
+        # Read config at call time to respect runtime patches (e.g., in tests)
+        if fallback is None:
+            fallback = config.unbacked_symint_fallback
+        return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
 
     def optimization_hint_with_override(
         self,
