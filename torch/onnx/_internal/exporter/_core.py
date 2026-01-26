@@ -1298,6 +1298,8 @@ def export(
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
     verbose: bool | None = None,
+    optimize: bool = True,
+    opset_version: int | None = None,
 ) -> _onnx_program.ONNXProgram:
     """Export a PyTorch model to ONNXProgram.
 
@@ -1317,6 +1319,9 @@ def export(
         dump_exported_program: Whether to save the exported program to a file.
         artifacts_dir: The directory to save the exported program and error reports.
         verbose: Whether to print verbose messages. If None (default), some messages will be printed.
+        optimize: Whether to optimize the exported ONNX graph.
+        opset_version: The ONNX opset version to use. If None, use the default opset version
+            from the registry.
 
     Returns:
         The ONNXProgram with the exported IR graph.
@@ -1430,7 +1435,7 @@ def export(
             verbose_print(f"ExportedProgram has been saved to '{program_path}'.")
 
     # Step 2: Decompose the exported program and insert type promotion nodes
-    verbose_print("Run decomposition...")
+    verbose_print("Run decompositions...")
 
     try:
         # Build the ONNX function registry
@@ -1443,7 +1448,7 @@ def export(
         )
     except Exception as e:
         export_status.decomposition = False
-        verbose_print("Run decomposition... ❌")
+        verbose_print("Run decompositions... ❌")
         profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
         if report:
@@ -1473,7 +1478,7 @@ def export(
         ) from e
     else:
         export_status.decomposition = True
-        verbose_print("Run decomposition... ✅")
+        verbose_print("Run decompositions... ✅")
 
     # Step 3: Translate the decomposed program to ONNX and produce ONNXProgram
     verbose_print("Translate the graph into ONNX...")
@@ -1492,12 +1497,6 @@ def export(
         )
         # Record the strategy used for getting the exported program for unit test assertions
         onnx_program._capture_strategy = capture_strategy
-
-        # Run the ONNX passes
-        if input_names:
-            _ir_passes.rename_inputs(onnx_program.model, input_names)
-        if output_names:
-            _ir_passes.rename_outputs(onnx_program.model, output_names)
 
         export_status.onnx_translation = True
         verbose_print("Translate the graph into ONNX... ✅")
@@ -1542,6 +1541,23 @@ def export(
     profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
     assert onnx_program.exported_program is not None
+
+    # Converter opset version and optimize
+    if opset_version is not None:
+        onnx_program.model = onnxscript_apis.convert_version(
+            onnx_program.model, opset_version
+        )
+
+    if optimize:
+        verbose_print("Optimize the ONNX graph...")
+        onnx_program.optimize()
+        verbose_print("Optimize the ONNX graph... ✅")
+
+    # Run the ONNX passes
+    if input_names:
+        _ir_passes.rename_inputs(onnx_program.model, input_names)
+    if output_names:
+        _ir_passes.rename_outputs(onnx_program.model, output_names)
 
     if not verify:
         # Return if verification is not requested
