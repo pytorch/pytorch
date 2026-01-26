@@ -81,10 +81,11 @@ class TestLibtorchAgnostic(TestCase):
     """
     Tests for versioned libtorch_agnostic extensions.
 
-    This test class supports testing both:
+    This test class supports testing:
 
     - libtorch_agn_2_9: Extension built with TORCH_TARGET_VERSION=2.9.0
     - libtorch_agn_2_10: Extension built with TORCH_TARGET_VERSION=2.10.0
+    - libtorch_agn_2_11: Extension built with TORCH_TARGET_VERSION=2.11.0
 
     Tests should be decorated with @skipIfTorchVersionLessThan to indicate the
     version that they target.
@@ -92,7 +93,7 @@ class TestLibtorchAgnostic(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # Build both 2.9 and 2.10 extensions
+        # Build versioned extensions
         base_dir = Path(__file__).parent
 
         try:
@@ -119,6 +120,16 @@ class TestLibtorchAgnostic(TestCase):
                 )
         else:
             print(f"Skipping 2.10 extension (running on PyTorch {torch.__version__})")
+
+        if (current_major > 2) or (current_major == 2 and current_minor >= 11):
+            try:
+                import libtorch_agn_2_11  # noqa: F401
+            except Exception:
+                install_cpp_extension(
+                    extension_root=base_dir / "libtorch_agn_2_11_extension"
+                )
+        else:
+            print(f"Skipping 2.11 extension (running on PyTorch {torch.__version__})")
 
     @onlyCPU
     def test_slow_sgd(self, device):
@@ -1220,38 +1231,6 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(stable_transposed, reference_transposed)
 
     @skipIfTorchVersionLessThan(2, 10)
-    @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
-    def test_my_from_blob_with_deleter(self, device):
-        """ Test for from_blob with custom deleter."""
-        import libtorch_agn_2_10 as libtorch_agnostic
-
-        libtorch_agnostic.ops.reset_deleter_call_count()
-        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
-
-        # We need an original tensor to create the tensor with from_blob.
-        original = torch.rand(2, 3, device=device, dtype=torch.float32)
-        blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
-            original.data_ptr(),
-            original.size(),
-            original.stride(),
-            device,
-            torch.float32,
-        )
-
-        self.assertEqual(blob_tensor, original)
-        self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
-
-        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
-
-        del blob_tensor
-        gc.collect()
-
-        # Ensure the deleter was called. The original tensor still exists and
-        # can be used.
-        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
-        original += 1
-
-    @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
     def test_std_cuda_check_success(self, device):
         """Test that STD_CUDA_CHECK works correctly for successful CUDA calls."""
@@ -1692,6 +1671,38 @@ except RuntimeError as e:
         result_broadcast = libtorch_agnostic.ops.my_subtract(a, c)
         expected_broadcast = torch.subtract(a, c)
         self.assertEqual(result_broadcast, expected_broadcast)
+
+    @skipIfTorchVersionLessThan(2, 11)
+    @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+    def test_my_from_blob_with_deleter(self, device):
+        """Test for from_blob with custom deleter (2.11 feature)."""
+        import libtorch_agn_2_11 as libtorch_agnostic
+
+        libtorch_agnostic.ops.reset_deleter_call_count()
+        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+
+        # We need an original tensor to create the tensor with from_blob.
+        original = torch.rand(2, 3, device=device, dtype=torch.float32)
+        blob_tensor = libtorch_agnostic.ops.my_from_blob_with_deleter(
+            original.data_ptr(),
+            original.size(),
+            original.stride(),
+            device,
+            torch.float32,
+        )
+
+        self.assertEqual(blob_tensor, original)
+        self.assertEqual(blob_tensor.data_ptr(), original.data_ptr())
+
+        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 0)
+
+        del blob_tensor
+        gc.collect()
+
+        # Ensure the deleter was called. The original tensor still exists and
+        # can be used.
+        self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
+        original += 1
 
 
 instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
