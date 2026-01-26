@@ -15,6 +15,11 @@
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
+/// A function pointer type for data deleters used with from_blob.
+/// The deleter is called with the data pointer when the tensor's storage
+/// is deallocated.
+using DeleterFnPtr = void (*)(void*);
+
 /// Stable version of the empty_like op.
 ///
 /// Creates a new uninitialized tensor with the same size, dtype, layout, and
@@ -709,6 +714,58 @@ inline torch::stable::Tensor from_blob(
       shim_layout,
       nullptr,
       0));
+  return torch::stable::Tensor(ath);
+}
+
+/// Creates a tensor from an existing data blob with a custom deleter.
+///
+/// Creates a tensor that uses the provided data pointer as its storage.
+/// When the tensor's storage is deallocated, the deleter function will be
+/// called with the data pointer. This allows proper cleanup of externally
+/// owned memory.
+///
+/// Minimum compatible version: PyTorch 2.10.
+///
+/// @param data Pointer to the data buffer.
+/// @param sizes The size of each dimension of the tensor.
+/// @param strides The stride for each dimension.
+/// @param device The device where the data resides.
+/// @param dtype The scalar type of the data.
+/// @param deleter Function to call when the tensor is deallocated. May be
+///                nullptr if no cleanup is needed.
+/// @param storage_offset The offset into the data buffer. Defaults to 0.
+/// @param layout The memory layout. Defaults to Strided.
+/// @return A tensor backed by the provided data.
+inline torch::stable::Tensor from_blob(
+    void* data,
+    torch::headeronly::IntHeaderOnlyArrayRef sizes,
+    torch::headeronly::IntHeaderOnlyArrayRef strides,
+    torch::stable::Device device,
+    torch::headeronly::ScalarType dtype,
+    DeleterFnPtr deleter,
+    int64_t storage_offset = 0,
+    torch::headeronly::Layout layout = torch::headeronly::Layout::Strided) {
+  auto shim_dtype =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(dtype));
+  auto shim_device_type = torch::stable::detail::to<int32_t>(
+      torch::stable::detail::from(device.type()));
+  auto shim_layout =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout));
+  AtenTensorHandle ath;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v3(
+      data,
+      sizes.size(),
+      sizes.data(),
+      strides.data(),
+      storage_offset,
+      shim_dtype,
+      shim_device_type,
+      device.index(),
+      &ath,
+      shim_layout,
+      nullptr,
+      0,
+      deleter));
   return torch::stable::Tensor(ath);
 }
 
