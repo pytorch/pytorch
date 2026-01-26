@@ -1182,6 +1182,7 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
+@functools.lru_cache
 def get_local_source_name(
     source: Source, *, only_allow_input: bool = False
 ) -> Optional[str]:
@@ -1194,14 +1195,17 @@ def get_local_source_name(
     return source.local_name
 
 
+@functools.lru_cache
 def is_from_local_source(source: Source, *, only_allow_input: bool = False) -> bool:
     return get_local_source_name(source, only_allow_input=only_allow_input) is not None
 
 
+@functools.lru_cache
 def is_from_global_source(source: Source) -> bool:
     return get_global_source_name(source) is not None
 
 
+@functools.lru_cache
 def get_global_source_name(source: Source | None) -> str | None:
     if isinstance(source, ChainedSource):
         return get_global_source_name(source.base)
@@ -1210,6 +1214,7 @@ def get_global_source_name(source: Source | None) -> str | None:
     return source.global_name
 
 
+@functools.lru_cache
 def is_from_nonlocal_source(source: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_nonlocal_source(source.base)
@@ -1220,6 +1225,7 @@ def is_from_nonlocal_source(source: Source) -> bool:
     )
 
 
+@functools.lru_cache
 def is_from_closure_source(source: Source) -> bool:
     if isinstance(source, ClosureSource):
         return True
@@ -1228,6 +1234,7 @@ def is_from_closure_source(source: Source) -> bool:
     return False
 
 
+@functools.lru_cache
 def is_from_source(source: Source, target: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
