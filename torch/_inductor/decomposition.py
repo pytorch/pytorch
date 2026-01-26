@@ -599,7 +599,11 @@ def narrow_copy(
     start: int,
     length: int,
 ) -> torch.Tensor:
-    return torch.narrow(self, dim, start, length).clone()
+    # Use memory_format=torch.contiguous_format to ensure correct strides.
+    # For empty tensors, a plain clone() preserves the input view's strides.
+    return torch.narrow(self, dim, start, length).clone(
+        memory_format=torch.contiguous_format
+    )
 
 
 @register_decomposition([aten.view_copy.default])
