@@ -122,6 +122,9 @@ void gpu_index_kernel(TensorIteratorBase& iter, const IntArrayRef index_size, co
 // The kernels are templated on an opaque, self-aligned type of the correct
 // size to avoid redundant kernels for different types of the same size.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
+template <> struct alignas(1) OpaqueType<1> { uint8_t data; };
+template <> struct alignas(2) OpaqueType<2> { uint16_t data; };
+template <> struct alignas(4) OpaqueType<4> { uint32_t data; };
 
 template <typename scalar_t>
 void index_fill_kernel_impl(
