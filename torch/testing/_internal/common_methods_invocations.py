@@ -32,7 +32,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
@@ -8957,10 +8956,7 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
 
     dmajor, dminor = torch.cuda.get_device_capability()
 
-    # Blockwise scaling requires cublasLt >= 12.9 (CUDA 12.9+)
-    # See: https://github.com/pytorch/pytorch/issues/172227
-    cuda_version = _get_torch_cuda_version()
-    if dmajor == 9 and not torch.version.hip and cuda_version >= (12, 9):
+    if dmajor == 9 and not torch.version.hip:
         # 1x128 x 1x128
         scale1 = make_scale((K // 128, M)).t()
         scale2 = make_scale((K // 128, N)).t()

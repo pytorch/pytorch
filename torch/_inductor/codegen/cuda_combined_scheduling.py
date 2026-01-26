@@ -179,8 +179,6 @@ class CUDACombinedScheduling(BaseScheduling):
         )
 
     def benchmark_combo_kernel(
-        self, node_list: Sequence[BaseSchedulerNode], node_benchmark_results
+        self, node_list: Sequence[BaseSchedulerNode]
     ) -> tuple[float, float, list[Optional[str]]]:
-        return self._triton_scheduling.benchmark_combo_kernel(
-            node_list, node_benchmark_results
-        )
+        return self._triton_scheduling.benchmark_combo_kernel(node_list)

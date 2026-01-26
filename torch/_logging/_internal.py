@@ -57,8 +57,6 @@ LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
 GET_DTRACE_STRUCTURED = False
 
-LOG_PREFIX = "dedicated_log_torch_trace_"
-
 
 @dataclass
 class LogRegistry:
@@ -1255,7 +1253,7 @@ class LazyTraceHandler(logging.StreamHandler):
                 self.stream = tempfile.NamedTemporaryFile(  # noqa: SIM115
                     mode="w+",
                     suffix=".log",
-                    prefix=LOG_PREFIX + ranksuffix,
+                    prefix=f"dedicated_log_torch_trace_{ranksuffix}",
                     dir=self.root_dir,
                     delete=False,
                 )
