@@ -206,7 +206,7 @@ class TestBinaryUfuncs(TestCase):
 
     # The following tests only apply to elementwise binary operators with references
     binary_ufuncs_with_references = list(
-        filter(lambda op: op.ref is not None and op.ref is not None, binary_ufuncs)
+        filter(lambda op: op.ref is not None, binary_ufuncs)
     )
 
     @ops(binary_ufuncs_with_references)
