@@ -1984,7 +1984,7 @@ class TestTorchDeviceType(TestCase):
             assert src.grad is not None
             grad = src.grad.detach().clone()
 
-            if torch.device(device).type == 'cuda':
+            if torch.device(device).type == 'cuda' or torch.device(device).type == 'mtia':
                 for _ in range(2):
                     src.grad.data.zero_()
                     res = torch.gather(src, dim, idx)
