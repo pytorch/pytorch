@@ -33,27 +33,6 @@ from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-
-
-def _is_process_group(val: Any) -> bool:
-    """
-    Check if val is a ProcessGroup or FakeProcessGroup.
-    These non-tensor objects can be safely passed between forward and backward.
-    """
-    if not torch.distributed.is_available():
-        return False
-    from torch._C._distributed_c10d import ProcessGroup
-
-    if isinstance(val, ProcessGroup):
-        return True
-    try:
-        from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
-
-        if isinstance(val, FakeProcessGroup):
-            return True
-    except ImportError:
-        pass
-    return False
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     find_symbol_binding_fx_nodes,
@@ -82,7 +61,6 @@ from ._aot_autograd.descriptors import (
     SavedForBackwardsNoVcCheckAOTOutput,
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
-from ._aot_autograd.graph_compile import is_opaque_node
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
@@ -267,12 +245,12 @@ def _extract_graph_with_inputs_outputs(
             env[node] = InvalidNode  # type: ignore[assignment]
         elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
-            invalid_args = [
-                x
+            all_args = [
+                isinstance(env[x], InvalidNodeBase)
                 for x in all_args
-                if isinstance(x, fx.Node) and isinstance(env[x], InvalidNodeBase)
+                if isinstance(x, fx.Node)
             ]
-            if invalid_args:
+            if any(all_args):
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
             # pyrefly: ignore [unsupported-operation, bad-argument-type]
@@ -920,7 +898,6 @@ def _extract_fwd_bwd_modules(
     joint_module: fx.GraphModule,
     saved_values: list[fx.Node],
     saved_sym_nodes: list[fx.Node],
-    saved_opaque_nodes: list[fx.Node],
     *,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
@@ -937,11 +914,7 @@ def _extract_fwd_bwd_modules(
 
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes
-        + saved_opaque_nodes
-        + saved_values
-        + tangent_inputs
-        + bwd_seed_offset_inputs,
+        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
@@ -954,13 +927,6 @@ def _extract_fwd_bwd_modules(
         if not node.users:
             _remove_by_name(saved_values, node.name)
             _remove_by_name(saved_sym_nodes, node.name)
-            # NOTE: We intentionally do NOT remove from saved_opaque_nodes here.
-            # Opaque nodes (like ProcessGroup) are non-tensor objects that must
-            # be preserved for the backward pass even if they appear to have no
-            # users in the partially extracted backward graph. The operations
-            # that use them (like reduce_scatter_tensor) may have been marked
-            # as InvalidNode during partial extraction but will be valid in
-            # the final backward graph.
         # wait_tensor is a bit special: if we have a "dead activation" that is not used in the bw,
         # but this dead activation is actually a collective,
         # then the collective will generally by followed by a wait_tensor() call.
@@ -972,8 +938,6 @@ def _extract_fwd_bwd_modules(
         ):
             _remove_by_name(saved_values, node.name)
             _remove_by_name(saved_sym_nodes, node.name)
-            # NOTE: We intentionally do NOT remove from saved_opaque_nodes here.
-            # See comment above.
         elif _is_backward_state(node):
             # BackwardState is saved directly
             _remove_by_name(saved_values, node.name)
@@ -1031,11 +995,11 @@ def _extract_fwd_bwd_modules(
     # Opaque objects should be placed after tensors in the forward outputs.
     saved_values_with_vc_check = []
     saved_values_no_vc_check = []
-    saved_fake_script_object = []
+    saved_opaque_objects = []
     for node in saved_values:
         # Check if this is an opaque object
         if isinstance(node.meta.get("val"), FakeScriptObject):
-            saved_fake_script_object.append(node)
+            saved_opaque_objects.append(node)
         elif node.meta.get("saved_tensor_with_no_vc_check", False):
             saved_values_no_vc_check.append(node)
         else:
@@ -1055,25 +1019,17 @@ def _extract_fwd_bwd_modules(
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
     # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, opaque_objects, symints)
-
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs
-        + saved_values
-        + saved_fake_script_object
-        + saved_sym_nodes
-        + saved_opaque_nodes,
+        fwd_outputs + saved_values + saved_opaque_objects + saved_sym_nodes,
         fwd_outputs_descs
         + [
             SavedForBackwardsNoVcCheckAOTOutput(i)
             if i >= no_vc_check_start_idx and i < len(saved_values)
             else SavedForBackwardsAOTOutput(i)
             for i in range(
-                len(saved_values)
-                + len(saved_fake_script_object)
-                + len(saved_sym_nodes)
-                + len(saved_opaque_nodes)
+                len(saved_values) + len(saved_opaque_objects) + len(saved_sym_nodes)
             )
         ],
         "forward",
@@ -1082,8 +1038,7 @@ def _extract_fwd_bwd_modules(
         joint_module.graph,
         saved_sym_nodes
         + saved_values
-        + saved_opaque_nodes
-        + saved_fake_script_object
+        + saved_opaque_objects
         + tangent_inputs
         + bwd_seed_offset_inputs
         + backward_state_inputs,
@@ -1178,7 +1133,6 @@ def default_partition(
 
     saved_values = []
     saved_sym_nodes = []
-    saved_opaque_nodes = []
 
     distributed_enabled = torch.distributed.is_available()
 
@@ -1234,11 +1188,6 @@ def default_partition(
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
             continue
-        if is_opaque_node(node):
-            # Opaques (like ProcessGroups) must be kept separate from tensors
-            # so they can be stashed in autograd .ctx like symints
-            saved_opaque_nodes.append(node)
-            continue
         if is_multi_output(node):
             # Must be ordered before MUST_SAVE tags to avoid saving tuples marked MUST_SAVE.
             continue
@@ -1273,7 +1222,6 @@ def default_partition(
 
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
-    saved_opaque_nodes = list(dict.fromkeys(saved_opaque_nodes).keys())
 
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_module.graph, saved_values)
@@ -1284,7 +1232,6 @@ def default_partition(
         joint_module,
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
-        saved_opaque_nodes=saved_opaque_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
     )
@@ -2172,9 +2119,7 @@ def solve_min_cut(
         elif is_non_tensor_node:
             # FakeScriptObjects (opaque objects) should have weight 0.0 so they can be
             # properly partitioned between forward and backward, like BackwardState.
-            # ProcessGroups are also safely passable between forward and backward.
-            val = node.meta.get("val")
-            if isinstance(val, (BackwardState, FakeScriptObject)) or _is_process_group(val):
+            if isinstance(node.meta.get("val"), (BackwardState, FakeScriptObject)):
                 weight = 0.0
                 cannot_save_reason = None
             else:
@@ -3431,10 +3376,8 @@ def min_cut_rematerialization_partition(
     # pyrefly: ignore [unbound-name]
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
-
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
-    saved_opaque_nodes = list(filter(is_opaque_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
@@ -3443,7 +3386,6 @@ def min_cut_rematerialization_partition(
         saved_values,
         # pyrefly: ignore [bad-argument-type]
         saved_sym_nodes=saved_sym_nodes,
-        saved_opaque_nodes=saved_opaque_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
     )
