@@ -2,6 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ForeachUtils.h>
+#include <c10/util/hash.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
 #include <functional>
@@ -440,8 +441,8 @@ void foreach_tensor_copy_list_kernel_cuda_(
     using DtypePair = std::pair<ScalarType, ScalarType>;
     struct PairHash {
       size_t operator()(const DtypePair& p) const {
-        return std::hash<int>{}(static_cast<int>(p.first)) ^
-            (std::hash<int>{}(static_cast<int>(p.second)) << 8);
+        return c10::hash_combine(
+            static_cast<size_t>(p.first), static_cast<size_t>(p.second));
       }
     };
     std::unordered_map<
