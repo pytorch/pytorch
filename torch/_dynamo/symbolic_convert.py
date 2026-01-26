@@ -1249,9 +1249,9 @@ class InstructionTranslatorBase(
     def inline_generator_function(
         self,
         fn: BaseUserFunctionVariable,
-        args: Sequence[Any],
-        kwargs: dict[str, Any],
-    ) -> Any:
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         """
         Redirect the call to the generator "call_function"
         """
@@ -1262,8 +1262,8 @@ class InstructionTranslatorBase(
     def inline_user_function_return(
         self,
         fn: BaseUserFunctionVariable,
-        args: Sequence[Any],
-        kwargs: dict[str, Any],
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> Any:
         """
         A call to some user defined function by inlining it.
@@ -4845,13 +4845,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @classmethod
     def inline_call(
-        cls, parent: Any, func: BaseUserFunctionVariable, args: Any, kwargs: Any
-    ) -> Any:
+        cls,
+        parent: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tracer = cls.build_inline_tracer(parent, func, args, kwargs)
         return tracer.inline_call_()
 
     @staticmethod
-    def check_inlineable(func: Any) -> trace_rules.SkipResult:
+    def check_inlineable(
+        func: BaseUserFunctionVariable,
+    ) -> trace_rules.SkipResult:
         if func.has_self():
             unimplemented(
                 gb_type="Inline attempt with __self__",
@@ -4884,7 +4890,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if (
-                hasattr(getattr(func, "fn", None), "_origin")
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4917,8 +4924,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def build_inline_tracer(
         parent: Any,
         func: BaseUserFunctionVariable,
-        args: list[VariableTracker],
-        kwargs: Any,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         assert isinstance(
             func,
@@ -5212,7 +5219,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.symbolic_result = self.pop()  # type: ignore[assignment]
+        self.symbolic_result = self.pop()
         self.instruction_pointer = None
         raise ReturnValueOp
 

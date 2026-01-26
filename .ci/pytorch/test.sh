@@ -1876,7 +1876,7 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
 
     if [[ -d "${HF_CACHE}" ]]; then
         # Enable HF_CACHE directory for vLLM tests. If this works out, we can enable
-        # this for (1) all CI jobs and (2) LF fleet
+        # this for all CI jobs including LF fleet
         export HF_HOME="${HF_CACHE}"
     fi
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
