@@ -12,6 +12,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_sample_dirichlet_native.h>
+#include <ATen/ops/_standard_gamma_native.h>
 #include <ATen/ops/argmax.h>
 #include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/cauchy_native.h>
@@ -29,8 +31,6 @@
 #include <ATen/ops/topk.h>
 #include <ATen/ops/uniform_native.h>
 #include <ATen/ops/view_as_real.h>
-#include <ATen/ops/_sample_dirichlet_native.h>
-#include <ATen/ops/_standard_gamma_native.h>
 #endif
 
 namespace at::native {
@@ -548,9 +548,8 @@ static auto& distributionsLib = lib;
 Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
   TORCH_CHECK(alpha.scalar_type() != ScalarType::Double,
               "MPS does not support _standard_gamma with scalar type: Double");
-  TORCH_CHECK(alpha.scalar_type() == ScalarType::Float ||
-              alpha.scalar_type() == ScalarType::Half ||
-              alpha.scalar_type() == ScalarType::BFloat16,
+  TORCH_CHECK(alpha.scalar_type() == ScalarType::Float || alpha.scalar_type() == ScalarType::Half ||
+                  alpha.scalar_type() == ScalarType::BFloat16,
               "MPS _standard_gamma only supports Float, Half, and BFloat16, got: ",
               alpha.scalar_type());
 
@@ -564,7 +563,7 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
 
   @autoreleasepool {
     std::string func_name = "standard_gamma_" + mps::scalarToMetalTypeString(alpha_contig);
-    id<MTLComputePipelineState> cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
+    auto cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
 
     std::array<uint32_t, 4> rng_state;
     {
@@ -572,9 +571,10 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
       uint64_t seed = mps_gen->current_seed();
       uint64_t offset = mps_gen->get_offset();
       uint64_t numel = static_cast<uint64_t>(result.numel());
-      // Conservative offset increment: rejection sampling may consume many random values.
-      // We use a multiplier of 32 to account for worst-case Box-Muller (2 randoms)
-      // plus rejection sampling iterations. This wastes some RNG state but ensures
+      // Conservative offset increment: rejection sampling may consume
+      // many random values. We use a multiplier of 32 to account for
+      // worst-case Box-Muller (2 randoms) plus rejection sampling
+      // iterations. This wastes some RNG state but ensures
       // non-overlapping sequences between kernel launches.
       constexpr uint64_t RANDOMS_PER_SAMPLE = 32;
       mps_gen->set_offset(offset + numel * RANDOMS_PER_SAMPLE);
@@ -587,7 +587,7 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto computeEncoder = mpsStream->commandEncoder();
       getMPSProfiler().beginProfileKernel(cplState, "_s_gamma_mps", {alpha_contig});
       [computeEncoder setComputePipelineState:cplState];
       mps::mtl_setArgs(computeEncoder, alpha_contig, result);
@@ -601,11 +601,9 @@ Tensor _s_gamma_mps(const Tensor& alpha, std::optional<Generator> gen) {
 }
 
 Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
-  TORCH_CHECK(lambda.scalar_type() != ScalarType::Double,
-              "MPS does not support poisson with scalar type: Double");
-  TORCH_CHECK(lambda.scalar_type() == ScalarType::Float ||
-              lambda.scalar_type() == ScalarType::Half ||
-              lambda.scalar_type() == ScalarType::BFloat16,
+  TORCH_CHECK(lambda.scalar_type() != ScalarType::Double, "MPS does not support poisson with scalar type: Double");
+  TORCH_CHECK(lambda.scalar_type() == ScalarType::Float || lambda.scalar_type() == ScalarType::Half ||
+                  lambda.scalar_type() == ScalarType::BFloat16,
               "MPS poisson only supports Float, Half, and BFloat16, got: ",
               lambda.scalar_type());
   // Note: Lambda validation is done lazily in the Metal kernel for performance.
@@ -622,7 +620,7 @@ Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
 
   @autoreleasepool {
     std::string func_name = "poisson_" + mps::scalarToMetalTypeString(lambda_contig);
-    id<MTLComputePipelineState> cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
+    auto cplState = mps::distributionsLib.getPipelineStateForFunc(func_name);
 
     std::array<uint32_t, 4> rng_state;
     {
@@ -644,7 +642,7 @@ Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      auto computeEncoder = mpsStream->commandEncoder();
       getMPSProfiler().beginProfileKernel(cplState, "_s_poisson_mps", {lambda_contig});
       [computeEncoder setComputePipelineState:cplState];
       mps::mtl_setArgs(computeEncoder, lambda_contig, result);
@@ -660,9 +658,8 @@ Tensor _s_poisson_mps(const Tensor& lambda, std::optional<Generator> gen) {
 Tensor _s_dirichlet_mps(const Tensor& alpha, std::optional<Generator> gen) {
   TORCH_CHECK(alpha.scalar_type() != ScalarType::Double,
               "MPS does not support _sample_dirichlet with scalar type: Double");
-  TORCH_CHECK(alpha.scalar_type() == ScalarType::Float ||
-              alpha.scalar_type() == ScalarType::Half ||
-              alpha.scalar_type() == ScalarType::BFloat16,
+  TORCH_CHECK(alpha.scalar_type() == ScalarType::Float || alpha.scalar_type() == ScalarType::Half ||
+                  alpha.scalar_type() == ScalarType::BFloat16,
               "MPS _sample_dirichlet only supports Float, Half, and BFloat16, got: ",
               alpha.scalar_type());
 

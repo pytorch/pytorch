@@ -14,12 +14,13 @@
  * Note on Philox RNG:
  * We use a stateful PhiloxState wrapper around the c10::metal::philox4 core
  * because rejection sampling requires consuming a variable number of random
- * values per thread. The stateless API in c10/metal/random.h (rand(seed, index))
- * assumes a fixed index per call, but our loops need to advance state dynamically.
+ * values per thread. The stateless API in c10/metal/random.h
+ * (rand(seed, index)) assumes a fixed index per call, but our loops need
+ * to advance state dynamically.
  */
 
-#include <metal_stdlib>
 #include <c10/metal/random.h>
+#include <metal_stdlib>
 using namespace metal;
 
 // Maximum iterations for rejection sampling loops to prevent GPU hangs
@@ -34,8 +35,8 @@ constexpr float type_min() {
   return metal::numeric_limits<T>::min();
 }
 
-// Philox state structure for rejection sampling
-// Uses c10::metal::philox4 core, but wraps it for stateful incremental generation.
+// Philox state structure for rejection sampling.
+// Uses c10::metal::philox4 core, wrapped for stateful generation.
 // counter[0..1] = 64-bit offset, counter[2..3] = 64-bit subsequence (tid)
 struct PhiloxState {
   uint4 counter;
@@ -45,8 +46,9 @@ struct PhiloxState {
 };
 
 inline void philox_next_output(thread PhiloxState& state) {
-  // Use c10::metal::philox4::multiple_rounds for the core Philox computation
-  state.output = c10::metal::philox4::multiple_rounds(state.counter, state.key, 10);
+  // Use c10::metal::philox4::multiple_rounds for Philox computation
+  state.output =
+      c10::metal::philox4::multiple_rounds(state.counter, state.key, 10);
 
   // Advance counter
   state.counter.x++;
@@ -64,10 +66,14 @@ inline uint philox_rand32(thread PhiloxState& state) {
   int idx = state.output_idx++;
   // Access uint4 components by index
   switch (idx) {
-    case 0: return state.output.x;
-    case 1: return state.output.y;
-    case 2: return state.output.z;
-    default: return state.output.w;
+    case 0:
+      return state.output.x;
+    case 1:
+      return state.output.y;
+    case 2:
+      return state.output.z;
+    default:
+      return state.output.w;
   }
 }
 
@@ -199,8 +205,9 @@ inline int sample_poisson_large(float lambda, thread PhiloxState& state) {
     }
 
     float kp1 = k + 1.0f;
-    // Stirling approximation: log(k!) ≈ (k + 0.5) * log(k+1) - (k+1) + log(sqrt(2*pi))
-    // log(sqrt(2*pi)) = 0.9189385332046727... (using higher precision constant)
+    // Stirling approximation:
+    // log(k!) ≈ (k+0.5)*log(k+1) - (k+1) + log(sqrt(2*pi))
+    // log(sqrt(2*pi)) = 0.918938...
     float lgamma_kp1 = (k + 0.5f) * log(kp1) - kp1 + 0.91893853320467274f;
 
     if ((log(v) + log(invalpha) - log(a / (us * us) + b)) <=
@@ -234,42 +241,68 @@ inline PhiloxState init_philox_state(constant uint* rng_state, uint tid) {
   PhiloxState state;
   state.key = uint2(rng_state[0], rng_state[1]);
   state.counter = uint4(rng_state[2], rng_state[3], tid, 0);
-  state.output_idx = 4;  // Force generation on first use
+  state.output_idx = 4; // Force generation on first use
   return state;
 }
 
 template <typename T>
-kernel void standard_gamma(device const T* alpha [[buffer(0)]],
-                           device T* output [[buffer(1)]],
-                           constant uint* rng_state [[buffer(2)]],
-                           uint tid [[thread_position_in_grid]]) {
+kernel void standard_gamma(
+    device const T* alpha [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant uint* rng_state [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
   PhiloxState state = init_philox_state(rng_state, tid);
   output[tid] = sample_gamma<T>(alpha[tid], state);
 }
 
 template <typename T>
-kernel void poisson_kernel(device const T* lambda [[buffer(0)]],
-                           device T* output [[buffer(1)]],
-                           constant uint* rng_state [[buffer(2)]],
-                           uint tid [[thread_position_in_grid]]) {
+kernel void poisson_kernel(
+    device const T* lambda [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    constant uint* rng_state [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
   PhiloxState state = init_philox_state(rng_state, tid);
   output[tid] = sample_poisson<T>(lambda[tid], state);
 }
 
-template [[host_name("standard_gamma_float")]] kernel void standard_gamma<float>(
-    device const float*, device float*, constant uint*, uint);
+template [[host_name("standard_gamma_float")]]
+kernel void standard_gamma<float>(
+    device const float*,
+    device float*,
+    constant uint*,
+    uint);
 
-template [[host_name("standard_gamma_half")]] kernel void standard_gamma<half>(
-    device const half*, device half*, constant uint*, uint);
+template [[host_name("standard_gamma_half")]]
+kernel void standard_gamma<half>(
+    device const half*,
+    device half*,
+    constant uint*,
+    uint);
 
-template [[host_name("standard_gamma_bfloat")]] kernel void standard_gamma<bfloat>(
-    device const bfloat*, device bfloat*, constant uint*, uint);
+template [[host_name("standard_gamma_bfloat")]]
+kernel void standard_gamma<bfloat>(
+    device const bfloat*,
+    device bfloat*,
+    constant uint*,
+    uint);
 
-template [[host_name("poisson_float")]] kernel void poisson_kernel<float>(
-    device const float*, device float*, constant uint*, uint);
+template [[host_name("poisson_float")]]
+kernel void poisson_kernel<float>(
+    device const float*,
+    device float*,
+    constant uint*,
+    uint);
 
-template [[host_name("poisson_half")]] kernel void poisson_kernel<half>(
-    device const half*, device half*, constant uint*, uint);
+template [[host_name("poisson_half")]]
+kernel void poisson_kernel<half>(
+    device const half*,
+    device half*,
+    constant uint*,
+    uint);
 
-template [[host_name("poisson_bfloat")]] kernel void poisson_kernel<bfloat>(
-    device const bfloat*, device bfloat*, constant uint*, uint);
+template [[host_name("poisson_bfloat")]]
+kernel void poisson_kernel<bfloat>(
+    device const bfloat*,
+    device bfloat*,
+    constant uint*,
+    uint);
