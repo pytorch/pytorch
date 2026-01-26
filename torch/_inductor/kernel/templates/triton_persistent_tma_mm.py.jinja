@@ -1,7 +1,7 @@
 {{def_kernel("A", "B")}}
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
+    M = {{size("A", 0)}} if A_ROW_MAJOR else {{size("A", 1)}}
+    N = {{size("B", 1)}} if B_ROW_MAJOR else {{size("B", 0)}}
+    K = {{size("A", 1)}} if A_ROW_MAJOR else {{size("A", 0)}}
     if M * N == 0:
         # early exit due to zero-size input(s)
         return
@@ -11,9 +11,7 @@
     grid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = grid_m * grid_n
-    tiles_per_SM = num_tiles // NUM_SMS
-    if start_pid < num_tiles % NUM_SMS:
-        tiles_per_SM += 1
+    tiles_per_SM = num_tiles + NUM_SMS - 1 // NUM_SMS
 
     tile_id = start_pid - NUM_SMS
     ki = -1
@@ -46,10 +44,10 @@
     tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
 
     {%- else %}
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
+    stride_am = {{stride("A", 0)}} if A_ROW_MAJOR else {{stride("A", 1)}}
+    stride_ak = {{stride("A", 1)}} if A_ROW_MAJOR else {{stride("A", 0)}}
+    stride_bk = {{stride("B", 0)}} if B_ROW_MAJOR else {{stride("B", 1)}}
+    stride_bn = {{stride("B", 1)}} if B_ROW_MAJOR else {{stride("B", 0)}}
     a_desc = triton.language.make_tensor_descriptor(
         base=A,
         shape=[M, K] if A_ROW_MAJOR else [K, M],
@@ -115,7 +113,6 @@
 
         if ki == k_tiles - 1:
             # inductor generates a suffix
-            {%- if TMA_EXPERIMENTAL_API %}
             # rematerialize rm and rn to save registers
             rcm = rm + tl.arange(0, BLOCK_M)
             rcn = rn + tl.arange(0, BLOCK_N)
@@ -123,7 +120,4 @@
             idx_n = rcn[None, :]
             mask = (idx_m < M) & (idx_n < N)
             {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
-            {%- else %}
-            {{store_output(("rm", "rn"), "acc", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
-            {%- endif %}
             acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
