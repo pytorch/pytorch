@@ -11,7 +11,9 @@ inline bool check_device(ArrayRef<Tensor> ts) {
   }
   Device curDevice = Device(kXPU, current_device());
   for (const Tensor& t : ts) {
-    if (t.device() != curDevice) return false;
+    if (t.device() != curDevice) {
+      return false;
+    }
   }
   return true;
 }
