@@ -578,6 +578,52 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    def test_embedding_backward_dynamic_shapes_large_grid(self, device):
+        """
+        Test that embedding backward with dynamic shapes doesn't fail with
+        'XBLOCK too large' error. This tests the fix for _check_max_grid_x
+        which previously incorrectly multiplied num_blocks by num_warps * warp_size
+        when checking against maxGridSize.
+        """
+
+        def foo(arg0, arg1, arg2):
+            t1 = arg0.mean(dim=1)
+            t4 = torch.nn.functional.embedding(
+                torch.clamp(arg1, 0, arg2.size(0) - 1).to(torch.long), arg2
+            )
+            t5 = torch.pow(t1, t4)
+            return t5.sum()
+
+        # Use sizes large enough to trigger the grid check logic
+        arg0 = torch.rand(
+            [10000, 5], dtype=torch.bfloat16, device=device, requires_grad=True
+        )
+        arg1 = torch.randint(0, 1000, [], dtype=torch.int64, device=device)
+        arg2 = torch.rand(
+            [1000, 10000], dtype=torch.bfloat16, device=device, requires_grad=True
+        )
+
+        # Test eager
+        out_eager = foo(arg0, arg1, arg2)
+        out_eager.backward()
+        eager_arg0_grad = arg0.grad.clone()
+        eager_arg2_grad = arg2.grad.clone()
+
+        # Reset grads
+        arg0.grad = None
+        arg2.grad = None
+
+        # Test compiled with dynamic shapes
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2)
+        out_compiled.backward()
+
+        self.assertEqual(eager_arg0_grad, arg0.grad)
+        self.assertEqual(eager_arg2_grad, arg2.grad)
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
         @torch.library.custom_op("test_dynamic_stride_nobreak::foo", mutates_args=())
