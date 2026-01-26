@@ -59,6 +59,10 @@ void binary_op_kernel(const std::string func_name,
 
 } // namespace mps
 
+static void atan2_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "atan2");
+}
+
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
     lib.exec_binary_kernel(iter, "fmax");
@@ -222,6 +226,7 @@ static void hypot_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "hypot");
 }
 
+REGISTER_DISPATCH(atan2_stub, &atan2_mps_kernel)
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(maximum_stub, &maximum_mps_kernel)
