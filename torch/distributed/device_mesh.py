@@ -1480,6 +1480,5 @@ def _register_distributed_opaque_types():
             "rank": MemberType.USE_REAL,
             "_get_backend_name": MemberType.USE_REAL,
             "group_name": MemberType.USE_REAL,
-            "__eq__": MemberType.USE_REAL,
         },
     )

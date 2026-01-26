@@ -1219,6 +1219,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
+                get_rank,
+                get_world_size,
             )
             from torch.distributed.tensor import DTensor
 
@@ -1228,19 +1230,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 get_process_group_ranks,
                 _resolve_group_name_by_ranks_and_tag,
+                get_rank,
+                get_world_size,
             )
             def handle_constant_processgroup_functions(
                 self, tx: "InstructionTranslator", *args: VariableTracker
             ) -> VariableTracker:
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
-                if len(args) == 1:
+                if len(args) == 0:
+                    # get_rank() or get_world_size() with no args (uses default group)
+                    pass
+                elif len(args) == 1:
                     # group or group name
                     assert args[0].is_python_constant() or (
                         isinstance(args[0], TorchScriptObjectVariable)
-                        and args[  # pyrefly: ignore[missing-attribute]
+                        and args[
                             0
-                        ].value.script_class_name
+                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
                         == "torch.distributed.distributed_c10d.ProcessGroup"
                     )
                 elif len(args) == 2:
@@ -1254,12 +1261,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"Invalid group value ({args}) for constant pg "
                         f"function {self.value}"
                     )
-                args_as_value = [
-                    arg.value.real_obj  # pyrefly: ignore[missing-attribute]
-                    if isinstance(arg, TorchScriptObjectVariable)
-                    else arg.as_python_constant()
-                    for arg in args
-                ]
+
+                def get_arg_value(arg: VariableTracker) -> Any:
+                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # as_python_constant(), so extract real_obj directly
+                    if isinstance(arg, TorchScriptObjectVariable):
+                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
+                    return arg.as_python_constant()
+
+                args_as_value = [get_arg_value(arg) for arg in args]
                 invocation_result = self.value(*args_as_value)
 
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource

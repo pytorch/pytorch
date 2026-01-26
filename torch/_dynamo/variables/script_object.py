@@ -38,12 +38,7 @@ from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
 from ..eval_frame import skip_code
-from ..exc import (
-    raise_observed_exception,
-    unimplemented,
-    UnsafeScriptObjectError,
-    Unsupported,
-)
+from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .base import VariableTracker
@@ -55,7 +50,6 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 _P = ParamSpec("_P")
@@ -230,13 +224,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 name,
             )
             if member_type is None:
-                # Special case: __bool__ and __len__ are used for truthiness checks.
-                # If they're not registered and the real object doesn't have them,
-                # raise ObservedAttributeError so the caller can fall back to
-                # treating the object as truthy (Python default behavior
-                if name in ("__bool__", "__len__") and not hasattr(real_obj, name):
-                    raise_observed_exception(AttributeError, tx)
-
                 unimplemented(
                     gb_type="Attempted to access unregistered member on an OpaqueObject",
                     context=f"value={real_obj}, attr={name}",
@@ -248,7 +235,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
-                if callable(value):
+                if inspect.ismethod(value):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
@@ -415,17 +402,3 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         return is_opaque_value_type(
             type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
         )
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        if self.source is not None:
-            self.source.reconstruct(codegen)
-            return
-
-        if hasattr(self.value, "real_obj") and is_opaque_value_type(
-            type(self.value.real_obj)
-        ):
-            real_obj = self.value.real_obj
-            codegen.append_output(codegen.create_load_const_unchecked(real_obj))
-            return
-
-        super().reconstruct(codegen)
