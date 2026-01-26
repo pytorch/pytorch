@@ -313,12 +313,59 @@ def reduce_scatter_cost(
     return latency + bw * 1e6
 
 
+def all_to_all_cost(
+    bytes_gb: float,
+    mesh_topo: MeshTopoInfo,
+    mesh_dim: int,
+) -> float:
+    """
+    Estimate the cost of an all-to-all collective operation.
+
+    Uses the same latency + bandwidth model as other collectives.
+    """
+    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+    mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
+    num_hops = num_devices_on_mesh_dim - 1
+    # base latency + comm latency
+    latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]  # us
+    bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth  # s
+    return latency + bw * 1e6  # rescale to us
+
+
+def _estimate_reshuffle_cost(
+    bytes_gb: float,
+    memory_bandwidth_gb_per_s: float = 87.7,
+    efficiency: float = 0.70,
+    kernel_overhead_us: float = 7.0,
+) -> float:
+    """
+    Estimate the compute cost of reshuffling tensor data (e.g., after allgather on non-dim-0).
+
+    This accounts for the memory bandwidth cost of reading and writing the tensor
+    during a reshuffle operation. The cost is based on a roofline model.
+
+    Args:
+        bytes_gb: Total bytes to read and write (typically 2x tensor size for read+write).
+        memory_bandwidth_gb_per_s: Device memory bandwidth in GB/s (default: 87.7 for A100/H100).
+        efficiency: Memory bandwidth efficiency factor (default: 0.70).
+        kernel_overhead_us: Minimum kernel launch overhead in microseconds (default: 7.0).
+
+    Returns:
+        Estimated reshuffle time in microseconds.
+    """
+    # Convert GB/s to bytes/us for calculation
+    read_write_time_us = bytes_gb / memory_bandwidth_gb_per_s * 1e6  # us
+    read_write_time_us = read_write_time_us / efficiency
+    return max(read_write_time_us, kernel_overhead_us)
+
+
 def _compute_placement_transition_cost(
     current_placement: "dtensor_spec.Placement",
     target_placement: "dtensor_spec.Placement",
     mesh_topo: MeshTopoInfo,
     mesh_dim: int,
     comm_bytes_gb: float,
+    include_compute_cost: bool = False,
 ) -> tuple[float, float]:
     """
     Compute the cost of transitioning from one placement to another on a single mesh dimension.
@@ -329,6 +376,8 @@ def _compute_placement_transition_cost(
         mesh_topo: Mesh topology information for cost estimation.
         mesh_dim: The mesh dimension where the transition happens.
         comm_bytes_gb: The communication bytes in GB for this step.
+        include_compute_cost: If True, include compute costs for tensor reshuffles
+            (e.g., when sharding on non-dim-0 requires data reordering).
 
     Returns:
         A tuple of (cost, updated_comm_bytes_gb):
@@ -339,22 +388,39 @@ def _compute_placement_transition_cost(
         return 0.0, comm_bytes_gb
 
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+    cost = 0.0
 
     if current_placement.is_shard() and target_placement.is_replicate():
         # allgather gives larger comm bytes
         comm_bytes_gb *= num_devices_on_mesh_dim
-        return allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
+        cost = allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim)
+        # Add compute cost for reshuffling if sharding on non-dim-0
+        if include_compute_cost and current_placement.dim != 0:  # type: ignore[attr-defined]
+            # Read + write = 2x the tensor bytes
+            cost += _estimate_reshuffle_cost(comm_bytes_gb * 2)
+        return cost, comm_bytes_gb
     elif current_placement.is_shard() and target_placement.is_shard():
-        # should be alltoall comm, since we haven't implement it yet, add 1.0 as penalty
-        # to favor allgather instead
-        # TODO: add alltoall_cost
-        return allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim) + 1.0, comm_bytes_gb
+        # Use all_to_all_cost for shard-to-shard transitions
+        cost = all_to_all_cost(comm_bytes_gb, mesh_topo, mesh_dim)
+        # Add compute cost for reshuffling on non-dim-0 shards
+        if include_compute_cost:
+            num_reshuffles = 0
+            if current_placement.dim != 0:  # type: ignore[attr-defined]
+                num_reshuffles += 1
+            if target_placement.dim != 0:  # type: ignore[attr-defined]
+                num_reshuffles += 1
+            if num_reshuffles > 0:
+                cost += num_reshuffles * _estimate_reshuffle_cost(comm_bytes_gb * 2)
+        return cost, comm_bytes_gb
     elif current_placement.is_partial() and target_placement.is_replicate():
         return allreduce_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
     elif current_placement.is_partial() and target_placement.is_shard():
         cost = reduce_scatter_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         # after reduce_scatter the comm bytes for further collectives halved.
         comm_bytes_gb /= num_devices_on_mesh_dim
+        # Add compute cost for reshuffling if target is non-dim-0
+        if include_compute_cost and target_placement.dim != 0:  # type: ignore[attr-defined]
+            cost += _estimate_reshuffle_cost(comm_bytes_gb * 2)
         return cost, comm_bytes_gb
     elif current_placement.is_shard() and target_placement.is_partial():
         # ban shard -> partial as it does not make sense to perform
@@ -373,6 +439,7 @@ def _compute_placement_transition_cost(
 def one_step_redistribute_cost(
     current_spec: "dtensor_spec.DTensorSpec",
     target_spec: "dtensor_spec.DTensorSpec",
+    include_compute_cost: bool = False,
 ) -> float:
     """
     Calculate the cost of a single redistribution step between two DTensorSpecs.
@@ -384,6 +451,7 @@ def one_step_redistribute_cost(
     Args:
         current_spec: The current DTensorSpec.
         target_spec: The target DTensorSpec.
+        include_compute_cost: If True, include compute costs for tensor reshuffles.
 
     Returns:
         The communication cost for this step (float("inf") if invalid).
@@ -422,7 +490,12 @@ def one_step_redistribute_cost(
     )
 
     cost, _ = _compute_placement_transition_cost(
-        current_placement, target_placement, mesh_topo, mesh_dim, comm_bytes_gb
+        current_placement,
+        target_placement,
+        mesh_topo,
+        mesh_dim,
+        comm_bytes_gb,
+        include_compute_cost=include_compute_cost,
     )
     return cost
 
@@ -430,15 +503,25 @@ def one_step_redistribute_cost(
 def redistribute_cost(
     current_spec: "dtensor_spec.DTensorSpec",
     target_spec: "dtensor_spec.DTensorSpec",
+    include_compute_cost: bool = False,
 ) -> float:
     """
     This function returns the cost of redistribute from current to target DTensorSpec.
 
     NOTE:
-    1. Only consider communication cost here, since computation costs for redistribute
-       are quite trivial (i.e. we only need to narrow or simple division)
+    1. By default, only considers communication cost. Set include_compute_cost=True
+       to also include compute costs for tensor reshuffles.
     2. Only consider redistribute cost on same mesh, cross mesh communication cost is
        not quite needed for operator strategy estimation/selection.
+
+    Args:
+        current_spec: The current DTensorSpec.
+        target_spec: The target DTensorSpec.
+        include_compute_cost: If True, include compute costs for tensor reshuffles
+            (e.g., when sharding on non-dim-0 requires data reordering).
+
+    Returns:
+        The estimated cost of redistribution in microseconds.
     """
     if current_spec.mesh != target_spec.mesh:
         # make infinite cost if meshes are not same
@@ -498,7 +581,12 @@ def redistribute_cost(
         target = transform_info.src_dst_placements[1]
         mesh_dim = transform_info.mesh_dim
         step_cost, comm_bytes_gb = _compute_placement_transition_cost(
-            current, target, mesh_topo, mesh_dim, comm_bytes_gb
+            current,
+            target,
+            mesh_topo,
+            mesh_dim,
+            comm_bytes_gb,
+            include_compute_cost=include_compute_cost,
         )
         if step_cost == float("inf"):
             return float("inf")
