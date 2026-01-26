@@ -8996,6 +8996,9 @@ class Conditional(ExternKernel):
         true_subgraph: Subgraph executed when predicate is True.
         false_subgraph: Subgraph executed when predicate is False.
         outputs: MultiOutput nodes representing the conditional's outputs.
+        true_inp_out_same_identity: For true branch, maps output_idx -> input_idx
+            where the output should be the same object as input (for in-place ops).
+        false_inp_out_same_identity: Same as above but for false branch.
     """
 
     predicate: Optional[IRNode] = None
@@ -9003,9 +9006,8 @@ class Conditional(ExternKernel):
     true_subgraph: Optional[Subgraph] = None
     false_subgraph: Optional[Subgraph] = None
     outputs: Optional[Sequence[MultiOutput]] = None
-    # Maps output index to operand index when output aliases a mutated operand
-    # in both branches. Used by codegen to return the original operand.
-    output_to_operand_alias: Optional[dict[int, int]] = None
+    true_inp_out_same_identity: Optional[dict[int, int]] = None
+    false_inp_out_same_identity: Optional[dict[int, int]] = None
 
     def __init__(
         self,
@@ -9115,50 +9117,6 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
-        # Analyze input-output aliasing and mutations in both branches.
-        # If an output aliases a mutated input in both branches, we can return
-        # the original operand instead of the subgraph output at codegen time.
-        from torch._higher_order_ops.utils import (
-            check_input_alias_and_mutation_return_outputs,
-        )
-
-        (
-            _,
-            true_inp_out_alias,
-            _,
-            true_mutated_inputs,
-            _,
-        ) = check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
-        (
-            _,
-            false_inp_out_alias,
-            _,
-            false_mutated_inputs,
-            _,
-        ) = check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
-
-        true_out_inp_alias = {v: k for k, v in true_inp_out_alias.items()}
-        false_out_inp_alias = {v: k for k, v in false_inp_out_alias.items()}
-
-        # An output can reuse the operand if:
-        # 1. Both branches alias the output to the same input, OR
-        # 2. One branch aliases to an input, and that input is mutated by either branch.
-        mutated_operand_indices = set(true_mutated_inputs) | set(false_mutated_inputs)
-        output_to_operand_alias: dict[int, int] = {}
-        for out_idx in range(len(true_outputs)):
-            true_alias = true_out_inp_alias.get(out_idx)
-            false_alias = false_out_inp_alias.get(out_idx)
-
-            # Both branches alias to the same operand
-            if true_alias is not None and true_alias == false_alias:
-                if true_alias in mutated_operand_indices:
-                    output_to_operand_alias[out_idx] = true_alias
-            # One branch aliases, the other mutates that operand
-            elif true_alias is not None and true_alias in mutated_operand_indices:
-                output_to_operand_alias[out_idx] = true_alias
-            elif false_alias is not None and false_alias in mutated_operand_indices:
-                output_to_operand_alias[out_idx] = false_alias
-
         # Determine device from operands and predicate
         # The predicate can be on a different device (e.g., CPU for control flow)
         # while the data operands and outputs should be on the compute device, so
@@ -9208,7 +9166,91 @@ class Conditional(ExternKernel):
         ]
 
         conditional.outputs = outputs  # type: ignore[assignment]
-        conditional.output_to_operand_alias = output_to_operand_alias
+
+        # Analyze both branches, this information is used for:
+        # 1. mutation_outputs: track which operands are mutated (for scheduler dependencies)
+        # 2. inp_out_same_identity: preserve tensor identity when returning the mutated input
+        from torch._higher_order_ops.utils import (
+            check_input_alias_and_mutation_return_outputs,
+        )
+
+        # Get mutated inputs using existing utility function
+        (_, _, _, true_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(true_fn.graph_module)
+        )
+        (_, _, _, false_mutated_inputs, _) = (
+            check_input_alias_and_mutation_return_outputs(false_fn.graph_module)
+        )
+
+        def detect_inp_out_same_identity(
+            graph_module: torch.fx.GraphModule,
+        ) -> dict[int, int]:
+            """
+            Detect the pattern where functionalized code has:
+              copy_(input_x, value_y)
+              return value_y
+
+            the corresponding original code before functionalization was like `return x.sin_()`.
+
+            This pattern indicates that the original code before functionalization was like `x.sin_()`
+            which returns `x` itself (same identity). We need to preserve this by returning
+            the original input instead of the computed value.
+
+            Returns:
+                inp_out_same_identity: dict mapping output_idx -> input_idx
+            """
+            graph = graph_module.graph
+            input_nodes = [n for n in graph.nodes if n.op == "placeholder"]
+            output_node = next(
+                (n for n in graph.nodes if n.op == "output"), None
+            )
+
+            if output_node is None:
+                return {}
+
+            # Get the returned values (could be a tuple)
+            returned_values = output_node.args[0]
+            if not isinstance(returned_values, (tuple, list)):
+                returned_values = (returned_values,)
+
+            # Build mapping from returned node to output index
+            ret_node_to_out_idx: dict[torch.fx.Node, int] = {
+                ret_val: out_idx
+                for out_idx, ret_val in enumerate(returned_values)
+                if isinstance(ret_val, torch.fx.Node)
+            }
+
+            # Find copy_(input, src) patterns where src is returned
+            # This means output should have same identity as input
+            inp_out_same_identity: dict[int, int] = {}
+            for node in graph.nodes:
+                if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+                    dst, src = node.args[0], node.args[1]
+                    # Check: dst is input, src is a node, and src is returned
+                    if (
+                        dst in input_nodes
+                        and isinstance(src, torch.fx.Node)
+                        and src in ret_node_to_out_idx
+                    ):
+                        input_idx = input_nodes.index(dst)
+                        out_idx = ret_node_to_out_idx[src]
+                        inp_out_same_identity[out_idx] = input_idx
+
+            return inp_out_same_identity
+
+        # Store branch-specific identity mappings for codegen
+        conditional.true_inp_out_same_identity = detect_inp_out_same_identity(true_fn.graph_module)
+        conditional.false_inp_out_same_identity = detect_inp_out_same_identity(false_fn.graph_module)
+
+        # Operand indices that are mutated by either branch
+        mutated_operand_indices = set(true_mutated_inputs) | set(false_mutated_inputs)
+
+        # Create MutationOutput for each mutated operand (for scheduler dependencies)
+        conditional.mutation_outputs = [
+            MutationOutput(operands[idx].layout, operands[idx], conditional)  # type: ignore[union-attr]
+            for idx in sorted(mutated_operand_indices)
+        ]
+
         return outputs
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:

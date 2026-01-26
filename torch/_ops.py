@@ -173,42 +173,6 @@ class OperatorBase:
             PythonFunctionalizeAPI,
         )
 
-        hop = self  # The HigherOrderOperator instance
-
-        def _try_auto_functionalize(
-            mode: FunctionalTensorMode | None, *args: _P.args, **kwargs: _P.kwargs
-        ) -> tuple[bool, _T | None]:
-            """
-            Try auto-functionalization for HOPs with mutation support.
-            Returns (success, result) tuple. If success is False, caller should
-            fall back to the original implementation.
-            """
-            if mode is None:
-                return False, None
-            try:
-                import torch.utils._pytree as pytree
-                from torch._higher_order_ops.auto_functionalize import (
-                    can_auto_functionalize,
-                    do_auto_functionalize_v2,
-                )
-                from torch._higher_order_ops.utils import HopInstance
-
-                hop_instance = HopInstance.create(hop, *args, **kwargs)
-                if can_auto_functionalize(hop_instance):
-                    result = do_auto_functionalize_v2(
-                        mode,
-                        hop_instance,
-                        tuple(pytree.tree_flatten((args, kwargs))[0]),
-                        {},
-                    )
-                    return True, result
-            except Exception:
-                # TODO: When handling nested cond, there can be mixed fake mode issues.
-                # Currently, auto functionalization does not support nested cond.
-                # Skip auto functionalization and fall back to the original implementation in this case.
-                pass
-            return False, None
-
         # Construct our three flavors of functionalization,
         # each of which have slightly different wrap/unwrap/redispatch policies
         def functionalize_dk_fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
@@ -226,10 +190,6 @@ class OperatorBase:
                 allowed_subclasses=(FakeTensor, FunctionalTensor),
             ):
                 return NotImplemented
-            # Try auto-functionalization first for HOPs with mutation
-            success, result = _try_auto_functionalize(mode, *args, **kwargs)
-            if success:
-                return result  # type: ignore[return-value]
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(

@@ -8937,15 +8937,38 @@ class GraphModule(torch.nn.Module):
             ):
                 torch.compile(fn)(f, x)
 
-            with self.assertRaisesRegex(
-                # Should be
-                # torch._dynamo.exc.Unsupported,
-                # "Encountered aliasing during higher order op tracing for HOP.*"
-                torch._dynamo.exc.UncapturedHigherOrderOpError,
-                r"Higher Order Operator: torch\.cond",
-            ):
-                with torch.inference_mode(inference_mode):
+            with torch.inference_mode(inference_mode):
+                if not inference_mode:
+                    with self.assertRaisesRegex(
+                        # Should be
+                        # torch._dynamo.exc.Unsupported,
+                        # "Encountered aliasing during higher order op tracing for HOP.*"
+                        torch._dynamo.exc.UncapturedHigherOrderOpError,
+                        r"Higher Order Operator: torch\.cond",
+                    ):
+                        torch.compile(fn)(f, x)
+                else:
                     torch.compile(fn)(f, x)
+
+    def test_cond_input_mutation_same_identity(self,):
+        predicate_true = torch.tensor(True, device="cuda")
+        predicate_false = torch.tensor(False, device="cuda")
+        org_data = torch.ones(2,2, device="cuda")
+
+        def fn(predicate, data):
+            return torch.cond(predicate, lambda x: x+1, lambda x: x.sin_().add_(2), [data])
+
+        with torch.no_grad():
+            expected = org_data.sin() + 2
+            data = org_data.clone()
+            output = fn(predicate_false, data)
+            torch.testing.assert_close(output, expected)
+            assert id(output) == id(data)
+
+            data = org_data.clone()
+            output = fn(predicate_true, data)
+            torch.testing.assert_close(output, org_data+1)
+            assert id(output) != id(data)
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     def test_while_loop_unbacked_bindings(self):
@@ -9515,7 +9538,6 @@ class <lambda>(torch.nn.Module):
 
     @requires_cuda
     @unittest.skipIf(not SM70OrLater, "triton")
-    @unittest.expectedFailure # TODO: seems to be a inductor scheduler issue
     @parametrize("device", ["cuda", "cpu"])
     @parametrize("dynamic", [True, False])
     def test_cond_auto_functionalize_union_input_mutation(self, device, dynamic):
@@ -9527,22 +9549,15 @@ class <lambda>(torch.nn.Module):
             def forward(self, x, y):
                 def true_fn(x):
                     x.add_(1)
-                    ret = x.sin() @ self.buf
-                    return ret
+                    return x.sin() @ self.buf
 
                 def false_fn(x):
                     self.buf.add_(1)
                     return x.sin() @ self.buf
 
-                # x = x.clone()
-                # print(x)
+                x = x.clone()
                 ret = torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
-                # print(ret, x)
-                # print(x.sum(), self.buf.sum())
-                # print(y)
-                ret= y + ret + x.sum() + self.buf.sum()
-                return ret
-                # return y + ret + x.sum() + self.buf.sum()
+                return y + ret + x.sum() + self.buf.sum()
 
         x, y = (
             torch.randn(3, 4, requires_grad=False),
@@ -9559,7 +9574,6 @@ class <lambda>(torch.nn.Module):
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
-
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0

@@ -3729,16 +3729,26 @@ class PythonWrapperCodegen(CodeGen):
             # move the Tensor predicate to host
             predicate = f"{predicate}.item()"
 
-        # Get the mapping of output indices to operand indices for aliased mutated inputs
-        output_to_operand_alias = getattr(conditional, "output_to_operand_alias", None) or {}
+        # Get branch-specific inp_out_same_identity mappings for tensor identity preservation.
+        # These maps output_idx -> input_idx where the output should be the same object
+        # as the input.
+        true_inp_out_same_identity = (
+            getattr(conditional, "true_inp_out_same_identity", None) or {}
+        )
+        false_inp_out_same_identity = (
+            getattr(conditional, "false_inp_out_same_identity", None) or {}
+        )
 
-        # Save references to operands that need to be used for output aliasing.
-        # This must be done before subgraph calls as buffers may be freed.
+        # Save references to operands that need to be used for output.
+        # This must be done before subgraph calls as buffers may be freed
+        all_aliased_operand_indices = set(true_inp_out_same_identity.values()) | set(
+            false_inp_out_same_identity.values()
+        )
         saved_operand_refs: dict[int, str] = {}
-        for out_idx, operand_idx in output_to_operand_alias.items():
-            saved_name = f"{name}_operand_{operand_idx}"
+        for operand_idx in sorted(all_aliased_operand_indices):
+            saved_name = f"{name}_saved_operand_{operand_idx}"
             self.writeline(f"{saved_name} = {outer_inputs[operand_idx]}")
-            saved_operand_refs[out_idx] = saved_name
+            saved_operand_refs[operand_idx] = saved_name
 
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
         self.writeline(f"if {predicate}:")
@@ -3751,6 +3761,12 @@ class PythonWrapperCodegen(CodeGen):
         else:
             self.codegen_subgraph(conditional.true_subgraph, outer_inputs, name)
 
+        # For true branch: replace outputs that should have same identity as input
+        if true_inp_out_same_identity:
+            self.writeline(f"{name} = list({name})")
+            for out_idx, operand_idx in true_inp_out_same_identity.items():
+                self.writeline(f"{name}[{out_idx}] = {saved_operand_refs[operand_idx]}")
+
         self.writeline(ExitSubgraphLine(self))
         self.writeline("else:")
         self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
@@ -3761,15 +3777,14 @@ class PythonWrapperCodegen(CodeGen):
             )
         else:
             self.codegen_subgraph(conditional.false_subgraph, outer_inputs, name)
-        self.writeline(ExitSubgraphLine(self))
 
-        # For outputs that alias mutated operands, replace with the original operand.
-        # This ensures that in-place mutations return the same tensor object.
-        if saved_operand_refs:
-            # Convert tuple to list if needed (subgraph returns tuple)
+        # For false branch: replace outputs that should have same identity as input
+        if false_inp_out_same_identity:
             self.writeline(f"{name} = list({name})")
-            for out_idx, saved_ref in saved_operand_refs.items():
-                self.writeline(f"{name}[{out_idx}] = {saved_ref}")
+            for out_idx, operand_idx in false_inp_out_same_identity.items():
+                self.writeline(f"{name}[{out_idx}] = {saved_operand_refs[operand_idx]}")
+
+        self.writeline(ExitSubgraphLine(self))
 
     def codegen_while_loop(self, while_loop, stack_output):
         """while_loop is codegened as a host side while_loop"""
