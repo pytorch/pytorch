@@ -80,3 +80,7 @@ jobs:
           use_bedrock: "true"
           claude_args: "--model global.anthropic.claude-opus-4-5-20251101-v1:0"
           settings: '{"alwaysThinkingEnabled": true}'
+
+      - name: Upload usage metrics
+        if: steps.fork-check.outputs.is_fork != 'true'
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@main
