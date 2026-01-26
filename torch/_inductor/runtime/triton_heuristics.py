@@ -65,7 +65,10 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
-from .static_cuda_launcher import StaticallyLaunchedCudaKernel
+from .static_triton_launcher import (
+    statically_launched_kernel_by_device,
+    StaticallyLaunchedCudaKernel,
+)
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -1726,7 +1729,9 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 kernel._cubin_path = cubin_location
 
             try:
-                static_kernel = StaticallyLaunchedCudaKernel(kernel)
+                static_kernel = statically_launched_kernel_by_device(
+                    kernel, triton_meta.get("device_type")
+                )
             except NotImplementedError as e:
                 raise CannotStaticallyLaunchKernel(f"NotImplemented: {str(e)}") from e
 
@@ -1764,7 +1769,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
     def make_launcher(self) -> LauncherType:
         # If at least one static make_launcher call occurs,
         # we're sure static cuda launcher was used for this compile
-        set_feature_use("static_cuda_launcher", True)
+        set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
@@ -2623,43 +2628,6 @@ def _handle_combo_kernel_per_subkernel_blocks(
         k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
     }
 
-    # Heuristic function dispatch table
-    heuristic_funcs = {
-        "pointwise": (
-            lambda hints: pointwise(
-                hints,
-                triton_meta=triton_meta,
-                tile_hint=tile_hint,
-                filename=filename,
-                min_elem_per_thread=min_elem_per_thread,
-                inductor_meta=inductor_meta_clean,
-                return_configs=True,
-            ),
-            False,  # skip_rblock
-        ),
-        "reduction": (
-            lambda hints: reduction(
-                hints,
-                reduction_hint=reduction_hint,
-                triton_meta=triton_meta,
-                filename=filename,
-                inductor_meta=inductor_meta_clean,
-                return_configs=True,
-            ),
-            False,  # skip_rblock
-        ),
-        "persistent_reduction": (
-            lambda hints: persistent_reduction(
-                hints,
-                reduction_hint=reduction_hint,
-                triton_meta=triton_meta,
-                filename=filename,
-                inductor_meta=inductor_meta_clean,
-                return_configs=True,
-            ),
-            True,  # skip_rblock - persistent reduction embeds RBLOCK in kernel body
-        ),
-    }
     combined_kwargs: dict[str, int] = {}
     all_num_warps: list[int] = []
     all_num_stages: list[int] = []
@@ -2668,8 +2636,41 @@ def _handle_combo_kernel_per_subkernel_blocks(
         subkernel_heuristic = combo_meta[f"heuristic_{i}"]
         size_hints_i = combo_meta[f"size_hints_{i}"]
 
-        heuristic_func, skip_rblock = heuristic_funcs[subkernel_heuristic]
-        cfg = heuristic_func(size_hints_i)[0]
+        if subkernel_heuristic == "pointwise":
+            cfg = pointwise(
+                size_hints_i,
+                triton_meta=triton_meta,
+                tile_hint=TileHint.SQUARE
+                if combo_meta[f"tile_hint_{i}"] == "TileHint.SQUARE"
+                else TileHint.DEFAULT,
+                filename=filename,
+                min_elem_per_thread=min_elem_per_thread,
+                inductor_meta=inductor_meta_clean,
+                return_configs=True,
+            )[0]
+            skip_rblock = False
+        elif subkernel_heuristic == "reduction":
+            cfg = reduction(
+                size_hints_i,
+                reduction_hint=reduction_hint,
+                triton_meta=triton_meta,
+                filename=filename,
+                inductor_meta=inductor_meta_clean,
+                return_configs=True,
+            )[0]
+            skip_rblock = False
+        elif subkernel_heuristic == "persistent_reduction":
+            cfg = persistent_reduction(
+                size_hints_i,
+                reduction_hint=reduction_hint,
+                triton_meta=triton_meta,
+                filename=filename,
+                inductor_meta=inductor_meta_clean,
+                return_configs=True,
+            )[0]
+            skip_rblock = True  # persistent reduction embeds RBLOCK in kernel body
+        else:
+            raise ValueError(f"Unknown heuristic: {subkernel_heuristic}")
 
         for key, value in cfg.kwargs.items():
             if skip_rblock and key.startswith("R") and "BLOCK" in key:

@@ -1,0 +1,176 @@
+name: Build Flash Attention 3 wheels
+
+on:
+  workflow_dispatch:
+  # TODO: Remove this trigger before merging - only for testing from PR branch
+  pull_request:
+    paths:
+      - .github/workflows/build-flash-attention-wheel.yml
+      - .ci/flash-attention/*.sh
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  build-wheel:
+    name: "Build FA3 ${{ matrix.cuda_version }} ${{ matrix.arch }}"
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_version: "12.6"
+            arch: "x86_64"
+            cuda_short: "126"
+            torch_cuda_arch_list: "8.0;8.6;9.0"
+            docker_image: "pytorch/manylinux2_28-builder:cuda12.6"
+            runner: "linux.12xlarge.memory"
+          - cuda_version: "13.0"
+            arch: "x86_64"
+            cuda_short: "130"
+            torch_cuda_arch_list: "8.0;8.6;9.0;10.0"
+            docker_image: "pytorch/manylinux2_28-builder:cuda13.0"
+            runner: "linux.12xlarge.memory"
+          - cuda_version: "12.6"
+            arch: "aarch64"
+            cuda_short: "126"
+            torch_cuda_arch_list: "8.0;8.6;9.0"
+            docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
+            runner: "linux.arm64.r7g.12xlarge.memory"
+            max_jobs: "4"
+            nvcc_threads: "2"
+          - cuda_version: "13.0"
+            arch: "aarch64"
+            cuda_short: "130"
+            torch_cuda_arch_list: "9.0;10.0"
+            docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
+            runner: "linux.arm64.r7g.12xlarge.memory"
+            max_jobs: "4"
+            nvcc_threads: "2"
+    timeout-minutes: 1440
+    env:
+      DOCKER_IMAGE: ${{ matrix.docker_image }}
+      CUDA_VERSION: ${{ matrix.cuda_version }}
+      CUDA_SHORT: ${{ matrix.cuda_short }}
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          fail-silently: false
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: true
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
+
+      - name: Build Flash Attention 3 wheel
+        run: |
+          set -x
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /pytorch \
+            "${DOCKER_IMAGE}"
+          )
+          PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
+            torch --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+          docker exec -t \
+            -e CUDA_VERSION="${CUDA_VERSION}" \
+            -e CUDA_SHORT="${CUDA_SHORT}" \
+            -e TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
+            -e FA_FINAL_PACKAGE_DIR="/artifacts" \
+            -e WHEEL_PLAT="${{ matrix.arch }}" \
+            -e PYTORCH_ROOT="/pytorch" \
+            -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
+            -e MAX_JOBS="${{ matrix.max_jobs }}" \
+            -e NVCC_THREADS="${{ matrix.nvcc_threads }}" \
+            "${container_name}" bash -c \
+            "bash /pytorch/.ci/flash-attention/build.sh"
+          docker exec -t "${container_name}" chown -R 1000:1000 /artifacts
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}-${{ matrix.arch }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/*.whl
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
+
+  upload-wheel:
+    name: "Upload FA3 ${{ matrix.cuda_short }} ${{ matrix.arch }}"
+    needs: build-wheel
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_short: "126"
+            arch: "x86_64"
+          - cuda_short: "130"
+            arch: "x86_64"
+          - cuda_short: "126"
+            arch: "aarch64"
+    permissions:
+      id-token: write
+      contents: read
+    container:
+      image: continuumio/miniconda3:4.12.0
+    environment: pytorchbot-env
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Configure AWS credentials(PyTorch account) for test
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
+          aws-region: us-east-1
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
+        with:
+          name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Upload binaries to test index
+        env:
+          PACKAGE_TYPE: wheel
+          UPLOAD_CHANNEL: test
+          UPLOAD_SUBFOLDER: cu${{ matrix.cuda_short }}
+          PKG_DIR: ${{ runner.temp }}/artifacts
+          DRY_RUN: disabled
+        shell: bash
+        run: |
+          set -ex
+          bash .circleci/scripts/binary_upload.sh
