@@ -11,7 +11,6 @@ from torch._library.effects import EffectType
 from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -202,7 +201,9 @@ def with_effects_functional(
     **kwargs: dict[str, Any],
 ) -> tuple[torch.Tensor, ...]:
     # with_effects is already functional, so just re-emit it.
-    unwrapped_token, unwrapped_args, unwrapped_kwargs = ctx.unwrap_tensors([token, args, kwargs])
+    unwrapped_token, unwrapped_args, unwrapped_kwargs = ctx.unwrap_tensors(
+        [token, args, kwargs]
+    )
     with ctx.redispatch_to_next():
         result = with_effects(unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs)
     return ctx.wrap_tensors(result)
