@@ -387,6 +387,41 @@ class UniformValueConstantFolder(ConstantFolder):
         return self.unknown_value
 
 
+def _node_depends_on(
+    n: torch.fx.Node,
+    target_node: torch.fx.Node,
+    visited: OrderedSet[torch.fx.Node] | None = None,
+) -> bool:
+    """Check if node `n` transitively depends on `target_node` through its args."""
+    if visited is None:
+        visited = OrderedSet()
+    if n in visited:
+        return False
+    visited.add(n)
+    if n is target_node:
+        return True
+    for arg in n.args:
+        if isinstance(arg, torch.fx.Node):
+            if _node_depends_on(arg, target_node, visited):
+                return True
+    return False
+
+
+def _has_self_referential_shape(shapes: list, node: torch.fx.Node) -> bool:
+    """
+    Check if any shape in `shapes` depends on `node`.
+
+    This is used to detect cycles when constant_fold_uniform_value creates a
+    replacement full() node whose shape includes a sym_size computed from the
+    original tensor being replaced.
+    """
+    for shape_node in shapes:
+        if isinstance(shape_node, torch.fx.Node):
+            if _node_depends_on(shape_node, node):
+                return True
+    return False
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     with torch.utils._python_dispatch._disable_current_modes():
         "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
@@ -471,6 +506,11 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                     cf.symint_nodes[s] if isinstance(s, torch.SymInt) else s
                     for s in node_replacements_shapes[node]
                 ]
+
+                # Check if any shape depends on a symint that was computed from
+                # the node being replaced - this would create a cycle
+                if _has_self_referential_shape(shapes, node):
+                    continue
 
                 # zeros and ones just get traced into full, so we insert those
                 new_node = graph.call_function(
