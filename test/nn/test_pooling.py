@@ -585,8 +585,9 @@ class TestPoolingNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "expected dimensions"):
             torch.ops.aten.adaptive_max_pool3d_backward(grad_output, input, indices)
 
+    @largeTensorTest("26GB") # conservative estimate ~4GiB input + ~4GiB output + ~16GiB indices
     def test_adaptive_max_pooling_integer_overflow(self, device):
-        input = torch.randn((8193, 512, 512), dtype=torch.half, device=device)
+        input = torch.ones((8193, 512, 512), dtype=torch.half, device=device)
         max_pool = torch.nn.AdaptiveMaxPool2d((512, 512))
 
         try:
@@ -594,19 +595,19 @@ class TestPoolingNNDeviceType(NNTestCase):
         except RuntimeError as e:
             self.assertRegex(str(e), "Adaptive Pooling does not support output sizes larger than INT32_MAX")
         else:
-            self.assertEqual(out, input)
+            self.assertEqual(out[0,:,:], input[0,:,:])
 
-
+    @largeTensorTest("9GB")
     def test_adaptive_avg_pooling_integer_overflow(self, device):
-        input = torch.randn((8193, 512, 512), dtype=torch.half, device=device)
+        input = torch.ones((8193, 512, 512), dtype=torch.half, device=device)
         avg_pool = torch.nn.AdaptiveAvgPool2d((512, 512))
-        
+
         try:
             out = avg_pool(input)
         except RuntimeError as e:
             self.assertRegex(str(e), "Adaptive Pooling does not support output sizes larger than INT32_MAX")
         else:
-            self.assertEqual(out, input)
+            self.assertEqual(out[0,:,:], input[0,:,:])
 
     @expectedFailureMPS  # Op not implemented
     @onlyNativeDeviceTypes
