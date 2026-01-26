@@ -175,7 +175,7 @@ size_t parseChosenWorkspaceSize() {
 }
 
 size_t getChosenWorkspaceSize() {
-  static size_t pool_size = parseChosenWorkspaceSize();
+  size_t pool_size = parseChosenWorkspaceSize();
   return pool_size;
 }
 
