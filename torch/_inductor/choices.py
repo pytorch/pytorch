@@ -381,15 +381,7 @@ class InductorChoices:
             if not all(
                 (
                     (isinstance(bound, int) or bound.is_constant())
-                    and bound is not sympy.oo
-                    and bound is not -sympy.oo
-                    and not isinstance(
-                        bound,
-                        (
-                            torch.utils._sympy.numbers.IntInfinity,
-                            torch.utils._sympy.numbers.NegativeIntInfinity,
-                        ),
-                    )
+                    and bound != torch.utils._sympy.numbers.IntInfinity()
                 )
                 for bound in (lower, upper)
             ):
