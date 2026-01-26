@@ -428,13 +428,15 @@ void foreach_tensor_copy_list_kernel_cuda_(
       });
 
   if (all_same_dtypes) {
-    // Fast path: all tensors have same (dst, src) dtype pair
+    // Fast path: all tensors have same (dst, src) dtype pair.
+    // Check device/sizes/strides compatibility for multi_tensor_apply.
     if (!(_check_tensors_share_device_and_dtype(
               {self, src}, /* skip_dtype_check */ true) &&
           _check_tensors_share_sizes_and_strides({self, src}))) {
       return at::native::foreach_tensor_copy_list_kernel_slow_(
           self, src, non_blocking);
     }
+    // Checks passed - fall through to AT_DISPATCH kernel below.
   } else {
     // Mixed dtypes: group by (dst_dtype, src_dtype) pair for optimal
     // performance
