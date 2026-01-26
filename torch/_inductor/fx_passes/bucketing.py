@@ -72,6 +72,7 @@ def _schedulable_wait_node(node: torch.fx.Node) -> bool:
     if not isinstance(node.args[0].target, Callable):
         return False
     is_callable: bool = node.args[0].op == "call_function"
+    # pyrefly: ignore [missing-attribute]
     coll: NCCL_COLL = get_collective_type_from_kernel_name(node.args[0].target.name())
     is_collective: bool = coll != NCCL_COLL.UNSUPPORTED
     return is_callable and is_collective
@@ -162,8 +163,8 @@ def bucket_all_gather(
     mode: BucketMode = "default",
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
-        from torch._inductor.fx_passes.bucketing import (  # pyrefly: ignore  # missing-module-attribute
-            bucket_cap_mb_by_bucket_idx_default,
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
@@ -179,8 +180,8 @@ def bucket_reduce_scatter(
     mode: BucketMode = "default",
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
-        from torch._inductor.fx_passes.bucketing import (  # pyrefly: ignore  # missing-module-attribute
-            bucket_cap_mb_by_bucket_idx_default,
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
@@ -439,8 +440,8 @@ def bucket_all_reduce(
     mode: str | None = None,
 ) -> None:
     if bucket_cap_mb_by_bucket_idx is None:
-        from torch._inductor.fx_passes.bucketing import (  # pyrefly: ignore  # missing-module-attribute
-            bucket_cap_mb_by_bucket_idx_default,
+        from torch._inductor.fx_passes.bucketing import (
+            bucket_cap_mb_by_bucket_idx_default,  # pyrefly: ignore [missing-module-attribute]
         )
 
         bucket_cap_mb_by_bucket_idx = bucket_cap_mb_by_bucket_idx_default
@@ -853,7 +854,9 @@ def process_collective_bucket(
         # Handle convert_element_type operations (for all_gather)
         node_in = n.args[0]
         if has_mergeable_all_gather_convert_dtype(n):
+            # pyrefly: ignore [bad-argument-type]
             ag_node_to_pre_nodes[n].append(node_in)
+            # pyrefly: ignore [missing-attribute]
             node_in = node_in.args[0]
 
         assert isinstance(node_in, torch.fx.Node)  # Ensure node_in is a Node
@@ -1031,6 +1034,7 @@ def merge_all_gather_bucket(
         ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
 
     # Process bucket with lazy input collection
+    # pyrefly: ignore [bad-argument-type]
     rank: int = dist.get_rank(_resolve_process_group(group_name))
 
     def create_trace_args(bucket_ins: list[torch.fx.Node]) -> tuple[Any, ...]:

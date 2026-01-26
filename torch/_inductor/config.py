@@ -905,6 +905,15 @@ optimize_scatter_upon_const_tensor = (
 add_pre_grad_passes: Optional[str] = None
 remove_pre_grad_passes: Optional[str] = None
 
+# Comma-separated list of pass names to disable. Passes disabled via this config
+# will be skipped when they go through GraphTransformObserver.
+# Can be set via TORCHINDUCTOR_DISABLED_PASSES env var.
+# Use uppercase pass names (e.g., "PASS1,PASS2").
+disabled_passes: str = Config(
+    env_name_force="TORCHINDUCTOR_DISABLED_PASSES",
+    default="",
+)
+
 
 # The multiprocessing start method to use for inductor workers in the codecache.
 def decide_worker_start_method() -> str:
@@ -2408,8 +2417,15 @@ class test_configs:
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
-    autotune_choice_name_regex: Optional[str] = None
-    autotune_choice_desc_regex: Optional[str] = None
+    # Can be set via TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX and
+    # TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX environment variables
+
+    autotune_choice_name_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX"
+    )
+    autotune_choice_desc_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX"
+    )
 
     graphsafe_rng_func_ignores_fallback_random = False
 

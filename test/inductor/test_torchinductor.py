@@ -1877,10 +1877,14 @@ class CommonTemplate:
             fn_opt = torch.compile(fn)
             if is_halide_backend(self.device):
                 pass  # no device asserts in halide
-            # TODO: remove once https://github.com/pytorch/pytorch/issues/144634
-            # is fixed.
             elif is_mps_backend(self.device):
-                pass  # no device asserts in MPS
+                _, codes = run_and_get_code(fn_opt, *inps)
+                # MPS generates Metal shader code
+                code = "\n".join(codes)
+                # Check for error reporting in MPS kernels
+                self.assertTrue(("TORCH_REPORT_ERROR" in code) is has_assert)
+                # Check for wrapping (ternary operator for negative index handling)
+                self.assertTrue((" ? " in code) is has_wrapping)
             elif is_pallas_backend(self.device):
                 pass  # Pallas generates Python/JAX code, not C++/Triton
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
@@ -12532,6 +12536,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (inp, offsets), check_lowp=False)
 
+    def test_bucketize_scalar_various_values(self):
+        def fn(boundaries, scalar_val):
+            return torch.bucketize(scalar_val, boundaries)
+
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for scalar_val in [-1.0, 0.0, 0.15, 0.5, 1.0]:
+            self.common(fn, (boundaries, scalar_val), check_lowp=False)
+
+    def test_bucketize_scalar_with_options(self):
+        def fn(boundaries, out_int32, right):
+            return torch.bucketize(0.5, boundaries, out_int32=out_int32, right=right)
+
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                self.common(fn, (boundaries, out_int32, right), check_lowp=False)
+
     @requires_gpu()
     @skip_if_gpu_halide
     @skip_if_not_triton
@@ -13568,7 +13591,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             or name
             not in [
                 "airy_ai",
-                "erfcx",
                 "laguerre_polynomial_l",
                 "legendre_polynomial_p",
                 "log_ndtr",
@@ -13695,6 +13717,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._dynamo.reset()
             elements = torch.tensor([1, 2, 3, 4])
             test_elements = 1
+            self.common(torch.isin, (elements, test_elements), {"invert": invert})
+            torch._dynamo.reset()
+            elements = torch.tensor([1, 2, 3, 4], device=self.device)
+            test_elements = torch.tensor(2, device=self.device)
             self.common(torch.isin, (elements, test_elements), {"invert": invert})
 
         elements = torch.tensor(3.0)
@@ -15415,6 +15441,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         expected = torch.tensor([[311.0], [1.0]])
         self.assertEqual(out, expected)
 
+    @requires_gpu()
+    def test_device_context_with_python_scalar(self):
+        from torch.utils._device import DeviceContext
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self, x, y):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, padding=1)
+                self.scale = (x // y) ** -0.5
+                self.relu = torch.nn.ReLU()
+                self.tao = torch.nn.Parameter(torch.tensor([1.0]))
+                self.forward = torch.compile(self.forward)
+
+            def forward(self, x):
+                x = self.relu(self.conv(x)) * self.scale
+                x = x / self.tao
+                return x * x
+
+        def run_session(x_param, y_param, size, device):
+            model = SimpleModel(x_param, y_param).to(device)
+            input_data = torch.randn(1, 3, size, size, device=device)
+            return model(input_data)
+
+        with DeviceContext(self.device):
+            # First call
+            out1 = run_session(100, 24, 32, self.device)
+            self.assertEqual(out1.device.type, self.device)
+
+            # Second call with different params triggers recompilation
+            out2 = run_session(100, 16, 64, self.device)
+            self.assertEqual(out2.device.type, self.device)
+
     # end of class CommonTemplate - add new tests here
 
 
@@ -16605,7 +16663,7 @@ if RUN_GPU:
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
-            hidden_size = 256
+            hidden_size = 512 if torch.version.hip is not None else 256
 
             inp = torch.randn(
                 batch_size,
