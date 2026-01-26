@@ -6,6 +6,7 @@ from typing import Optional
 import sympy
 from sympy import Expr, Symbol
 
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ..utils import sympy_dot, sympy_subs
@@ -37,6 +38,30 @@ class BlockPatternMatcher:
         return sympy.S.Zero + sum(
             term for term in sympy.Add.make_args(expr) if symbol in term.free_symbols
         )
+
+    @staticmethod
+    def factor_index_expr(expr: sympy.Expr, index_var: Symbol) -> sympy.Expr:
+        """
+        Given an index expression, factor the expression around
+        - FloorDiv(index_var, ...)
+        - ModularIndexing(index_var, ...)
+        - xindex
+
+        e.g. FloorDiv(index_var, d0)*s0 + FloorDiv(index_var, d0)*s1 ->
+        FloorDiv(index_var, d0) * (s0 + s1)
+        """
+        centres = OrderedSet()
+        for sub in sympy.preorder_traversal(expr):
+            if isinstance(sub, FloorDiv) and sub.args[0] == index_var:
+                centres.add(sub)
+            elif isinstance(sub, ModularIndexing) and sub.args[0] == index_var:
+                centres.add(sub)
+        centres.add(index_var)
+
+        expr_out = expr
+        for c in centres:
+            expr_out = sympy.collect(expr_out, c)
+        return expr_out
 
     @staticmethod
     def get_slice_numels(dims: list[Expr]) -> list[Expr]:

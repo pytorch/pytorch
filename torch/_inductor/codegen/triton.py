@@ -2840,29 +2840,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 Note that dN does not appear in the expression, but we solve for it
                 using range tree numels and the other dims.
                 """
-
                 index_var = range_tree.symbol()
-
-                def factor_index_expr(expr: sympy.Expr) -> sympy.Expr:
-                    # e.g. FloorDiv(xindex, d0)*s0 + FloorDiv(xindex, d0)*s1 ->
-                    # FloorDiv(xindex, d0) * (s0 + s1)
-                    centres = OrderedSet()
-                    for sub in sympy.preorder_traversal(expr):
-                        if isinstance(sub, FloorDiv) and sub.args[0] == index_var:
-                            centres.add(sub)
-                        if (
-                            isinstance(sub, ModularIndexing)
-                            and sub.args[0] == index_var
-                        ):
-                            centres.add(sub)
-
-                    expr_out = expr
-                    for c in centres:
-                        expr_out = sympy.collect(expr_out, c)
-                    return expr_out
-
-                # Simplify the index by factoring around FloorDiv & ModularIndexing
-                index = factor_index_expr(index)
 
                 # Bound the possible number of dims. We use the following heuristics:
                 # - At least one dim for each range tree node.
@@ -2976,7 +2954,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     match_affine_block,
                     match_mod_div_block,
                 ):
-                    match = match_func(expr, range_tree)
+                    factored_index_expr = BlockPatternMatcher.factor_index_expr(
+                        expr, range_tree
+                    )
+                    match = match_func(factored_index_expr, range_tree)
                     if match is not None:
                         return match
 
