@@ -835,6 +835,7 @@ class RedistributeTest(DTensorTestBase):
             )
             self.assertEqual(weight_ref.grad, weight.grad.full_tensor())
 
+    @with_comms
     def test_one_chunk_mesh(self):
         # mesh size is 1 on second dim
         mesh = init_device_mesh(self.device_type, (4, 1))
