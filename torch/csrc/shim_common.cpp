@@ -8,8 +8,8 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
 
-#include <ATen/Parallel.h>
 #include <ATen/Functions.h>
+#include <ATen/Parallel.h>
 #include <ATen/ops/from_blob.h>
 #include <torch/csrc/shim_conversion_utils.h>
 #include <torch/csrc/stable/c/shim.h>
