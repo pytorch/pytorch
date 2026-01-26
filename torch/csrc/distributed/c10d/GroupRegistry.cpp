@@ -52,6 +52,7 @@ class GroupRegistry {
   void unregister_all_groups() {
     std::unique_lock write_lock(lock_);
     registry_.clear();
+    group_name_aliases_.clear();
   }
 
   void register_alias(
@@ -74,10 +75,41 @@ class GroupRegistry {
       group->setGroupNameAlias(alias_name);
     }
 
-    auto [_, inserted] =
-        group_name_aliases_.try_emplace(alias_name, canonical_name);
-    TORCH_CHECK(
-        inserted, "An alias is already registered under the name ", alias_name);
+    // Check if the alias already exists
+    auto alias_it = group_name_aliases_.find(alias_name);
+    if (alias_it != group_name_aliases_.end()) {
+      // Alias exists - check if it points to the same canonical name
+      // (idempotent)
+      if (alias_it->second == canonical_name) {
+        // Same canonical name, skip registration (idempotent)
+        return;
+      }
+
+      // Alias points to a different target. Check if the old target
+      // is still valid. This can happen when running multiple steps
+      // (eager, precompile, load) in the same process, where process
+      // groups are created and destroyed between steps.
+      auto old_target_it = registry_.find(alias_it->second);
+      if (old_target_it != registry_.end()) {
+        auto old_group = old_target_it->second.lock();
+        if (old_group != nullptr) {
+          // Old target still valid, cannot re-register
+          TORCH_CHECK(
+              false,
+              "An alias is already registered under the name ",
+              alias_name,
+              " pointing to '",
+              alias_it->second,
+              "', cannot re-register to point to '",
+              canonical_name,
+              "'");
+        }
+      }
+      // Old target is gone (destroyed or not in registry), update the alias
+      alias_it->second = canonical_name;
+      return;
+    }
+    group_name_aliases_.emplace(alias_name, canonical_name);
   }
 
  private:

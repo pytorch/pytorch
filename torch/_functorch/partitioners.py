@@ -2108,10 +2108,25 @@ def solve_min_cut(
         if node_info.is_required_fw(node) and ban_reason:
             ban_recomputation_if_allowed(node, ban_reason)
 
-        # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
+        # Helper to check if a value is a tensor or a container of tensors
+        def is_tensor_or_tensor_container(val):
+            if isinstance(val, torch.Tensor):
+                return True
+            if isinstance(val, (list, tuple)):
+                return any(is_tensor_or_tensor_container(v) for v in val)
+            return False
+
+        # Checks if a node is actually a non-tensor node.
+        # A node is a non-tensor node if:
+        # 1. It has no 'val' or 'tensor_meta' in meta, OR
+        # 2. Its 'val' is not a tensor AND not a container of tensors
+        # This properly handles multi-output nodes that return tuples of tensors.
         is_non_tensor_node = (
             "val" not in node.meta and "tensor_meta" not in node.meta
-        ) or ("val" in node.meta and not isinstance(node.meta["val"], torch.Tensor))
+        ) or (
+            "val" in node.meta
+            and not is_tensor_or_tensor_container(node.meta["val"])
+        )
 
         if is_sym_node(node):
             weight = float(sym_node_size(node))

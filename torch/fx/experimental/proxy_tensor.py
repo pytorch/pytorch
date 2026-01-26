@@ -472,7 +472,12 @@ def _get_proxies(t: torch.Tensor) -> list[Proxy]:
             t_inner = torch._from_functional_tensor(t_inner.elem)
         if not isinstance(t_inner, torch.Tensor):
             continue
-        proxy_tensor = get_proxy_slot(t_inner, tracer)
+        # Pass default=None to gracefully handle tensors not tracked by the tracer.
+        # This can happen when autograd_function_apply runs during AOT export and
+        # saved_values contains tensors that are inputs to the subgraph (e.g., module
+        # buffers passed to autograd.Function.apply()) which may not be tracked by
+        # the outer tracer.
+        proxy_tensor = get_proxy_slot(t_inner, tracer, default=None)
         if proxy_tensor is not None:
             proxies.append(proxy_tensor.proxy)
     return proxies

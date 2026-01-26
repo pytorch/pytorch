@@ -317,6 +317,48 @@ class DeviceMeshTest(DTensorTestBase):
         backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
         self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
 
+    def test_canonical_pg_naming_consistency(self):
+        """
+        Test that DeviceMesh produces consistent canonical process group names
+        that follow the expected format: mesh_mesh_{dim_name}_{hash}.
+        This is critical for cross-backend precompilation where artifacts
+        compiled with fake backend need to be loaded with real backend.
+        """
+        world_size = 8
+        mesh_shape = (2, 4)
+
+        # Test with fake backend (uses split_group path)
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=world_size)
+
+        device_mesh = init_device_mesh(
+            "cuda",
+            mesh_shape,
+            mesh_dim_names=("fsdp", "tp"),
+        )
+
+        dim_group_names = device_mesh._dim_group_names
+        self.assertEqual(len(dim_group_names), 2)
+
+        # Verify the canonical names follow the expected format
+        # Format: mesh_mesh_{dim_name}_{hash}
+        fsdp_name = dim_group_names[0]
+        tp_name = dim_group_names[1]
+
+        # Check format: mesh_mesh_fsdp_{hash_digits}
+        self.assertRegex(fsdp_name, r"^mesh_mesh_fsdp_\d+$")
+        self.assertRegex(tp_name, r"^mesh_mesh_tp_\d+$")
+
+        # Verify the process groups can be resolved by canonical names
+        from torch._C._distributed_c10d import _resolve_process_group
+
+        fsdp_pg = _resolve_process_group(fsdp_name)
+        tp_pg = _resolve_process_group(tp_name)
+        self.assertIsNotNone(fsdp_pg)
+        self.assertIsNotNone(tp_pg)
+
+        dist.destroy_process_group()
+
     @with_comms
     def test_from_group_with_global_pg(self):
         # Simple test: check `from_group` from a mesh pg vs. directly
