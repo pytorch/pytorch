@@ -327,6 +327,46 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_handle_signal(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        handle = symm_mem.rendezvous(tensor, group=group_name)
+
+        channel = 0
+        world_size = handle.world_size
+
+        c10d.barrier()
+
+        # Pair up ranks: odd ranks send to even ranks
+        # This allows the test to work with any number of GPUs
+        if self.rank % 2 == 1:
+            # Odd rank: send signal to previous even rank
+            dst_rank = self.rank - 1
+            handle.put_signal(dst_rank=dst_rank, channel=channel)
+            torch.cuda.synchronize()
+        elif self.rank % 2 == 0 and self.rank + 1 < world_size:
+            # Even rank: wait for signal from next odd rank (if it exists)
+            src_rank = self.rank + 1
+            # wait_signal blocks until the signal arrives
+            # If this completes without hanging, the test passes
+            handle.wait_signal(src_rank=src_rank, channel=channel)
+            torch.cuda.synchronize()
+
+        c10d.barrier()
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_get(self):
         symm_mem.set_backend("NCCL")
@@ -410,6 +450,31 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         y = torch.ops.symm_mem.one_shot_all_reduce(y, "sum", group_name)
         expected = torch.mm(x, w) * self.world_size
         self.assertEqual(y, expected)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl_version(
+        (2, 29), "NCCL Symmetric Memory multicast support from nccl 2.29"
+    )
+    def test_multicast_ptr(self) -> None:
+        """
+        Get the multicast pointer
+        """
+        from torch._C._autograd import DeviceType
+        from torch._C._distributed_c10d import _SymmetricMemory
+
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        tensor = symm_mem.empty(1, device=self.device)
+        handle = symm_mem.rendezvous(tensor, group_name)
+        if _SymmetricMemory.has_multicast_support(DeviceType.CUDA, self.device.index):
+            self.assertNotEqual(handle.multicast_ptr, 0)
+        else:
+            self.assertEqual(handle.multicast_ptr, 0)
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")

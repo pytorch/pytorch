@@ -27,8 +27,8 @@ C10_DEVICE __forceinline__ void sgd_math(
     const float* grad_scale_ptr) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
-    opmath_t p = static_cast<opmath_t>(r_args[kParamIdx][ii]);
-    opmath_t g = static_cast<opmath_t>(r_args[kGradIdx][ii]);
+    auto p = static_cast<opmath_t>(r_args[kParamIdx][ii]);
+    auto g = static_cast<opmath_t>(r_args[kGradIdx][ii]);
 
     if (grad_scale_ptr) {
       g /= static_cast<opmath_t>(*grad_scale_ptr);
@@ -84,12 +84,11 @@ struct FusedSgdMathFunctor {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
 
-    const opmath_t weight_decay_opmath = static_cast<opmath_t>(weight_decay);
-    const opmath_t momentum_opmath = static_cast<opmath_t>(momentum);
-    const opmath_t lr_opmath =
+    const auto weight_decay_opmath = static_cast<opmath_t>(weight_decay);
+    const auto momentum_opmath = static_cast<opmath_t>(momentum);
+    const auto lr_opmath =
         lr_ptr ? static_cast<opmath_t>(*lr_ptr) : static_cast<opmath_t>(lr);
-    const opmath_t dampening_opmath = static_cast<opmath_t>(dampening);
-
+    const auto dampening_opmath = static_cast<opmath_t>(dampening);
     scalar_t* args[depth];
     scalar_t r_args[depth][kILP];
     const auto n = tl.numel_for_tensor[tensor_loc] - chunk_idx * chunk_size;

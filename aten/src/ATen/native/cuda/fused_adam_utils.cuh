@@ -39,10 +39,10 @@ C10_DEVICE inline void adam_math(
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
     // Load values.
-    opmath_t param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
-    opmath_t grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
-    opmath_t exp_avg = static_cast<opmath_t>(r_args[kExpAvgIdx][ii]);
-    opmath_t exp_avg_sq = static_cast<opmath_t>(r_args[kExpAvgSqIdx][ii]);
+    auto param = static_cast<opmath_t>(r_args[kParamIdx][ii]);
+    auto grad = static_cast<opmath_t>(r_args[kGradIdx][ii]);
+    auto exp_avg = static_cast<opmath_t>(r_args[kExpAvgIdx][ii]);
+    auto exp_avg_sq = static_cast<opmath_t>(r_args[kExpAvgSqIdx][ii]);
     opmath_t max_exp_avg_sq;
     if constexpr (amsgrad) {
       max_exp_avg_sq = static_cast<opmath_t>(r_args[kMaxExpAvgSqIdx][ii]);
@@ -126,19 +126,19 @@ struct FusedAdamMathFunctor {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
 
-    const opmath_t lr_opmath =
+    const auto lr_opmath =
         lr_ptr ? static_cast<opmath_t>(*lr_ptr) : static_cast<opmath_t>(lr);
-    const opmath_t beta1_opmath = static_cast<opmath_t>(beta1);
-    const opmath_t beta2_opmath = static_cast<opmath_t>(beta2);
-    const opmath_t weight_decay_opmath = static_cast<opmath_t>(weight_decay);
-    const opmath_t eps_opmath = static_cast<opmath_t>(eps);
+    const auto beta1_opmath = static_cast<opmath_t>(beta1);
+    const auto beta2_opmath = static_cast<opmath_t>(beta2);
+    const auto weight_decay_opmath = static_cast<opmath_t>(weight_decay);
+    const auto eps_opmath = static_cast<opmath_t>(eps);
 
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
     }
     const auto [bias_correction1, bias_correction2_sqrt] =
         [&]() -> std::pair<opmath_t, opmath_t> {
-      opmath_t step_count =
+      auto step_count =
           static_cast<opmath_t>(*reinterpret_cast<const float*>(
               tl.state_steps_addresses[tensor_loc]));
 

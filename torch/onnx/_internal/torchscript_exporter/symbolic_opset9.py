@@ -6138,13 +6138,18 @@ def cdist(
     # we unsqueeze both input tensors
     row_size_x1 = symbolic_helper._get_tensor_dim_size(x1, -2)
     row_size_x2 = symbolic_helper._get_tensor_dim_size(x2, -2)
-    assert row_size_x1 is not None
-    assert row_size_x2 is not None
     p_float = symbolic_helper._parse_arg(p, "f")
     compute_mode = symbolic_helper._parse_arg(compute_mode, "i")
     if p_float == 2.0 and (
         compute_mode == 1
-        or (compute_mode is None and row_size_x1 >= 25 and row_size_x2 >= 25)
+        or (
+            compute_mode is None
+            and (
+                row_size_x1 is None
+                or row_size_x2 is None
+                or (row_size_x1 >= 25 and row_size_x2 >= 25)
+            )
+        )
     ):
         return _euclidean_dist(g, x1, x2)
     rank = symbolic_helper._get_tensor_rank(x1)
