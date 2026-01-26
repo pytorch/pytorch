@@ -1357,50 +1357,58 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
 
         input_data = torch.randn((8, 8, 8), device=self.device_type)
 
-        import torch.distributed as dist
-
-        rank = dist.get_rank()
+        comm_mode = CommDebugMode()
 
         # Test case 1: ascending order (baseline - can use flattened all_gather)
+        # With ascending shard order, flattening should occur, resulting in fewer all_gathers
         ascending_src = _distribute_tensor(
             input_data.clone(),
             mesh,
             [Shard(0), Shard(0), Shard(0)],
             shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
         )
-        with DebugMode(record_torchfunction=False) as debug_mode_asc:
+        with comm_mode:
             ascending_result = redistribute(
                 ascending_src,
                 mesh,
                 [Replicate(), Replicate(), Replicate()],
                 shard_order=(),
             )
-        trace_asc = self._extract_redistribute_trace_from_debug_mode(
-            debug_mode_asc.debug_string()
+        ascending_all_gather_count = comm_mode.get_comm_counts()[
+            funcol.all_gather_into_tensor
+        ]
+        # With flattening: all 3 mesh dims are flattened into 1 all_gather
+        # (A_B_C flattened mesh enables single operation)
+        self.assertEqual(
+            ascending_all_gather_count,
+            1,
+            f"ascending order: expected 1 all_gather (with full flattening), got {ascending_all_gather_count}",
         )
 
         # Test case 2: non-ascending order (1, 0, 2) - should NOT use flattened all_gather
+        # Individual all_gathers should be used for correctness
         non_ascending_src = _distribute_tensor(
             input_data.clone(),
             mesh,
             [Shard(0), Shard(0), Shard(0)],
             shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
         )
-        with DebugMode(record_torchfunction=False) as debug_mode_non_asc:
+        with comm_mode:
             non_ascending_result = redistribute(
                 non_ascending_src,
                 mesh,
                 [Replicate(), Replicate(), Replicate()],
                 shard_order=(),
             )
-        trace_non_asc = self._extract_redistribute_trace_from_debug_mode(
-            debug_mode_non_asc.debug_string()
+        non_ascending_all_gather_count = comm_mode.get_comm_counts()[
+            funcol.all_gather_into_tensor
+        ]
+        # Without flattening: 3 individual all_gathers (one per mesh dim)
+        self.assertEqual(
+            non_ascending_all_gather_count,
+            3,
+            f"non-ascending order: expected 3 all_gathers (no flattening), got {non_ascending_all_gather_count}",
         )
-
-        # Print traces for debugging
-        if rank == 0:
-            print(f"\nAscending order trace: {trace_asc}")
-            print(f"Non-ascending order trace: {trace_non_asc}")
 
         # Both should produce the same fully replicated tensor
         self.assertEqual(ascending_result.to_local(), non_ascending_result.to_local())
@@ -2082,11 +2090,8 @@ class OptimizeFlattenedReductionsTest(TestCase):
                     (Shard(0), Shard(0)),
                 )
 
-            # BUG: Currently the code sorts dims to (0, 1) and INCORRECTLY flattens.
-            # The correct behavior should be: since transforms are (1, 0) order but
-            # only (0, 1) flattened mesh exists, we should NOT flatten.
-            # This test exposes the bug by asserting the CORRECT behavior.
-            self.assertEqual(len(result), 2)  # Should NOT be flattened
+            # we do not flatten due to non-ascending order
+            self.assertEqual(len(result), 2)
 
             # Verify warning message content
             self.assertEqual(len(log_context.output), 1)

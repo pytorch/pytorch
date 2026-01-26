@@ -373,25 +373,19 @@ def _optimize_transform_infos(
             if mesh_dims != sorted_mesh_dims:
                 return None, "non_ascending_mesh_dims"
         elif comm_type == "all_gather":
-            # For all_gather: the source shard order determines data layout.
-            # The greedy algorithm generates transforms in reversed order (inner to outer),
-            # but this is fine as long as the shard order is ascending.
-            # We need to check the actual shard order, not the transform order.
-            has_non_default_order = False
+            # For all_gather: the shard order (data layout) must be ascending for
+            # flattening to work correctly. Transform order doesn't matter.
+            # Check shard_order when provided; if not provided, assume default (ascending).
             if src_shard_order:
-                # Find the shard order entry for the affected tensor dimension
                 src, _ = first_placements
                 if isinstance(src, Shard):
                     affected_tensor_dim = src.dim
                     for entry in src_shard_order:
                         if entry.tensor_dim == affected_tensor_dim:
                             # Check if the mesh dims in the shard order are ascending
-                            order_mesh_dims = entry.mesh_dims
-                            if order_mesh_dims != tuple(sorted(order_mesh_dims)):
-                                has_non_default_order = True
+                            if entry.mesh_dims != tuple(sorted(entry.mesh_dims)):
+                                return None, "non_ascending_mesh_dims"
                             break
-            if has_non_default_order:
-                return None, "non_ascending_mesh_dims"
         # Use sorted dims for mesh lookup (required by DeviceMesh API)
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, sorted_mesh_dims)
         if flattened_mesh is None:
