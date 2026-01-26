@@ -553,7 +553,7 @@ W_0^{\text{EMA}} = W_0^{\text{model}}
 ```{math}
 W_{t+1}^{\text{EMA}} = \text{decay} \times W_t^{\text{EMA}} + (1 - \text{decay}) \times W_{t+1}^{\text{model}}
 ```
- where :math:`W_t^{\text{EMA}}` is the EMA parameter at step `t`, :math:`W_t^{\text{model}}` is the model parameter at step `t`, and decay is the EMA decay rate (default: 0.999).
+ where $W_t^{\text{EMA}}$ is the EMA parameter at step `t`, $W_t^{\text{model}}$ is the model parameter at step `t`, and decay is the EMA decay rate (default: 0.999).
 
 Here the model `model` can be an arbitrary {class}`torch.nn.Module` object. `averaged_model`
 will keep track of the running averages of the parameters of the `model`. To update these
