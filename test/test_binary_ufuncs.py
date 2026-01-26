@@ -2172,16 +2172,18 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(b1.item(), 1)
 
         # Verify CPU and CUDA produce the same results
-        cpu_result = torch.maximum(b0.cpu(), l0.cpu(), out=torch.zeros(1, dtype=torch.uint8))
+        cpu_out = torch.zeros(1, dtype=torch.uint8)
+        cpu_result = torch.maximum(b0.cpu(), l0.cpu(), out=cpu_out)
         self.assertEqual(result_with_out.cpu(), cpu_result)
 
         # Test minimum as well
         b1.zero_()
         result_min = torch.minimum(b0, l0, out=b1)
-        # expected_min computed in promoted dtype (int64), then cast to out dtype (uint8)
+        # expected_min computed in promoted dtype (int64), then cast to uint8
         expected_min = torch.minimum(b0, l0).to(b1.dtype)
         self.assertEqual(result_min.item(), expected_min.item())
-        self.assertEqual(result_min.item(), (-9) % 256)  # -9 cast to uint8 after comparison
+        # -9 cast to uint8 after comparison
+        self.assertEqual(result_min.item(), (-9) % 256)
 
         # Test with different dtype combinations
         test_cases = [
