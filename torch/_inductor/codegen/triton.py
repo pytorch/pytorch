@@ -2843,14 +2843,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
                 index_var = range_tree.symbol()
 
-                def factor_index_expr(expr: Expr):
+                def factor_index_expr(expr: sympy.Expr) -> sympy.Expr:
                     # e.g. FloorDiv(xindex, d0)*s0 + FloorDiv(xindex, d0)*s1 ->
                     # FloorDiv(xindex, d0) * (s0 + s1)
-                    centres = set()
+                    centres = OrderedSet()
                     for sub in sympy.preorder_traversal(expr):
                         if isinstance(sub, FloorDiv) and sub.args[0] == index_var:
                             centres.add(sub)
-                        if isinstance(sub, ModularIndexing) and sub.args[0] == index_var:
+                        if (
+                            isinstance(sub, ModularIndexing)
+                            and sub.args[0] == index_var
+                        ):
                             centres.add(sub)
 
                     expr_out = expr
@@ -2933,9 +2936,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # the call to lookup_precomputed_size
                 linear_block_size = TritonSymbols.get_block_size(range_tree)
                 block_shape: list[sympy.Expr] = [
-                    CeilDiv(linear_block_size, sizevars.lookup_precomputed_size(slice_numels[0]))
+                    CeilDiv(
+                        linear_block_size,
+                        sizevars.lookup_precomputed_size(slice_numels[0]),
+                    )
                 ] + [
-                    sympy.Min(CeilDiv(linear_block_size, sizevars.lookup_precomputed_size(numel)), sizevars.lookup_precomputed_size(dim))
+                    sympy.Min(
+                        CeilDiv(
+                            linear_block_size, sizevars.lookup_precomputed_size(numel)
+                        ),
+                        sizevars.lookup_precomputed_size(dim),
+                    )
                     for numel, dim in zip(slice_numels[1:], dims[1:])
                 ]
 
@@ -2954,9 +2965,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     offsets=block_offsets,
                 )
 
-
             def match_block_subexpr(
-                expr: sympy.Expr, range_tree: IterationRangesRoot,
+                expr: sympy.Expr,
+                range_tree: IterationRangesRoot,
             ) -> Optional[BlockParameters]:
                 """
                 Match a block indexing subexpression involving a single range tree.

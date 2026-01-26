@@ -6,7 +6,7 @@ from typing import Optional
 import sympy
 from sympy import Expr, Symbol
 
-from torch.utils._sympy.functions import Identity, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ..utils import sympy_dot, sympy_subs
 from ..virtualized import V
@@ -145,8 +145,8 @@ class BlockPatternMatcher:
                 match[stride] = sympy.S.Zero
 
         # Replace wildcards with matched expressions.
-        dims = [dims[0]] + [match[ dim ] for dim in dims[1:]]
-        strides = [match[ stride ] for stride in strides]
+        dims = [dims[0]] + [match[dim] for dim in dims[1:]]
+        strides = [match[stride] for stride in strides]
         slice_numels = cls.get_slice_numels(dims)
         block_index_exprs = [sympy_subs(expr, match) for expr in block_index_exprs]
 
