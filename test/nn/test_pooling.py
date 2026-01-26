@@ -366,18 +366,6 @@ class TestPoolingNN(NNTestCase):
         self.assertFalse(torch.isnan(out).any())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_adaptive_avg_pooling_integer_overflow(self):
-        input = torch.randn((8193, 512, 512), dtype=torch.half, device="cuda")
-        avg_pool = torch.nn.AdaptiveAvgPool2d((512, 512))
-        
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Adaptive Pooling does not support output sizes larger than INT32_MAX"
-        ):
-            out = avg_pool(input)
-            out[0,0,0] = 1.0
-
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_adaptive_avg_pooling_nhwc_overflow(self):
         input = torch.randint(
             -256, 256, (20, 32, 256, 256), dtype=torch.half, device="cuda"
@@ -597,17 +585,28 @@ class TestPoolingNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "expected dimensions"):
             torch.ops.aten.adaptive_max_pool3d_backward(grad_output, input, indices)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_adaptive_max_pooling_integer_overflow(self):
-        input = torch.randn((8193, 512, 512), dtype=torch.half, device="cuda")
+    def test_adaptive_max_pooling_integer_overflow(self, device):
+        input = torch.randn((8193, 512, 512), dtype=torch.half, device=device)
         max_pool = torch.nn.AdaptiveMaxPool2d((512, 512))
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Adaptive Pooling does not support output sizes larger than INT32_MAX"
-        ):
+        try:
             out = max_pool(input)
-            out[0,0,0] = 1.0
+        except RuntimeError as e:
+            self.assertRegex(str(e), "Adaptive Pooling does not support output sizes larger than INT32_MAX")
+        else:
+            self.assertEqual(out, input)
+
+
+    def test_adaptive_avg_pooling_integer_overflow(self, device):
+        input = torch.randn((8193, 512, 512), dtype=torch.half, device=device)
+        avg_pool = torch.nn.AdaptiveAvgPool2d((512, 512))
+        
+        try:
+            out = avg_pool(input)
+        except RuntimeError as e:
+            self.assertRegex(str(e), "Adaptive Pooling does not support output sizes larger than INT32_MAX")
+        else:
+            self.assertEqual(out, input)
 
     @expectedFailureMPS  # Op not implemented
     @onlyNativeDeviceTypes
