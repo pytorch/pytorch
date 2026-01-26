@@ -1282,8 +1282,7 @@ def script(
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
     :class:`ScriptFunction`. TorchScript itself is a subset of the Python language, so not all
     features in Python work, but we provide enough functionality to compute on
-    tensors and do control-dependent operations. For a complete guide, see the
-    :ref:`language-reference`.
+    tensors and do control-dependent operations.
 
     Scripting a dictionary or list copies the data inside it into a TorchScript instance than can be
     subsequently passed by reference between Python and TorchScript with zero copy overhead.
