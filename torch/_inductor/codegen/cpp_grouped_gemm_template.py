@@ -411,10 +411,14 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         if isinstance(micro_gemm, CppMicroGemmAMX):
             counters["inductor"]["cpp_micro_gemm_amx_counter"] += 1
 
-        L1_cache_size = torch._C._cpu._L1d_cache_size()  # per core cache size in Bytes
+        L1_cache_size = torch.cpu.get_capabilities().get(
+            "l1d_cache_size", 0
+        )  # per core cache size in Bytes
         assert L1_cache_size > 0, f"Expect L1_cache_size > 0 but got {L1_cache_size}"
 
-        L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
+        L2_cache_size = torch.cpu.get_capabilities().get(
+            "l2_cache_size", 0
+        )  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
         epilogues: list[ir.IRNode] = []
