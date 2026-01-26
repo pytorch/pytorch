@@ -365,7 +365,6 @@ class GraphModule(torch.nn.Module):
             aligned_idxs = remove_unaligned_input_idxs([fake_tensor], [0])
             self.assertEqual(list(aligned_idxs), [0])
 
-
 instantiate_parametrized_tests(TestFakeDistributed)
 
 if __name__ == "__main__":
