@@ -463,11 +463,33 @@ XFAIL_DICTS = {
     "binary_numerical": BINARY_NUMERICAL_XFAILS,
 }
 
+# Ops that should NOT be expected failures on ROCm (they work correctly there).
+# Structure: test_type -> backend -> op_name -> set of dtypes (or ALL)
+ROCM_XFAIL_EXCLUSIONS = {
+    "batch_invariance": {
+        "inductor_default": {
+            "div": {fp32},
+        },
+    },
+}
+
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
     """Check if a test is expected to fail."""
     xfails = XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
-    return dtype in xfails or ALL in xfails
+    is_xfail = dtype in xfails or ALL in xfails
+
+    # On ROCm, some ops work correctly and should not be xfails
+    if is_xfail and torch.version.hip is not None:
+        exclusions = (
+            ROCM_XFAIL_EXCLUSIONS.get(test_type, {})
+            .get(backend, {})
+            .get(op_name, set())
+        )
+        if dtype in exclusions or ALL in exclusions:
+            return False
+
+    return is_xfail
 
 
 def compile_fn(fn, backend):
@@ -566,6 +588,10 @@ class TestOpInfoProperties(TestCase):
 
         # Disable split-k accumulation in GEMM to ensure batch-invariant results.
         # Split-k can produce different rounding based on how work is partitioned.
+        # Disabling split-k requires the cuBLASLt backend, so we set it first.
+        prev_blas_library = torch.backends.cuda.preferred_blas_library()
+        torch.backends.cuda.preferred_blas_library("cublaslt")
+
         # We need to save both the reduced precision and split_k settings.
         prev_fp16 = (
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
@@ -663,6 +689,7 @@ class TestOpInfoProperties(TestCase):
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
                 prev_bf16
             )
+            torch.backends.cuda.preferred_blas_library(prev_blas_library)
 
     # =========================================================================
     # Run-to-Run Determinism Tests
