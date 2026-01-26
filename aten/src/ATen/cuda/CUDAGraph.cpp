@@ -6,8 +6,11 @@
 #include <ATen/Functions.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/util/flat_hash_map.h>
 
 #include <cstddef>
+#include <mutex>
+#include <optional>
 
 namespace at::cuda {
 
@@ -20,6 +23,26 @@ static bool _cuda_graphs_debug = false;
 // circumstances (in particular, during autograd).
 static std::mutex _currently_capturing_graphs_mutex;
 static ska::flat_hash_map<CaptureId_t, CUDAGraph*> _currently_capturing_graphs;
+
+std::optional<CaptureId_t> getCaptureId(std::optional<cudaStream_t> stream) {
+  cudaStream_t s = stream.value_or(c10::cuda::getCurrentCUDAStream());
+  cudaStreamCaptureStatus status{};
+  CaptureId_t capture_id = 0;
+  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(s, &status, &capture_id));
+  if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
+    return capture_id;
+  }
+  return std::nullopt;
+}
+
+CUDAGraph* getGraphFromCaptureId(CaptureId_t capture_id) {
+  std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
+  auto it = _currently_capturing_graphs.find(capture_id);
+  if (it != _currently_capturing_graphs.end()) {
+    return it->second;
+  }
+  return nullptr;
+}
 
 MempoolId_t graph_pool_handle() {
   // Sets just the second value, to distinguish it from MempoolId_ts created from
@@ -59,29 +82,12 @@ void CUDAGraph::register_generator_state(
   captured_generator_states_[std::move(state)] = 0;
 }
 
-void CUDAGraph::register_generator_state(const at::Generator& generator) {
-  c10::intrusive_ptr<CUDAGeneratorImpl> cuda_gen =
-      dynamic_intrusive_pointer_cast<CUDAGeneratorImpl>(
-          generator.getIntrusivePtr());
-  cuda_gen->register_graph(this);
-}
-
 void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode capture_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
 
   capture_mode_ = capture_mode;
-
-  // default generator is always registered
-  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      std::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  gen->register_graph(this);
-
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->capture_prologue();
-  }
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -123,12 +129,13 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
-  cudaStreamCaptureStatus status{};
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &capture_id_));
-  TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+  auto capture_id_opt = getCaptureId(stream);
+  TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
+      "Stream should be actively capturing after cudaStreamBeginCapture");
+  capture_id_ = capture_id_opt.value();
 
   {
-    std::unique_lock<std::mutex> lock(_currently_capturing_graphs_mutex);
+    std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
     _currently_capturing_graphs.emplace(capture_id_, this);
   }
 }
@@ -156,7 +163,7 @@ void CUDAGraph::capture_end() {
 
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {
-    wholegraph_increments = generator_state->capture_epilogue();
+    wholegraph_increments = generator_state->capture_epilogue(capture_id_);
   }
 
   size_t numCUDAGraphNodes = 0;
@@ -220,7 +227,7 @@ void CUDAGraph::replay() {
 
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {
-    generator_state->replay_prologue(wholegraph_increments);
+    generator_state->replay_prologue(capture_id_, wholegraph_increments);
   }
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
@@ -279,6 +286,22 @@ void CUDAGraph::reset() {
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
+
+  // Remove capture states from each generator state before clearing
+  // Must do this before clearing capture_id_ since we need it to identify the capture state
+  if (capture_id_ != 0) {
+    for (auto& [generator_state, wholegraph_increment] : captured_generator_states_) {
+      generator_state->remove_capture_state(capture_id_);
+    }
+  }
+  captured_generator_states_.clear();
+
+  if (capture_id_ != 0) {
+    std::lock_guard<std::mutex> lock(_currently_capturing_graphs_mutex);
+    _currently_capturing_graphs.erase(capture_id_);
+    capture_id_ = 0;
+  }
+
   if (capture_ended_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
@@ -286,10 +309,12 @@ void CUDAGraph::reset() {
     capture_ended_ = false;
   }
   if (has_graph_) {
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));
     has_graph_ = false;
   }
   if (has_graph_exec_) {
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
     has_graph_exec_ = false;
   }
@@ -303,10 +328,6 @@ MempoolId_t CUDAGraph::pool() {
 }
 
 CUDAGraph::~CUDAGraph() {
-  for (auto& [generator_state, wholegraph_increments] :
-       captured_generator_states_) {
-    generator_state->unregister_graph(this);
-  }
   reset();
 
 // There are recent HIP changes where hipGraphExecDestroy doesn't immediately free memory.
@@ -424,8 +445,11 @@ getCurrentCUDAStream(), &cond_node, nullptr, 1, cudaStreamSetCaptureDependencies
   auto& conditional_rng_snapshot = conditional_rng_snapshots_.top();
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {
-    conditional_rng_snapshot.emplace(
-        generator_state, generator_state->offset_intragraph_);
+    auto* capture_state =
+        generator_state->get_capture_state(capture_id_, false);
+    uint64_t offset =
+        capture_state ? capture_state->offset_intragraph_ : 0;
+    conditional_rng_snapshot.emplace(generator_state, offset);
   }
 
   c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
@@ -475,9 +499,12 @@ void CUDAGraph::end_capture_to_conditional_node() {
     for (const auto& [generator_state, offset_intragraph_before_capture] :
          conditional_rng_snapshot) {
       const auto generator_it = captured_generator_states_.find(generator_state);
+      auto* capture_state =
+          generator_state->get_capture_state(capture_id_, false);
+      uint64_t current_offset =
+          capture_state ? capture_state->offset_intragraph_ : 0;
       if (generator_it == captured_generator_states_.end() ||
-          generator_state->offset_intragraph_ !=
-              offset_intragraph_before_capture) {
+          current_offset != offset_intragraph_before_capture) {
         rng_or_generators_changed = true;
         break;
       }

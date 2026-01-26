@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <limits>
+#include <optional>
 #include <stack>
 
 #if defined(USE_ROCM) || !(defined(CUDA_VERSION) && CUDA_VERSION >= 12040)
@@ -29,6 +30,18 @@ namespace cuda {
 // Standalone way to get a unique mempool id usable as a pool=... argument
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
+
+struct CUDAGraph;
+
+// Helper function to get the capture ID for a stream.
+// Returns std::nullopt if the stream is not actively capturing.
+// If no stream is provided, uses the current CUDA stream.
+TORCH_CUDA_CPP_API std::optional<CaptureId_t> getCaptureId(
+    std::optional<cudaStream_t> stream = std::nullopt);
+
+// Get the CUDAGraph associated with a capture ID, if any.
+// Returns nullptr if no graph is associated with the given capture ID.
+TORCH_CUDA_CPP_API CUDAGraph* getGraphFromCaptureId(CaptureId_t capture_id);
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(bool keep_graph=false);
@@ -54,9 +67,9 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph(CUDAGraph&& other) = delete;
   CUDAGraph& operator=(CUDAGraph&& other) = delete;
 
-  // See Note [Explicit Registration of Generators to the CUDA Graph]
+  // See Note [Lazy Registration of Generators to the CUDA Graph]
+  // Called internally by CUDAGeneratorState::get_capture_state() during capture
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
-  void register_generator_state(const at::Generator& generator);
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
