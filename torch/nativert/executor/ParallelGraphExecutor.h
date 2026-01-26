@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/Semaphore.h>
+#include <torch/csrc/autograd/profiler_kineto.h>
 #include <torch/nativert/executor/GraphExecutorBase.h>
 #include <torch/nativert/executor/SessionState.h>
 #include <thread>
@@ -14,6 +15,32 @@ class ConcurrentQueue;
 } // namespace moodycamel
 
 namespace torch::nativert {
+
+/**
+ * Synchronizes profiler state between main thread and child thread.
+ *
+ * This function checks if the main thread's profiler state has changed
+ * and enables/disables profiling in the current child thread accordingly.
+ * This allows worker threads in a thread pool to participate in Kineto tracing
+ * when profiling is dynamically enabled/disabled.
+ *
+ * @param profilerEnabledInThisThread Current profiler state for this thread.
+ *        Will be updated to reflect the new state after synchronization.
+ */
+inline void syncProfilerStateFromMainThread(bool& profilerEnabledInThisThread) {
+  bool mainThreadProfiling =
+      torch::autograd::profiler::isProfilerEnabledInMainThread();
+
+  if (mainThreadProfiling != profilerEnabledInThisThread) {
+    if (mainThreadProfiling) {
+      torch::autograd::profiler::enableProfilerInChildThread();
+    } else {
+      torch::autograd::profiler::disableProfilerInChildThread();
+    }
+    profilerEnabledInThisThread = mainThreadProfiling;
+  }
+}
+
 class ThreadPoolExecutor;
 
 typedef std::function<void()> Work;
