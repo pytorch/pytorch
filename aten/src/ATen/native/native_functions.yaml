@@ -9973,8 +9973,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: atan2_out
-    MPS: atan2_out_mps
+    CPU, CUDA, MPS: atan2_out
   tags: [core, pointwise]
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
