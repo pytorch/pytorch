@@ -3308,6 +3308,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["o_ptr"],
         )
 
+    @skipIfXpu(msg="Blocked by https://github.com/pytorch/pytorch/issues/170049")
     @make_mutation_test
     def test_while_loop():
         @triton.jit
