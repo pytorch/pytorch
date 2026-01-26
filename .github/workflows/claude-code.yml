@@ -46,9 +46,9 @@ jobs:
           else
             PR_NUMBER="${{ github.event.issue.number }}"
           fi
-          IS_FORK=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json isCrossRepository -q '.isCrossRepository')
-          echo "is_fork=$IS_FORK" >> $GITHUB_OUTPUT
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          IS_FORK=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json isCrossRepository -q '.isCrossRepository')
+          echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "Is fork PR: $IS_FORK (PR #$PR_NUMBER)"
 
       - name: Post fork PR notice and exit
@@ -58,20 +58,23 @@ jobs:
         run: |
           gh pr comment ${{ steps.fork-check.outputs.pr_number }} --repo ${{ github.repository }} --body \
             "Sorry, Claude can't review fork PRs yet due to a limitation in the GitHub Action. Tracking issue: https://github.com/anthropics/claude-code-action/issues/821"
-          echo "::error::Claude Code does not support fork PRs yet"
-          exit 1
+          echo "::notice::Skipping - Claude Code does not support fork PRs yet"
+          exit 0
 
       - uses: actions/checkout@v4
+        if: steps.fork-check.outputs.is_fork != 'true'
         with:
           fetch-depth: 1
 
       - name: Configure AWS credentials via OIDC
+        if: steps.fork-check.outputs.is_fork != 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
           aws-region: us-east-1
 
       - name: Run Claude Code
+        if: steps.fork-check.outputs.is_fork != 'true'
         uses: anthropics/claude-code-action@v1
         with:
           use_bedrock: "true"
