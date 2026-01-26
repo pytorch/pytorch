@@ -52,5 +52,26 @@ class TestDistributedLaunch(TestCase):
         launch.main(args)
 
 
+class TestLauncherApi(TestCase):
+    def test_get_entrypoint_name_with_empty_strings(self):
+        """
+        Test that _get_entrypoint_name handles empty strings in args list.
+        Previously, accessing arg[0] on an empty string would raise IndexError.
+        """
+        from torch.distributed.launcher.api import _get_entrypoint_name
+
+        result = _get_entrypoint_name(sys.executable, ["", "-u", "script.py"])
+        self.assertEqual(result, "script.py")
+
+        result = _get_entrypoint_name(sys.executable, ["", "", "another.py"])
+        self.assertEqual(result, "another.py")
+
+        result = _get_entrypoint_name(sys.executable, ["", ""])
+        self.assertEqual(result, "")
+
+        result = _get_entrypoint_name(sys.executable, ["-u", "", "test.py"])
+        self.assertEqual(result, "test.py")
+
+
 if __name__ == "__main__":
     run_tests()
