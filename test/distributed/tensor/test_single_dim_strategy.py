@@ -538,7 +538,7 @@ class TestExpandPlaceholder(TestCase):
             [Replicate(), Replicate(), Replicate()],  # Implicit all-replicate
         ]
         single_dim_strategies = _insert_single_dim_replication_strategy(
-            single_dim_strategies, num_input_tensors=2
+            single_dim_strategies, num_outputs=1, num_input_tensors=2
         )
         expanded_replicate = _fill_single_dim_strategy_placeholders(
             {Replicate()}, single_dim_strategies
@@ -821,6 +821,100 @@ class TestExpandPlaceholder(TestCase):
                 f"Output placement {output_spec.placements} should match out kwarg placement (Replicate(),)",
             )
 
+    def test_expand_multi_output_strategy(self):
+        """Test expanding single-dim strategies for multi-output ops.
+
+        This is a regression test for the fix where _insert_single_dim_replication_strategy
+        was hardcoded to assume 1 output, causing assertion errors for multi-output ops.
+        The bug was: input_specs(3) != strategies(1: 1 args + 0 kwargs)
+
+        The fix ensures:
+        1. Multi-output ops correctly expand strategies with num_outputs > 1
+        2. The replicate strategy has the correct number of placements (num_outputs + num_inputs)
+        3. All output specs are populated as a tuple with correct tensor_meta
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+
+        # Create a batched matrix input: (batch=2, m=3, n=3)
+        input_meta = TensorMeta(
+            shape=torch.Size([2, 3, 3]),
+            stride=(9, 3, 1),
+            dtype=torch.float32,
+        )
+
+        # Create output tensor_metas for a 3-output op
+        output_metas = (
+            TensorMeta(torch.Size([2, 3, 3]), (9, 3, 1), torch.float32),
+            TensorMeta(torch.Size([2, 3, 3]), (9, 3, 1), torch.float32),
+            TensorMeta(torch.Size([2, 3, 3]), (9, 3, 1), torch.float32),
+        )
+
+        # Create input spec with Shard(0) on batch dim
+        input_spec = DTensorSpec(
+            mesh=mesh,
+            placements=(Shard(0),),
+            tensor_meta=input_meta,
+        )
+
+        # Create OpSchema - use a placeholder op since we're providing our own strategy
+        op_schema = OpSchema(
+            op=torch.ops.aten.abs.default,  # placeholder, not actually used
+            args_schema=(OpStrategy([OpSpec(input_spec)]),),
+            kwargs_schema={},
+        )
+
+        # Define a mock multi-output single-dim strategy function
+        # This simulates an op with 3 outputs and 1 input
+        # Using Partial for outputs to test a realistic scenario
+        def mock_multi_output_strategy(op, args_schema, kwargs_schema):
+            # Return strategies with 4 placements each (3 outputs + 1 input)
+            # Using Partial for outputs (common for reduction ops)
+            return [
+                [Partial(), Partial(), Partial(), Shard(0)],
+            ]
+
+        # This would have crashed before the fix with:
+        # AssertionError: input_specs(3) != strategies(1: 1 args + 0 kwargs)
+        # because _insert_single_dim_replication_strategy created [R, R] (2 elements)
+        # instead of [R, R, R, R] (4 elements for 3 outputs + 1 input)
+        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, mock_multi_output_strategy, output_metas
+        )
+        strategy = expanded_strategy_fn(
+            torch.ops.aten.abs.default,
+            op_schema.args_meta,
+            op_schema.kwargs_meta,
+        )
+
+        # Strategy should be an OpStrategy
+        self.assertIsInstance(strategy, OpStrategy)
+        self.assertGreaterEqual(len(strategy.strategies), 1)
+
+        # Each OpSpec should have tuple output_spec with 3 elements (one per output)
+        for op_spec in strategy.strategies:
+            # Access output_specs directly (it's a tuple for multi-output ops)
+            output_specs = op_spec.output_specs
+            self.assertIsInstance(
+                output_specs, tuple, "Multi-output op should have tuple output_specs"
+            )
+            self.assertEqual(
+                len(output_specs), 3, "Should have 3 output specs for 3-output op"
+            )
+
+            # Check that all output specs are valid DTensorSpecs with tensor_meta
+            for i, out_spec in enumerate(output_specs):
+                self.assertIsNotNone(out_spec, f"Output {i} spec should not be None")
+                self.assertIsInstance(out_spec, DTensorSpec)
+                self.assertIsNotNone(
+                    out_spec.tensor_meta, f"Output {i} spec should have tensor_meta"
+                )
+                # Verify the tensor_meta shape matches what we provided
+                self.assertEqual(out_spec.tensor_meta.shape, torch.Size([2, 3, 3]))
+
+            # Check input specs - should have 1 input
+            self.assertIsNotNone(op_spec.input_specs)
+            self.assertEqual(len(op_spec.input_specs), 1, "Should have 1 input tensor")
+
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
 def dummy_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -830,6 +924,16 @@ def dummy_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 @dummy_add.register_fake
 def _dummy_add_fake(x, y):
     return torch.empty_like(x)
+
+
+@torch.library.custom_op("mylib::dummy_check", mutates_args=())
+def dummy_check(x: torch.Tensor) -> None:
+    """A no-output op similar to _linalg_check_errors."""
+
+
+@dummy_check.register_fake
+def _dummy_check_fake(x):
+    return None
 
 
 class TestSingleDimStrategyRegistration(TestCase):
@@ -876,6 +980,33 @@ class TestSingleDimStrategyRegistration(TestCase):
 
         # Now the op should run with DTensor
         torch.ops.mylib.dummy_add(x_dt, y_dt)
+
+    @patch(
+        "torch.distributed.tensor._api.DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs",
+        {},
+    )
+    def test_register_single_dim_strategy_no_output(self):
+        """Test that single-dim strategy works for ops with no tensor output.
+
+        This tests the fix for operators like _linalg_check_errors that return None.
+        Previously, this would fail with:
+        "_propagate_tensor_meta_non_cached returned None for ..., but tensor_meta is required"
+        """
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = torch.randn(8, 16)
+        x_dt = distribute_tensor(x, mesh, [Shard(0)])
+
+        # Register a single-dim strategy for the no-output op
+        @register_single_dim_strategy(torch.ops.mylib.dummy_check.default)
+        def dummy_check_single_dim_strategy(op, args_schema, kwargs_schema):
+            # For no-output ops, return empty list (replicate-only)
+            return []
+
+        # This should work without raising "tensor_meta is required" error
+        result = torch.ops.mylib.dummy_check(x_dt)
+
+        # Verify the result is None (no tensor output)
+        self.assertIsNone(result, "No-output op should return None")
 
 
 if __name__ == "__main__":
