@@ -11,7 +11,6 @@ It does so by:
 4. dispatching subclasses
 """
 
-import typing
 import warnings
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
@@ -1199,15 +1198,6 @@ def aot_dispatch_subclass(
     # directly on the joint, but this would hurt compile time (adding yet another pass through the joint).
     subclass_meta = SubclassMeta()
 
-    if is_joint_structure:
-        primals_wrapped: list[FxValue] = typing.cast(list[FxValue], args[0])
-        primals_wrapped_descs: list[AOTInput] = typing.cast(
-            list[AOTInput], args_descs[0]
-        )
-    else:
-        primals_wrapped: list[FxValue] = typing.cast(list[FxValue], args)
-        primals_wrapped_descs: list[AOTInput] = typing.cast(list[AOTInput], args_descs)
-
     # NB: doesn't take descs, this is going from the NEW flat_args to the
     # subclasses, we don't need to do bookkeeping here
     def inner_fn(fn, args, *, use_trace_joint: bool):
@@ -1229,23 +1219,16 @@ def aot_dispatch_subclass(
             )
             # Don't need fw outs since we already have subclass metadata on them
             grad_inputs = wrapped_outs[1]
-            # Don't count ProcessGroups for gradients - they use the same PGs as forward inputs
             subclass_meta.grad_input_metas = create_subclass_meta(grad_inputs)
 
             # Add extra symints as outputs to the forward/backward graphs
             # ignore nested ints here
             forward_outs, forward_outs_descs = unwrap_tensor_subclasses(
-                wrapped_outs[0],
-                wrapped_outs_descs[0],
-                append_symints=True,
-                append_opaques=True,
+                wrapped_outs[0], wrapped_outs_descs[0], append_symints=True
             )
             # ignore nested ints here
             backward_outs, backward_outs_descs = unwrap_tensor_subclasses(
-                wrapped_outs[1],
-                wrapped_outs_descs[1],
-                append_symints=True,
-                append_opaques=True,
+                wrapped_outs[1], wrapped_outs_descs[1], append_symints=True
             )
             return (
                 (forward_outs, backward_outs),
@@ -1254,7 +1237,7 @@ def aot_dispatch_subclass(
 
         # Step 3: Unwrap any subclass outputs back into dense tensors
         return unwrap_tensor_subclasses(
-            wrapped_outs, wrapped_outs_descs, append_symints=True, append_opaques=True
+            wrapped_outs, wrapped_outs_descs, append_symints=True
         )
 
     def joint_fn(
@@ -1281,10 +1264,9 @@ def aot_dispatch_subclass(
     if is_joint_structure:
         # Add extra symints (size/strides) as input to the forward graph
         primals_unwrapped_pair = unwrap_tensor_subclasses(
-            primals_wrapped,
-            primals_wrapped_descs,
+            args[0],  # type: ignore[arg-type]
+            args_descs[0],  # type: ignore[arg-type]
             append_symints=True,
-            append_opaques=True,
         )
         # We pass append_symints=False here because the partitioner will
         # capture and add any extra argument
@@ -1292,23 +1274,21 @@ def aot_dispatch_subclass(
             args[1],  # type: ignore[arg-type]
             args_descs[1],  # type: ignore[arg-type]
             append_symints=False,
-            append_opaques=False,
         )
 
         args_unwrapped = (primals_unwrapped_pair[0], tangents_unwrapped_pair[0])
         args_descs_unwrapped = (primals_unwrapped_pair[1], tangents_unwrapped_pair[1])
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
-            primals_wrapped, meta.static_input_indices
+            args[0], meta.static_input_indices
         )
     else:
         args_unwrapped, args_descs_unwrapped = unwrap_tensor_subclasses(  # type: ignore[assignment]
-            primals_wrapped,
-            primals_wrapped_descs,
+            args,  # type: ignore[arg-type]
+            args_descs,  # type: ignore[arg-type]
             append_symints=True,
-            append_opaques=True,
         )
         remapped_static_indices = remap_unwrapped_subclass_arg_indices(
-            primals_wrapped, meta.static_input_indices
+            args, meta.static_input_indices
         )
 
     if is_joint_structure:
@@ -1393,62 +1373,7 @@ def create_functional_call(
                         fake_mode = detect_fake_mode()
                         assert fake_mode is not None
                         fake_mode.epoch += 1
-
-                        # When Dynamo traces a model, it may create extra placeholders
-                        # for attribute accesses (e.g., DTensor._local_tensor). The FX
-                        # Interpreter's default process_inputs uses pytree.arg_tree_leaves
-                        # which doesn't know about these extra placeholders. To fix this,
-                        # we pre-flatten the args using the module's _in_spec and then
-                        # add any derived attributes (like _local_tensor) that Dynamo
-                        # recorded as separate placeholders.
-                        placeholder_nodes = [
-                            n for n in mod.graph.nodes if n.op == "placeholder"
-                        ]
-
-                        if (
-                            hasattr(mod, "_in_spec")
-                            and mod._in_spec is not None
-                        ):
-                            from torch.fx._pytree import tree_flatten_spec
-
-                            flat_args = tree_flatten_spec(
-                                (args, {}), mod._in_spec
-                            )
-
-                            # Build a mapping from placeholder name to flat_args index.
-                            # Placeholder names follow pattern: l_flat_args_N_ where N
-                            # is the index into flat_args.
-                            placeholder_names = [n.name for n in placeholder_nodes]
-
-                            # Check if there are more placeholders than flat_args.
-                            # This happens when Dynamo created extra placeholders for
-                            # attribute accesses like DTensor._local_tensor.
-                            if len(placeholder_nodes) > len(flat_args):
-                                # Build final args list matching placeholders
-                                final_args = []
-                                flat_args_idx = 0
-                                for ph_name in placeholder_names:
-                                    if ph_name.endswith("_local_tensor"):
-                                        # This is an attribute access placeholder.
-                                        # The parent is the previous arg.
-                                        parent_arg = final_args[-1]
-                                        if hasattr(parent_arg, "_local_tensor"):
-                                            final_args.append(parent_arg._local_tensor)
-                                        else:
-                                            raise RuntimeError(
-                                                f"Placeholder {ph_name} expects _local_tensor "
-                                                f"but parent {type(parent_arg)} doesn't have it"
-                                            )
-                                    else:
-                                        final_args.append(flat_args[flat_args_idx])
-                                        flat_args_idx += 1
-                                flat_args = final_args
-
-                            out = PropagateUnbackedSymInts(mod).run(
-                                *flat_args, enable_io_processing=False
-                            )
-                        else:
-                            out = PropagateUnbackedSymInts(mod).run(*args)
+                        out = PropagateUnbackedSymInts(mod).run(*args)
             else:
                 out = mod(*args[params_len:], **kwargs)
 

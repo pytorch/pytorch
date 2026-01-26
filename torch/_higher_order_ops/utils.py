@@ -1016,13 +1016,10 @@ def check_input_alias_and_mutation_return_outputs(
     Union[tuple[Any, ...], list[Any]],
 ]:
     def _get_example_value(n):
-        try:
-            if not isinstance(n, torch.fx.Node):
-                return n
-            else:
-                return n.meta["val"] if "val" in n.meta else n.meta["example_value"]
-        except Exception as e:
-            return "dumb workaround for opaque objects not having meta val"
+        if not isinstance(n, torch.fx.Node):
+            return n
+        else:
+            return n.meta["val"] if "val" in n.meta else n.meta["example_value"]
 
     fake_args = [
         _get_example_value(n)
