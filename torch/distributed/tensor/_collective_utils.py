@@ -457,6 +457,11 @@ def redistribute_cost(
         # TODO: see if we want to support this once there's cross mesh communication
         return float("inf")
 
+    # For sub-meshes, ranks not participating in the mesh should not compute
+    # redistribution costs. Return 0 since they won't actually participate.
+    if not current_spec.mesh._is_current_rank_part_of_mesh():
+        return 0.0
+
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     cost = 0.0
     comm_bytes_gb = (
