@@ -1022,7 +1022,6 @@ class TestForeach(TestCase):
             )
         self.assertEqual(expect, actual, equal_nan=False)
 
-    @onlyCUDA
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_foreach_max_with_different_tensor_sizes_and_negative_values(self, device, dtype):
         # Small tensor with all negative values
