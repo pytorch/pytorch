@@ -100,6 +100,10 @@ calculate_swa(std::optional<int64_t> window_size_left,
     needs_swa = true;
     window_left = window_size_left.value_or(window_left);
     window_right = window_size_right.value_or(window_right);
+    // If both windows are set to -1, this is a "Default" value use case. no SWA
+    if(window_left == -1 && window_right == -1) {
+        return std::make_tuple(false/*needs_swa*/, 0, 0);
+    }
   }
   return std::make_tuple(needs_swa, window_left, window_right);
 #else
