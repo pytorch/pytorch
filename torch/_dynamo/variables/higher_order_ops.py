@@ -34,7 +34,6 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -423,7 +422,9 @@ def _call_function_and_unflatten_output(
 
     # Transform variable back into a list (previously made into a tuple by
     # speculate_subgraph function) so as to respect the pytree API typing.
-    flat_list_variable = SourcelessBuilder.create(tx, list).call_function(tx, [flat_variable], {})
+    flat_list_variable = SourcelessBuilder.create(tx, list).call_function(
+        tx, [flat_variable], {}
+    )
     return (
         _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, ret_spec.treespec)
         if ret_spec.treespec
@@ -612,7 +613,9 @@ def _check_supported_callable_arg(
     from .builder import SourcelessBuilder
 
     is_callable = (
-        SourcelessBuilder.create(tx, callable).call_function(tx, [func_var], {}).as_python_constant()
+        SourcelessBuilder.create(tx, callable)
+        .call_function(tx, [func_var], {})
+        .as_python_constant()
     )
     if not is_callable:
         unimplemented(
@@ -1906,7 +1909,9 @@ def speculate_subgraph(
 
                 # Actually, transform the list (returned by flatten) into a tuple
                 # for dynamo consistency.
-                output = SourcelessBuilder.create(tx, tuple).call_function(tx, [output], {})
+                output = SourcelessBuilder.create(tx, tuple).call_function(
+                    tx, [output], {}
+                )
 
                 if remove_consts_from_outputs:
                     # Filter out the constants and save them into a spec. Filtering
@@ -4517,7 +4522,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         """
         Traces the backward method of the autograd.Function object.
         """
-        from . import UserDefinedClassVariable, UserFunctionVariable, UserMethodVariable
+        from . import UserDefinedClassVariable, UserMethodVariable
 
         # Note that for the forward, we do not restore side effects, because we
         # want the later tracing to see the side-effects. But for backward, we
@@ -4594,8 +4599,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
                 if isinstance(self.bwd_fn, types.FunctionType):
                     bwd_fn = SourcelessBuilder.create(
-                        tx,
-                        autograd_function_backward_rewritten(self.bwd_fn)
+                        tx, autograd_function_backward_rewritten(self.bwd_fn)
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
@@ -4986,7 +4990,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         method_name: str,
         args: Sequence[VariableTracker],
     ) -> tuple[VariableTracker, Sequence[VariableTracker]]:
-        from . import UserDefinedClassVariable, UserFunctionVariable, UserMethodVariable
+        from . import UserDefinedClassVariable, UserMethodVariable
 
         source = None
         if self.parent_source:
