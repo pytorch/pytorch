@@ -25,6 +25,23 @@ entirely.
 
 Disclose that the PR was authored with Claude.
 
+# Coding Style Guidelines
+
+Follow these rules for all code changes in this repository:
+
+- Minimize comments; code should be self-explanatory and self-documenting.
+- Prefer clear abstractions over helper functions.
+- Don't make trivial one-off helper functions.
+- State management should be explicit. For example, there should be a clear class definition
+  for an object in Python that has all of the members: don't dynamically `setattr` a field on an
+  object and then dynamically `getattr` the field on the object.
+- Match existing code style and architectural patterns.
+- Assume the reader has familiarity with PyTorch. They may not be the expert
+  on the code that is being read, but they should have some experience in the
+  area.
+
+If uncertain, choose the simpler, more concise implementation.
+
 # Dynamo Config
 
 Use `torch._dynamo.config.patch` for temporarily changing config. It can be used as a decorator on test methods or as a context manager:
