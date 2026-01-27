@@ -24,7 +24,8 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 3: Redirect to Secondary Oncall
   - Step 4: Label the Issue
   - Step 5: High Priority — REQUIRES HUMAN REVIEW
-  - Step 6: Mark Triaged
+  - Step 6: Mark Bot-Triaged
+  - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
 
 **Labels reference:** See [labels.json](labels.json) for the full catalog of 305 labels suitable for triage. This file excludes CI triggers, test configs, release notes, and deprecated labels.
@@ -132,7 +133,11 @@ High priority criteria:
 - Many users affected
 - Core component or popular model impact
 
-### 6) Mark triaged
+### 6) Mark bot-triaged
+
+If any triage action was taken (label added, comment added, or issue closed), add `bot-triaged`.
+
+### 7) Mark triaged
 
 If not transferred/redirected and not flagged for review, add `triaged`.
 
@@ -152,4 +157,5 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
+- Add `bot-triaged` whenever a triage action is taken
 - Add `triaged` label when classification is complete
