@@ -2300,6 +2300,36 @@ def forward(self, arg0_1):
         )
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA required")
+    def test_lift_fresh_copy_preserves_pin_memory(self):
+        # Test that lift_fresh_copy preserves the is_pinned() attribute
+        # This is important for CUDA graphs with non_blocking copies
+        # See https://github.com/pytorch/pytorch/issues/XXXXX
+        pinned_tensor = torch.tensor([1.0, 2.0, 3.0], pin_memory=True)
+        self.assertTrue(pinned_tensor.is_pinned())
+
+        # Call lift_fresh_copy directly
+        copied = torch.ops.aten.lift_fresh_copy.default(pinned_tensor)
+
+        # Verify the copy preserves pin_memory and values
+        self.assertTrue(copied.is_pinned(), "lift_fresh_copy should preserve is_pinned()")
+        self.assertEqual(pinned_tensor, copied)
+        # Verify it's actually a copy (different storage)
+        self.assertNotEqual(
+            pinned_tensor.untyped_storage()._cdata, copied.untyped_storage()._cdata
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA required")
+    def test_lift_fresh_copy_non_pinned_unchanged(self):
+        # Test that lift_fresh_copy works normally for non-pinned tensors
+        regular_tensor = torch.tensor([1.0, 2.0, 3.0])
+        self.assertFalse(regular_tensor.is_pinned())
+
+        copied = torch.ops.aten.lift_fresh_copy.default(regular_tensor)
+
+        self.assertFalse(copied.is_pinned())
+        self.assertEqual(regular_tensor, copied)
+
 
 @xfail_inherited_tests(
     [
