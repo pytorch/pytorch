@@ -2643,6 +2643,21 @@ def setup(app):
     app.connect("autodoc-process-docstring", process_docstring)
     app.connect("html-page-context", hide_edit_button_for_pages)
     app.config.add_last_updated = True
+
+    try:
+        from sphinx_tippy import get_tippy_data
+
+        def merge_tippy_data(app, env, docnames, other):
+            """Merge tippy data from parallel workers."""
+            tippy_data = get_tippy_data(app)
+            other_data = getattr(other, "tippy_data", {})
+            tippy_data["pages"].update(other_data.get("pages", {}))
+
+        app.connect("env-merge-info", merge_tippy_data)
+    except (ImportError, AttributeError):
+        # sphinx-tippy not installed or older version without get_tippy_data
+        pass
+
     return {"version": "0.1", "parallel_read_safe": True}
 
 
