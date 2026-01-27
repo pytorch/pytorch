@@ -4580,6 +4580,17 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_frozenset_reconstruction2(self):
+        def fn(x):
+            s = frozenset([1, x])
+            return x + 1, s
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_frozenset_illegal_call_method(self):
         def fn_add():
             s = frozenset((1, 2, 3))
