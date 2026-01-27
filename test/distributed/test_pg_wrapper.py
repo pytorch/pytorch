@@ -484,8 +484,8 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
 
 
 if __name__ == "__main__":
-    assert not torch.get_device_module()._initialized, (
-        "test_pg_wrapper must not have initialized CUDA context on main process"
+    assert not (torch.cuda.is_initialized() or torch.xpu.is_initialized()), (
+        "test_pg_wrapper must not have initialized CUDA/XPU context on main process"
     )
 
     run_tests()
