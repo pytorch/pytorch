@@ -1908,6 +1908,99 @@ class TestLinalg(TestCase):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
             self.assertEqual(result, result_numpy, msg=msg)
 
+    @dtypes(torch.float, torch.double)
+    def test_powsum(self, device, dtype):
+        ords = [0.5, 1, 2, 3, 4.5, -1, -2, -0.5, 0, float('inf'), float('-inf')]
+        input_sizes = [(10,), (4, 5), (3, 4, 5), (0,), (0, 10)]
+
+        for input_size, ord in product(input_sizes, ords):
+            x = make_tensor(input_size, dtype=dtype, device=device, low=0.1, high=0.9)
+            for dim in [None, 0, -1]:
+                if dim == -1 and len(input_size) <= 1:
+                    continue
+                for keepdim in [True, False]:
+                    result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim)
+                    expected = x.abs().pow(ord).sum(dim=dim, keepdim=keepdim)
+                    self.assertEqual(result, expected)
+
+    @onlyCUDA
+    def test_powsum_dtype_kwarg(self, device):
+        # Test dtype kwarg with bfloat16 input and float32 computation
+        # This tests the dtype conversion path in the kernel
+        ords = [0.5, 1, 2, 3]
+        input_sizes = [(10,), (4, 5), (3, 4, 5)]
+
+        for input_size, ord in product(input_sizes, ords):
+            x = make_tensor(input_size, dtype=torch.bfloat16, device=device, low=0.1, high=0.9)
+            for dim in [None, 0, -1]:
+                if dim == -1 and len(input_size) <= 1:
+                    continue
+                for keepdim in [True, False]:
+                    result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim, dtype=torch.float32)
+                    # Expected: convert to float32 first, then compute
+                    expected = x.to(torch.float32).abs().pow(ord).sum(dim=dim, keepdim=keepdim)
+                    self.assertEqual(result.dtype, torch.float32)
+                    self.assertEqual(result, expected)
+
+    @onlyCPU
+    def test_powsum_dtype_kwarg_1d_reduction(self, device):
+        # Test dtype kwarg on CPU with bfloat16 input and float32 computation
+        # Tests both the 1D reduction path (explicit conversion) and larger reductions (kernel handles it)
+        ords = [0.5, 1, 2, 3]
+
+        # Test case where reduction dims have size > 1 (kernel handles dtype conversion)
+        for input_size in [(10,), (4, 5), (3, 4, 5)]:
+            for ord in ords:
+                x = make_tensor(input_size, dtype=torch.bfloat16, device=device, low=0.1, high=0.9)
+                for dim in [None, 0, -1]:
+                    if dim == -1 and len(input_size) <= 1:
+                        continue
+                    for keepdim in [True, False]:
+                        result = torch.linalg._powsum(x, ord, dim=dim, keepdim=keepdim, dtype=torch.float32)
+                        expected = x.to(torch.float32).abs().pow(ord).sum(dim=dim, keepdim=keepdim)
+                        self.assertEqual(result.dtype, torch.float32)
+                        self.assertEqual(result, expected)
+
+        # Test case where reduction dims have size 1 (explicit conversion path)
+        x = make_tensor((1, 5), dtype=torch.bfloat16, device=device, low=0.1, high=0.9)
+        for ord in ords:
+            result = torch.linalg._powsum(x, ord, dim=0, keepdim=True, dtype=torch.float32)
+            expected = x.to(torch.float32).abs().pow(ord).sum(dim=0, keepdim=True)
+            self.assertEqual(result.dtype, torch.float32)
+            self.assertEqual(result, expected)
+
+    @dtypes(torch.float, torch.double)
+    def test_foreach_powsum(self, device, dtype):
+        ords = [0.5, 1, 2, 3, 4.5, -1, -2, 0]
+        tensors = [make_tensor((10,), dtype=dtype, device=device, low=0.1, high=0.9) for _ in range(3)]
+        for ord in ords:
+            results = torch._foreach_powsum(tensors, ord)
+            for t, r in zip(tensors, results):
+                expected = t.abs().pow(ord).sum()
+                self.assertEqual(r, expected)
+
+    @onlyCUDA
+    def test_foreach_powsum_dtype_kwarg(self, device):
+        # Test dtype kwarg with bfloat16 input and float32 computation
+        # This tests the dtype conversion path in both slow and fast CUDA paths
+        ords = [1, 2]  # Fast path for p=1 and p=2
+        tensors = [make_tensor((10,), dtype=torch.bfloat16, device=device, low=0.1, high=0.9) for _ in range(3)]
+        for ord in ords:
+            results = torch._foreach_powsum(tensors, ord, dtype=torch.float32)
+            for t, r in zip(tensors, results):
+                # Expected: convert to float32 first, then compute
+                expected = t.to(torch.float32).abs().pow(ord).sum()
+                self.assertEqual(r.dtype, torch.float32)
+                self.assertEqual(r, expected)
+
+        # Also test slow path (p != 1, 2)
+        for ord in [0.5, 3]:
+            results = torch._foreach_powsum(tensors, ord, dtype=torch.float32)
+            for t, r in zip(tensors, results):
+                expected = t.to(torch.float32).abs().pow(ord).sum()
+                self.assertEqual(r.dtype, torch.float32)
+                self.assertEqual(r, expected)
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)

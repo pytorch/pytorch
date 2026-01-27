@@ -872,16 +872,6 @@ add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
 target_link_libraries(pybind::pybind11 INTERFACE Python::Module)
 
-# ---[ OpenTelemetry API headers
-find_package(OpenTelemetryApi)
-if(NOT OpenTelemetryApi_FOUND)
-  message(STATUS "Using third_party/opentelemetry-cpp.")
-  set(OpenTelemetryApi_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../third_party/opentelemetry-cpp/api/include)
-endif()
-message(STATUS "opentelemetry api include dirs: " "${OpenTelemetryApi_INCLUDE_DIRS}")
-add_library(opentelemetry::api INTERFACE IMPORTED)
-target_include_directories(opentelemetry::api SYSTEM INTERFACE ${OpenTelemetryApi_INCLUDE_DIRS})
-
 # ---[ MPI
 if(USE_MPI)
   find_package(MPI)
