@@ -271,7 +271,6 @@ def _optimize_transform_infos(
     device_mesh: DeviceMesh,
     src_placements: tuple[Placement, ...],
     dst_placements: tuple[Placement, ...],
-    src_shard_order: ShardOrder | None = None,
 ) -> list[_TransformInfo | _FlattenedTransformInfo]:
     """
     Optimize transform infos by merging consecutive same-type collectives into
@@ -373,19 +372,11 @@ def _optimize_transform_infos(
             if mesh_dims != sorted_mesh_dims:
                 return None, "non_ascending_mesh_dims"
         elif comm_type == "all_gather":
-            # For all_gather: the shard order (data layout) must be ascending for
-            # flattening to work correctly. Transform order doesn't matter.
-            # Check shard_order when provided; if not provided, assume default (ascending).
-            if src_shard_order:
-                src, _ = first_placements
-                if isinstance(src, Shard):
-                    affected_tensor_dim = src.dim
-                    for entry in src_shard_order:
-                        if entry.tensor_dim == affected_tensor_dim:
-                            # Check if the mesh dims in the shard order are ascending
-                            if entry.mesh_dims != tuple(sorted(entry.mesh_dims)):
-                                return None, "non_ascending_mesh_dims"
-                            break
+            # For all_gather: transforms come from planner in innermost-to-outermost order
+            # (descending mesh dims for ascending shard order). If transforms are not in
+            # descending order, the shard order isn't ascending and we can't flatten.
+            if mesh_dims != tuple(sorted_mesh_dims[::-1]):
+                return None, "non_ascending_mesh_dims"
         # Use sorted dims for mesh lookup (required by DeviceMesh API)
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, sorted_mesh_dims)
         if flattened_mesh is None:
@@ -505,6 +496,9 @@ def _optimize_transform_infos(
                 )
 
         i = j
+    logger.debug(
+        "_optimize_transform_infos original: %s, optimized: %s", transform_infos, result
+    )
 
     return result
 
@@ -1391,7 +1385,6 @@ def redistribute_local_tensor(
         device_mesh,
         current_spec.placements,
         target_spec.placements,
-        current_spec.shard_order,
     )
 
     debug_mode = get_active_debug_mode()
