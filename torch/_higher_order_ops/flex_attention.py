@@ -730,6 +730,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         mask_mod_other_buffers: tuple[Any, ...],
         *score_mod_other_buffers: tuple[Any, ...],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        ctx.set_materialize_grads(False)
         any_buffer_requires_grad = any(
             buffer.requires_grad
             for buffer in mask_mod_other_buffers
@@ -980,7 +981,8 @@ def sdpa_dense_backward(
     # We're undoing the log -> log2 change of base in the forwards
     logsumexp = logsumexp * math.log(2)
     # The backwards formula for the log -> log2 change of base in the forwards
-    grad_logsumexp = grad_logsumexp / math.log(2)
+    if grad_logsumexp is not None:
+        grad_logsumexp = grad_logsumexp / math.log(2)
     scores, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -1007,9 +1009,12 @@ def sdpa_dense_backward(
         -1,
         keepdim=True,
     )
-    grad_score_mod = softmax_scores * (
-        grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
-    )
+    if grad_logsumexp is not None:
+        grad_score_mod = softmax_scores * (
+            grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
+        )
+    else:
+        grad_score_mod = softmax_scores * (grad_softmax_scores - sum_scores)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
@@ -1276,7 +1281,9 @@ def flex_attention_backward_functionalize(
     assert isinstance(out_unwrapped, torch.Tensor)
     assert isinstance(logsumexp_unwrapped, torch.Tensor)
     assert isinstance(grad_out_unwrapped, torch.Tensor)
-    assert isinstance(grad_logsumexp_unwrapped, torch.Tensor)
+    assert grad_logsumexp_unwrapped is None or isinstance(
+        grad_logsumexp_unwrapped, torch.Tensor
+    )
     assert isinstance(block_mask_unwrapped, tuple)
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
