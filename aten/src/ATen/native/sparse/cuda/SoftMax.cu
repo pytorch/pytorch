@@ -50,6 +50,8 @@
 
 #include <c10/macros/Macros.h>
 
+#include <c10/cuda/CUDAMathCompat.h>
+
 namespace at::native {
 namespace {
 
