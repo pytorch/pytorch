@@ -919,9 +919,7 @@ class RedistributeTest(DTensorTestBase):
         # Test each reduce op type for R->P transitions
         for reduce_op in ("sum", "avg", "min", "max"):
             # Create replicated tensor
-            replica_tensor = distribute_tensor(
-                local_tensor, device_mesh, [Replicate()]
-            )
+            replica_tensor = distribute_tensor(local_tensor, device_mesh, [Replicate()])
 
             # Apply R->P transition with the specified reduce_op
             partial_spec = Partial(reduce_op)
