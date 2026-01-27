@@ -449,12 +449,12 @@ if(USE_XPU)
   list(APPEND ATen_XPU_INCLUDE ${SYCL_INCLUDE_DIR})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS ${SYCL_LIBRARY})
   if(WIN32)
-      if(DEFINED ENV{LEVEL_ZERO_V1_SDK_PATH})
-          include_directories("$ENV{LEVEL_ZERO_V1_SDK_PATH}/include")
-      else()
-          message(FATAL_ERROR
-              ("LEVEL_ZERO_V1_SDK_PATH environment variable is not set on Windows, please update the Intel Graphics Driver.")
-      endif()
+    if(DEFINED ENV{LEVEL_ZERO_V1_SDK_PATH})
+      include_directories("$ENV{LEVEL_ZERO_V1_SDK_PATH}/include")
+    else()
+      message(FATAL_ERROR "LEVEL_ZERO_V1_SDK_PATH environment variable is not set."
+      "Please update the Intel Graphics Driver.")
+    endif()
   endif()
 endif()
 
