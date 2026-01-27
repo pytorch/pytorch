@@ -444,7 +444,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(self.value != args[0].value)
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
-            return SourcelessBuilder.create(tx, dict).call_method(tx, name, args, kwargs)
+            return SourcelessBuilder.create(tx, dict).call_method(
+                tx, name, args, kwargs
+            )
         elif issubclass(self.value, (set, frozenset)) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, set).call_method(tx, name, args, kwargs)
