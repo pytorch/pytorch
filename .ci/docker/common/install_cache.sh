@@ -9,11 +9,12 @@ install_ubuntu() {
   # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
   apt-get install -y cargo
   echo "Checking out sccache repo"
-  git clone https://github.com/mozilla/sccache -b v0.10.0
+  git clone https://github.com/mozilla/sccache -b v0.13.0
   cd sccache
   echo "Building sccache"
-  cargo build --release
+  cargo build --release --features="dist-client dist-server"
   cp target/release/sccache /opt/cache/bin
+  cp target/release/sccache-dist /opt/cache/bin
   echo "Cleaning up"
   cd ..
   rm -rf sccache
