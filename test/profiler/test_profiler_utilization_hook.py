@@ -1,3 +1,4 @@
+# Owner(s): ["module: profiler"]
 """
 Test the profiler export_chrome_trace callback mechanism.
 """
