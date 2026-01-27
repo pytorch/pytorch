@@ -510,8 +510,8 @@ def get_comprehension_bytecode_prefix() -> list[str]:
 
     assert sys.version_info >= (3, 12)
 
-    def fn():
-        return [i for i in range(1)]
+    def fn() -> list[int]:
+        return [i for i in range(1)]  # noqa: C416
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
@@ -522,7 +522,7 @@ def get_comprehension_bytecode_prefix() -> list[str]:
 
 
 @functools.cache
-def get_comprehension_result_patterns() -> dict[str, str]:
+def get_comprehension_result_patterns() -> dict[str, Optional[str]]:
     """Discover bytecode patterns for comprehension result handling.
 
     Returns dict with:
@@ -535,27 +535,27 @@ def get_comprehension_result_patterns() -> dict[str, str]:
     assert sys.version_info >= (3, 12)
 
     # Pattern 1: Result assigned to variable
-    def fn_assigned():
-        result = [i for i in range(1)]
+    def fn_assigned() -> list[int]:
+        result = [i for i in range(1)]  # noqa: C416
         return result
 
     # Pattern 2: Result discarded
-    def fn_discarded():
-        [i for i in range(1)]
+    def fn_discarded() -> int:
+        [i for i in range(1)]  # noqa: C416
         return 1
 
     # Pattern 3: Result returned directly
-    def fn_returned():
-        return [i for i in range(1)]
+    def fn_returned() -> list[int]:
+        return [i for i in range(1)]  # noqa: C416
 
-    def find_post_end_for_opcode(fn):
+    def find_post_end_for_opcode(fn: Callable[..., Any]) -> Optional[str]:
         insts = list(dis.get_instructions(fn))
         for i, inst in enumerate(insts):
             if inst.opname == "END_FOR" and i + 1 < len(insts):
                 return insts[i + 1].opname
         return None
 
-    def find_discard_opcode(fn):
+    def find_discard_opcode(fn: Callable[..., Any]) -> Optional[str]:
         insts = list(dis.get_instructions(fn))
         for i, inst in enumerate(insts):
             if inst.opname == "END_FOR":
@@ -567,7 +567,9 @@ def get_comprehension_result_patterns() -> dict[str, str]:
                     return insts[j].opname
         return None
 
-    def find_return_after_iterator_restore(fn):
+    def find_return_after_iterator_restore(
+        fn: Callable[..., Any],
+    ) -> Optional[str]:
         insts = list(dis.get_instructions(fn))
         for i, inst in enumerate(insts):
             if inst.opname == "END_FOR":
@@ -4455,6 +4457,7 @@ class InstructionTranslatorBase(
         if sys.version_info < (3, 12):
             return False
 
+        assert self.instruction_pointer is not None
         ip = self.instruction_pointer - 1
 
         pattern = get_comprehension_bytecode_prefix()
