@@ -41,7 +41,6 @@ from torch._prims_common.wrappers import (
 )
 from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.fx.experimental import _config as exp_config
-from torch.fx.experimental.symbolic_shapes import guard_or_false
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils import _pytree as pytree
 
@@ -3589,6 +3588,8 @@ def meta_index_Tensor(self, indices):
 
     out = self.new_empty(before_shape + replacement_shape + after_shape)
 
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     if guard_or_false(self.numel() == 0):
         # No need to worry about the output strides if self is empty.
         return out
@@ -5626,6 +5627,8 @@ def gather_shape_check(self, dim, index):
 
 @register_meta(aten.gather.default)
 def meta_gather(self, dim, index, sparse_grad=False):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
     is_index_empty = guard_or_false(index.numel() == 0)
     if not is_index_empty:
@@ -5687,6 +5690,8 @@ def ensure_nonempty_dim(dim):
 
 # From aten/src/ATen/native/ScatterGatherChecks.h
 def scatter_shape_check(self, dim, index, src_opt=None):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     if guard_or_false(index.numel() == 0):
         return
     torch._check(
