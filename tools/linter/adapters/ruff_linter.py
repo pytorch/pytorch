@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "ruff==0.14.4",
+# ]
+# ///
 """Adapter for https://github.com/charliermarsh/ruff."""
 
 from __future__ import annotations
