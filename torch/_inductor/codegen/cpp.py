@@ -709,13 +709,47 @@ class CppOverrides(OpOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        # NOTE: We removed the cache_dtype_convert optimization here because it can cause
-        # numerical divergence when the low-precision intermediate is semantically meaningful.
-        # See https://github.com/pytorch/pytorch/issues/115260 for context.
-        # The optimization assumed that convert<float>(convert<bf16>(x)) == x, but this
-        # ignores precision loss through the bf16 intermediate.
-        # TODO: Re-enable this optimization only for store/load legalization cases where
-        # the precision loss is not semantically meaningful.
+        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+            """
+            https://github.com/pytorch/pytorch/issues/115260
+            For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
+            in low-precision floating point data type. When the output of node1 also serves as the output of the
+            kernel, the result of nodes would be different from the case when output of node1 is not the output
+            of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
+            storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
+            to the cse cache.
+
+            Example (pseudo code):
+                node1_output = ...
+                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+                store(buf, node1_output_lowp)
+                node2_input_lowp = load(buf)
+                node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+            Without cse cache trick:
+                node1_output = ...
+                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+                store(buf, node1_output_lowp)
+                node2_input_lowp = node_output_lowp # hit store cache
+                node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
+
+            With cse cache trick:
+                node1_output = ...
+                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
+                # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
+                store(buf, node1_output_lowp)
+                node2_input_lowp = node_output_lowp # hit store cache
+                node2_input = node1_output # hit cse cache
+
+            IMPORTANT: We store metadata on the lowp csevar so that the cache is only
+            populated when the value is actually stored to a buffer (in CppKernel.store).
+            This avoids incorrectly caching for internal computations where the lowp
+            intermediate is semantically meaningful (e.g., layer_norm bf16 output used
+            in add with f32).
+            """
+            # Store metadata for later caching at store time
+            csevar._lowp_fp32_source = x
+            csevar._lowp_src_dtype = src_dtype
         return csevar
 
     @staticmethod
@@ -1629,9 +1663,10 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        # NOTE: We removed the cache_dtype_convert optimization here because it can cause
-        # numerical divergence when the low-precision intermediate is semantically meaningful.
-        # TODO: Re-enable this optimization only for store/load legalization cases.
+        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
+            # Store metadata for later caching at store time (see scalar to_dtype)
+            csevar._lowp_fp32_source = x
+            csevar._lowp_src_dtype = src_dtype
         return csevar
 
     @staticmethod
@@ -2104,6 +2139,24 @@ class CppKernel(Kernel):
         assert "buf" in name
         var = self.args.output(name)
         index = self.rename_indexing(index)
+
+        # Cache dtype conversion for store/load consistency
+        # (see https://github.com/pytorch/pytorch/issues/115260)
+        # When storing a low-precision value that came from a high-precision computation,
+        # cache the reverse conversion so that loading and promoting back gives the same
+        # result as using the high-precision value directly.
+        # This is ONLY done at store time (not at to_dtype time) to avoid incorrectly
+        # caching for internal computations where the low-precision is semantically meaningful.
+        if (
+            isinstance(value, CppCSEVariable)
+            and hasattr(value, "_lowp_fp32_source")
+            and value._lowp_fp32_source is not None
+        ):
+            # Cache: to_f32(lowp_value) -> original_f32_value
+            src_var = value._lowp_fp32_source
+            src_dtype = getattr(value, "_lowp_src_dtype", torch.float)
+            self.cache_dtype_convert(src_var, src_dtype, value, value.dtype)
+
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
@@ -2928,6 +2981,19 @@ class CppVecKernel(CppKernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         assert isinstance(value, CppCSEVariable), value
+
+        # Cache dtype conversion for store/load consistency
+        # (see https://github.com/pytorch/pytorch/issues/115260)
+        # Same as scalar store - cache at store time, not to_dtype time
+        if (
+            isinstance(value, CppCSEVariable)
+            and hasattr(value, "_lowp_fp32_source")
+            and value._lowp_fp32_source is not None
+        ):
+            src_var = value._lowp_fp32_source
+            src_dtype = getattr(value, "_lowp_src_dtype", torch.float)
+            self.cache_dtype_convert(src_var, src_dtype, value, value.dtype)
+
         if not value.is_vec:
             # this happens when we store a scalar into a vectorized buffer like "fill"
             value = self.broadcast(value)

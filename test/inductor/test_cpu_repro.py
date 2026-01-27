@@ -4313,6 +4313,92 @@ class CPUReproTests(TestCase):
 
         self.common(fn, ())
 
+    def test_bf16_to_f32_promotion_preserves_precision_loss(self):
+        """
+        Test that bf16 precision loss is preserved when bf16 values are promoted
+        back to f32 in fused kernels.
+
+        This is a regression test for a bug where cache_dtype_convert incorrectly
+        cached the reverse conversion (bf16 -> f32 -> original_f32), causing the
+        precision loss through bf16 to be skipped.
+
+        The bug manifested in backward pass fusion when:
+        1. layer_norm computes internally in f32, then casts output to bf16
+        2. That bf16 value is added with an f32 value (promoting bf16 back to f32)
+        3. cache_dtype_convert cached: to_f32(bf16_result) -> original_f32_value
+        4. The fused backward kernel used the original f32 instead of bf16-roundtripped
+
+        Generated code before fix (WRONG):
+            tmp17 = layer_norm_internal  # f32
+            tmp18 = convert<bf16>(tmp17)  # bf16 (DEAD CODE - never used!)
+            tmp20 = tmp17 + other  # Uses f32 tmp17, skipping bf16 precision loss
+
+        Generated code after fix (CORRECT):
+            tmp17 = layer_norm_internal  # f32
+            tmp18 = convert<bf16>(tmp17)  # bf16
+            tmp19 = convert<f32>(tmp18)   # f32 (with bf16 precision loss)
+            tmp20 = tmp19 + other         # Correct!
+        """
+        torch.manual_seed(9157)
+
+        def fn(arg_0, arg_1, arg_2, arg_3, sentinel):
+            var_node_2 = torch.full((14, 16), 1.158473253250122, dtype=torch.float32)
+            var_node_1 = torch.nn.functional.relu(var_node_2)
+            var_node_6 = torch.full((14, 1), -0.94140625, dtype=torch.bfloat16)
+            var_node_5 = torch.matmul(
+                var_node_6.to(torch.bfloat16), arg_0.to(torch.bfloat16)
+            )
+            var_node_9 = torch.full((16,), 0.76953125, dtype=torch.bfloat16)
+            var_node_8 = torch.reshape(var_node_9, [16])
+            var_node_11 = torch.full((16,), 2.4375, dtype=torch.bfloat16)
+            var_node_10 = torch.div(var_node_11, arg_1)
+            var_node_4 = torch.nn.functional.layer_norm(
+                var_node_5.to(torch.bfloat16),
+                (16,),
+                weight=var_node_8.to(torch.bfloat16),
+                bias=var_node_10.to(torch.bfloat16),
+            )
+            var_node_14 = torch.nn.functional.relu(arg_2)
+            var_node_16 = arg_3.contiguous().view([15, 16])
+            var_node_13 = torch.matmul(
+                var_node_14.to(torch.float32), var_node_16.to(torch.float32)
+            )
+            var_node_3 = torch.add(var_node_4, var_node_13)
+            var_node_0 = torch.div(var_node_1, var_node_3)
+            result = var_node_0 * sentinel
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        arg_0 = torch.randn(1, 16, dtype=torch.bfloat16)
+        arg_1 = torch.randn(16, dtype=torch.float32)
+        arg_2 = torch.randn(14, 15, dtype=torch.float32)
+        arg_3 = torch.randn(240, dtype=torch.float32)
+
+        args = (arg_0, arg_1, arg_2, arg_3, sentinel)
+
+        # Eager forward + backward
+        out_eager = fn(*args)
+        out_eager.sum().backward()
+
+        # Compiled forward + backward (the bug was in the backward pass fusion)
+        compiled_fn = torch.compile(fn, fullgraph=True, dynamic=True)
+        out_compiled = compiled_fn(*args)
+        out_compiled.sum().backward()
+
+        # Before fix: ~5.67% relative difference
+        # After fix: <2% relative difference
+        rel_diff = (
+            (out_eager.sum() - out_compiled.sum()).abs()
+            / (out_eager.sum().abs() + 1e-12)
+            * 100
+        )
+        self.assertLess(
+            rel_diff,
+            2.0,
+            f"Relative diff {rel_diff:.2f}% exceeds 2% threshold. "
+            "bf16 precision loss may be incorrectly skipped in fused kernel.",
+        )
+
     def test_select_tiliing_with_index_expr(self):
         def fn(x, y):
             x = torch.ops.aten.view.default(x, [8, 8, 8, 3136])
