@@ -132,8 +132,8 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         value: torch.Tensor,
         out: torch.Tensor,
         logsumexp: torch.Tensor,
-        grad_out: torch.Tensor,
-        grad_logsumexp: torch.Tensor,
+        grad_out: torch.Tensor | None,
+        grad_logsumexp: torch.Tensor | None,
         fw_graph: Union[Callable, GraphModule],
         joint_graph: GraphModule,
         block_mask: tuple,
@@ -919,8 +919,8 @@ def sdpa_dense_backward(
     value: torch.Tensor,
     out: torch.Tensor,
     logsumexp: torch.Tensor,
-    grad_out: torch.Tensor,
-    grad_logsumexp: torch.Tensor,
+    grad_out: torch.Tensor | None,
+    grad_logsumexp: torch.Tensor | None,
     fw_graph: Callable,  # GraphModule type hint?
     joint_graph: Callable,
     block_mask: tuple,
@@ -997,6 +997,9 @@ def sdpa_dense_backward(
     masked_out_rows = logsumexp == -float("inf")
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
     softmax_scores = torch.where(masked_out_rows.unsqueeze(-1), 0, softmax_scores)
+
+    if grad_out is None:
+        grad_out = torch.zeros_like(out)
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
@@ -1280,7 +1283,7 @@ def flex_attention_backward_functionalize(
     assert isinstance(value_unwrapped, torch.Tensor)
     assert isinstance(out_unwrapped, torch.Tensor)
     assert isinstance(logsumexp_unwrapped, torch.Tensor)
-    assert isinstance(grad_out_unwrapped, torch.Tensor)
+    assert grad_out_unwrapped is None or isinstance(grad_out_unwrapped, torch.Tensor)
     assert grad_logsumexp_unwrapped is None or isinstance(
         grad_logsumexp_unwrapped, torch.Tensor
     )
