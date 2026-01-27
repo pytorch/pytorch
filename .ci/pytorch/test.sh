@@ -149,8 +149,6 @@ export LANG=C.UTF-8
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
 if [[ -d "${HF_CACHE}" ]]; then
-  # Enable HF_CACHE directory for vLLM tests. If this works out, we can enable
-  # this for all CI jobs including LF fleet
   export HF_HOME="${HF_CACHE}"
 fi
 
