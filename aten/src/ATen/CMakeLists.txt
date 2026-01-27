@@ -334,33 +334,38 @@ IF(USE_MSLK)
     file(GLOB_RECURSE mslk_native_rocm_hip
       "${MSLK_SRCS}/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
       "${MSLK_SRCS}/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
-    set_source_files_properties(${mslk_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+    set_source_files_properties(${mslk_native_rocm_hip} PROPERTIES LANGUAGE HIP)
 
-    # Add additional HIPCC compiler flags for performance
-    set(MSLK_EXTRA_HIPCC_FLAGS
-      -mllvm
-      -enable-post-misched=0
-      -mllvm
-      -greedy-reverse-local-assignment=1
+    # Add additional HIP compiler flags for performance
+    #
+    # WARNING: do not add a space between `-mllvm` and `flag-to-pass` like
+    # `-mllvm -enable-post-misched=0`. Concatenate them with `=` instead like
+    # below.
+    #
+    # The reason is that CMake performs flag deduplication, so when there
+    # are multiple `-mllvm` flags like `-mllvm -flag-foo=0 -mllvm -flag-bar=1`,
+    # only the first `-mllvm` is kept so the compiler receives instead
+    # `-mllvm -flag-foo=0 -flag-bar=1`. By inserting `=` in between,
+    # `-mllvm=-flag-foo=0` becomes one single flag so deduplication doesn't
+    # remove `-mllvm`.
+    set(MSLK_HIP_FLAGS
+      -mllvm=-enable-post-misched=0
+      -mllvm=-greedy-reverse-local-assignment=1
       -fhip-new-launch-api)
     if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
-        list(PREPEND MSLK_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
+        list(PREPEND MSLK_HIP_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
       endif()
 
-    # Only compile for gfx942 for now.
-    # This is rather hacky, I could not figure out a clean solution :(
-    set(HIP_CLANG_FLAGS_ORIGINAL ${HIP_CLANG_FLAGS})
-    string(REGEX REPLACE "--offload-arch=[^ ]*" "" FILTERED_HIP_CLANG_FLAGS "${HIP_CLANG_FLAGS}")
+    # Only compile for gfx942 for now
     if("gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-      list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=gfx942;)
+      set(MSLK_HIP_ARCHITECTURES "gfx942")
+    else()
+      set(MSLK_HIP_ARCHITECTURES "OFF")
     endif()
-    set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
 
-    hip_add_library(
-      mslk STATIC
-      ${mslk_native_rocm_hip}
-      HIPCC_OPTIONS ${HIP_HCC_FLAGS} ${MSLK_EXTRA_HIPCC_FLAGS})
-    set(HIP_CLANG_FLAGS ${HIP_CLANG_FLAGS_ORIGINAL})
+    add_library(mslk STATIC ${mslk_native_rocm_hip})
+    set_target_properties(mslk PROPERTIES HIP_ARCHITECTURES "${MSLK_HIP_ARCHITECTURES}")
+    target_compile_options(mslk PRIVATE $<$<COMPILE_LANGUAGE:HIP>:${MSLK_HIP_FLAGS}>)
     set_target_properties(mslk PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_compile_definitions(mslk PRIVATE MSLK_NO_EXTENDED_SHAPES)
 

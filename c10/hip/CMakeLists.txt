@@ -27,12 +27,15 @@ file(GLOB C10_HIP_SRCS
 # Mark the cc files as HIP files, so we call the compiler.  (They have to be
 # suffixed with cc, because the hcc compiler won't accept them otherwise.)
 file(GLOB __c10_hip_srcs_cpp *.cc impl/*.cc)
-set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES LANGUAGE HIP)
 
 file(GLOB_RECURSE C10_HIP_HEADERS *.h)
 
 if(NOT BUILD_LIBTORCHLESS)
-  hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
+  add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
+
+  # Set HIP architectures
+  set_target_properties(c10_hip PROPERTIES HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}")
   torch_compile_options(c10_hip)
 
   # Propagate HIP_CXX_FLAGS that were set from Dependencies.cmake
@@ -49,7 +52,7 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   # ---[ Dependency of c10_hip
-  target_link_libraries(c10_hip PUBLIC ${C10_LIB} hip::amdhip64)
+  target_link_libraries(c10_hip PUBLIC ${C10_LIB} hip::host)
 
   target_include_directories(
       c10_hip PUBLIC
