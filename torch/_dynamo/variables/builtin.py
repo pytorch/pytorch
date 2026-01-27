@@ -2317,7 +2317,10 @@ class BuiltinVariable(VariableTracker):
                     f"{len(kwargs)} kwargs",
                 )
         strict = kwargs.pop("strict", ConstantVariable.create(False))
-        iter_args = [SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {}) for arg in args]
+        iter_args = [
+            SourcelessBuilder.create(tx, iter).call_function(tx, [arg], {})
+            for arg in args
+        ]
         return variables.ZipVariable(
             iter_args,
             strict=strict.as_python_constant(),
