@@ -19,6 +19,110 @@ bool has_key(
   return map.find(key) != map.end();
 }
 
+// Mapping from serialized enum values (torch._export.serde.schema) to c10
+// enums. The serialized format has different enum values than c10 (e.g.,
+// UNKNOWN=0 offset).
+c10::ScalarType convertSerializedScalarType(int serialized_value) {
+  constexpr int kInvalid = -1;
+  constexpr int kScalarTypeMap[] = {
+      kInvalid, // 0: UNKNOWN
+      static_cast<int>(c10::ScalarType::Byte), // 1
+      static_cast<int>(c10::ScalarType::Char), // 2
+      static_cast<int>(c10::ScalarType::Short), // 3
+      static_cast<int>(c10::ScalarType::Int), // 4
+      static_cast<int>(c10::ScalarType::Long), // 5
+      static_cast<int>(c10::ScalarType::Half), // 6
+      static_cast<int>(c10::ScalarType::Float), // 7
+      static_cast<int>(c10::ScalarType::Double), // 8
+      static_cast<int>(c10::ScalarType::ComplexHalf), // 9
+      static_cast<int>(c10::ScalarType::ComplexFloat), // 10
+      static_cast<int>(c10::ScalarType::ComplexDouble), // 11
+      static_cast<int>(c10::ScalarType::Bool), // 12
+      static_cast<int>(c10::ScalarType::BFloat16), // 13
+      kInvalid, // 14
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid,
+      kInvalid, // 27
+      static_cast<int>(c10::ScalarType::UInt16), // 28
+      static_cast<int>(c10::ScalarType::Float8_e4m3fn), // 29
+      static_cast<int>(c10::ScalarType::Float8_e5m2), // 30
+      static_cast<int>(c10::ScalarType::Float8_e4m3fnuz), // 31
+      static_cast<int>(c10::ScalarType::Float8_e5m2fnuz), // 32
+  };
+  constexpr int kMapSize = sizeof(kScalarTypeMap) / sizeof(kScalarTypeMap[0]);
+
+  TORCH_CHECK(
+      serialized_value >= 0 && serialized_value < kMapSize,
+      "Serialized ScalarType value out of range: ",
+      serialized_value);
+  int result = kScalarTypeMap[serialized_value];
+  TORCH_CHECK(
+      result != kInvalid,
+      "Invalid serialized ScalarType value: ",
+      serialized_value);
+  return static_cast<c10::ScalarType>(result);
+}
+
+c10::MemoryFormat convertSerializedMemoryFormat(int serialized_value) {
+  constexpr int kInvalid = -1;
+  constexpr int kMemoryFormatMap[] = {
+      kInvalid, // 0: Unknown
+      static_cast<int>(c10::MemoryFormat::Contiguous), // 1
+      static_cast<int>(c10::MemoryFormat::ChannelsLast), // 2
+      static_cast<int>(c10::MemoryFormat::ChannelsLast3d), // 3
+      static_cast<int>(c10::MemoryFormat::Preserve), // 4
+  };
+  constexpr int kMapSize =
+      sizeof(kMemoryFormatMap) / sizeof(kMemoryFormatMap[0]);
+
+  TORCH_CHECK(
+      serialized_value >= 0 && serialized_value < kMapSize,
+      "Serialized MemoryFormat value out of range: ",
+      serialized_value);
+  int result = kMemoryFormatMap[serialized_value];
+  TORCH_CHECK(
+      result != kInvalid,
+      "Invalid serialized MemoryFormat value: ",
+      serialized_value);
+  return static_cast<c10::MemoryFormat>(result);
+}
+
+c10::Layout convertSerializedLayout(int serialized_value) {
+  constexpr int kInvalid = -1;
+  constexpr int kLayoutMap[] = {
+      kInvalid, // 0: Unknown
+      static_cast<int>(c10::Layout::Sparse), // 1: SparseCoo
+      static_cast<int>(c10::Layout::SparseCsr), // 2
+      static_cast<int>(c10::Layout::SparseCsc), // 3
+      static_cast<int>(c10::Layout::SparseBsr), // 4
+      static_cast<int>(c10::Layout::SparseBsc), // 5
+      static_cast<int>(c10::Layout::Mkldnn), // 6
+      static_cast<int>(c10::Layout::Strided), // 7
+  };
+  constexpr int kMapSize = sizeof(kLayoutMap) / sizeof(kLayoutMap[0]);
+
+  TORCH_CHECK(
+      serialized_value >= 0 && serialized_value < kMapSize,
+      "Serialized Layout value out of range: ",
+      serialized_value);
+  int result = kLayoutMap[serialized_value];
+  TORCH_CHECK(
+      result != kInvalid,
+      "Invalid serialized Layout value: ",
+      serialized_value);
+  return static_cast<c10::Layout>(result);
+}
+
 } // namespace
 
 namespace torch::aot_inductor {
@@ -164,7 +268,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::ScalarType>();
+      stack.at(index) =
+          convertSerializedScalarType(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::MemoryFormatType: {
@@ -176,7 +281,8 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::MemoryFormat>();
+      stack.at(index) =
+          convertSerializedMemoryFormat(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::LayoutType: {
@@ -188,7 +294,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
           index,
           " but got ",
           serialized_arg_type);
-      stack.at(index) = serialized_arg_val.get<c10::Layout>();
+      stack.at(index) = convertSerializedLayout(serialized_arg_val.get<int>());
       break;
     }
     case c10::TypeKind::DeviceObjType: {
