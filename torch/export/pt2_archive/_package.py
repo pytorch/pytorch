@@ -29,7 +29,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.pt2_archive._package_weights import (
-    get_complete,
+    get_complete_tensor,
     group_weights,
     TensorProperties,
     Weights,
@@ -307,8 +307,7 @@ def _package_aoti_files(
         grouped_tensors: list[OrderedSet[tuple[str, str]]] = group_weights(all_weights)
         for idx, group in enumerate(grouped_tensors):
             filename = f"{WEIGHT_FILENAME_PREFIX}{idx}"
-            model_name, weight_name = get_complete(group, all_weights)
-            complete_tensor, _ = all_weights[model_name].get_weight(weight_name)
+            complete_tensor = get_complete_tensor(group, all_weights)
             buffer = io.BytesIO()
             torch.save(complete_tensor, buffer, pickle_protocol=pickle_protocol)
             archive_writer.write_bytes(
@@ -416,8 +415,7 @@ def _save_raw_tensors(
 
     for group in storage_groups:
         # Find the complete tensor that covers all others in this storage group
-        model_name, complete_item_name = get_complete(group, weights_dict)
-        complete_tensor, _ = weights_dict[model_name].get_weight(complete_item_name)
+        complete_tensor = get_complete_tensor(group, weights_dict)
 
         path_name = f"{filename_prefix}{idx}"
         archive_path = os.path.join(directory, path_name)

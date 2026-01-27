@@ -40,15 +40,19 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
-    IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     requires_triton_ptxas_compat,
     SM80OrLater,
     tf32_on_and_off,
 )
-from torch.testing._internal.common_device_type import _has_sufficient_memory, e4m3_type
+from torch.testing._internal.common_device_type import (
+    _has_sufficient_memory,
+    e4m3_type,
+    e5m2_type,
+)
 from torch.testing._internal.common_quantization import (
     _group_quantize_tensor,
     skip_if_no_torchvision,
@@ -1309,8 +1313,8 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        TEST_WITH_ROCM or not IS_SM90,
-        "scaled_grouped_mm is only supported on SM90",
+        not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
+        "scaled_grouped_mm is only supported on SM90 and MI300+ devices",
     )
     @skipIfXpu
     def test_scaled_grouped_mm(self):
@@ -1357,13 +1361,13 @@ class AOTInductorTestsTemplate:
         x_fp16 = torch.randn(
             num_groups, batch_size, in_features, dtype=dtype, device=device
         )
-        x_fp8 = x_fp16.to(torch.float8_e4m3fn)
+        x_fp8 = x_fp16.to(e4m3_type)
 
         # Create FP8 weight tensor - concatenated and transposed
         weight_fp16 = torch.randn(
             total_out_features, in_features, dtype=dtype, device=device
         )
-        weight_fp8 = weight_fp16.to(torch.float8_e4m3fn)
+        weight_fp8 = weight_fp16.to(e4m3_type)
 
         # Create scales
         scale_a = torch.ones(num_groups, batch_size, device=device, dtype=torch.float32)
@@ -4895,7 +4899,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(m, inputs)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
@@ -4916,12 +4919,8 @@ class AOTInductorTestsTemplate:
 
         inputs = []
         for dtype in (
-            torch.float8_e4m3fn,
-            torch.float8_e5m2,
-            # FP8 funz are for AMD
-            # see https://github.com/pytorch/pytorch/issues/126734
-            # torch.float8_e4m3fnuz,
-            # torch.float8_e5m2fnuz,
+            e4m3_type,  # float8_e4m3fn (CUDA) or float8_e4m3fnuz (ROCm)
+            e5m2_type,  # float8_e5m2 (CUDA) or float8_e5m2fnuz (ROCm)
         ):
             inputs.append(torch.ones(8, 8, 8, dtype=dtype, device=self.device))
         dim0 = Dim("s0", min=2, max=1024)
@@ -7034,7 +7033,11 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
+            is_amd_gfx94x = torch.version.hip and (
+                "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            )
+
+            if GPU_TYPE == "xpu" or is_amd_gfx94x:
                 grid_0 = 32736
             else:
                 grid_0 = 1023
@@ -7084,7 +7087,11 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
+            is_amd_gfx94x = torch.version.hip and (
+                "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            )
+
+            if GPU_TYPE == "xpu" or is_amd_gfx94x:
                 grid_0 = 32736
             else:
                 grid_0 = 1023
@@ -7708,6 +7715,45 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, device=self.device),
         )
+        self.check_model(Model(), example_inputs, move_model_to_device=False)
+
+    @requires_gpu
+    def test_mixed_device_zero_size_constant(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Zero-size CUDA buffer
+                self.register_buffer(
+                    "empty_buffer",
+                    torch.empty(0, device=GPU_TYPE, dtype=torch.float32),
+                )
+                self.register_buffer(
+                    "cpu_indices",
+                    torch.tensor([0, 1, 2, 3], device="cpu", dtype=torch.int64),
+                )
+                self.register_buffer(
+                    "cuda_weights",
+                    torch.tensor(
+                        [1.0, 2.0, 3.0, 4.0], device=GPU_TYPE, dtype=torch.float32
+                    ),
+                )
+                # Another CUDA buffer to verify offset tracking is correct
+                self.register_buffer(
+                    "cuda_bias",
+                    torch.tensor(
+                        [0.5, 0.5, 0.5, 0.5], device=GPU_TYPE, dtype=torch.float32
+                    ),
+                )
+
+            def forward(self, x):
+                idx_cuda = self.cpu_indices.to(GPU_TYPE)
+                weights = self.cuda_weights[idx_cuda]
+                return x * weights + self.cuda_bias
+
+        example_inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu
