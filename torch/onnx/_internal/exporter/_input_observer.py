@@ -65,13 +65,17 @@ def _flatten_unflatten_for_dynamic_shapes(
     )
 
 
-def _infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int]:
+def _infer_dynamic_dimensions(
+    shape_list: Sequence[tuple[int, ...]], add_batch_dimension: bool = False
+) -> list[int]:
     """Returns the list of dynamic dimensions given a list of shapes
     corresponding to the same tensor.
 
     Args:
         shape_list:
             list of shapes, they must all have the same length
+        add_batch_dimension:
+            make the first dimension dynamic if it is not
 
     Returns:
         list of dynamic dimensions
@@ -85,7 +89,7 @@ def _infer_dynamic_dimensions(shape_list: Sequence[tuple[int, ...]]) -> list[int
     dynamic = []
     for i in range(rank):
         dims = [shape[i] for shape in shape_list]
-        if len(set(dims)) > 1:
+        if len(set(dims)) > 1 or (i == 0 and add_batch_dimension):
             dynamic.append(i)
     return dynamic
 
@@ -146,17 +150,24 @@ class InputObserverInfo:
         self.outputs_specs.append(spec)
         self.flat_outputs.append([t.clone().detach() for t in flat_res])
 
-    def _build_inputs_completed_with_none_values(self) -> list[list[torch.Tensor]]:
+    def _build_inputs_completed_with_none_values(
+        self,
+    ) -> tuple[list[int | str], list[list[torch.Tensor]]]:
         # Let's compute the sizes of each independently.
         if not self.flat_inputs or self._max_args is None or self._max_kwargs is None:
             raise RuntimeError("No inputs were captured.")
-        arg_sizes = [
-            len(torch.utils._pytree.tree_flatten(a)[0]) for a in self._max_args
-        ]
-        kwarg_sizes = {
-            k: len(torch.utils._pytree.tree_flatten(v)[0])
-            for k, v in self._max_kwargs.items()
-        }
+
+        flat_index_to_args: list[int | str] = []
+        arg_sizes = []
+        for index_args, a in enumerate(self._max_args):
+            size = len(torch.utils._pytree.tree_flatten(a)[0])
+            arg_sizes.append(size)
+            flat_index_to_args.extend([index_args] * size)
+        kwarg_sizes = {}
+        for k, v in self._max_kwargs.items():
+            size = len(torch.utils._pytree.tree_flatten(v)[0])
+            kwarg_sizes[k] = size
+            flat_index_to_args.extend([k] * size)
 
         # Let's reprocess everything.
         captured_inputs: dict[int | str, int] = {}
@@ -196,13 +207,36 @@ class InputObserverInfo:
                 else:
                     flat.extend([None for _ in range(kwarg_sizes[k])])
             new_flat_inputs.append(flat)
-        return new_flat_inputs
+        return flat_index_to_args, new_flat_inputs
 
     def infer_dynamic_shapes(
-        self,
+        self, add_batch_dimension_for: set[int | str] | None = None
     ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
-        """Infers dynamic shapes based on the collected tensors."""
-        flat_inputs = self._build_inputs_completed_with_none_values()
+        """Infers dynamic shapes.  based on the collected tensors.
+        Most of the time, models do support a batch dimension
+        but this batch dimension has the same value for every input sample.
+        Instead of running inference on new samples, argument `add_batch_dimension_for`
+        can be used to tell the first dimension is a dynamic dimension for a particular
+        set of inputs referenced by their name (str) or their position (int).
+        """
+
+        def _add_batch_dimension(name_or_position):
+            if not add_batch_dimension_for:
+                return False
+            if name_or_position in add_batch_dimension_for:
+                return True
+            if (
+                isinstance(name_or_position, int)
+                and self.signature_names[name_or_position] in add_batch_dimension_for
+            ):
+                return True
+            return False
+
+        flat_index_to_args, flat_inputs = self._build_inputs_completed_with_none_values()
+
+        def _add_batch_dimension_for_flat_index(index):
+            return _add_batch_dimension(flat_index_to_args[index])
+
         # This is already checked by build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
         assert self._max_args is not None and self._max_kwargs is not None
@@ -218,7 +252,8 @@ class InputObserverInfo:
         n_tensors = len(shape_lists[0])
         dynamic_shapes = [
             _infer_dynamic_dimensions(
-                [s for s in [shapes[index] for shapes in shape_lists] if s is not None]
+                [s for s in [shapes[index] for shapes in shape_lists] if s is not None],
+                add_batch_dimension=_add_batch_dimension_for_flat_index(index),
             )
             for index in range(n_tensors)
         ]
@@ -409,12 +444,18 @@ class InputObserver:
             raise RuntimeError("No inputs were captured.")
 
     def infer_dynamic_shapes(
-        self,
+        self, add_batch_dimension_for: set[int | str] | None = None
     ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
-        """Infers dynamic shapes based on the collected tensors."""
+        """
+        Infers dynamic shapes. Most of the time, models do support a batch dimension
+        but this batch dimension has the same value for every input sample.
+        Instead of running inference on new samples, argument `add_batch_dimension_for`
+        can be used to tell the first dimension is a dynamic dimension for a particular
+        set of inputs referenced by their name (str) or their position (int).
+        """
         self._check_captured()
         assert self.info is not None  # missed by type checking
-        return self.info.infer_dynamic_shapes()
+        return self.info.infer_dynamic_shapes(add_batch_dimension_for=add_batch_dimension_for)
 
     def infer_arguments(
         self, index: int | None = None
