@@ -132,8 +132,8 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         value: torch.Tensor,
         out: torch.Tensor,
         logsumexp: torch.Tensor,
-        grad_out: torch.Tensor,
-        grad_logsumexp: torch.Tensor,
+        grad_out: torch.Tensor | None,
+        grad_logsumexp: torch.Tensor | None,
         fw_graph: Union[Callable, GraphModule],
         joint_graph: GraphModule,
         block_mask: tuple,
@@ -730,6 +730,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         mask_mod_other_buffers: tuple[Any, ...],
         *score_mod_other_buffers: tuple[Any, ...],
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        ctx.set_materialize_grads(False)
         any_buffer_requires_grad = any(
             buffer.requires_grad
             for buffer in mask_mod_other_buffers
@@ -918,8 +919,8 @@ def sdpa_dense_backward(
     value: torch.Tensor,
     out: torch.Tensor,
     logsumexp: torch.Tensor,
-    grad_out: torch.Tensor,
-    grad_logsumexp: torch.Tensor,
+    grad_out: torch.Tensor | None,
+    grad_logsumexp: torch.Tensor | None,
     fw_graph: Callable,  # GraphModule type hint?
     joint_graph: Callable,
     block_mask: tuple,
@@ -976,6 +977,11 @@ def sdpa_dense_backward(
     G = query.size(1) // key.size(1)
     key = torch.repeat_interleave(key, G, dim=1)
     value = torch.repeat_interleave(value, G, dim=1)
+
+    if grad_out is None:
+        grad_out = torch.zeros_like(out)
+    if grad_logsumexp is None:
+        grad_logsumexp = torch.zeros_like(logsumexp)
 
     # We're undoing the log -> log2 change of base in the forwards
     logsumexp = logsumexp * math.log(2)
@@ -1275,8 +1281,10 @@ def flex_attention_backward_functionalize(
     assert isinstance(value_unwrapped, torch.Tensor)
     assert isinstance(out_unwrapped, torch.Tensor)
     assert isinstance(logsumexp_unwrapped, torch.Tensor)
-    assert isinstance(grad_out_unwrapped, torch.Tensor)
-    assert isinstance(grad_logsumexp_unwrapped, torch.Tensor)
+    assert grad_out_unwrapped is None or isinstance(grad_out_unwrapped, torch.Tensor)
+    assert grad_logsumexp_unwrapped is None or isinstance(
+        grad_logsumexp_unwrapped, torch.Tensor
+    )
     assert isinstance(block_mask_unwrapped, tuple)
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
