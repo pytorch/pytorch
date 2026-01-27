@@ -5202,7 +5202,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return {
             "enable_fp_fusion": not config.emulate_precision_casts,
             "launch_pdl": cls._enable_pdl_codegen(),
-            "disable_ftz": config.eager_numerics.disable_ftz
+            "disable_ftz": config.eager_numerics.disable_ftz,
         }
 
     @classmethod
