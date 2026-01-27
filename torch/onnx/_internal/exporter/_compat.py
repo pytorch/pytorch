@@ -12,7 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx import _constants as onnx_constants
-from torch.onnx._internal._lazy_import import onnx, onnxscript_apis
+from torch.onnx._internal._lazy_import import onnx
 from torch.onnx._internal.exporter import (
     _constants,
     _core,
@@ -174,17 +174,12 @@ def export_compat(
         dump_exported_program=dump_exported_program,
         artifacts_dir=artifacts_dir,
         verbose=verbose,
+        optimize=optimize,
+        opset_version=opset_version,
     )
 
     if need_axis_mapping and dynamic_shapes is not None:
         onnx_program._rename_dynamic_axes(dynamic_shapes)
-
-    # Converter opset version and optimize
-    onnx_program.model = onnxscript_apis.convert_version(
-        onnx_program.model, opset_version
-    )
-    if optimize:
-        onnx_program.optimize()
 
     if f is not None:
         if isinstance(f, io.BytesIO):
