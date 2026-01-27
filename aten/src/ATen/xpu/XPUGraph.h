@@ -10,7 +10,6 @@
 namespace at {
 
 struct Generator;
-struct XPUGeneratorImpl;
 struct XPUGeneratorState;
 
 namespace xpu {
