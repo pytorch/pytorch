@@ -4581,7 +4581,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         expected = fn()
         actual = opt_fn()
         self.assertTrue(same(expected, actual))
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_closure_out_of_scope_cell_with_cond(self):
         # Test closure with out-of-scope cell variable, used in a cond
@@ -11752,6 +11752,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> backed_var_to_val: values don't match.
+  >  Left: {s44: 2, s93: 3}
+  > Right: {}
 ==> name_to_node: values don't match.
   >  Left: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {}
@@ -11772,9 +11775,6 @@ ShapeEnv not equal: field values don't match:
   > Right: {}
 ==> var_to_sources: values don't match.
   >  Left: {s44: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)], s93: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)]}
-  > Right: {}
-==> var_to_val: values don't match.
-  >  Left: {s44: 2, s93: 3}
   > Right: {}
 """,
         )
