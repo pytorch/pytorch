@@ -625,6 +625,37 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_nested_function_calls_with_comprehension_graph_break(self):
+        """Test nested function calls where inner function has comprehension with graph break."""
+
+        def h(x):
+            x = x + 3
+            [torch._dynamo.graph_break() or i for i in range(3)]
+            x = x + 4
+            return x
+
+        def g(x):
+            x = x + 2
+            x = h(x)
+            x = x + 5
+            return x
+
+        def f(x):
+            x = x + 1
+            x = g(x)
+            x = x + 6
+            return x
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(f, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), f(x))
+        self.assertEqual(len(backend.graphs), 6)
+        for i in range(6):
+            self.assertEqual(count_op(backend.graphs[i], operator.add), 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
