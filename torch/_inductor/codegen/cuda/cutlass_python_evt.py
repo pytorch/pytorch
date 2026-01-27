@@ -308,19 +308,20 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             for l, r in (zip(left, right))
         )
 
-    def _render_input_signature(self) -> str:
+    def _render_input_signature(self, fn_name: str = "_epilogue_fn") -> str:
         arguments = ", ".join(
             [_ACCUMULATOR_ARG_NAME]
             + [name for name in self.reads if name != self.accumulator_node_name]
         )
-        return f"def fn({arguments}):"
+        return f"def {fn_name}({arguments}):"
 
     def _render_return_statement(self) -> str:
         return_vars = OrderedSet(
             op_v.value for op_v in self.store_name_to_value.values()
         )
         assert "D" in return_vars
-        return f"return {', '.join(return_vars)}"
+        # Add 4-space indentation to match the function body (IndentedBuffer uses 4 spaces)
+        return f"    return {', '.join(return_vars)}"
 
     def _tmp_var(self) -> str:
         return f"tmp_{next(self.var_counter)}"
