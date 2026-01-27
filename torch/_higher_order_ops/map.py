@@ -25,6 +25,7 @@ from .utils import (
     create_bw_fn,
     fill_none_with_masks,
     filter_with_masks,
+    first_slice_copy,
     materialize_as_graph,
     save_values_for_backward,
     saved_values,
@@ -182,9 +183,17 @@ class MapAutogradOp(torch.autograd.Function):
 
         def construct_args_single_step_bw():
             unwrapped_mapped_xs = pytree.tree_map(_from_fun, fw_mapped_args)
-            example_xs = _unstack_pytree(unwrapped_mapped_xs)[0]
+            # Use first_slice_copy instead of _unstack_pytree to avoid
+            # iterating over batch dim, which would guard on symbolic sizes.
+            example_xs = [
+                first_slice_copy(x).requires_grad_(x.requires_grad)
+                for x in unwrapped_mapped_xs
+            ]
             unwrapped_grads = pytree.tree_map(_from_fun, flat_grads)
-            example_grads = _unstack_pytree(unwrapped_grads)[0]
+            example_grads = [
+                first_slice_copy(x).requires_grad_(x.requires_grad)
+                for x in unwrapped_grads
+            ]
             example_pos_args = [
                 _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in pos_args
