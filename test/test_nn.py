@@ -6686,6 +6686,28 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             groups = 2
             torch.native_channel_shuffle(input_tensor, groups)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_native_channel_shuffle_cuda_input_checks(self):
+        # Test that CUDA path also raises proper errors instead of crashing with FPE
+        # See https://github.com/pytorch/pytorch/issues/173500
+        input_tensor = torch.rand([1, 4, 10, 10], device='cuda')
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of groups to divide channels in must be positive.*"):
+            groups = 0
+            torch.native_channel_shuffle(input_tensor, groups)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Number of channels must be divisible by groups.*"):
+            groups = 3
+            torch.native_channel_shuffle(input_tensor, groups)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "channel_shuffle expects input with > 2 dims,.*"):
+            input_tensor = torch.rand([1, 2], device='cuda')
+            groups = 2
+            torch.native_channel_shuffle(input_tensor, groups)
+
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_native_channel_shuffle_return_alias_of_self(self):
         groups = 3
