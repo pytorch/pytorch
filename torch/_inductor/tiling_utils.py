@@ -274,10 +274,10 @@ def get_pw_red_splits(
         pointwise_numel * red_numel
     )  # type: ignore[operator]
     i = len(n._body.sizes[0]) - 1
-    prod = 1
+    prod: sympy.Expr = sympy.Integer(1)
     while i >= 0:
-        prod *= n._body.sizes[0][i]
-        if prod == red_numel:
+        prod = prod * n._body.sizes[0][i]
+        if V.graph.sizevars.guard_or_false(sympy.Eq(prod, red_numel)):
             break
         i -= 1
 
