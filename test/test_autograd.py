@@ -4093,6 +4093,7 @@ class TestAutograd(TestCase):
             else:
                 run()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     def test_checkpoint_device_context_fn(self):
         @contextlib.contextmanager
         def apply_device(device):
