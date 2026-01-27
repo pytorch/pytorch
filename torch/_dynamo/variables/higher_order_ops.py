@@ -48,6 +48,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.fx.proxy import Proxy
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 
 from .. import graph_break_hints, variables
 from ..exc import (
@@ -4330,6 +4331,25 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if x.is_tensor() and x.as_proxy() in non_differentiable_set:
                     non_differentiable_idx.append(i)
 
+        # See Note [Activations with no version counter checks in eager]
+        # Compute which tensors in bwd_freevars came from ctx.save_for_backward.
+        # This allows AOT autograd to distinguish between tensors saved via
+        # save_for_backward vs those stashed directly on ctx (e.g., ctx.x = x).
+        saved_for_backward_idx = []
+        if ctx.saved_tensors is not None and len(ctx.saved_tensors.tensors) > 0:
+            # Build a set of proxies that were passed to save_for_backward
+            saved_tensor_proxies = OrderedSet()
+            for tensor_vt in ctx.saved_tensors.tensors:
+                if tensor_vt.is_tensor():
+                    saved_tensor_proxies.add(tensor_vt.as_proxy())
+
+            # bwd_freevars is a dict of outer-graph proxy -> inner-graph proxy
+            # for all tensors passed from fwd to bwd. Find which indices
+            # correspond to save_for_backward tensors.
+            for i, fwd_proxy in enumerate(bwd_freevars.keys()):
+                if fwd_proxy in saved_tensor_proxies:
+                    saved_for_backward_idx.append(i)
+
         # Store fwd_body
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         fwd_name = tx.output.install_subgraph(
@@ -4353,6 +4373,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
         kwargs_for_fn = {
             "non_differentiable_idx": non_differentiable_idx,
+            "saved_for_backward_idx": saved_for_backward_idx,
         }
 
         # Store the invocation as a call

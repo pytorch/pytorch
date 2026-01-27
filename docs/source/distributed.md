@@ -190,7 +190,6 @@ dist.init_process_group(backend="nccl", pg_options=opts, device_id=device)
 # Set up symmetric memory with NCCL backend
 symm_mem.set_backend("NCCL")
 group_name = dist.group.WORLD.group_name
-symm_mem.enable_symm_mem_for_group(group_name)
 
 # Allocate tensors using symmetric memory
 numel = 1024 * 1024

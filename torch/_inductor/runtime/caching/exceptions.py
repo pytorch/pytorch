@@ -1,5 +1,3 @@
-# pyre-strict
-
 """Exception classes for PyTorch Inductor runtime caching.
 
 This module defines a hierarchy of exceptions used throughout the caching system.

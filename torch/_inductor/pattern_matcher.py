@@ -1342,10 +1342,11 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        raise AssertionError(
-                            "Deleted index from getitem, did you erase the index and not properly replace it?"
-                        )
-                    replace(user, new[idx])
+                        # Output is used directly
+                        # pyrefly: ignore [bad-argument-type]
+                        old.replace_all_uses_with(new)
+                    else:
+                        replace(user, new[idx])
                 graph.erase_node(old)
 
             if len(output_nodes) == len(replacement):
@@ -2328,7 +2329,7 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 new_node.node.name = self.new_graph._graph_namespace.create_name(
                     old_node.name, None
                 )
-            # pyrefly: ignore [bad-return]
+
             return new_node
 
     return CopyGraph(input_graph).transform()

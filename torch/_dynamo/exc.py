@@ -34,7 +34,7 @@ import typing
 from enum import auto, Enum
 from functools import lru_cache
 from pathlib import Path
-from traceback import extract_stack, format_exc, format_list, StackSummary
+from traceback import extract_stack, format_exc, format_list, FrameSummary, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import torch._guards
@@ -102,6 +102,13 @@ class RestartAnalysis(TorchDynamoException):
 
 class SpeculationRestartAnalysis(RestartAnalysis):
     pass
+
+
+class AutogradGradRestartAnalysis(RestartAnalysis):
+    """Raised when autograd.grad consumed grad_fns that are returned.
+
+    On restart, autograd.grad will graph break instead of being traced.
+    """
 
 
 class UnspecializeRestartAnalysis(RestartAnalysis):
@@ -408,11 +415,23 @@ def raise_observed_exception(
     kwargs: Optional[dict[str, Any]] = None,
 ) -> NoReturn:
     from .symbolic_convert import ExceptionVals
-    from .variables import BuiltinVariable
+    from .variables import BuiltinVariable, ConstantVariable, VariableTracker
+
+    # Wrap any non-VariableTracker args in ConstantVariable
+    def wrap_arg(arg: Any) -> VariableTracker:
+        if isinstance(arg, VariableTracker):
+            return arg
+        return ConstantVariable.create(arg)
+
+    wrapped_args = [wrap_arg(a) for a in args] if args else []
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
+    exception_vt = BuiltinVariable(exc_type).call_function(
+        tx,  # pyrefly: ignore[bad-argument-type]
+        wrapped_args,
+        kwargs or {},
+    )
     assert isinstance(exception_vt, ExceptionVals)
     tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
@@ -763,7 +782,7 @@ def remove_resume_prefix(name: str) -> Optional[str]:
     return None
 
 
-def collapse_resume_frames(stack: StackSummary) -> StackSummary:
+def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSummary:
     """
     When we graph break, we create a resume function and make a regular Python call
     to it, which gets intercepted by Dynamo. This behavior is normally shown in the
