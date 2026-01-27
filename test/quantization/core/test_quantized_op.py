@@ -2909,6 +2909,25 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(result.shape, (0, 2))
 
     @override_qengines
+    def test_zero_dim_interpolate(self):
+        """
+        Verifies the correctness of interpolate with zero input height or input width.
+        """
+        X_height = torch.ones((8, 6, 0, 7), dtype=torch.float32)
+        X_width = torch.ones((8, 6, 7, 0), dtype=torch.float32)
+        X_channels = torch.ones((8, 0, 7, 7), dtype=torch.float32)
+        qX_height = torch.quantize_per_tensor(X_height, scale=0.07663195986552764, zero_point=85, dtype=torch.quint8)
+        qX_width = torch.quantize_per_tensor(X_width, scale=0.07663195986552764, zero_point=85, dtype=torch.quint8)
+        qX_channels = torch.quantize_per_tensor(X_channels, scale=0.07663195986552764, zero_point=85, dtype=torch.quint8)
+        for mode in ["nearest", "bilinear", "nearest-exact"]:
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.interpolate(qX_height, size=202, mode=mode)
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.interpolate(qX_width, size=202, mode=mode)
+            with self.assertRaises(RuntimeError):
+                torch.nn.functional.interpolate(qX_channels, size=202, mode=mode)
+
+    @override_qengines
     def test_linear_bias_unpack(self):
         """
         Verifies the correctness of bias() and unpack() API for LinearPackedParamBase.
@@ -4561,11 +4580,9 @@ class TestQuantizedLinear(TestCase):
         post_op="none",
         unary_post_op_args=(),
         post_op_algorithms=("none",),
-        test_fast_path=False,
     ):
-        if test_fast_path:
-            import os
-            os.environ["ONEDNN_CACHE_CONTEXT_UNSAFE"] = "1"
+        import os
+        test_fast_path = os.getenv("ONEDNN_CACHE_CONTEXT_UNSAFE", "0") == "1"
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         linear_op = F.linear
         in_channels_list = [4, 8]
@@ -4693,22 +4710,17 @@ class TestQuantizedLinear(TestCase):
                     y_s: {y_scale}, y_zp: {y_zp}""",
                 )
 
-        if test_fast_path:
-            del os.environ["ONEDNN_CACHE_CONTEXT_UNSAFE"]
-
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         self._test_qlinear_pt2e_helper(qlinear, "none")
-        self._test_qlinear_pt2e_helper(qlinear, "none", test_fast_path=True)
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_relu_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise
         self._test_qlinear_pt2e_helper(qlinear, "relu")
-        self._test_qlinear_pt2e_helper(qlinear, "relu", test_fast_path=True)
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
@@ -4716,35 +4728,30 @@ class TestQuantizedLinear(TestCase):
         qlinear = torch.ops.onednn.qlinear_pointwise
         post_op_algorithms = ['none', 'tanh']
         self._test_qlinear_pt2e_helper(qlinear, "gelu", post_op_algorithms=post_op_algorithms)
-        self._test_qlinear_pt2e_helper(qlinear, "gelu", post_op_algorithms=post_op_algorithms, test_fast_path=True)
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_sum_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "sum")
-        self._test_qlinear_pt2e_helper(qlinear, "sum", test_fast_path=True)
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_sum_relu_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "sum_relu")
-        self._test_qlinear_pt2e_helper(qlinear, "sum_relu", test_fast_path=True)
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_add_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "add")
-        self._test_qlinear_pt2e_helper(qlinear, "add", test_fast_path=True)
 
     @unittest.skipIf(IS_FBCODE, "Skip pt2e ops in fbcode")
     @skipIfNoONEDNN
     def test_qlinear_add_relu_pt2e(self):
         qlinear = torch.ops.onednn.qlinear_pointwise.binary
         self._test_qlinear_pt2e_helper(qlinear, "add_relu")
-        self._test_qlinear_pt2e_helper(qlinear, "add_relu", test_fast_path=True)
 
     def _test_qlinear_fp8_helper(
         self,
@@ -4753,6 +4760,8 @@ class TestQuantizedLinear(TestCase):
         unary_post_op_args=(),
         post_op_algorithms=("none",),
     ):
+        import os
+        test_fast_path = os.getenv("ONEDNN_CACHE_CONTEXT_UNSAFE", "0") == "1"
         qlinear_prepack = torch.ops.onednn.qlinear_prepack
         linear_op = F.linear
         in_channels_list = [4, 8]
@@ -4801,12 +4810,14 @@ class TestQuantizedLinear(TestCase):
                 x_zp = 0
                 w_zps = torch.zeros_like(w_scales, dtype=torch.int)
 
+                num_iter = 2 if test_fast_path else 1  # rerun to use cache
                 if post_op in ("none", "relu", "gelu"):
-                    qy = qlinear_op(
-                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        b, used_y_scale, used_y_zp, output_dtype,
-                        post_op, unary_post_op_args, post_op_algo
-                    )
+                    for _ in range(num_iter):
+                        qy = qlinear_op(
+                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                            b, used_y_scale, used_y_zp, output_dtype,
+                            post_op, unary_post_op_args, post_op_algo
+                        )
                     if post_op == "relu":
                         y_ref = F.relu(y_ref)
                     elif post_op == "gelu":
@@ -4825,12 +4836,13 @@ class TestQuantizedLinear(TestCase):
                     if bfloat16_out:
                         accum = accum.bfloat16()
                         accum_ref = accum_ref.bfloat16()
-                    qy = qlinear_op(
-                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        accum, b, used_y_scale, used_y_zp, output_dtype,
-                        x2_scale, x2_zp, "sum", binary_alpha,
-                        unary_post_op, unary_post_op_args, post_op_algo
-                    )
+                    for _ in range(num_iter):
+                        qy = qlinear_op(
+                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                            accum.clone(), b, used_y_scale, used_y_zp, output_dtype,
+                            x2_scale, x2_zp, "sum", binary_alpha,
+                            unary_post_op, unary_post_op_args, post_op_algo
+                        )
                     y_ref = y_ref + accum_ref * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
@@ -4841,12 +4853,13 @@ class TestQuantizedLinear(TestCase):
                     x2 = torch.rand_like(y_ref)
                     unary_post_op = "relu" if post_op == "add_relu" else "none"
                     binary_alpha = 1.0  # we only support alpha=1.0 now
-                    qy = qlinear_op(
-                        qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
-                        x2, b, used_y_scale, used_y_zp, output_dtype,
-                        1.0, 0, "add", binary_alpha,
-                        unary_post_op, unary_post_op_args, post_op_algo
-                    )
+                    for _ in range(num_iter):
+                        qy = qlinear_op(
+                            qx, x_scale, x_zp, qw_packed, w_scales, w_zps,
+                            x2, b, used_y_scale, used_y_zp, output_dtype,
+                            1.0, 0, "add", binary_alpha,
+                            unary_post_op, unary_post_op_args, post_op_algo
+                        )
                     y_ref = y_ref + x2 * binary_alpha
                     if unary_post_op == "relu":
                         y_ref = F.relu(y_ref)
