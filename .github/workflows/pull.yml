@@ -467,6 +467,7 @@ jobs:
       # This should sync with the build in xpu.yml but xpu uses a larger runner
       # sync-tag: linux-xpu-n-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      runner: linux.c7i.4xlarge
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
       test-matrix: |
