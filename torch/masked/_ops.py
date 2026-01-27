@@ -7,7 +7,6 @@ from typing_extensions import ParamSpec
 import torch
 from torch import sym_float, Tensor
 from torch._prims_common import corresponding_real_dtype
-from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
 from torch.masked import _docs
 from torch.masked.maskedtensor.core import is_masked_tensor, MaskedTensor
 from torch.masked.maskedtensor.creation import as_masked_tensor
@@ -933,6 +932,8 @@ def _input_mask(input: Tensor | MaskedTensor, *args, **kwargs) -> Tensor:
     # mask shape must match with input shape
     # Use sym_or + guard_or_false to handle unbacked symbolic dimensions.
     # If shapes have unbacked dims, assume they match and let runtime validate.
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_or
+
     shape_comparisons = tuple(s1 != s2 for s1, s2 in zip(mask.shape, input.shape))
     if mask.ndim != input.ndim or (
         shape_comparisons and guard_or_false(sym_or(*shape_comparisons))
