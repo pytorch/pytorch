@@ -459,7 +459,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from .builder import SourcelessBuilder
         from . import (
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
@@ -2128,7 +2127,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from . import ConstantVariable, SymNodeVariable
-        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .builder import wrap_fx_proxy
 
         if self.nonstrict_traceable:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)
