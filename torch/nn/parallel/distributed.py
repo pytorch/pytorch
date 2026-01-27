@@ -1444,7 +1444,7 @@ class DistributedDataParallel(Module, Joinable):
             )
 
     @contextmanager
-    def no_sync(self, enabled: bool = True):
+    def no_sync(self, *, enabled: bool = True):
         r"""
         Context manager to disable gradient synchronizations across DDP processes.
 
