@@ -1654,12 +1654,11 @@ class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
         const_args_idx = kernel_side_table.add_constant_args(const_args)
 
         # Simulate serialization: capture the kernel side table state
-        triton_kernels = {}
-        triton_constant_args = {}
-        for idx, kernel in kernel_side_table.id_to_kernel.items():
-            triton_kernels[idx] = _serialize_triton_kernel(kernel)
-        for idx, args in kernel_side_table.constant_args.items():
-            triton_constant_args[idx] = args
+        triton_kernels = {
+            idx: _serialize_triton_kernel(kernel)
+            for idx, kernel in kernel_side_table.id_to_kernel.items()
+        }
+        triton_constant_args = dict(kernel_side_table.constant_args)
 
         # Simulate a new process by clearing the side table
         kernel_side_table.reset_table()

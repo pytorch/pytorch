@@ -118,14 +118,13 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
 
         # See Note: [Triton Kernel Side Table Serialization]
         # Capture triton kernel side table state BEFORE serialization.
-        triton_kernels: dict[int, tuple[str, str]] = {}
-        triton_constant_args: dict[int, dict[str, Any]] = {}
-
-        for idx, kernel in kernel_side_table.id_to_kernel.items():
-            triton_kernels[idx] = _serialize_triton_kernel(kernel)
-
-        for idx, args in kernel_side_table.constant_args.items():
-            triton_constant_args[idx] = args
+        triton_kernels: dict[int, tuple[str, str]] = {
+            idx: _serialize_triton_kernel(kernel)
+            for idx, kernel in kernel_side_table.id_to_kernel.items()
+        }
+        triton_constant_args: dict[int, dict[str, Any]] = dict(
+            kernel_side_table.constant_args
+        )
 
         with torch._functorch.config.patch("bundled_autograd_cache", True):
             serialized_entry = fn.compiled_fn.serialize()
