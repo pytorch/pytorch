@@ -208,12 +208,32 @@ def benchmark_node_with_cache_key(
             est := get_custom_estimation(n, custom_runtime_estimation, None)
         ) is not None:
             set_cached_node_time(key, est)
+            _record_compute_benchmark(key, est, n)
             return est, key
 
         bench = get_collective_do_bench()
         out = bench(lambda: n.target(*args, **kwargs))  # type: ignore[operator]
         set_cached_node_time(key, out)
+        _record_compute_benchmark(key, out, n)
         return out, key
+
+
+def _record_compute_benchmark(key: str, runtime_ms: float, node: fx.Node) -> None:
+    """Record a compute benchmark result for later logging."""
+    from torch._inductor.fx_passes.node_runtime_estimation import record_benchmark_result
+    from torch._inductor.fx_utils import count_flops_fx
+
+    try:
+        flops = count_flops_fx(node)
+    except Exception:
+        flops = None
+
+    record_benchmark_result(
+        key=key,
+        runtime_ms=runtime_ms,
+        category="compute",
+        flops=flops,
+    )
 
 
 def benchmark_node(
@@ -794,11 +814,15 @@ class OverlapScheduler:
         if self.log_final_collectives_estimations:
             from torch._inductor.fx_passes.node_runtime_estimation import (
                 _log_graph_collective_benchmarks,
+                log_all_benchmarks_to_tlparse,
             )
 
             _log_graph_collective_benchmarks(
                 self.gm, "fx_collectives_estimations_after_overlap_bucketing"
             )
+
+            # Also log all benchmarks (compute + collectives) as JSON for repro
+            log_all_benchmarks_to_tlparse()
 
         return self.gm
 

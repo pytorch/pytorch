@@ -91,6 +91,106 @@ from torch.hub import tqdm
 from .. import config
 
 
+def _extract_distributed_topology(gm: torch.fx.GraphModule) -> dict[str, Any]:
+    """
+    Extract distributed topology information from the graph.
+
+    Returns a dict containing:
+    - has_distributed_ops: bool
+    - process_groups: dict mapping group_name -> {size: int, rank: int}
+    - device_meshes: list of mesh configurations (device_type, mesh_array, dim_names)
+    """
+    import torch.distributed as dist
+    from torch.fx.operator_schemas import normalize_function
+
+    topology: dict[str, Any] = {
+        "has_distributed_ops": False,
+        "process_groups": {},
+        "device_meshes": [],
+    }
+
+    # Check if distributed is initialized to get actual topology
+    dist_initialized = dist.is_available() and dist.is_initialized()
+
+    # Find all collective ops and extract their group names
+    group_names: set[str] = set()
+    for node in gm.graph.nodes:
+        if node.op != "call_function":
+            continue
+        if not isinstance(node.target, OpOverload):
+            continue
+        if node.target.namespace not in {"_c10d_functional", "c10d_functional"}:
+            continue
+
+        topology["has_distributed_ops"] = True
+
+        # Extract group_name from the node
+        try:
+            opt_args_kwargs = normalize_function(
+                node.target,
+                args=node.args,
+                kwargs=node.kwargs,
+                normalize_to_only_use_kwargs=True,
+            )
+            if opt_args_kwargs is not None:
+                _, kwargs = opt_args_kwargs
+                if "group_name" in kwargs:
+                    group_names.add(kwargs["group_name"])
+        except Exception:
+            pass
+
+    # Get process group info
+    if dist_initialized:
+        from torch.distributed.distributed_c10d import (
+            _get_group_size_by_name,
+            _resolve_process_group,
+            get_group_rank,
+            get_rank,
+        )
+
+        for group_name in group_names:
+            try:
+                size = _get_group_size_by_name(group_name)
+                pg = _resolve_process_group(group_name)
+                rank = get_group_rank(pg, get_rank())
+                topology["process_groups"][group_name] = {
+                    "size": size,
+                    "rank": rank,
+                }
+            except Exception:
+                # Fallback to default group info
+                topology["process_groups"][group_name] = {
+                    "size": dist.get_world_size(),
+                    "rank": dist.get_rank(),
+                }
+
+        # Try to capture DeviceMesh info if available
+        try:
+            from torch.distributed.device_mesh import _mesh_resources
+
+            if hasattr(_mesh_resources, "mesh_stack") and _mesh_resources.mesh_stack:
+                for mesh in _mesh_resources.mesh_stack:
+                    mesh_info = {
+                        "device_type": mesh.device_type,
+                        "mesh": mesh.mesh.tolist()
+                        if hasattr(mesh.mesh, "tolist")
+                        else list(mesh.mesh),
+                        "mesh_dim_names": mesh.mesh_dim_names,
+                    }
+                    topology["device_meshes"].append(mesh_info)
+        except Exception:
+            pass
+    else:
+        # If not initialized, use default values
+        for group_name in group_names:
+            topology["process_groups"][group_name] = {
+                "size": 2,
+                "rank": 0,
+            }
+
+    return topology
+
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -311,6 +411,7 @@ def generate_compiler_repro_string(
     save_dir: Optional[str] = None,
     stable_hash: bool = False,
     has_distributed_ops: bool = False,
+    distributed_topology: Optional[dict[str, Any]] = None,
 ) -> str:
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
@@ -323,6 +424,10 @@ import torch.distributed as dist
 from torch.testing._internal.distributed.fake_pg import FakeStore
         """
         ).strip()
+
+        # Add DeviceMesh import if meshes are present
+        if distributed_topology and distributed_topology.get("device_meshes"):
+            distributed_imports += "\nfrom torch.distributed.device_mesh import DeviceMesh"
 
     triton_imports = ""
 
@@ -500,6 +605,89 @@ if "__compile_source__" in globals():
     return model_str
 
 
+def _generate_distributed_init_code(
+    topology: dict[str, Any],
+    use_fake_processes: bool = True,
+) -> str:
+    """
+    Generate distributed initialization code based on the topology.
+
+    Args:
+        topology: Dictionary containing process_groups and device_meshes info
+        use_fake_processes: If True, use FakeProcessGroup for single-GPU debugging.
+                           If False, use real distributed initialization.
+    """
+    if not topology.get("has_distributed_ops"):
+        return ""
+
+    lines = []
+    lines.append("    # Distributed topology captured from original run:")
+    lines.append(f"    # Process groups: {topology.get('process_groups', {})}")
+    if topology.get("device_meshes"):
+        lines.append(f"    # Device meshes: {topology.get('device_meshes', [])}")
+    lines.append("")
+
+    process_groups = topology.get("process_groups", {})
+
+    if use_fake_processes:
+        # Determine world_size and rank from the default process group if available
+        # Otherwise use the max size from all process groups
+        default_world_size = 2
+        default_rank = 0
+        if process_groups:
+            # Find the largest group size (likely the world group)
+            max_size = max(pg["size"] for pg in process_groups.values())
+            default_world_size = max_size
+            # Use rank 0 for repro (can be overridden with env var)
+
+        lines.append("    # Initialize FakeProcessGroup for distributed operations")
+        lines.append("    # Set USE_REAL_DISTRIBUTED=1 to use real distributed")
+        lines.append("    # Set REPRO_RANK=N to simulate a specific rank")
+        lines.append('    import os')
+        lines.append('    use_real = os.environ.get("USE_REAL_DISTRIBUTED", "0") == "1"')
+        lines.append(f'    repro_rank = int(os.environ.get("REPRO_RANK", "{default_rank}"))')
+        lines.append(f'    repro_world_size = int(os.environ.get("REPRO_WORLD_SIZE", "{default_world_size}"))')
+        lines.append("")
+        lines.append("    if not use_real:")
+        lines.append("        store = FakeStore()")
+        lines.append("        dist.init_process_group(")
+        lines.append('            backend="fake",')
+        lines.append("            rank=repro_rank,")
+        lines.append("            world_size=repro_world_size,")
+        lines.append("            store=store")
+        lines.append("        )")
+        lines.append("    else:")
+        lines.append("        # Real distributed initialization - requires proper setup")
+        lines.append("        dist.init_process_group()")
+        lines.append("")
+
+        # Generate DeviceMesh setup if present
+        device_meshes = topology.get("device_meshes", [])
+        if device_meshes:
+            lines.append("    # Recreate DeviceMesh from captured topology")
+            for i, mesh_info in enumerate(device_meshes):
+                mesh_var = f"mesh_{i}" if i > 0 else "mesh"
+                device_type = mesh_info.get("device_type", "cpu")
+                mesh_array = mesh_info.get("mesh", [[0, 1]])
+                mesh_dim_names = mesh_info.get("mesh_dim_names")
+
+                if mesh_dim_names:
+                    lines.append(
+                        f'    {mesh_var} = DeviceMesh("{device_type}", {mesh_array}, mesh_dim_names={mesh_dim_names})'
+                    )
+                else:
+                    lines.append(
+                        f'    {mesh_var} = DeviceMesh("{device_type}", {mesh_array})'
+                    )
+            lines.append("")
+    else:
+        lines.append("    # Real distributed initialization")
+        lines.append("    dist.init_process_group()")
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
 def save_graph_repro(
     fd: IO[Any],
     gm: torch.fx.GraphModule,
@@ -526,13 +714,9 @@ def save_graph_repro(
     if save_dir is not None:
         save_dir = normalize_path_separator(save_dir)
 
-    # Check if the graph contains distributed operations
-    has_distributed_ops = any(
-        node.op == "call_function"
-        and isinstance(node.target, OpOverload)
-        and node.target.namespace in {"_c10d_functional", "c10d_functional"}
-        for node in gm.graph.nodes
-    )
+    # Extract distributed topology from the graph
+    topology = _extract_distributed_topology(gm)
+    has_distributed_ops = topology["has_distributed_ops"]
 
     fd.write(
         generate_compiler_repro_string(
@@ -542,6 +726,7 @@ def save_graph_repro(
             save_dir=save_dir,
             stable_hash=stable_hash,
             has_distributed_ops=has_distributed_ops,
+            distributed_topology=topology,
         )
     )
     if accuracy is None:
@@ -555,18 +740,9 @@ def save_graph_repro(
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
 
-    # Add distributed initialization before run_repro if needed
+    # Add distributed initialization with proper topology
     if has_distributed_ops:
-        fd.write(
-            "    # Initialize FakeProcessGroup for distributed operations\n"
-            "    store = FakeStore()\n"
-            "    dist.init_process_group(\n"
-            '        backend="fake",\n'
-            "        rank=0,\n"
-            "        world_size=2,\n"
-            "        store=store\n"
-            "    )\n"
-        )
+        fd.write(_generate_distributed_init_code(topology, use_fake_processes=True))
 
     fd.write(
         f"    with torch.no_grad():\n"
