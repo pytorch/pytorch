@@ -1775,6 +1775,7 @@ class MultiProcContinuousTest(TestCase):
             store=store,
             pg_options=cls.opts(),
             timeout=cls.timeout,
+            device_id=rank,
         )
         cls.pg = c10d.distributed_c10d._get_default_group()
 
