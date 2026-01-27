@@ -493,7 +493,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
-        class State:
+        class State(torch._opaque_base.OpaqueBase):
             def __init__(self, n):
                 self.n = n
 
@@ -794,7 +794,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
-        class State:
+        class State(torch._opaque_base.OpaqueBase):
             def __init__(self, n):
                 self.n = n
 
@@ -2325,28 +2325,16 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         x_expected,
         x_test,
     ):
-        """
-        Helper to compare two models' forward outputs and gradients.
-
-        Args:
-            model_expected: The reference model (typically eager)
-            model_test: The model to test (typically compiled)
-            x_expected: Input tensor for expected model
-            x_test: Input tensor for test model (should be cloned from x_expected)
-        """
-        # Check forward results match
         out_expected = model_expected(x_expected)
         out_test = model_test(x_test)
         self.assertEqual(out_expected, out_test)
 
-        # Check gradients match
         loss_expected = out_expected.sum()
         loss_test = out_test.sum()
         loss_expected.backward()
         loss_test.backward()
         self.assertEqual(x_expected.grad, x_test.grad)
 
-        # Check parameter gradients match
         expected_grads = {
             name: param.grad for name, param in model_expected.named_parameters()
         }
@@ -2379,14 +2367,11 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         backend = AotEagerAndRecordGraphs()
         compiled_aot = torch.compile(mod_compile_aot, backend=backend, fullgraph=True)
 
-        # Run twice to verify state is properly reset between runs
         for _ in range(2):
-            # Zero grads for clean state each iteration
             mod_eager.zero_grad()
             mod_compile_eager.zero_grad()
             mod_compile_aot.zero_grad()
 
-            # Generate fresh args each iteration
             args = args_fn()
             args_clone = pytree.tree_map(
                 lambda x: x.clone().detach().requires_grad_(x.requires_grad), args
@@ -2581,10 +2566,8 @@ class GraphModule(torch.nn.Module):
         counter = CompileCounterWithBackend("aot_eager")
         compiled_fn = torch.compile(mod_compiled, backend=counter, fullgraph=True)
 
-        # Same input value for both runs
         x_value = torch.randn(3, 3)
 
-        # use_double_scale = True (uses * 2 branch)
         mod_eager.use_double_scale = True
         mod_compiled.use_double_scale = True
 
@@ -2600,7 +2583,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(out_eager_1, out_compiled_1)
         self.assertEqual(x1.grad, x1_clone.grad)
 
-        # use_double_scale = False (uses * 3 branch) - same input, different config
         mod_eager.zero_grad()
         mod_compiled.zero_grad()
 
@@ -2629,7 +2611,6 @@ class GraphModule(torch.nn.Module):
     def test_leaf_function_dynamic_autograd_closure(self):
         from torch._dynamo.testing import CompileCounterWithBackend
 
-        # Closure variable that controls the branch
         config = {"use_double_scale": True}
 
         @leaf_function
@@ -2650,11 +2631,9 @@ class GraphModule(torch.nn.Module):
         counter = CompileCounterWithBackend("aot_eager")
         compiled_fn = torch.compile(fn, backend=counter, fullgraph=True)
 
-        # Same input values for both runs
         x_value = torch.randn(3, 3)
         y_value = torch.randn(3, 3)
 
-        # use_double_scale = True (uses * 2 branch)
         config["use_double_scale"] = True
 
         x1 = x_value.clone().requires_grad_(True)
@@ -2672,7 +2651,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x1.grad, x1_clone.grad)
         self.assertEqual(y1.grad, y1_clone.grad)
 
-        # use_double_scale = False (uses * 3 branch) - same input, different closure
         config["use_double_scale"] = False
 
         x2 = x_value.clone().requires_grad_(True)
@@ -2699,8 +2677,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(counter.frame_count, 1)
 
     def test_leaf_function_closure_constants_without_grad(self):
-        # Note: Closure-captured tensors should NOT require gradients. Gradients do not
-        # flow back to tensors that are not explicitly passed as inputs to the leaf function.
         closure_scale = 2.0
         closure_tensor = torch.tensor([1.0, 2.0, 3.0])
 
@@ -2814,7 +2790,6 @@ class GraphModule(torch.nn.Module):
     def test_leaf_function_nested_annotations(self):
         @leaf_function
         def inner_leaf_forward(mod, x):
-            # Simple non-traceable logic without data-dependent control flow
             y = mod.linear(x)
             return (y + x,)
 
@@ -2832,7 +2807,6 @@ class GraphModule(torch.nn.Module):
 
         @leaf_function
         def outer_leaf_forward(mod, x):
-            # The inner module's forward calls another leaf_function
             z = mod.linear(x)
             return mod.inner(z + x)
 
@@ -2934,13 +2908,10 @@ class GraphModule(torch.nn.Module):
                 self.scale = torch.nn.Parameter(torch.tensor(2.0))
 
             def forward(self, x):
-                # Pre-process x before passing to NonzeroModule
                 x = self.pre_linear(x)
                 x = torch.relu(x)
                 out, nonzero_indices = self.nonzero_module(x)
-                # Use the nonzero indices to index into the output
                 num_nonzero = nonzero_indices.shape[0]
-                # Scale the output and add a value based on count of nonzero elements
                 scaled_out = out * self.scale + num_nonzero
                 return scaled_out, nonzero_indices
 
@@ -3056,7 +3027,6 @@ class GraphModule(torch.nn.Module):
                 final = self.final_linear(out3)
                 return final
 
-        # Create eager and compiled versions with identical weights
         model_eager = TopLevelModule(compile_submodules=False)
         model_compiled = TopLevelModule(compile_submodules=True)
         model_compiled.load_state_dict(model_eager.state_dict())
@@ -3076,7 +3046,6 @@ class GraphModule(torch.nn.Module):
     def test_leaf_function_with_graph_breaks(self, backend, do_compile):
         @leaf_function
         def leaf_forward(mod, x):
-            # Data-dependent behavior to ensure this is truly opaque
             if x.sum() > 0:
                 return (mod.linear(x),)
             else:
@@ -3105,22 +3074,11 @@ class GraphModule(torch.nn.Module):
                 self.backend = backend
 
             def _forward(self, x):
-                # First leaf function call
                 out1 = self.leaf1(x)[0]
-
-                # Manual graph break
                 torch._dynamo.graph_break()
-
-                # Second leaf function call after graph break
                 out2 = self.leaf2(out1)[0]
-
-                # Another manual graph break
                 torch._dynamo.graph_break()
-
-                # Third leaf function call after another graph break
                 out3 = self.leaf3(out2)[0]
-
-                # Final processing
                 result = self.final_linear(out3)
                 return result
 
@@ -3132,7 +3090,6 @@ class GraphModule(torch.nn.Module):
                 else:
                     return self._forward(x)
 
-        # Create eager and compiled versions with identical weights
         model_eager = TopLevelModule(do_compile=False)
         model_test = TopLevelModule(do_compile=do_compile, backend=backend)
         model_test.load_state_dict(model_eager.state_dict())
@@ -3222,8 +3179,6 @@ class GraphModule(torch.nn.Module):
         def no_fake_impl_forward(mod, x):
             return (mod.linear(x),)
 
-        # No @no_fake_impl_forward.fake_impl provided
-
         class SimpleModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3235,11 +3190,9 @@ class GraphModule(torch.nn.Module):
         mod = SimpleModule()
         x = torch.randn(3, 3)
 
-        # Eager works fine
         result = mod(x)
         self.assertEqual(result[0].shape, (3, 3))
 
-        # Compiled should raise an error about missing fake_impl
         compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Exception, "requires a fake_impl"):
             compiled_mod(x)
@@ -3270,7 +3223,6 @@ class GraphModule(torch.nn.Module):
         expected = x @ constant_weight
         self.assertEqual(result[0], expected)
 
-        # Captured tensors cause compilation error - must pass as explicit args
         compiled_mod = torch.compile(mod, backend=backend, fullgraph=True)
         with self.assertRaisesRegex(
             Exception, "Please convert all Tensors to FakeTensors"
@@ -3293,12 +3245,10 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3)
 
-        # Eager works (but is dangerous)
         x_eager = x.clone()
         result_eager = fn(x_eager)
         self.assertEqual(result_eager[0], x + 1)
 
-        # Compiled detects mutation and raises error
         compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
         with self.assertRaisesRegex(RuntimeError, "In-place mutation detected"):
             compiled_fn(x.clone())
@@ -3338,7 +3288,6 @@ class GraphModule(torch.nn.Module):
 
         @mismatched_forward.fake_impl
         def mismatched_forward_fake(mod, x):
-            # Fake returns wrong shape (3, 6) vs real (3, 3)
             return (torch.zeros(x.shape[0], 6),)
 
         class MismatchedModule(torch.nn.Module):
@@ -3358,7 +3307,6 @@ class GraphModule(torch.nn.Module):
                 with self.assertRaises((RuntimeError, AssertionError)):
                     compiled_mod(x)
             else:
-                # With validation disabled, shape mismatch should not raise
                 result = compiled_mod(x)
                 self.assertEqual(result[0].shape, (3, 3))
 
@@ -3367,7 +3315,7 @@ class GraphModule(torch.nn.Module):
         def my_custom_fn(inputs: dict[str, torch.Tensor], scale: float, offset: int):
             x = inputs["x"]
             y = inputs["y"]
-            if x.sum() > 0:  # data-dependent control flow
+            if x.sum() > 0:
                 return (x * scale + y + offset, x.sum() + y.sum())
             return (x * scale - y + offset, x.sum() - y.sum())
 
@@ -3437,8 +3385,6 @@ class GraphModule(torch.nn.Module):
     def test_leaf_function_escaped_gradient_input_no_grad(
         self, backend, check_escaped_gradients
     ):
-        # If all inputs don't require grad, no error should be raised even with closure tensors
-        # because autograd key is not triggered.
         closure_weight = torch.randn(3, 3, requires_grad=True)
 
         @leaf_function

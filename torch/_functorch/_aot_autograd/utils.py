@@ -156,7 +156,7 @@ class PytreeThunk:
     is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
     def set(self, spec: pytree.TreeSpec) -> None:
-        assert self.spec is None or self.spec == spec
+        assert self.spec is None or self.spec == spec, (self.spec, spec)
         assert spec is not None
         self.spec: pytree.TreeSpec = spec
         if self.spec.type in {tuple, list} and all(
@@ -447,6 +447,9 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                     output_token_nodes = (
                         output_token_nodes | tokens_from_invoke_subgraph
                     )
+
+        if not output_token_nodes and not input_token_nodes:
+            return
 
         output_node = next(reversed(module.graph.find_nodes(op="output")))
         assert output_node is not None
