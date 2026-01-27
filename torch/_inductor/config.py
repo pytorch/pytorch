@@ -566,6 +566,19 @@ max_autotune_gemm_backends = os.environ.get(
 ).upper()
 
 
+# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
+# in max_autotune. By default it's 5, to keep compile time reasonable.
+# Set to None (or env var "none"/"all") to tune all configs.
+def _nvgemm_max_profiling_configs_default() -> Optional[int]:
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
+    if env_val.lower() in ("none", "all"):
+        return None
+    return int(env_val)
+
+
+nvgemm_max_profiling_configs: Optional[int] = _nvgemm_max_profiling_configs_default()
+
+
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
@@ -904,6 +917,15 @@ optimize_scatter_upon_const_tensor = (
 # options in caffe2/torch/_inductor/fx_passes/pre_grad.py
 add_pre_grad_passes: Optional[str] = None
 remove_pre_grad_passes: Optional[str] = None
+
+# Comma-separated list of pass names to disable. Passes disabled via this config
+# will be skipped when they go through GraphTransformObserver.
+# Can be set via TORCHINDUCTOR_DISABLED_PASSES env var.
+# Use uppercase pass names (e.g., "PASS1,PASS2").
+disabled_passes: str = Config(
+    env_name_force="TORCHINDUCTOR_DISABLED_PASSES",
+    default="",
+)
 
 
 # The multiprocessing start method to use for inductor workers in the codecache.
@@ -2038,10 +2060,6 @@ class cuda:
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
 
-    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
-    # By default it's 5, to keep compile time to a reasonable level.
-    nvgemm_max_profiling_configs: Optional[int] = 5
-
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
 
@@ -2408,8 +2426,15 @@ class test_configs:
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
-    autotune_choice_name_regex: Optional[str] = None
-    autotune_choice_desc_regex: Optional[str] = None
+    # Can be set via TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX and
+    # TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX environment variables
+
+    autotune_choice_name_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX"
+    )
+    autotune_choice_desc_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX"
+    )
 
     graphsafe_rng_func_ignores_fallback_random = False
 
