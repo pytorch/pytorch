@@ -2,7 +2,7 @@ name: ppc64le
 
 on:
   push:
-    branches:
+    tags:
       - ciflow/ppc64le/*
   workflow_dispatch:
 
