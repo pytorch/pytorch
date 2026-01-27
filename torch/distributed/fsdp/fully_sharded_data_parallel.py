@@ -75,6 +75,7 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.utils import _p_assert
+from torch.utils._typing_utils import copy_method_params, copy_method_sig
 
 from ._flat_param import FlatParameter, FlatParamHandle
 from ._optim_utils import (
@@ -954,6 +955,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             for fsdp_module in traversal_utils._get_fsdp_states(self):
                 _register_orig_params(fsdp_module, fsdp_module)
 
+    @copy_method_sig(nn.Module._apply)
     def _apply(self, *args, **kwargs):
         """Deregister the original parameters and expose the :class:`FlatParameter` s before calling ``_apply()``."""
         # When using the original parameters: Since (1) the `FlatParameter`s
@@ -970,6 +972,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         with context:
             return super()._apply(*args, **kwargs)
 
+    @copy_method_params(nn.Module.named_buffers)
     def named_buffers(
         self,
         *args,
@@ -988,6 +991,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 buffer_name = buffer_name.replace(FSDP_PREFIX, "")
             yield (buffer_name, buffer)
 
+    @copy_method_params(nn.Module.named_parameters)
     def named_parameters(
         self,
         *args,

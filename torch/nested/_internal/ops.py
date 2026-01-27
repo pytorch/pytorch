@@ -707,6 +707,7 @@ def to_copy_default(func, *args, **kwargs):
         # Temporary hack until we have the union find
         tgt = mb_unwrap_functional_tensor(new_thing)
         src = mb_unwrap_functional_tensor(ragged_source)
+        # pyrefly: ignore[missing-attribute]
         tgt.nested_int_memo = src.nested_int_memo
     else:
         _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
@@ -805,6 +806,7 @@ def like_factory_default(func, *args, **kwargs):
             # Temporary hack until we have the union find
             tgt = mb_unwrap_functional_tensor(new_thing)
             src = mb_unwrap_functional_tensor(ragged_source)
+            # pyrefly: ignore[missing-attribute]
             tgt.nested_int_memo = src.nested_int_memo
         else:
             _tensor_symint_registry[new_thing] = _tensor_symint_registry[ragged_source]
