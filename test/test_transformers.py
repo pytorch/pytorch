@@ -1947,6 +1947,34 @@ class TestSDPAFailureModes(NNTestCase):
                                                           attn_bias=None, compute_log_sumexp=True,
                                                           dropout_p=0.01)
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
+    def test_mem_eff_attention_backward_requires_bias_when_bias_grad(self):
+        q = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
+        k = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
+        v = torch.rand(2, 8, 256, 64, device="cuda", dtype=torch.float16, requires_grad=True)
+        out, lse, philox_seed, philox_offset = torch.ops.aten._scaled_dot_product_efficient_attention.default(
+            q, k, v, None, True
+        )
+        grad_out = torch.rand_like(out)
+        error_str = "bias_requires_grad is true but no bias was provided"
+        with self.assertRaisesRegex(RuntimeError, error_str):
+            torch.ops.aten._scaled_dot_product_efficient_attention_backward.default(
+                grad_out,
+                q,
+                k,
+                v,
+                None,
+                out,
+                lse,
+                philox_seed,
+                philox_offset,
+                0.0,
+                (True, True, True, True),
+                False,
+                scale=None,
+            )
+
     @largeTensorTest("15GB", "cuda")
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
