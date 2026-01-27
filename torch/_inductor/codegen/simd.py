@@ -1102,45 +1102,85 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def estimate_kernel_num_bytes(self):
         """
-        Try the best to estimate the total size (in bytes) of the
-        kernel's inputs and outputs, which is used for estimating the memory
-        throughput of this kernel. This information is used for checking how
-        far we are from the peak memory bandwidth. It's important that
-        we want to avoid overestimating the sizes of the inputs and outputs,
-        because it can wrongfully give us a very large memory traffic value,
-        which may be even larger than the theoretical bandwidth and thus
-        become very misleading. This is particularly problematic for cases
-        where we slice some inputs. In those cases, we should only count
-        the size of the "slices" instead of the original inputs, because
-        only the slices contribute to the real memory traffic.
+        Estimate the total memory traffic (in bytes) of the kernel's inputs
+        and outputs. This is used for estimating memory throughput to compare
+        against peak memory bandwidth.
+
+        Uses the actual read_writes from fused nodes to compute bytes, which
+        properly accounts for:
+        - Fused operations where intermediate results stay in registers
+        - Buffer elimination through fusion (kernel-local buffers excluded)
+        - Actual read/write patterns from memory expressions
+
+        This avoids overestimating which could give misleading bandwidth numbers
+        larger than theoretical peak.
+        """
+        scheduler = V.graph.scheduler
+        if not scheduler:
+            return self._estimate_kernel_num_bytes_fallback()
+
+        # Get all fused node names for buffer elimination check
+        fused_node_names = OrderedSet(
+            n.get_name() for n in NodeScheduleMarker.only_nodes(self.features.node_schedule)
+        )
+
+        # Collect all reads and writes, tracking which buffers are kernel-local
+        all_reads: dict[str, list] = {}
+        all_writes: dict[str, list] = {}
+
+        for node in NodeScheduleMarker.only_nodes(self.features.node_schedule):
+            for dep in node.read_writes.reads:
+                if dep.name not in all_reads:
+                    all_reads[dep.name] = []
+                all_reads[dep.name].append(dep)
+
+            for dep in node.read_writes.writes:
+                if dep.name not in all_writes:
+                    all_writes[dep.name] = []
+                all_writes[dep.name].append(dep)
+
+        total_bytes = 0
+
+        # Count reads - exclude kernel-local buffers (written but only used within kernel)
+        for buf_name, deps in all_reads.items():
+            # Skip if this is a kernel-local buffer that will be eliminated
+            if buf_name in all_writes and scheduler.can_buffer_be_removed_through_fusion(
+                buf_name, fused_node_names
+            ):
+                continue
+            # Sum bytes for all reads of this buffer
+            for dep in deps:
+                try:
+                    total_bytes += dep.numbytes_hint()
+                except Exception:
+                    pass
+
+        # Count writes - exclude kernel-local buffers
+        for buf_name, deps in all_writes.items():
+            if scheduler.can_buffer_be_removed_through_fusion(buf_name, fused_node_names):
+                continue
+            for dep in deps:
+                try:
+                    total_bytes += dep.numbytes_hint()
+                except Exception:
+                    pass
+
+        return total_bytes
+
+    def _estimate_kernel_num_bytes_fallback(self):
+        """
+        Fallback estimation based on buffer sizes when scheduler is unavailable.
         """
         nbytes = []
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         _, call_args, _, _ = self.args.python_argdefs()
         buf_accesses = self.features.buf_accesses()
 
-        # For pointwise and reduction kernels, this is the upper-bound numels
-        # for the output buffer.
-        # FIXME: This is not exactly right for cases like below:
-        #    def foo(tensor0, tensor1):
-        #        x0 = narrow(tensor0)
-        #        return cat(x0, tensor1)
-        # For this example, we will end up overestimate the size for the
-        # slice s0. Potentially, we could have precise inputs information
-        # if we maintained the original inputs of the Pointwise kernel created
-        # for the "cat". However, I think it might be a bit overwhelming that
-        # we add such complexity only for handling some particular cases for
-        # benchmarking.
         out_numel = V.graph.sizevars.size_hint(
             sympy_product(self.numels.values()),
             fallback=config.unbacked_symint_fallback,
         )
         for i, arg in enumerate(call_args):
-            # "buf" may be narrowed. In this case, the number of memory accesses
-            # should be estimated based on the reinterpreted layout.
-            # On the other hand, buf may be broadcasted. In this case,
-            # counting the size of the underline storage would give us
-            # a better estimation in terms of memory accesses.
             if arg not in buf_accesses:
                 nbytes.append(0)
                 continue
@@ -1149,9 +1189,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 arg_numel, fallback=config.unbacked_symint_fallback
             )
             if buf_size > out_numel:
-                # This arg points to a buf that has been sliced.
-                # We need to count each individual slice to have
-                # a better estimation.
                 indices = OrderedSet[Any]()
                 no_index_dep_count = 0
                 for dep in buf_accesses[arg]:
