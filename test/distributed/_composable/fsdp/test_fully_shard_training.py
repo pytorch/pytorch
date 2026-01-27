@@ -426,7 +426,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        assert test_device_type in ("cuda", "hpu", "xpu", "cpu"), f"{test_device_type}"
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(

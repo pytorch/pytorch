@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TEST_XPU,
     TestCase,
+    TEST_PRIVATEUSE1,
 )
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
@@ -228,6 +229,8 @@ def skip_if_lt_x_gpu(x):
             if TEST_HPU and torch.hpu.device_count() >= x:
                 return func(*args, **kwargs)
             if TEST_XPU and torch.xpu.device_count() >= x:
+                return func(*args, **kwargs)
+            if TEST_PRIVATEUSE1 and torch.accelerator.device_count() >= x:
                 return func(*args, **kwargs)
             test_skip = TEST_SKIPS[f"multi-gpu-{x}"]
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):

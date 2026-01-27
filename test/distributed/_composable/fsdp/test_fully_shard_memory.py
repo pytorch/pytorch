@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_HPU,
     TEST_XPU,
+    TEST_PRIVATEUSE1,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -256,14 +257,14 @@ class TestFullyShardMemory(FSDPTest):
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
 
-        if TEST_CUDA or TEST_XPU:
+        if TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1:
             return round(mem_stats["active_bytes.all.peak"] / 1e6)
         if TEST_HPU:
             return round(mem_stats["MaxInUse"] / 1e6)
 
     def _get_curr_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-        if TEST_CUDA or TEST_XPU:
+        if TEST_CUDA or TEST_XPU or TEST_PRIVATEUSE1:
             return round(mem_stats["active_bytes.all.current"] / 1e6)
         if TEST_HPU:
             return round(mem_stats["InUse"] / 1e6)
