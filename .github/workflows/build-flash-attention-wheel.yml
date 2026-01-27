@@ -55,6 +55,14 @@ jobs:
             runner: "linux.arm64.r7g.12xlarge.memory"
             max_jobs: "4"
             nvcc_threads: "2"
+          - cuda_version: "13.0"
+            arch: "aarch64"
+            cuda_short: "130"
+            torch_cuda_arch_list: "9.0;10.0"
+            docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
+            runner: "linux.arm64.r7g.12xlarge.memory"
+            max_jobs: "4"
+            nvcc_threads: "2"
     timeout-minutes: 1440
     env:
       DOCKER_IMAGE: ${{ matrix.docker_image }}

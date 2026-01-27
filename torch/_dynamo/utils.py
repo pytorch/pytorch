@@ -2198,26 +2198,6 @@ def clone_tensor(x: torch.Tensor) -> torch.Tensor:
     return y
 
 
-def copy_dynamo_tensor_attributes(src: torch.Tensor, dst: torch.Tensor) -> None:
-    """
-    Copy dynamo-specific tensor attributes from src to dst.
-    These attributes are used for dynamic shape marking and must be preserved
-    when cloning or casting tensors.
-    """
-    if hasattr(src, "_dynamo_dynamic_indices"):
-        dst._dynamo_dynamic_indices = src._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_unbacked_indices"):
-        dst._dynamo_unbacked_indices = src._dynamo_unbacked_indices.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_hint_overrides"):
-        dst._dynamo_hint_overrides = src._dynamo_hint_overrides.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_shape_ids"):
-        dst._dynamo_shape_ids = src._dynamo_shape_ids.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_strict_unbacked_indices"):
-        dst._dynamo_strict_unbacked_indices = src._dynamo_strict_unbacked_indices.copy()  # type: ignore[attr-defined]
-    if hasattr(src, "_dynamo_weak_dynamic_indices"):
-        dst._dynamo_weak_dynamic_indices = src._dynamo_weak_dynamic_indices.copy()  # type: ignore[attr-defined]
-
-
 def clone_input(
     x: torch.Tensor, *, dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
@@ -2233,7 +2213,8 @@ def clone_input(
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
             y.grad = clone_input(x.grad, dtype=dtype)
-        copy_dynamo_tensor_attributes(x, y)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return y
 
     with torch.no_grad():
@@ -2292,7 +2273,8 @@ def clone_input(
             # tensor refers to a single memory location. Please clone() the tensor before
             # performing the operation.
             return torch_clone(x)
-        copy_dynamo_tensor_attributes(x, result)
+        if hasattr(x, "_dynamo_dynamic_indices"):
+            result._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()  # type: ignore[attr-defined]
         return result
 
 
