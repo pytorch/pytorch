@@ -4456,7 +4456,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         """
         from torch._functorch.autograd_function import DynamoAutogradFunctionTraceHelper
 
-        fwd_fn, fwd_args = self.prepare_fn_vt(ctx, "forward", args)
+        fwd_fn, fwd_args = self.prepare_fn_vt(tx, ctx, "forward", args)
 
         # autograd.Function forward does a few things like running in no_grad
         # mode and also applying view_as for input tensors that are returned as
@@ -4550,7 +4550,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     bwd_args.append(ConstantVariable.create(None))
 
-        bwd_fn, bwd_args = self.prepare_fn_vt(ctx, "backward", bwd_args)
+        bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
 
         def is_strict_for(v: VariableTracker) -> bool:
             if v.is_tensor():
@@ -4986,6 +4986,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
     def prepare_fn_vt(
         self,
+        tx: "InstructionTranslator",
         ctx: "AutogradFunctionContextVariable",
         method_name: str,
         args: Sequence[VariableTracker],
