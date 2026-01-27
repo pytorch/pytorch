@@ -652,7 +652,7 @@ def main() -> None:
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
 
     # Save the labels from the PR, so that we can use it later
-    set_output("labels", json.dumps(labels))
+    set_output("labels", json.dumps(list(labels)))
 
 
 if __name__ == "__main__":
