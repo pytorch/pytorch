@@ -375,7 +375,7 @@ def _optimize_transform_infos(
             # For all_gather: transforms come from planner in innermost-to-outermost order
             # (descending mesh dims for ascending shard order). If transforms are not in
             # descending order, the shard order isn't ascending and we can't flatten.
-            if mesh_dims != tuple(sorted_mesh_dims[::-1]):
+            if mesh_dims != sorted_mesh_dims[::-1]:
                 return None, "non_ascending_mesh_dims"
         # Use sorted dims for mesh lookup (required by DeviceMesh API)
         flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, sorted_mesh_dims)
