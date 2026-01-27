@@ -2101,8 +2101,6 @@ class DebugAutotuner(CachingAutotuner):
             possible_names = _find_names(self)
             kernel_name = f"{max(possible_names, key=len)}"
             if not re.match(self.regex_filter, kernel_name):
-                # Still run the kernel even if we're not collecting bandwidth info for it
-                super().run(*args, stream=stream, **kwargs, benchmark_run=True)
                 return
             if len(self.launchers) != 1:
                 if len(self.launchers) == 0:
@@ -2138,10 +2136,8 @@ class DebugAutotuner(CachingAutotuner):
                     ),
                 )
             else:
-                # Use cached benchmark data but still run the kernel with profiler support
-                # This ensures profiler captures each kernel execution
+                # in AOTI, we will call the kernel and its timing info has been cached already
                 collected_calls.append(self.cached)
-                super().run(*args, stream=stream, **kwargs, benchmark_run=True)
 
 
 def hash_configs(configs: list[Config]):

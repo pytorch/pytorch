@@ -732,7 +732,6 @@ class ParseException(RuntimeError):
 def add_utilization_annotations(
     data: dict[str, Any],
     device_name: Optional[str] = None,
-    dtype: Optional[Union[torch.dtype, str]] = None,
 ) -> dict[str, Any]:
     """
     Add achieved_flops_percent, achieved_bandwidth_percent, and roofline metrics to trace events.
@@ -747,8 +746,6 @@ def add_utilization_annotations(
         device_name: Optional device name to use for looking up peak specs.
                     If None, will try to use PyTorch's device query APIs or
                     infer from trace's deviceProperties.
-        dtype: Optional dtype to use for FLOPS calculation. If None, will try
-               to infer from each event's input types.
 
     Returns:
         The augmented trace data with utilization and roofline metrics added to kernel events.
@@ -806,14 +803,6 @@ def add_utilization_annotations(
         )
         return data
 
-    # Parse dtype if string
-    resolved_dtype: Optional[torch.dtype] = None
-    if dtype is not None:
-        if isinstance(dtype, torch.dtype):
-            resolved_dtype = dtype
-        elif dtype in _dtype_map:
-            resolved_dtype = _dtype_map[dtype]
-
     # Add utilization annotations to CUDA kernel events only
     # CPU ops with kernel metadata are skipped - they represent the CPU-side launch,
     # not the actual GPU execution where utilization matters
@@ -837,24 +826,23 @@ def add_utilization_annotations(
         kernel_num_gb = event["args"].get("kernel_num_gb", 0)
 
         # Determine dtype for this event
-        event_dtype = resolved_dtype
+        event_dtype: Optional[torch.dtype] = None
+        # Try to infer from event's input types
+        if "Input type" in event["args"]:
+            input_types = event["args"]["Input type"]
+            if isinstance(input_types, list) and len(input_types) > 0:
+                type_str = input_types[0]
+                if type_str in _dtype_map:
+                    event_dtype = _dtype_map[type_str]
+        # Try from kernel name
         if event_dtype is None:
-            # Try to infer from event
-            if "Input type" in event["args"]:
-                input_types = event["args"]["Input type"]
-                if isinstance(input_types, list) and len(input_types) > 0:
-                    type_str = input_types[0]
-                    if type_str in _dtype_map:
-                        event_dtype = _dtype_map[type_str]
-            # Try from kernel name
-            if event_dtype is None:
-                name = event.get("name", "")
-                if "bfloat16" in name:
-                    event_dtype = torch.bfloat16
-                elif "float16" in name:
-                    event_dtype = torch.float16
-                else:
-                    event_dtype = torch.float32  # Default
+            name = event.get("name", "")
+            if "bfloat16" in name:
+                event_dtype = torch.bfloat16
+            elif "float16" in name:
+                event_dtype = torch.float16
+            else:
+                event_dtype = torch.float32  # Default
 
         # Get peak performance for dtype
         peak_tflops = peak_tflops_by_dtype.get(event_dtype, 0)

@@ -33,7 +33,7 @@ class TestUtilizationAnnotations(TestCase):
             "deviceProperties": [{"id": 0, "name": "NVIDIA H100"}],
         }
 
-        result = add_utilization_annotations(trace_data, device_name="NVIDIA H100", dtype=torch.float32)
+        result = add_utilization_annotations(trace_data, device_name="NVIDIA H100")
         args = result["traceEvents"][0]["args"]
 
         self.assertIn("achieved_flops_percent", args)
