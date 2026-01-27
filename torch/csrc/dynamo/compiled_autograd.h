@@ -1115,7 +1115,7 @@ struct IValuePacker {
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
     // On windows CPU is support compiled autograd.
-#if defined(_WIN32) && (defined(USE_CUDA) || defined(USE_ROCM))
+#if defined(_WIN32) && defined(__NVCC__)
     // NB: the if-constexpr usage triggers compilation errors on Windows
     // with certain compiler settings
     // (see https://github.com/pytorch/pytorch/pull/144707 for examples).
