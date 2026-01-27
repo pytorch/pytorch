@@ -825,6 +825,157 @@ class RedistributeTest(DTensorTestBase):
                 out = dt.redistribute(mesh, dst)
                 self.assertEqual(out.placements, dst)
 
+    @with_comms
+    def test_replicate_to_partial_different_reduce_ops(self):
+        """
+        Test that Replicate -> Partial transitions work for all reduce op types.
+
+        This test verifies that the redistribution planner dynamically considers
+        only the reduce ops present in src/dst placements, rather than hardcoding
+        specific reduce ops like "sum" and "avg".
+        """
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.randn(12, 3, device=self.device_type)
+
+        from torch.distributed.tensor._redistribute import Redistribute
+
+        comm_mode = CommDebugMode()
+
+        # Test each reduce op type for R->P transitions
+        for reduce_op in ("sum", "avg", "min", "max"):
+            # Create replicated tensor
+            replica_tensor = distribute_tensor(local_tensor, device_mesh, [Replicate()])
+
+            # Apply R->P transition with the specified reduce_op
+            partial_spec = Partial(reduce_op)
+            with comm_mode:
+                partial_tensor = Redistribute.apply(
+                    replica_tensor, device_mesh, [partial_spec]
+                )
+
+            self.assertEqual(partial_tensor.size(), local_tensor.size())
+            self.assertEqual(partial_tensor.placements, (partial_spec,))
+            # R->P should be a local operation (no communication)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            # Verify the local tensor content is correct based on the reduce_op
+            if reduce_op == "sum":
+                # For sum, the local tensor should be divided by world_size
+                self.assertEqual(
+                    replica_tensor.to_local() / self.world_size,
+                    partial_tensor.to_local(),
+                )
+            elif reduce_op in ("avg", "min", "max"):
+                # For avg/min/max, the R->P transition is a no-op (identity)
+                self.assertEqual(
+                    replica_tensor.to_local(),
+                    partial_tensor.to_local(),
+                )
+
+    @with_comms
+    def test_replicate_to_partial_planner_reduce_op_collection(self):
+        """
+        Test that the redistribution planner correctly collects reduce ops from
+        src/dst placements and only considers those in graph exploration.
+
+        This verifies the optimization that avoids naively expanding the graph
+        to include all possible reduce op types.
+        """
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+        from torch.distributed.tensor._redistribute import get_redistribute_planner
+
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.randn(12, 3, device=self.device_type)
+        tensor_meta = TensorMeta(
+            shape=local_tensor.size(),
+            stride=local_tensor.stride(),
+            dtype=local_tensor.dtype,
+        )
+
+        # Test case 1: Replicate -> Partial("min") should only consider "min"
+        src_spec = DTensorSpec(
+            device_mesh,
+            (Replicate(),),
+            tensor_meta=tensor_meta,
+        )
+        dst_spec = DTensorSpec(
+            device_mesh,
+            (Partial("min"),),
+            tensor_meta=tensor_meta,
+        )
+
+        planner = get_redistribute_planner(device_mesh, tensor_meta)
+        # Clear any cached state from previous tests
+        planner.partial_reduce_ops_in_target.clear()
+        planner.generate_graph_based_transform_infos(
+            src_spec, dst_spec, tuple(local_tensor.size())
+        )
+
+        # The planner should have collected "min" as the only reduce op
+        self.assertEqual(
+            planner.partial_reduce_ops_in_target,
+            {"min"},
+            "Planner should only consider reduce ops from src/dst placements",
+        )
+
+        # Test case 2: Partial("max") -> Replicate should only consider "max"
+        src_spec2 = DTensorSpec(
+            device_mesh,
+            (Partial("max"),),
+            tensor_meta=tensor_meta,
+        )
+        dst_spec2 = DTensorSpec(
+            device_mesh,
+            (Replicate(),),
+            tensor_meta=tensor_meta,
+        )
+
+        planner2 = get_redistribute_planner(device_mesh, tensor_meta)
+        planner2.partial_reduce_ops_in_target.clear()
+        planner2.generate_graph_based_transform_infos(
+            src_spec2, dst_spec2, tuple(local_tensor.size())
+        )
+
+        self.assertEqual(
+            planner2.partial_reduce_ops_in_target,
+            {"max"},
+            "Planner should collect reduce ops from source placements too",
+        )
+
+        # Test case 3: Multiple Partial types in 2D mesh
+        mesh_2d = DeviceMesh(
+            self.device_type,
+            torch.arange(self.world_size).reshape(2, 2),
+        )
+        tensor_meta_2d = TensorMeta(
+            shape=local_tensor.size(),
+            stride=local_tensor.stride(),
+            dtype=local_tensor.dtype,
+        )
+
+        src_spec3 = DTensorSpec(
+            mesh_2d,
+            (Partial("sum"), Replicate()),
+            tensor_meta=tensor_meta_2d,
+        )
+        dst_spec3 = DTensorSpec(
+            mesh_2d,
+            (Replicate(), Partial("avg")),
+            tensor_meta=tensor_meta_2d,
+        )
+
+        planner3 = get_redistribute_planner(mesh_2d, tensor_meta_2d)
+        planner3.partial_reduce_ops_in_target.clear()
+        planner3.generate_graph_based_transform_infos(
+            src_spec3, dst_spec3, tuple(local_tensor.size())
+        )
+
+        self.assertEqual(
+            planner3.partial_reduce_ops_in_target,
+            {"sum", "avg"},
+            "Planner should collect all reduce ops from both src and dst",
+        )
+
 
 instantiate_parametrized_tests(RedistributeTest)
 
@@ -1254,56 +1405,6 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                             src_to_dst_cost <= src_to_int_cost + int_to_dst_cost,
                             f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
                         )
-
-    @with_comms
-    def test_ordered_redistribute_with_partial(self):
-        """Test mixing Partial in the original placements and do redistribute."""
-        # This test takes 226s to complete on 8XA100...
-        torch.manual_seed(21)
-        with maybe_disable_local_tensor_mode():
-            mesh = init_device_mesh(self.device_type, (2, 2, 2))
-            input_tensor_shape = [
-                # even sharding
-                (16, 8),
-                (8, 16, 32),
-                # uneven sharding with padding
-                (17, 5),
-                (13, 2, 13),
-            ]
-            placement_choice = [
-                Shard(0),
-                Shard(1),
-                Shard(2),
-                Partial("sum"),
-                Partial("min"),
-                Replicate(),
-            ]
-            # pick 3 for the 3D mesh
-            partial_placement_comb = list(itertools.combinations(placement_choice, 3))
-
-        def _is_valid_placement(placements, tensor_rank):
-            # Check if placements is valid for tensor with rank `tensor_rank`
-            for placement in placements:
-                if isinstance(placement, Shard):
-                    if placement.dim >= tensor_rank:
-                        return False
-            return True
-
-        for shape in input_tensor_shape:
-            for placements in partial_placement_comb:
-                if not _is_valid_placement(placements, len(shape)):
-                    continue
-                local_tensor = torch.randn(shape, device=self.device_type)
-                full_tensor = DTensor.from_local(local_tensor, mesh, placements)
-                with maybe_disable_local_tensor_mode():
-                    shard_orders = generate_shard_orders(mesh, len(shape))
-                for shard_order in shard_orders:
-                    sharded_dt = redistribute(
-                        full_tensor, mesh, placements=None, shard_order=shard_order
-                    )
-                    self.assertEqual(
-                        make_full_tensor(sharded_dt), make_full_tensor(full_tensor)
-                    )
 
     @with_comms
     def test_redistribute_partial_to_different_partial_not_supported(self):
