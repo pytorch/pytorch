@@ -30,6 +30,8 @@ Disclose that the PR was authored with Claude.
 Follow these rules for all code changes in this repository:
 
 - Minimize comments; be concise; code should be self-explanatory and self-documenting.
+- Comments should be useful, for example, comments that remind the reader about
+  some global context that is non-obvious and can't be inferred locally.
 - Don't make trivial (1-2 LOC) helper functions that are only used once unless
   it significantly improves code readability.
 - Prefer clear abstractions. State management should be explicit.
