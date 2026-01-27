@@ -42,9 +42,6 @@ class LeafModuleState(NamedTuple):
 @dataclass
 class GradientInfo:
     """
-    Instead of storing full tensors in the forward state, we store just the
-    information needed for backward.
-
     We need the gradient edge to trigger the autograd engine backward.
 
     We need the tensor metadata (size, dtype, device) to create zeros when
@@ -91,20 +88,7 @@ def check_escaped_gradients(
     """
     Check if computation graph depends on tensors not passed as explicit inputs.
 
-    When a leaf_function closes over a tensor with requires_grad=True, gradients
-    won't flow back to it because backward only computes gradients for explicit
-    inputs. This function walks the autograd graph from outputs and raises an
-    error if it finds leaf tensors not in our input set.
-
     Controlled by torch._dynamo.config.leaf_function_check_escaped_gradients.
-
-    Args:
-        outputs: Function outputs (tensor or tuple of tensors)
-        inputs: Function inputs
-        requires_grad_indices: Indices of inputs that require gradients
-
-    Raises:
-        RuntimeError: If closure-captured tensors with requires_grad are detected
     """
     if not requires_grad_indices:
         return
@@ -222,11 +206,6 @@ def autograd_grad_with_gradient_info(
     """
     Compute gradients using GradientInfo instead of full tensors.
 
-    This is a lighter-weight alternative that avoids storing full tensors in
-    the forward state. Instead, we store GradientInfo containing:
-    - GradientEdge for torch.autograd.grad
-    - Tensor metadata (size, dtype, device) for creating zeros when needed
-
     Args:
         output_infos: GradientInfo for each output (None if no grad_fn)
         input_infos: GradientInfo for each input (None if not requires_grad)
@@ -234,7 +213,6 @@ def autograd_grad_with_gradient_info(
 
     Returns a tuple of gradients with None for inputs that don't require grad.
     """
-    # Filter outputs to only those with valid GradientInfo
     filtered_output_edges = []
     filtered_grad_outputs = []
     for i, info in enumerate(output_infos):
@@ -243,7 +221,6 @@ def autograd_grad_with_gradient_info(
             if grad_outputs is not None:
                 filtered_grad_outputs.append(grad_outputs[i])
 
-    # Filter inputs to only those with GradientInfo, tracking original indices
     filtered_input_edges = []
     filtered_input_infos = []
     input_indices = []
@@ -253,11 +230,9 @@ def autograd_grad_with_gradient_info(
             filtered_input_infos.append(info)
             input_indices.append(i)
 
-    # Early return if no valid outputs or inputs
     if not filtered_output_edges or not filtered_input_edges:
         return tuple(None for _ in input_infos)
 
-    # Compute gradients using GradientEdges
     grads = torch.autograd.grad(
         outputs=filtered_output_edges,
         inputs=filtered_input_edges,
@@ -524,7 +499,6 @@ def _validate_outputs_match(
     Raises:
         RuntimeError: If outputs don't match with detailed error message.
     """
-    # Check pytree structure matches
     fake_flat, fake_spec = pytree.tree_flatten(fake_output)
     real_flat, real_spec = pytree.tree_flatten(real_output)
 
@@ -543,7 +517,6 @@ def _validate_outputs_match(
             f"real_impl returned {len(real_flat)} values"
         )
 
-    # Check each tensor's shape and dtype
     for i, (fake_val, real_val) in enumerate(zip(fake_flat, real_flat)):
         fake_is_tensor = isinstance(fake_val, torch.Tensor)
         real_is_tensor = isinstance(real_val, torch.Tensor)
@@ -575,12 +548,9 @@ def _validate_outputs_match(
 
 def _invoke_leaf_function_impl(fn_spec, input_spec, *flat_args):
     """
-    Shared implementation for fake and dense dispatch.
-
     Tensors are detached before and after invoking the function to ensure
     the leaf function is treated as an atomic operation from autograd's
-    perspective. This prevents internal operations from leaking into the
-    autograd graph - gradients flow through InvokeLeafFunctionAutogradOp's
+    perspective. Gradients flow through InvokeLeafFunctionAutogradOp's
     custom backward instead.
     """
     fn = unwrap_fn_spec(fn_spec)

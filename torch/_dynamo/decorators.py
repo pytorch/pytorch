@@ -287,24 +287,20 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             logging.basicConfig(level=logging.INFO)
             logger = logging.getLogger(__name__)
 
-
             @leaf_function
             def compute_and_log_stats(x):
                 stats = x.mean(dim=1)  # Shape: (x.shape[0],)
                 logger.info(f"Per-sample means: {stats}")
                 return (stats,)
 
-
             @compute_and_log_stats.fake_impl
             def compute_and_log_stats_fake(x):
                 # Match the output shape: (x.shape[0],)
                 return (x.new_empty(x.shape[0]),)
 
-
             class MyModule(torch.nn.Module):
                 def forward(self, x):
                     return compute_and_log_stats(x)
-
 
             x = torch.randn(3, 4)
             model = torch.compile(MyModule(), backend="aot_eager", fullgraph=True)
