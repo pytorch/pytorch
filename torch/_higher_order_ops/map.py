@@ -220,7 +220,12 @@ def _broadcast_to_batch(output, batch_size):
 
     def expand_with_batch(t):
         if isinstance(t, torch.Tensor):
-            return t.unsqueeze(0).expand(batch_size, *t.shape).clone()
+            # Use contiguous_format to match torch.stack behavior
+            return (
+                t.unsqueeze(0)
+                .expand(batch_size, *t.shape)
+                .clone(memory_format=torch.contiguous_format)
+            )
         return t
 
     return pytree.tree_map(expand_with_batch, output)
