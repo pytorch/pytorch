@@ -329,6 +329,18 @@ op_db: list[OpInfo] = [
                 }
             ),
         ),
+        skips=(
+            # Exception: Tensor-likes are not close!
+            # Greatest absolute difference: inf at index (10,) (up to 1e-05 allowed)
+            # Greatest relative difference: nan at index (10,) (up to 0.001 allowed)
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+        ),
         dtypes=all_types_and(torch.bool),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         supports_forward_ad=True,
@@ -417,6 +429,12 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=0.0004, rtol=0.009)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+            ),
         ),
         dtypes=all_types_and(torch.bool),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
@@ -501,13 +519,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -536,13 +547,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -622,12 +626,6 @@ op_db: list[OpInfo] = [
                 device_type="mps",
             ),
             DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
-            DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
         ),
@@ -670,12 +668,6 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
                 device_type="mps",
             ),
             DecorateInfo(
@@ -799,13 +791,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -820,13 +805,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -841,13 +819,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-            # AssertionError: Scalars are not close!
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
