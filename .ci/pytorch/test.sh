@@ -148,6 +148,12 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
+if [[ -d "${HF_CACHE}" ]]; then
+  # Enable HF_CACHE directory for vLLM tests. If this works out, we can enable
+  # this for all CI jobs including LF fleet
+  export HF_HOME="${HF_CACHE}"
+fi
+
 if [[ "$TEST_CONFIG" == 'default' ]]; then
   export CUDA_VISIBLE_DEVICES=0
   export HIP_VISIBLE_DEVICES=0
@@ -1874,11 +1880,6 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
     (cd .ci/lumen_cli && python -m pip install -e .)
 
-    if [[ -d "${HF_CACHE}" ]]; then
-        # Enable HF_CACHE directory for vLLM tests. If this works out, we can enable
-        # this for all CI jobs including LF fleet
-        export HF_HOME="${HF_CACHE}"
-    fi
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
