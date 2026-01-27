@@ -145,6 +145,7 @@ def flex_attention_strategy(op_schema: OpSchema) -> OpStrategy:
 @register_op_strategy(flex_attention_backward_hop, schema_info=RuntimeSchemaInfo())  # type: ignore[arg-type]
 def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args(validate=False)
+    grad_logsumexp = op_schema.args_schema[6]
 
     # Replicate everything. The backward outputs follow the same sharding as the
     # forward inputs (query, key, value).
@@ -158,7 +159,7 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         Replicate(),  # out,
         Replicate(),  # logsumexp,
         Replicate(),  # grad_out,
-        Replicate(),  # grad_logsumexp,
+        Replicate() if grad_logsumexp else None,  # grad_logsumexp,
         Replicate(),  # q_num_blocks,
         Replicate(),  # q_indices,
     ]
@@ -175,7 +176,7 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         Shard(0),  # out,
         Shard(0),  # logsumexp,
         Shard(0),  # grad_out,
-        Shard(0),  # grad_logsumexp,
+        Shard(0) if grad_logsumexp else None,  # grad_logsumexp,
         Shard(0),  # q_num_blocks,
         Shard(0),  # q_indices,
     ]
@@ -192,7 +193,7 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         Shard(0),  # out,
         Shard(0),  # logsumexp,
         Shard(0),  # grad_out,
-        Shard(0),  # grad_logsumexp,
+        Shard(0) if grad_logsumexp else None,  # grad_logsumexp,
         Replicate(),  # q_num_blocks,
         Replicate(),  # q_indices,
     ]
@@ -210,7 +211,7 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         Shard(1),  # out,
         Shard(1),  # logsumexp,
         Shard(1),  # grad_out,
-        Shard(1),  # grad_logsumexp,
+        Shard(1) if grad_logsumexp else None,  # grad_logsumexp,
         Shard(1),  # q_num_blocks,
         Shard(1),  # q_indices,
     ]
@@ -227,7 +228,7 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         Shard(1),  # out,
         Shard(1),  # logsumexp,
         Shard(1),  # grad_out,
-        Shard(1),  # grad_logsumexp,
+        Shard(1) if grad_logsumexp else None,  # grad_logsumexp,
         Replicate(),  # q_num_blocks,
         Replicate(),  # q_indices,
     ]
@@ -245,7 +246,7 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         Shard(2),  # out,
         Shard(2),  # logsumexp,
         Shard(2),  # grad_out,
-        Shard(2),  # grad_logsumexp,
+        Shard(2) if grad_logsumexp else None,  # grad_logsumexp,
         Replicate(),  # q_num_blocks,
         Shard(3),  # q_indices,
     ]
@@ -459,7 +460,7 @@ def _flex_backward_propagate(
             out._spec,
             logsumexp._spec,
             grad_out._spec,
-            grad_logsumexp._spec,
+            grad_logsumexp._spec if grad_logsumexp is not None else None,
             *block_mask_spec,
         ),
         kwargs_schema={},
@@ -472,7 +473,7 @@ def _flex_backward_propagate(
         out._local_tensor,
         logsumexp._local_tensor,
         grad_out._local_tensor,
-        grad_logsumexp._local_tensor,
+        grad_logsumexp._local_tensor if grad_logsumexp is not None else None,
     ]
     local_args.extend(b._local_tensor for b in block_mask)
     op_info = OpInfo(
@@ -485,7 +486,7 @@ def _flex_backward_propagate(
             out._spec,
             logsumexp._spec,
             grad_out._spec,
-            grad_logsumexp._spec,
+            grad_logsumexp._spec if grad_logsumexp is not None else None,
             *block_mask_spec,
         ),  # type: ignore[arg-type]
         local_args=tuple(local_args),
@@ -616,6 +617,8 @@ def dtensor_flex_attention_backward(
     )
 
     if not isinstance(grad_logsumexp, DTensor):
+        assert grad_logsumexp is None
+        """
         # TODO: Why is this not a DTensor? Is it because that logsumexp is not used
         # by the downstream ops in the forward pass?
         assert grad_logsumexp.shape == logsumexp.shape
@@ -628,6 +631,7 @@ def dtensor_flex_attention_backward(
             device_mesh=out.device_mesh,
             placements=out.placements,
         )
+        """
 
     op_info = _flex_backward_propagate(
         query, key, value, out, logsumexp, grad_out, grad_logsumexp, block_mask[6:8]
@@ -649,7 +653,7 @@ def dtensor_flex_attention_backward(
     assert isinstance(local_out, torch.Tensor)
     assert isinstance(local_logsumexp, torch.Tensor)
     assert isinstance(local_grad_out, torch.Tensor)
-    assert isinstance(local_grad_logsumexp, torch.Tensor)
+    # assert isinstance(local_grad_logsumexp, torch.Tensor)
 
     block_mask_local = pytree.tree_map(
         lambda x: x._local_tensor if isinstance(x, DTensor) else x,

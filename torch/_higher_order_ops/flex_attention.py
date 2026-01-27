@@ -123,8 +123,8 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         value: torch.Tensor,
         out: torch.Tensor,
         logsumexp: torch.Tensor,
-        grad_out: torch.Tensor,
-        grad_logsumexp: torch.Tensor,
+        grad_out: torch.Tensor | None,
+        grad_logsumexp: torch.Tensor | None,
         fw_graph: Union[Callable, GraphModule],
         joint_graph: GraphModule,
         block_mask: tuple,
@@ -745,6 +745,7 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         assert not any_buffer_requires_grad, (
             "Captured buffers from mask mod that require grad are not supported."
         )
+        ctx.set_materialize_grads(False)
         ctx._fw_graph = fw_graph
         ctx._joint_graph = joint_graph
         ctx._mask_graph = block_mask[-1]
@@ -925,8 +926,8 @@ def sdpa_dense_backward(
     value: torch.Tensor,
     out: torch.Tensor,
     logsumexp: torch.Tensor,
-    grad_out: torch.Tensor,
-    grad_logsumexp: torch.Tensor,
+    grad_out: torch.Tensor | None,
+    grad_logsumexp: torch.Tensor | None,
     fw_graph: Callable,  # GraphModule type hint?
     joint_graph: Callable,
     block_mask: tuple,
@@ -987,7 +988,8 @@ def sdpa_dense_backward(
     # We're undoing the log -> log2 change of base in the forwards
     logsumexp = logsumexp * math.log(2)
     # The backwards formula for the log -> log2 change of base in the forwards
-    grad_logsumexp = grad_logsumexp / math.log(2)
+    if grad_logsumexp is not None:
+        grad_logsumexp = grad_logsumexp / math.log(2)
     scores, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -1003,6 +1005,9 @@ def sdpa_dense_backward(
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
     softmax_scores = torch.where(masked_out_rows.unsqueeze(-1), 0, softmax_scores)
 
+    if grad_out is None:
+        grad_out = torch.zeros_like(out)
+
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
     grad_softmax_scores = grad_out.to(dtype=softmax_scores.dtype) @ value.to(
@@ -1014,9 +1019,12 @@ def sdpa_dense_backward(
         -1,
         keepdim=True,
     )
-    grad_score_mod = softmax_scores * (
-        grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
-    )
+    if grad_logsumexp is not None:
+        grad_score_mod = softmax_scores * (
+            grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
+        )
+    else:
+        grad_score_mod = softmax_scores * (grad_softmax_scores - sum_scores)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
@@ -1300,8 +1308,10 @@ def flex_attention_backward_functionalize(
     assert isinstance(value_unwrapped, torch.Tensor)
     assert isinstance(out_unwrapped, torch.Tensor)
     assert isinstance(logsumexp_unwrapped, torch.Tensor)
-    assert isinstance(grad_out_unwrapped, torch.Tensor)
-    assert isinstance(grad_logsumexp_unwrapped, torch.Tensor)
+    assert grad_out_unwrapped is None or isinstance(grad_out_unwrapped, torch.Tensor)
+    assert grad_logsumexp_unwrapped is None or isinstance(
+        grad_logsumexp_unwrapped, torch.Tensor
+    )
     assert isinstance(block_mask_unwrapped, tuple)
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
