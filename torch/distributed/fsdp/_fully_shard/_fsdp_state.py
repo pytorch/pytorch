@@ -70,6 +70,9 @@ def disable_if_config_true(func):
 
 
 class FSDPState(_State):
+    # Name used in error messages; subclasses can override
+    _state_name: str = "FSDP"
+
     def __init__(self) -> None:
         super().__init__()
         self._fsdp_param_group: FSDPParamGroup | None = None
@@ -83,6 +86,10 @@ class FSDPState(_State):
         # ``False`` when user set reshard_after_forward
         # through ``fully_shard`` or ``set_reshard_after_forward``
         self._auto_reshard_after_forward: bool | None = True
+
+    def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
+        """Get the state for a module. Subclasses can override to use different state getters."""
+        return _get_module_fsdp_state(module)
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -162,19 +169,19 @@ class FSDPState(_State):
         self._is_root = True
         if len(self._modules) > 1:
             raise RuntimeError(
-                f"FSDP requires a single root module but got {self._modules}"
+                f"{self._state_name} requires a single root module but got {self._modules}"
             )
         detect_compiled_autograd()
         root_module = self._modules[0]
         visited_states: set[FSDPState] = set()
         for module_name, module in root_module.named_modules():
-            if (state := _get_module_fsdp_state(module)) is None:
+            if (state := self._get_state_for_module(module)) is None:
                 continue
             if module is not root_module:
                 if state not in visited_states and state._is_root is not None:
                     raise RuntimeError(
-                        "FSDP state has already been lazily initialized for "
-                        f"{module_name}\nFSDP requires running forward through "
+                        f"{self._state_name} state has already been lazily initialized for "
+                        f"{module_name}\n{self._state_name} requires running forward through "
                         "the root module first"
                     )
                 state._is_root = False

@@ -16,11 +16,13 @@ from torch.distributed.utils import _get_root_modules
 from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
+    _apply_fsdp_to_module,
     _get_device_from_mesh,
     _get_managed_modules,
     _get_managed_states,
     _get_post_forward_mesh_info,
-    _init_default_fully_shard_mesh,
+    _init_default_mesh,
+    _init_param_group,
     _move_states_to_device,
 )
 from ._fsdp_param_group import FSDPParamGroup
@@ -191,7 +193,7 @@ def fully_shard(
         raise ValueError(
             f"fully_shard does not support containers that do not implement forward: {module}"
         )
-    mesh = mesh or _init_default_fully_shard_mesh()
+    mesh = mesh or _init_default_mesh()
     if mesh.ndim not in (1, 2):
         raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
     elif mesh.ndim == 1:
@@ -222,17 +224,17 @@ def fully_shard(
     params, buffers = _get_managed_states(managed_modules, ignored_params)
 
     _move_states_to_device(params, buffers, device)
-    if params:
-        state._fsdp_param_group = FSDPParamGroup(
-            params,
-            modules,
-            mesh_info,
-            post_forward_mesh_info,
-            device,
-            shard_placement_fn,
-            mp_policy,
-            offload_policy,
-        )
+    _init_param_group(
+        state,
+        params,
+        modules,
+        mesh_info,
+        post_forward_mesh_info,
+        device,
+        shard_placement_fn,
+        mp_policy,
+        offload_policy,
+    )
 
     # For Dynamo
     for managed_module in managed_modules:
@@ -240,14 +242,7 @@ def fully_shard(
         managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
-    for module in modules:
-        cls = module.__class__
-        new_cls = cls_to_fsdp_cls.get(cls)
-        if not new_cls:
-            dct = {"__deepcopy__": _unimplemented_deepcopy}
-            new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
-            cls_to_fsdp_cls[cls] = new_cls
-        module.__class__ = new_cls
+    _apply_fsdp_to_module(modules, cls_to_fsdp_cls, FSDPModule, "FSDP", _unimplemented_deepcopy)
     return arg_module
 
 
@@ -271,14 +266,17 @@ def disable_fsdp_module_new_init() -> Iterator[None]:
 
 
 class FSDPModule:
+    # Index in MRO where the original class is found.
+    # For FSDP: [FSDP<Orig>, FSDPModule, Orig, ...] -> index 2
+    # Subclasses like ReplicateModule override this.
+    _orig_cls_mro_index: int = 2
+
     def __new__(cls, *args, **kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
         """
-        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
-        # and index 1 is the `FSDPModule` class itself
-        orig_cls = cls.__mro__[2]
+        orig_cls = cls.__mro__[cls._orig_cls_mro_index]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         if _enable_fsdp_module_new_init:
             self.__init__(*args, **kwargs)
