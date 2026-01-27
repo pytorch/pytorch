@@ -1274,6 +1274,20 @@ class _InProcessFxCompile(FxCompile):
                 payload_fn=lambda: runnable_graph_str,
             )
 
+            # Log distributed topology if present
+            dist_topology = torch._dynamo.repro.after_aot._extract_distributed_topology(
+                gm
+            )
+            if dist_topology["has_distributed_ops"]:
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "distributed_topology",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: dist_topology,
+                )
+
             V.debug.fx_graph(gm, example_inputs)
             # TODO: Should we actually dump this?  It should be redundant with the aot
             # structured logs...
