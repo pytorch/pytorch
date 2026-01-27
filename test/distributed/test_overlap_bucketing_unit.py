@@ -1207,5 +1207,89 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         result.graph.lint()
 
 
+class TestForeachGroupsUnit(InductorTestCase):
+    """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
+
+    def test_compute_foreach_groups_same_dtype_shape(self):
+        """When all tensors have same dtype/shape, should return None (no benefit to grouping)."""
+        from torch._inductor.fx_passes.bucketing import _compute_foreach_groups
+
+        t1 = torch.randn(10, 20)
+        t2 = torch.randn(10, 20)
+        t3 = torch.randn(10, 20)
+        out_dtypes = [torch.float32, torch.float32, torch.float32]
+
+        groups = _compute_foreach_groups([t1, t2, t3], out_dtypes)
+        self.assertIsNone(groups)
+
+    def test_compute_foreach_groups_different_dtypes(self):
+        """When tensors have different dtypes, should group by dtype."""
+        from torch._inductor.fx_passes.bucketing import _compute_foreach_groups
+
+        t1 = torch.randn(10, 20)
+        t2 = torch.randn(10, 20, dtype=torch.float16)
+        t3 = torch.randn(10, 20)
+        out_dtypes = [torch.float32, torch.float16, torch.float32]
+
+        groups = _compute_foreach_groups([t1, t2, t3], out_dtypes)
+        self.assertIsNotNone(groups)
+        self.assertEqual(len(groups), 2)
+        # Check that indices 0 and 2 are grouped together (same dtype/shape)
+        # and index 1 is in its own group
+        group_sets = [set(g) for g in groups]
+        self.assertIn({0, 2}, group_sets)
+        self.assertIn({1}, group_sets)
+
+    def test_compute_foreach_groups_different_shapes(self):
+        """When tensors have different shapes, should group by shape."""
+        from torch._inductor.fx_passes.bucketing import _compute_foreach_groups
+
+        t1 = torch.randn(10, 20)
+        t2 = torch.randn(5, 10)
+        t3 = torch.randn(10, 20)
+        out_dtypes = [torch.float32, torch.float32, torch.float32]
+
+        groups = _compute_foreach_groups([t1, t2, t3], out_dtypes)
+        self.assertIsNotNone(groups)
+        self.assertEqual(len(groups), 2)
+        group_sets = [set(g) for g in groups]
+        self.assertIn({0, 2}, group_sets)
+        self.assertIn({1}, group_sets)
+
+    @unittest.skipIf(not HAS_GPU, "Requires GPU")
+    def test_pre_bucket_all_gather_with_foreach_groups(self):
+        """Test that _pre_bucket_all_gather produces same result with/without foreach_groups."""
+        from torch._inductor.fx_passes.bucketing import (
+            _ALL_DTYPES,
+            _pre_bucket_all_gather,
+        )
+
+        t1 = torch.randn(10, device="cuda")
+        t2 = torch.randn(20, dtype=torch.float16, device="cuda")
+        t3 = torch.randn(10, device="cuda")
+
+        ag_ins = [t1, t2, t3]
+        out_dtype_ints = [
+            _ALL_DTYPES.index(torch.float32),
+            _ALL_DTYPES.index(torch.float16),
+            _ALL_DTYPES.index(torch.float32),
+        ]
+        groups = [[0, 2], [1]]
+
+        # Test with grouped foreach
+        result_with_groups = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, groups
+        )
+        # Test without grouped foreach
+        result_without_groups = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, None
+        )
+
+        self.assertEqual(result_with_groups.shape, result_without_groups.shape)
+        self.assertTrue(
+            torch.allclose(result_with_groups.cpu(), result_without_groups.cpu())
+        )
+
+
 if __name__ == "__main__":
     run_tests()

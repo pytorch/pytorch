@@ -59,6 +59,51 @@ def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     return (group_name, reduce_op, dtype)
 
 
+def _compute_foreach_groups(
+    ag_ins: list[torch.Tensor],
+    out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
+) -> list[list[int]] | None:
+    """
+    Compute groups of indices that have the same src/dst dtype and shape.
+
+    This is an optimization to allow more efficient foreach_copy_ calls by grouping
+    tensors with matching properties together. Uses shape hints (not guards) for
+    SymInts since this is purely an optimization.
+
+    Args:
+        ag_ins: List of input tensors
+        out_dtypes: List of output dtypes for each tensor
+
+    Returns:
+        None if all tensors are in a single group (no benefit to grouping), otherwise
+        a list of groups, where each group is a list of indices with matching
+        (src_dtype, dst_dtype, shape) properties.
+    """
+    from torch.fx.experimental.symbolic_shapes import hint_int
+
+    def _get_shape_hint(tensor: torch.Tensor) -> tuple[int, ...]:
+        """Get shape as concrete ints, using hints for SymInts."""
+        return tuple(
+            hint_int(s) if hasattr(s, "node") else int(s) for s in tensor.shape
+        )
+
+    groups: dict[tuple[torch.dtype, torch.dtype, tuple[int, ...]], list[int]] = {}
+    for i, (ag_in, out_dtype) in enumerate(zip(ag_ins, out_dtypes)):
+        src_dtype = ag_in.dtype
+        # Use shape hints for SymInts (not guards) since this is an optimization
+        shape = _get_shape_hint(ag_in)
+        key = (src_dtype, out_dtype, shape)
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(i)
+
+    # If there's only one group, no benefit to grouping
+    if len(groups) <= 1:
+        return None
+
+    return list(groups.values())
+
+
 def _schedulable_wait_node(node: torch.fx.Node) -> bool:
     """
     Add additional check on if the wait node is schedulable
@@ -561,7 +606,22 @@ def _pre_bucket_all_gather(
         int
     ],  # dtype enum values, that inputs are converted to before all_gather
     rank: int,
+    foreach_groups: list[list[int]] | None = None,
 ) -> torch.Tensor:
+    """
+    Pre-bucket all gather operation.
+
+    Args:
+        ag_ins: Input tensors to gather
+        group_size: Size of the process group
+        group_name: Name of the process group
+        dtype: Target dtype for the bucket
+        out_dtype_ints: Dtype enum values for each input
+        rank: Current rank
+        foreach_groups: Optional groups for foreach_copy optimization.
+            If provided, groups tensors by same src/dst dtype and shape for
+            more efficient foreach_copy_ calls. Each group is a list of indices.
+    """
     # Convert int indices back to torch.dtype
     out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
     ins_split_sizes_bytes = [
@@ -576,7 +636,7 @@ def _pre_bucket_all_gather(
     device = ag_ins[0].device
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
-    foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
+    foreach_copy_dsts = list(torch.split(new_ag_in, ins_split_sizes))
     # View each destination slice as its output dtype, then copy
     # The copy operation handles dtype conversion from input dtype to output dtype
     foreach_copy_dsts_typed = [
@@ -584,7 +644,15 @@ def _pre_bucket_all_gather(
         for dst, out_dtype in zip(foreach_copy_dsts, out_dtypes, strict=True)
     ]
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
-    torch._foreach_copy_(foreach_copy_dsts_typed, ag_ins_flattened)
+
+    if foreach_groups is not None:
+        # Group foreach_copy calls by same src/dst dtype and shape for better performance
+        for group_indices in foreach_groups:
+            group_dsts = [foreach_copy_dsts_typed[idx] for idx in group_indices]
+            group_srcs = [ag_ins_flattened[idx] for idx in group_indices]
+            torch._foreach_copy_(group_dsts, group_srcs)
+    else:
+        torch._foreach_copy_(foreach_copy_dsts_typed, ag_ins_flattened)
     return new_ag_out
 
 
@@ -595,6 +663,7 @@ def _pre_bucket_all_gather_fake(
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtype_ints: list[int],
     rank: int,
+    foreach_groups: list[list[int]] | None = None,
 ) -> torch.Tensor:
     out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
     ins_split_sizes_bytes = [
@@ -640,8 +709,18 @@ def all_gather_merge_fn_to_trace_custom_ops(
     # TODO: custom ops support list[dtype] input
     out_dtype_ints = [_ALL_DTYPES.index(dt) for dt in out_dtypes]
 
+    # Compute foreach groups for better foreach_copy_ performance
+    # Groups tensors by same src/dst dtype and shape (using hints, not guards)
+    foreach_groups = _compute_foreach_groups(ag_ins, out_dtypes)
+
     new_ag_out = torch.ops.bucketing._pre_bucket_all_gather(
-        ag_ins, group_size, group_name, dtype, out_dtype_ints, rank
+        ag_ins,
+        group_size,
+        group_name,
+        dtype,
+        out_dtype_ints,
+        rank,
+        foreach_groups,
     )
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
