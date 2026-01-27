@@ -52,6 +52,7 @@ def _get_total_norm(
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach: bool | None = None,
+    skip_root: bool = False,
 ) -> torch.Tensor:
     r"""Compute the norm of an iterable of tensors.
 
@@ -70,6 +71,10 @@ def _get_total_norm(
             If ``None``, use the foreach implementation for CUDA and CPU native tensors and silently
             fall back to the slow implementation for other device types.
             Default: ``None``
+        skip_root (bool): if True, skip the final root operation (``^(1/p)``) and return
+            the sum of powered norms directly (``sum(|x|^p)``). This is useful for
+            distributed settings where delaying the root reduces unnecessary collectives.
+            Default: ``False``
 
     Returns:
         Total norm of the tensors (viewed as a single vector).
@@ -89,23 +94,44 @@ def _get_total_norm(
     )  # type: ignore[assignment]
 
     norms: list[Tensor] = []
+    # For p-norms (p not in {inf, -inf, 0}), use powsum to accumulate sum(|x|^p)
+    # and apply the root once at the end. This avoids sqrt -> pow -> sqrt cycles.
+    use_powsum = norm_type not in (float("inf"), float("-inf"), 0.0)
+
     for (device, _), ([device_tensors], _) in grouped_tensors.items():
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
-            norms.extend(torch._foreach_norm(device_tensors, norm_type))
+            if use_powsum:
+                # pyrefly: ignore[missing-attribute]
+                norms.extend(torch._foreach_powsum(device_tensors, norm_type))
+            else:
+                norms.extend(torch._foreach_norm(device_tensors, norm_type))
         elif foreach:
             raise RuntimeError(
                 f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
             )
         else:
-            norms.extend(
-                [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
-            )
+            if use_powsum:
+                norms.extend(
+                    # pyrefly: ignore[missing-attribute]
+                    [torch.linalg._powsum(g, norm_type) for g in device_tensors]
+                )
+            else:
+                norms.extend(
+                    [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
+                )
 
-    total_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to(first_device) for norm in norms]), norm_type
-    )
+    stacked_norms = torch.stack([norm.to(first_device) for norm in norms])
+
+    if use_powsum:
+        # norms are sum(|x|^p), just sum them
+        total_norm = stacked_norms.sum()
+        if not skip_root:
+            total_norm = total_norm ** (1.0 / norm_type)
+    else:
+        # For inf/-inf/0 norms, use vector_norm directly
+        total_norm = torch.linalg.vector_norm(stacked_norms, norm_type)
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(

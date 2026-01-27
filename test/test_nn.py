@@ -13826,6 +13826,31 @@ if __name__ == '__main__':
             self.assertEqual(len(w), 1)
             self.assertEqual(str(w[0].message), "`parameters` is an empty generator, no gradient clipping will occur.")
 
+    @parametrize_test('foreach', (False, True))
+    def test_get_total_norm_powsum_numerics(self, device, foreach):
+        """Test that _get_total_norm with powsum produces correct results.
+
+        For p-norms (p not in {inf, -inf, 0}), _get_total_norm now uses
+        powsum to accumulate sum(|x|^p) and applies the root once at the end.
+        """
+        from torch.nn.utils.clip_grad import _get_total_norm
+
+        tensors = [
+            torch.randn(10, 10, device=device),
+            torch.randn(5, 5, device=device),
+            torch.randn(20, device=device),
+        ]
+
+        # Test p-norms that use powsum (p > 0, p != inf)
+        for norm_type in [2.0, 3.0, 4.0]:
+            # Expected: (sum of sum(|x|^p) for each tensor)^(1/p)
+            expected = sum(
+                (t.abs() ** norm_type).sum() for t in tensors
+            ) ** (1.0 / norm_type)
+
+            result = _get_total_norm(tensors, norm_type, foreach=foreach)
+            self.assertEqual(result, expected)
+
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
     @largeTensorTest("42GB", "cuda")

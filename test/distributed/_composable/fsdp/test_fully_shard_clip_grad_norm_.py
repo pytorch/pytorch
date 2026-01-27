@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
+from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLPStack
@@ -18,6 +19,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
+from torch.utils._debug_mode import DebugMode
 
 
 device_type = torch.device(get_devtype())
@@ -115,6 +117,78 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
             self._test_clip_grad_norm(
                 1, norm_type, ref_model, ref_optim, model, optim, inp
             )
+
+    @skip_if_lt_x_gpu(2)
+    def test_clip_grad_norm_dtensor_powsum(self):
+        """Test that powsum optimization uses one allreduce and one pow for p-norms."""
+        dp_mesh = init_device_mesh(device_type.type, (self.world_size,))
+
+        # Create two sharded DTensor parameters with gradients
+        torch.manual_seed(42)
+        x = nn.Parameter(
+            DTensor.from_local(
+                torch.randn(4, 8, device=device_type), dp_mesh, [Shard(0)]
+            )
+        )
+        y = nn.Parameter(
+            DTensor.from_local(
+                torch.randn(4, 8, device=device_type), dp_mesh, [Shard(0)]
+            )
+        )
+        x.grad = DTensor.from_local(
+            torch.randn(4, 8, device=device_type), dp_mesh, [Shard(0)]
+        )
+        y.grad = DTensor.from_local(
+            torch.randn(4, 8, device=device_type), dp_mesh, [Shard(0)]
+        )
+
+        with DebugMode() as debug_mode:
+            torch.nn.utils.get_total_norm([x.grad, y.grad], norm_type=2.0)
+
+        # Verify: foreach_powsum on local tensors -> stack -> sum -> allreduce -> pow
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  aten::_foreach_powsum.Scalar(['dt: f32[8, 8]| S(0)', 'dt: f32[8, 8]| S(0)'], 2.0)
+    aten::_foreach_powsum.Scalar(['t: f32[4, 8]', 't: f32[4, 8]'], 2.0)  ->  ['t: f32[]', 't: f32[]']
+  aten::stack(['dt: f32[]| P(sum)', 'dt: f32[]| P(sum)'])
+    aten::stack(['t: f32[]', 't: f32[]'])  ->  t: f32[2]
+  aten::sum(dt: f32[2]| P(sum))
+    aten::sum(t: f32[2])  ->  t: f32[]
+  aten::pow.Tensor_Scalar(dt: f32[]| P(sum), 0.5)
+    -> output: R
+    redistribute_input(0, P(sum) -> R)
+      redistribute_input(t: f32[], trace: P(sum)->R)
+        _c10d_functional::all_reduce(t: f32[], sum, 0)  ->  t: f32[]
+        _c10d_functional::_wrap_tensor_autograd(t: f32[])  ->  t: f32[]
+        _c10d_functional::wait_tensor(t: f32[])  ->  t: f32[]
+    aten::pow.Tensor_Scalar(t: f32[], 0.5)  ->  t: f32[]""",
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_get_total_norm_skip_root(self):
+        """Test that skip_root=True returns Partial(sum) with correct numerics."""
+        from torch.distributed.tensor import Partial
+
+        dp_mesh = init_device_mesh(device_type.type, (self.world_size,))
+
+        torch.manual_seed(42 + dp_mesh.get_local_rank())
+        tensors = [
+            DTensor.from_local(
+                torch.randn(4, 8, device=device_type), dp_mesh, [Shard(0)]
+            )
+            for _ in range(3)
+        ]
+
+        result = torch.nn.utils.get_total_norm(tensors, norm_type=2.0, skip_root=True)
+
+        # Verify placement is Partial(sum)
+        self.assertEqual(result.placements, (Partial("sum"),))
+
+        # Verify numerics: result should be sum(|x|^2) across all tensors
+        full_tensors = [t.full_tensor() for t in tensors]
+        expected = sum((t.abs() ** 2).sum() for t in full_tensors)
+        self.assertEqual(result.full_tensor(), expected)
 
 
 class TestClipGradNormWorldSize4(_TestClipGradNormBase):
