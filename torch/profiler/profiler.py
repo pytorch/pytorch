@@ -40,19 +40,19 @@ __all__ = [
 
 # Callbacks to run when export_chrome_trace is called.
 # Each callback takes trace data (dict) and returns modified trace data.
-# Use register_export_chrome_trace_callback() to add callbacks.
 _export_chrome_trace_callbacks: list[Callable[[dict], dict]] = []
 
 
-def register_export_chrome_trace_callback(callback: Callable[[dict], dict]) -> None:
+def register_export_chrome_trace_callback(
+    callback: Callable[[dict], dict]
+) -> Callable[[dict], dict]:
     """
     Register a callback to be run when export_chrome_trace() is called.
 
     The callback receives the trace data as a dict and should return the
     (potentially modified) trace data. Callbacks are run in registration order.
 
-    This can be used to add custom annotations to traces, e.g., FLOPS/bandwidth
-    utilization metrics.
+    Returns the callback (for use with unregister_export_chrome_trace_callback).
 
     Example::
 
@@ -63,8 +63,17 @@ def register_export_chrome_trace_callback(callback: Callable[[dict], dict]) -> N
             return data
 
         torch.profiler.register_export_chrome_trace_callback(add_custom_annotation)
+        # Later, to remove:
+        torch.profiler.unregister_export_chrome_trace_callback(add_custom_annotation)
     """
     _export_chrome_trace_callbacks.append(callback)
+    return callback
+
+
+def unregister_export_chrome_trace_callback(callback: Callable[[dict], dict]) -> None:
+    """Remove a previously registered export_chrome_trace callback."""
+    if callback in _export_chrome_trace_callbacks:
+        _export_chrome_trace_callbacks.remove(callback)
 PROFILER_STEP_NAME = "ProfilerStep"
 
 _WARNINGS_SHOWN = set()

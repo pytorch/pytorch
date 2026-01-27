@@ -1101,6 +1101,11 @@ input files to combine.",
 
 # Register the default utilization callback with the profiler.
 # This enables automatic FLOPS/bandwidth utilization annotations in profiler traces.
+# lru_cache ensures we only register once per process.
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
 def _register_profiler_callback() -> None:
     try:
         from torch.profiler import register_export_chrome_trace_callback

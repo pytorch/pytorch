@@ -22,13 +22,19 @@ class TestExportChromeTraceCallbacks(TestCase):
         _export_chrome_trace_callbacks.clear()
 
     def test_callback_registration(self):
-        """Test that callbacks can be registered."""
+        """Test that callbacks can be registered and removed."""
+        from torch.profiler import unregister_export_chrome_trace_callback
+
         def my_callback(data):
             return data
 
         self.assertEqual(len(_export_chrome_trace_callbacks), 0)
         register_export_chrome_trace_callback(my_callback)
         self.assertEqual(len(_export_chrome_trace_callbacks), 1)
+
+        # Test unregister works
+        unregister_export_chrome_trace_callback(my_callback)
+        self.assertEqual(len(_export_chrome_trace_callbacks), 0)
 
     def test_callback_modifies_trace(self):
         """Test that registered callbacks modify the trace."""
