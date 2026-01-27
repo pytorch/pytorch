@@ -720,7 +720,7 @@ def _warn_tf32_disabled() -> None:
         )
     if torch.xpu.is_available() and not torch.backends.mkldnn.allow_tf32:
         warnings.warn(
-            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
+            "TensorFloat32 matrix engine for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
             "Consider setting `torch.backends.mkldnn.allow_tf32 = True` for better performance."
         )
