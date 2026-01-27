@@ -28,6 +28,7 @@ from .profiler import (
     schedule,
     supported_activities,
     tensorboard_trace_handler,
+    unregister_export_chrome_trace_callback,
 )
 
 
