@@ -3,7 +3,7 @@ import logging
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Optional
+from typing import cast, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -27,6 +27,33 @@ from torch.distributed.distributed_c10d import (
 
 
 logger = logging.getLogger(__name__)
+
+# GPU HBM bandwidth (GB/s) - conservative estimate across A100/H100
+# A100: ~2000 GB/s, H100: ~3350 GB/s
+# Using a conservative value that works reasonably across GPU generations
+_GPU_MEMORY_BANDWIDTH_GBS = 2000.0
+
+
+def local_compute_cost(bytes_gb: float, read_write_factor: float = 2.0) -> float:
+    """
+    Compute cost for local memory-bound operations (in microseconds).
+
+    GPU compute operations like elementwise division are memory-bandwidth bound,
+    not compute bound. This function models the cost based on memory traffic.
+
+    For elementwise ops (e.g., tensor / scalar), we read and write the tensor
+    once, so read_write_factor=2.0 is the default.
+
+    Args:
+        bytes_gb: Size of tensor data in GB.
+        read_write_factor: Memory traffic multiplier. Default 2.0 for read+write.
+            Use 1.0 for read-only operations, 0.0 for no-ops (views).
+
+    Returns:
+        Cost in microseconds, matching the units used by communication costs.
+    """
+    # Time = bytes / bandwidth, convert to microseconds to match comm costs
+    return (read_write_factor * bytes_gb / _GPU_MEMORY_BANDWIDTH_GBS) * 1e6
 
 
 @torch.library.register_fake("_dtensor::shard_dim_alltoall")
@@ -366,6 +393,19 @@ def _compute_placement_transition_cost(
     elif current_placement.is_replicate() and target_placement.is_shard():
         comm_bytes_gb /= num_devices_on_mesh_dim
         return 0.0, comm_bytes_gb
+    elif current_placement.is_replicate() and target_placement.is_partial():
+        # Replicate -> Partial cost depends on the reduce_op:
+        # - "sum": requires division (tensor / num_chunks) which is memory-bound
+        # - "avg", "min", "max": no-op, tensor returned unchanged (zero cost)
+        partial_placement = cast(dtensor_spec.Partial, target_placement)
+        if partial_placement.reduce_op == "sum":
+            # Read tensor + write result = 2x memory traffic
+            return local_compute_cost(
+                comm_bytes_gb, read_write_factor=2.0
+            ), comm_bytes_gb
+        else:
+            # avg, min, max partition operations are no-ops
+            return 0.0, comm_bytes_gb
 
     return 0.0, comm_bytes_gb
 
@@ -444,17 +484,6 @@ def redistribute_cost(
         # make infinite cost if meshes are not same
         # TODO: see if we want to support this once there's cross mesh communication
         return float("inf")
-    if current_spec.is_replicated():
-        # short-cut: comm cost is 0 if current spec is already full replication
-        return 0.0
-
-    # TODO(zpcore): test placements with _StridedShard if we replace shard_order
-    # with _StridedShard.
-    if (
-        current_spec.placements == target_spec.placements
-        and current_spec.shard_order == target_spec.shard_order
-    ):
-        return 0.0
 
     # For sub-meshes, ranks not participating in the mesh should not compute
     # redistribution costs. Return 0 since they won't actually participate.
