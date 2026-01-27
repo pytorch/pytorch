@@ -712,7 +712,7 @@ def _warn_tf32_disabled() -> None:
         torch.cuda.is_available()
         and not torch.backends.cuda.matmul.allow_tf32
         and torch.cuda.get_device_capability() >= (8, 0)
-    ):
+    ) or (torch.xpu.is_available() and not torch.backends.mkldnn.allow_tf32):
         warnings.warn(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
@@ -731,9 +731,13 @@ def _sfdp_params_check(match):
         return False
     # fused kernels use tf32
     if (
-        query.device.type != "cpu"
+        query.device.type == "cuda"
         and query.dtype == torch.float32
         and not torch.backends.cuda.matmul.allow_tf32
+    ) or (
+        query.device.type == "xpu"
+        and query.dtype == torch.float32
+        and not torch.backends.mkldnn.allow_tf32
     ):
         _warn_tf32_disabled()
         return False
@@ -817,6 +821,8 @@ def _get_sfdp_patterns():
     if torch.cuda.is_available():
         # workaround https://github.com/pytorch/pytorch/issues/97894
         device = "cuda"
+    elif torch.xpu.is_available():
+        device = "xpu"
     else:
         device = "cpu"
 
