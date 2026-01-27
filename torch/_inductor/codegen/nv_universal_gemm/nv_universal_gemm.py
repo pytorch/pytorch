@@ -209,6 +209,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         scale_type_b: Optional[Any] = None,
         swizzle_type_a: Optional[Any] = None,
         swizzle_type_b: Optional[Any] = None,
+        supports_epilogue_fusion: bool = False,
     ) -> None:
         super().__init__(
             name=name,
@@ -224,6 +225,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.scale_type_b = scale_type_b
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
+        self.supports_epilogue_fusion = supports_epilogue_fusion
 
         output_buffer = Buffer(name=f"{variant.op_name}_out", layout=layout)
 
@@ -261,6 +263,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             scale_type_b=self.scale_type_b,
             swizzle_type_a=self.swizzle_type_a,
             swizzle_type_b=self.swizzle_type_b,
+            supports_epilogue_fusion=self.supports_epilogue_fusion,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
@@ -283,6 +286,79 @@ class NVUniversalGemmCaller(ChoiceCaller):
             "kernel_name": self.kernel.metadata.kernel_name,
         }
 
+    def get_make_kernel_render(self):
+        """
+        Return a make_kernel_render function for this caller.
+
+        This allows NVUniversalGemmCaller to participate in MultiTemplateBuffer's
+        epilogue benchmarking mechanism, similar to TritonTemplateCaller.
+        """
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernel,
+        )
+        from torch._inductor.utils import Placeholder
+
+        # Capture caller state in closure
+        kernel_metadata = {
+            "kernel_name": self.kernel.metadata.kernel_name,
+            "min_cc": self.kernel.metadata.min_cc,
+        }
+        accumulator_type = self.accumulator_type
+        workspace_size = self.workspace_size
+        variant = self.variant
+        scale_type_a = self.scale_type_a
+        scale_type_b = self.scale_type_b
+        swizzle_type_a = self.swizzle_type_a
+        swizzle_type_b = self.swizzle_type_b
+        input_nodes = self.input_nodes
+        supports_epilogue = self.supports_epilogue_fusion
+
+        def make_kernel_render(
+            out_node,
+            hint_override=None,
+            epilogue_fn_code=None,
+            epilogue_reads=None,
+            epilogue_writes=None,
+            epilogue_var_renames=None,
+        ):
+            from torch._inductor.ir import StorageBox, TensorBox
+
+            # Process input nodes
+            processed_inputs = []
+            for inp in input_nodes:
+                if isinstance(inp, TensorBox):
+                    inp = inp.data
+                if isinstance(inp, StorageBox):
+                    inp = inp.data
+                processed_inputs.append(inp)
+
+            kernel_name = str(Placeholder.KERNEL_NAME)
+
+            render_kernel = NVUniversalGemmKernel(
+                kernel_name=kernel_name,
+                input_nodes=processed_inputs,
+                output_node=out_node,
+                kernel_metadata=kernel_metadata,
+                accumulator_type=accumulator_type,
+                workspace_size=workspace_size,
+                variant=variant,
+                scale_type_a=scale_type_a,
+                scale_type_b=scale_type_b,
+                swizzle_type_a=swizzle_type_a,
+                swizzle_type_b=swizzle_type_b,
+                epilogue_fn_code=epilogue_fn_code,
+                epilogue_reads=epilogue_reads,
+                epilogue_writes=epilogue_writes,
+                epilogue_var_renames=epilogue_var_renames,
+            )
+
+            def render():
+                return render_kernel.render()
+
+            return render_kernel, render
+
+        return make_kernel_render
+
 
 def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
     """
@@ -298,15 +374,13 @@ def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
         return None
 
 
-def _exclude_efc_kernels(metadata) -> bool:
-    """
-    Filter out EFC kernels.
+def _include_efc_kernels_only(metadata) -> bool:
+    """Filter to include only EFC (Epilogue Fusion Compatible) kernels."""
+    return "EFC" in metadata.kernel_class.__name__
 
-    EFC kernels support custom epilogue operations but have additional overhead.
-    Since NVGEMM doesn't support epilogue fusion yet (see nv_universal_gemm_scheduling.py),
-    we use non-EFC kernels which are equivalent for identity epilogue (out = acc).
-    TODO(nikhilap): Remove this filter once NVGEMM supports epilogue fusion.
-    """
+
+def _exclude_efc_kernels(metadata) -> bool:
+    """Filter to exclude EFC kernels (for non-epilogue cases)."""
     return "EFC" not in metadata.kernel_class.__name__
 
 
@@ -409,25 +483,42 @@ def _add_nv_gemm_choices_impl(
         return
     cc_int = int(cc)
 
-    kernels = get_compatible_kernels(args, cc_int, metadata_filter=_exclude_efc_kernels)
-    if not kernels:
+    # Get non-EFC kernels for autotuning
+    non_efc_kernels = get_compatible_kernels(
+        args, cc_int, metadata_filter=_exclude_efc_kernels
+    )
+    if not non_efc_kernels:
         log.debug("No compatible %s kernels found", variant.op_name)
         return
 
-    max_configs = config.nvgemm_max_profiling_configs or len(kernels)
+    # Get EFC kernels separately for epilogue fusion capability
+    efc_kernels = get_compatible_kernels(
+        args, cc_int, metadata_filter=_include_efc_kernels_only
+    )
+
+    max_configs = config.nvgemm_max_profiling_configs or len(non_efc_kernels)
     if variant == GemmVariant.GEMM and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
-        kernels = heuristics.filter_kernels(
-            kernels, mm_inputs, max_configs, accumulator_type
+        non_efc_kernels = heuristics.filter_kernels(
+            non_efc_kernels, mm_inputs, max_configs, accumulator_type
+        )
+        efc_kernels = heuristics.filter_kernels(
+            efc_kernels, mm_inputs, max_configs, accumulator_type
         )
     else:
         # TODO(nikhilap): Enable heuristics for grouped and scaled GEMMs
         # when nvMatmulHeuristics adds support
-        kernels = kernels[:max_configs]
+        non_efc_kernels = non_efc_kernels[:max_configs]
+        efc_kernels = efc_kernels[:max_configs]
 
-    # Add callers for each kernel
+    # Add callers for both non-EFC and EFC kernels
+    # Non-EFC kernels don't support epilogue fusion, EFC kernels do
+    all_kernels = [(kernel, False) for kernel in non_efc_kernels] + [
+        (kernel, True) for kernel in efc_kernels
+    ]
+
     num_added = 0
-    for kernel in kernels:
+    for kernel, supports_epilogue_fusion in all_kernels:
         name = f"{variant.op_name}_{next(NVUniversalGemmCaller.index_counter)}"
         workspace_size = kernel.get_workspace_size(args)
         try:
@@ -443,6 +534,7 @@ def _add_nv_gemm_choices_impl(
                 scale_type_b=scale_type_b,
                 swizzle_type_a=swizzle_type_a,
                 swizzle_type_b=swizzle_type_b,
+                supports_epilogue_fusion=supports_epilogue_fusion,
             )
             choices.append(caller)
             num_added += 1
