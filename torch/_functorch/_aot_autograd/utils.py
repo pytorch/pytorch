@@ -448,6 +448,9 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                         output_token_nodes | tokens_from_invoke_subgraph
                     )
 
+        if not output_token_nodes and not input_token_nodes:
+            return
+
         output_node = next(reversed(module.graph.find_nodes(op="output")))
         assert output_node is not None
         with module.graph.inserting_before(output_node):

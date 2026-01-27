@@ -358,7 +358,7 @@ def expand_to_full_mesh_op_strategy(
     input_index: int = 1,
     inplace_op: bool = False,
     is_valid_strategy_cb: Callable[
-        [list[DTensorSpec], tuple[DTensorSpec | None, ...]], bool
+        [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
 ) -> OpStrategy:
@@ -465,12 +465,15 @@ def expand_to_full_mesh_op_strategy(
                 if spec_list[0].placements != out_kwarg_spec.placements:
                     continue
 
-        output_specs: tuple[DTensorSpec | None, ...]
-        if input_index > 1:
+        output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
+        if input_index == 0:
+            # No outputs (e.g., _linalg_check_errors)
+            output_specs = None
+        elif input_index > 1:
             output_specs = tuple(spec_list[:input_index])
         else:
             if spec_list[0] is not None:
-                output_specs = spec_list[0]  # type: ignore[assignment]
+                output_specs = spec_list[0]
             else:
                 raise RuntimeError("output spec is None")
 
@@ -482,7 +485,8 @@ def expand_to_full_mesh_op_strategy(
             continue
 
         # perform additional op-specific filtering
-        if is_valid_strategy_cb is not None:
+        # Skip callback for no-output ops (output_specs is None)
+        if is_valid_strategy_cb is not None and output_specs is not None:
             if not is_valid_strategy_cb(input_specs, output_specs):
                 continue
 

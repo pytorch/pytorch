@@ -403,9 +403,7 @@ class _ExportPackage:
             )
         base_directory = os.path.dirname(pt2_path)
         package_name = os.path.basename(pt2_path)[:-4]
-        with (
-            zipfile.ZipFile(pt2_path, "r") as zip_ref,
-        ):
+        with zipfile.ZipFile(pt2_path, "r") as zip_ref:
             zip_ref.extractall(base_directory)
 
         example_inputs_map: dict[str, int] | None = (

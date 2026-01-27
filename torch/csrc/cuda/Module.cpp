@@ -731,8 +731,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
   }
 
-  using c10::cuda::CUDACachingAllocator::BlockInfo;
-  using c10::cuda::CUDACachingAllocator::SegmentInfo;
+  using c10::CachingDeviceAllocator::BlockInfo;
+  using c10::CachingDeviceAllocator::SegmentInfo;
 
   py::str device_s = "device";
   py::str address_s = "address";
@@ -831,7 +831,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str oom_s = "oom";
   py::str device_free_s = "device_free";
 
-  using namespace c10::cuda::CUDACachingAllocator;
+  using c10::CachingDeviceAllocator::TraceEntry;
 
   auto action_to_str = [&](TraceEntry::Action action) {
     switch (action) {

@@ -46,14 +46,24 @@ void ThreadPoolExecutor::start(int32_t numThreads) {
 }
 
 void ThreadPoolExecutor::loop() {
+  // Track profiler state for this thread to synchronize with main thread
+  bool profilerEnabledInThisThread = false;
+
   while (true) {
     Work unit;
 
     sem_->acquire();
 
     if (stopped_) {
+      // Clean up profiler state before thread exits
+      if (profilerEnabledInThisThread) {
+        torch::autograd::profiler::disableProfilerInChildThread();
+      }
       return;
     }
+
+    // Synchronize profiler state with main thread
+    syncProfilerStateFromMainThread(profilerEnabledInThisThread);
 
     while (!work_->try_dequeue(ctok(), unit)) {
     };

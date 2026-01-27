@@ -7,7 +7,6 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/hip/HIPContext.h>
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #include <ATen/hip/HIPGraphsUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS

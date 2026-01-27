@@ -2550,7 +2550,7 @@ class CppKernel(Kernel):
         par = 1
         depth = 0
         for expr in ranges:
-            hint = V.graph.sizevars.size_hint(expr, fallback=8192)
+            hint = V.graph.sizevars.optimization_hint(expr, fallback=8192)
             if par >= 2 * threads or par == threads:
                 break
             if seq // threads < config.cpp.min_chunk_size:

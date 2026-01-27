@@ -23,6 +23,7 @@ from torch._functorch._aot_autograd.autograd_cache import (
 from torch._functorch._aot_autograd.schemas import AOTConfig
 from torch._guards import TracingContext
 from torch._inductor import config as inductor_config
+from torch._inductor.custom_graph_pass import CustomRuntimeEstimator
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.runtime.triton_compat import tl, triton
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -1179,6 +1180,130 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_triton_op_kernel_factory_function(self):
+        """
+        Test that triton kernels returned from factory functions are properly detected.
+
+        i.e., the pattern:
+            kernel = get_autotune_kernel()
+            capture_triton(kernel)[grid](...)
+        """
+        from torch._library import capture_triton
+        from torch._library.triton import triton_ops_to_kernels
+
+        @triton.jit
+        def factory_kernel(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(x_ptr + offsets, x + 42, mask=mask)
+
+        def get_kernel():
+            """Factory function that returns a triton kernel."""
+            return factory_kernel
+
+        @torch._library.triton_op("test::factory_triton_op", mutates_args=())
+        def factory_triton_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone()
+            n_elements = y.numel()
+            kernel = get_kernel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            capture_triton(kernel)[grid](y, n_elements, BLOCK_SIZE=256)
+            return y
+
+        kernels = triton_ops_to_kernels.get("test::factory_triton_op", [])
+
+        self.assertGreater(
+            len(kernels),
+            0,
+            "we should detect the kernel returned by get_kernel()",
+        )
+
+        kernel_names = [getattr(k, "__name__", str(k)) for k in kernels]
+        self.assertIn(
+            "factory_kernel",
+            kernel_names,
+            f"factory_kernel should be detected, got: {kernel_names}",
+        )
+
+        a = torch.randn(5, device=GPU_TYPE)
+        expected = a.clone() + 42
+        result = torch.ops.test.factory_triton_op(a)
+        self.assertEqual(result, expected)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_triton_op_lru_cache_factory_function(self):
+        """
+        Test that triton kernels returned from @lru_cache decorated factory
+        functions are properly detected.
+
+        i.e., the pattern:
+            @lru_cache
+            def get_autotune_kernel_lru():
+                return get_autotune_kernel(...)
+
+            kernel = get_autotune_kernel_lru()
+            capture_triton(kernel)[grid](...)
+        """
+        from functools import lru_cache
+
+        from torch._library import capture_triton
+        from torch._library.triton import triton_ops_to_kernels
+
+        @triton.jit
+        def cached_kernel(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(x_ptr + offsets, x + 99, mask=mask)
+
+        def get_kernel():
+            """Factory function."""
+            return cached_kernel
+
+        @lru_cache
+        def get_cached_kernel():
+            """Calls factory function decorated with @lru_cache."""
+            return get_kernel()
+
+        @torch._library.triton_op("test::lru_cache_triton_op", mutates_args=())
+        def lru_cache_triton_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone()
+            n_elements = y.numel()
+            kernel = get_cached_kernel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            capture_triton(kernel)[grid](y, n_elements, BLOCK_SIZE=256)
+            return y
+
+        kernels = triton_ops_to_kernels.get("test::lru_cache_triton_op", [])
+
+        self.assertGreater(
+            len(kernels),
+            0,
+            "we should detect the kernel through @lru_cache",
+        )
+
+        kernel_names = [getattr(k, "__name__", str(k)) for k in kernels]
+        self.assertIn(
+            "cached_kernel",
+            kernel_names,
+            f"cached_kernel should be detected, got: {kernel_names}",
+        )
+
+        a = torch.randn(5, device=GPU_TYPE)
+        expected = a.clone() + 99
+        result = torch.ops.test.lru_cache_triton_op(a)
+        self.assertEqual(result, expected)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_triton_op_cache_multiple_ops_invalidation(self):
         @triton.jit
         def my_jit(x):
@@ -2200,6 +2325,161 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         # Results should be different
         self.assertNotEqual(result1, result2)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget": 0.5})
+    def test_custom_runtime_estimator_cache_hit(self):
+        """Test that CustomRuntimeEstimator with valid uuid() results in cache hit."""
+
+        class MyCustomEstimator(CustomRuntimeEstimator):
+            def __call__(self, node) -> float:
+                return 1.0
+
+            def uuid(self):
+                return "my_custom_estimator_v1"
+
+        def fn(x, y):
+            return torch.mm(x, y) + 1
+
+        with fresh_cache():
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": MyCustomEstimator()}
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+
+                x = torch.randn(10, 10, requires_grad=True)
+                y = torch.randn(10, 10, requires_grad=True)
+                result = compiled_fn(x, y)
+                result.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+                self._clear_dynamo_and_codecache()
+
+                x2 = torch.randn(10, 10, requires_grad=True)
+                y2 = torch.randn(10, 10, requires_grad=True)
+                result2 = compiled_fn(x2, y2)
+                result2.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget": 0.5})
+    def test_custom_estimator_bypasses_cache(self):
+        """Test that cache is bypassed when custom estimator lacks proper uuid."""
+
+        def fn(x, y):
+            return torch.mm(x, y) + 1
+
+        # Test 1: Raw callable without uuid() method bypasses cache
+        def raw_estimator(node) -> float:
+            return 1.0
+
+        with fresh_cache():
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": raw_estimator}
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+                x = torch.randn(10, 10, requires_grad=True)
+                y = torch.randn(10, 10, requires_grad=True)
+                result = compiled_fn(x, y)
+                result.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+                self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+        counters.clear()
+        self._clear_dynamo_and_codecache()
+
+        # Test 2: CustomRuntimeEstimator with uuid() returning None bypasses cache
+        class EstimatorWithNullUuid(CustomRuntimeEstimator):
+            def __call__(self, node) -> float:
+                return 1.0
+
+            def uuid(self):
+                return None
+
+        with fresh_cache():
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": EstimatorWithNullUuid()}
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+                x = torch.randn(10, 10, requires_grad=True)
+                y = torch.randn(10, 10, requires_grad=True)
+                result = compiled_fn(x, y)
+                result.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+                self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @functorch_config.patch({"activation_memory_budget": 0.5})
+    def test_different_custom_estimator_uuids_cause_cache_miss(self):
+        """Test that different uuid values cause cache miss."""
+
+        class EstimatorV1(CustomRuntimeEstimator):
+            def __call__(self, node) -> float:
+                return 1.0
+
+            def uuid(self):
+                return "estimator_v1"
+
+        class EstimatorV2(CustomRuntimeEstimator):
+            def __call__(self, node) -> float:
+                return 1.0
+
+            def uuid(self):
+                return "estimator_v2"
+
+        def fn(x, y):
+            return torch.mm(x, y) + 1
+
+        with fresh_cache():
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": EstimatorV1()}
+            ):
+                compiled_fn = torch.compile(fn, backend="inductor")
+                x = torch.randn(10, 10, requires_grad=True)
+                y = torch.randn(10, 10, requires_grad=True)
+                result = compiled_fn(x, y)
+                result.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+            self._clear_dynamo_and_codecache()
+
+            with functorch_config.patch(
+                {"activation_memory_budget_runtime_estimator": EstimatorV2()}
+            ):
+                compiled_fn2 = torch.compile(fn, backend="inductor")
+                x2 = torch.randn(10, 10, requires_grad=True)
+                y2 = torch.randn(10, 10, requires_grad=True)
+                result2 = compiled_fn2(x2, y2)
+                result2.sum().backward()
+
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
 
 
 @functorch_config.patch({"bundled_autograd_cache": True})

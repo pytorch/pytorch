@@ -14,7 +14,7 @@ from torch._inductor.kernel.flex.flex_flash_attention import (
     HierarchicalIndex,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.nn.attention.flex_attention import (
     _DEFAULT_SPARSE_BLOCK_SIZE,
     create_block_mask,
@@ -31,7 +31,11 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_utils import decorateIf, parametrize
+from torch.testing._internal.common_utils import (
+    decorateIf,
+    DeterministicGuard,
+    parametrize,
+)
 
 
 def _times_two(score, _b, _h, _m, _n):
@@ -575,6 +579,8 @@ SCORE_MOD_CASES = [
     ),
 ]
 
+DETERMINISTIC_SCORE_MOD_CASES = [case for case in SCORE_MOD_CASES if case.requires_grad]
+
 
 MASK_MOD_CASES = [
     MaskModCase("block_mask_causal", lambda _dtype, _device: _causal_mask),
@@ -647,6 +653,8 @@ MASK_MOD_CASES = [
         requires_grad=True,
     ),
 ]
+
+DETERMINISTIC_MASK_MOD_CASES = [case for case in MASK_MOD_CASES if case.requires_grad]
 
 GQA_MQA_BLOCK_MASK_CASES = [
     MaskModCase(
@@ -785,6 +793,31 @@ class TestFlexFlash(InductorTestCase):
         )
 
     @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("case", DETERMINISTIC_SCORE_MOD_CASES, name_fn=score_case_name)
+    def test_flash_attention_backward_deterministic_score_mod_cases(
+        self, device, dtype, case
+    ):
+        q, k, v = create_test_tensors(
+            batch_size=case.batch_size,
+            num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
+            seq_len=case.seq_len,
+            dim=case.dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=case.requires_grad,
+        )
+        with DeterministicGuard(True):
+            flash_vs_triton(
+                q,
+                k,
+                v,
+                score_mod=case.score_mod_factory(dtype, device)
+                if case.score_mod_factory
+                else None,
+            )
+
+    @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", MASK_MOD_CASES, name_fn=mask_case_name)
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
         if case.requires_grad:
@@ -820,6 +853,96 @@ class TestFlexFlash(InductorTestCase):
                 device=device,
             ),
         )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("case", DETERMINISTIC_MASK_MOD_CASES, name_fn=mask_case_name)
+    def test_flash_attention_backward_deterministic_block_mask_raises(
+        self, device, dtype, case
+    ):
+        from torch._dynamo.exc import BackendCompilerFailed
+
+        q, k, v = create_test_tensors(
+            batch_size=case.batch_size,
+            num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
+            seq_len=case.seq_len,
+            dim=case.dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=case.requires_grad,
+        )
+        block_mask = _create_block_mask_for_device(
+            case.mask_mod_factory(dtype, device),
+            case.batch_size,
+            case.block_mask_num_heads or case.num_heads,
+            case.seq_len,
+            case.seq_len,
+            device=device,
+        )
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        with DeterministicGuard(True):
+            with self.assertRaisesRegex(
+                BackendCompilerFailed,
+                "Deterministic backward for flex_attention with block_mask using the FLASH backend",
+            ):
+                out = compiled_fn(
+                    q,
+                    k,
+                    v,
+                    score_mod=(
+                        case.score_mod_factory(dtype, device)
+                        if case.score_mod_factory
+                        else None
+                    ),
+                    block_mask=block_mask,
+                    kernel_options={"BACKEND": "FLASH"},
+                )
+                out.sum().backward()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("case", DETERMINISTIC_MASK_MOD_CASES, name_fn=mask_case_name)
+    def test_flash_attention_backward_deterministic_warn_only_block_mask(
+        self, device, dtype, case
+    ):
+        major, _ = torch.cuda.get_device_capability()
+        if major < 9:
+            self.skipTest("block sparse backward only supported on SM90+ for FLASH")
+
+        q, k, v = create_test_tensors(
+            batch_size=case.batch_size,
+            num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
+            seq_len=case.seq_len,
+            dim=case.dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=case.requires_grad,
+        )
+        block_mask = _create_block_mask_for_device(
+            case.mask_mod_factory(dtype, device),
+            case.batch_size,
+            case.block_mask_num_heads or case.num_heads,
+            case.seq_len,
+            case.seq_len,
+            device=device,
+        )
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        with DeterministicGuard(True, warn_only=True):
+            out = compiled_fn(
+                q,
+                k,
+                v,
+                score_mod=(
+                    case.score_mod_factory(dtype, device)
+                    if case.score_mod_factory
+                    else None
+                ),
+                block_mask=block_mask,
+                kernel_options={"BACKEND": "FLASH"},
+            )
+            out.sum().backward()
 
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
@@ -969,6 +1092,24 @@ class TestFlexFlash(InductorTestCase):
         self.assertTrue(
             prof_result["found"],
             f"Flash attention backward kernel not found. Kernels: {prof_result['kernel_names']}",
+        )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_forwards_deterministic_flag(self, device, dtype):
+        q, k, v = create_test_tensors(dim=128, dtype=dtype, device=device)
+        q.requires_grad_(True)
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        def run_for_code():
+            return compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
+
+        _, code = run_fw_bw_and_get_code(run_for_code)
+        code_str = "\n".join(code)
+        self.assertIn(
+            "are_deterministic_algorithms_enabled()",
+            code_str,
+            "Expected deterministic flag to be wired through flash backward",
         )
 
     @dtypes(torch.float16, torch.bfloat16)

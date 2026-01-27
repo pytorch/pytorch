@@ -440,9 +440,9 @@ static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, c
   int m = cuda_int_cast(A.size(-2), "m");
   int n = cuda_int_cast(A.size(-1), "n");
   int batchsize = cuda_int_cast(batchCount(A), "batch size");
-  int lda = A.stride(-1);
-  int ldu = compute_uv ? U.stride(-1) : m;
-  int ldv = compute_uv ? V.stride(-1) : n;
+  auto lda = std::max<int>(1, m);
+  auto ldu = std::max<int>(1, m);
+  auto ldv = std::max<int>(1, n);
 
   // Need to pass allocated memory to the function, otherwise it fails
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();

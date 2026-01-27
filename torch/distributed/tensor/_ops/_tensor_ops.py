@@ -831,8 +831,12 @@ def cat_single_dim_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_list = args_schema[0]
     # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
-    assert isinstance(input_list, tuple), type(input_list)
+    assert isinstance(input_list, (tuple, list)), type(input_list)
     assert all(isinstance(tm, TensorMeta) for tm in input_list)
+
+    if isinstance(input_list, list):
+        input_list = tuple(input_list)
+
     num_inputs = len(input_list)
     ndim_set = {len(meta.shape) for meta in input_list}
     assert len(ndim_set) in (1, 2), (

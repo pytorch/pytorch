@@ -8970,6 +8970,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(1, 32, 4)
         self.run_test(Cdist(), input_args=(x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cdist_dynamic_axes_script(self):
+        class CdistModule(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.cdist(a, b)
+
+        model = torch.jit.script(CdistModule())
+        a = torch.randn(10, 3)
+        b = torch.randn(10, 3)
+        self.run_test(
+            model,
+            input_args=(a, b),
+            input_names=["a", "b"],
+            output_names=["out"],
+            dynamic_axes={"a": {0: "size"}, "b": {0: "size"}},
+        )
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
         for ignore_index in [-100, 1]:

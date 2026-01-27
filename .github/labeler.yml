@@ -131,6 +131,9 @@
 "ciflow/vllm":
 - .github/ci_commit_pins/vllm.txt
 
+"ci-refresh-hf-cache":
+- .github/ci_commit_pins/vllm.txt
+
 "ciflow/inductor-pallas":
 - torch/_inductor/codegen/pallas.py
 - test/inductor/test_pallas.py

@@ -38,7 +38,8 @@ vllm_regression_test:
   package_install:
     - modelscope
   steps:
-    - pytest -v -s test_regression.py
+    - pytest -v -s test_regression.py -k 'not test_model_from_modelscope'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s test_regression.py -k test_model_from_modelscope
 
 vllm_lora_tp_test_distributed:
   title: LoRA TP Test (Distributed)
@@ -48,7 +49,8 @@ vllm_lora_tp_test_distributed:
   num_gpus: 4
   steps:
     - pytest -v -s -x lora/test_chatglm3_tp.py
-    - pytest -v -s -x lora/test_llama_tp.py
+    - pytest -v -s -x lora/test_llama_tp.py -k 'not test_tp2_serialize_and_deserialize_lora'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s -x lora/test_llama_tp.py -k test_tp2_serialize_and_deserialize_lora
     - pytest -v -s -x lora/test_llm_with_multi_loras.py
 
 vllm_distributed_test_28_failure_test:
@@ -72,7 +74,10 @@ vllm_multi_model_processor_test:
   package_install:
     - git+https://github.com/TIGER-AI-Lab/Mantis.git
   steps:
-    - pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py
+    - pytest -v -s models/multimodal/processing --ignore models/multimodal/processing/test_tensor_schema.py --ignore models/multimodal/processing/test_common.py --ignore models/multimodal/processing/test_glm4_1v.py
+    - pytest -v -s models/multimodal/processing/test_common.py -k 'not mistralai'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_common.py -k mistralai
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/processing/test_glm4_1v.py
 
 vllm_multi_model_test_28_failure_test:
   title: Multi-Model Test (Failed 2.8 release)
@@ -80,7 +85,8 @@ vllm_multi_model_test_28_failure_test:
   package_install:
     - git+https://github.com/TIGER-AI-Lab/Mantis.git
   steps:
-    - pytest -v -s models/multimodal/generation/test_voxtral.py
+    - pytest -v -s models/multimodal/generation/test_voxtral.py -k 'not 5-128-half'
+    - HF_DATASETS_OFFLINE=0 TRANSFORMERS_OFFLINE=0 pytest -v -s models/multimodal/generation/test_voxtral.py -k 5-128-half
     - pytest -v -s models/multimodal/pooling
 
 vllm_pytorch_compilation_unit_tests:
@@ -114,13 +120,9 @@ vllm_distributed_test_2_gpu_28_failure_test:
   steps:
     - pytest -v -s distributed/test_sequence_parallel.py
 
-# TODO(elainewy): need to add g6 with 4 gpus to run this test
 vllm_lora_test:
   title: LoRA Test %N
   id: lora_test
   parallelism: 4
   steps:
-    - "echo '[checking] list sharded lora tests:'"
-    - pytest -q --collect-only lora --shard-id=$$BUILDKITE_PARALLEL_JOB --num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT --ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py --ignore=lora/test_llm_with_multi_loras.py --ignore=lora/test_olmoe_tp.py --ignore=lora/test_deepseekv2_tp.py --ignore=lora/test_gptoss_tp.py --ignore=lora/test_qwen3moe_tp.py
-    - "echo '[checking] Done. list lora tests'"
     - pytest -v -s lora --shard-id=$$BUILDKITE_PARALLEL_JOB --num-shards=$$BUILDKITE_PARALLEL_JOB_COUNT --ignore=lora/test_chatglm3_tp.py --ignore=lora/test_llama_tp.py --ignore=lora/test_llm_with_multi_loras.py --ignore=lora/test_olmoe_tp.py --ignore=lora/test_deepseekv2_tp.py --ignore=lora/test_gptoss_tp.py --ignore=lora/test_qwen3moe_tp.py

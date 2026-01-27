@@ -43,7 +43,6 @@ if [[ "$(uname -m)" == "aarch64" ]]; then
     source "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh"
     if [[ "${CUDA_VERSION:-12.6}" == "13.0" ]]; then
         echo "installing CUDA 13.0.0 for ARM"
-        # install_cuda 13.0.0 cuda_13.0.0_580.65.06_linux
         install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
     else
         echo "installing CUDA 12.6.3 for ARM"

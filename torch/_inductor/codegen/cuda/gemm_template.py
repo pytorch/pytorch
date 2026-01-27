@@ -19,7 +19,7 @@ from torch._inductor.select_algorithm import create_inputs_key
 from torch._inductor.utils import clear_on_fresh_cache
 
 from ... import ir
-from ...config import cuda as inductor_cuda_config
+from ...config import cutlass as inductor_cutlass_config
 from ...ir import (
     Buffer,
     ChoiceCaller,
@@ -579,7 +579,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             for name, op in ops:
                 for (
                     swizzle
-                ) in inductor_cuda_config.cutlass_max_profiling_swizzle_options:
+                ) in inductor_cutlass_config.cutlass_max_profiling_swizzle_options:
                     description = f"{name} swizzle={swizzle}"
                     self.maybe_append_choice(
                         choices,
@@ -636,7 +636,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
-        if inductor_cuda_config.generate_test_runner and not is_dynamic(
+        if inductor_cutlass_config.generate_test_runner and not is_dynamic(
             *self.input_nodes, self.output_node
         ):
             res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
@@ -954,7 +954,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             )
             return None
 
-        if inductor_cuda_config.cutlass_tma_only and not self._has_tma_epilogue(op):
+        if inductor_cutlass_config.cutlass_tma_only and not self._has_tma_epilogue(op):
             return None
 
         # Set epilogue.
@@ -976,14 +976,16 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return None
 
         # Apply regex filters at the end when configuration name doesn't change anymore
-        if inductor_cuda_config.cutlass_op_allowlist_regex:
+        if inductor_cutlass_config.cutlass_op_allowlist_regex:
             if not re.search(
-                inductor_cuda_config.cutlass_op_allowlist_regex, op.configuration_name()
+                inductor_cutlass_config.cutlass_op_allowlist_regex,
+                op.configuration_name(),
             ):
                 return None
-        if inductor_cuda_config.cutlass_op_denylist_regex is not None:
+        if inductor_cutlass_config.cutlass_op_denylist_regex is not None:
             if re.search(
-                inductor_cuda_config.cutlass_op_denylist_regex, op.configuration_name()
+                inductor_cutlass_config.cutlass_op_denylist_regex,
+                op.configuration_name(),
             ):
                 return None
 
@@ -1036,7 +1038,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             time.time() - start_time,
         )
         sorted_res = sorted(res.items())
-        ret_res = sorted_res[: inductor_cuda_config.cutlass_max_profiling_configs]
+        ret_res = sorted_res[: inductor_cutlass_config.cutlass_max_profiling_configs]
         if len(self.filtered_ops_cache) < 50:
             self.filtered_ops_cache[self.cache_key] = ret_res
         else:
@@ -1076,8 +1078,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         if not shape or len(shape) < 2 or (shape[0] > 0 and shape[1] > 0):
             return ""
 
-        preferred = inductor_cuda_config.cutlass_dynamic_cluster_shape
-        fallback = inductor_cuda_config.cutlass_dynamic_cluster_fallback
+        preferred = inductor_cutlass_config.cutlass_dynamic_cluster_shape
+        fallback = inductor_cutlass_config.cutlass_dynamic_cluster_fallback
 
         cluster_k = shape[2] if len(shape) > 2 and shape[2] > 0 else preferred[2]
         preferred = (preferred[0], preferred[1], cluster_k)
@@ -1310,7 +1312,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         }
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
-        if inductor_cuda_config.generate_test_runner and not is_dynamic(X, W, Y, Bias):
+        if inductor_cutlass_config.generate_test_runner and not is_dynamic(
+            X, W, Y, Bias
+        ):
             test_runner_code = self._template_from_string(
                 GEMM_STANDALONE_RUNNER_TEMPLATE
             ).render(**options)

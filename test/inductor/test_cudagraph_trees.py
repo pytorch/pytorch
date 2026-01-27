@@ -1175,6 +1175,75 @@ if HAS_CUDA_AND_TRITON:
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_cudagraph_unsafe_unbacked_ops(self):
+            @torch.library.custom_op("mylib::get_size", mutates_args=())
+            def get_size(x: torch.Tensor) -> int:
+                return x.shape[0] // 2
+
+            @get_size.register_fake
+            def _(x):
+                ctx = torch.library.get_ctx()
+                return ctx.new_dynamic_size(min=0, max=x.shape[0])
+
+            x = torch.randn(8, 8, device="cuda")
+            W1 = torch.randn(8, 8, device="cuda")
+            W2 = torch.randn(8, 8, device="cuda")
+
+            def f(q):
+                # input q is on gpu. Here, we have 1 cuda addition op followed by cpu <> gpu device copy
+                # to enforce 1 graph partition. `torch._inductor.config.cudagraph_unsafe_unbacked_ops`
+                # will decide whether we have 1 more graph partition (i.e., 1 graph partition
+                # or 2 graph partitions in total).
+                q = q + 1
+                q_cpu = q.cpu()
+                q = q_cpu.cuda()
+
+                num_decode = torch.ops.mylib.get_size(q)  # Returns unbacked SymInt
+
+                torch._check(num_decode >= 0)
+                torch._check(num_decode <= q.shape[0])
+
+                num_prefill = q.shape[0] - num_decode
+
+                decode_q = q.narrow(0, 0, num_decode)
+                prefill_q = q.narrow(0, num_decode, num_prefill)
+
+                prefill_out = prefill_q @ W1
+                prefill_out2 = prefill_out @ W2
+
+                decode_out = decode_q @ W1
+
+                return prefill_out2, decode_out
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions_before = get_num_partitions(code)
+            # 2 partition since ops using unbacked symints are kept in graph partitions
+            self.assertEqual(num_partitions_before, 2)
+
+            # With config, ops using the unbacked symint should be partitioned out
+            torch._inductor.config.cudagraph_unsafe_unbacked_ops = ["mylib::get_size"]
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions_after = get_num_partitions(code)
+            # 1 partition since ops using unbacked symints are excluded from graph partitions
+            self.assertEqual(num_partitions_after, 1)
+
+            # Test with op_overload name (with .default suffix)
+            torch._inductor.config.cudagraph_unsafe_unbacked_ops = [
+                "mylib::get_size.default"
+            ]
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions_overload = get_num_partitions(code)
+            # 1 partition since ops using unbacked symints are excluded from graph partitions
+            self.assertEqual(num_partitions_overload, 1)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_with_memory_plan_reuse(self):
             BATCH_SIZE = 16
             MLP_SIZE = 128

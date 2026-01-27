@@ -448,6 +448,7 @@ DEFINE_DISPATCH(nansum_stub);
 DEFINE_DISPATCH(std_var_stub);
 DEFINE_DISPATCH(prod_stub);
 DEFINE_DISPATCH(norm_stub);
+DEFINE_DISPATCH(powsum_stub);
 DEFINE_DISPATCH(mean_stub);
 DEFINE_DISPATCH(and_stub);
 DEFINE_DISPATCH(or_stub);

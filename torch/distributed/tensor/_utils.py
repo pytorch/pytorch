@@ -491,6 +491,9 @@ def assert_no_mixed_partial_types(placements: Sequence[Placement]) -> None:
     semantically critical during redistribution. Rather than introducing complex ordering
     constraints, we prohibit mixing different Partial reduce types.
 
+    Note: Partial("sum") and Partial("avg") DO commute with each other, so they can be ordered
+    arbitrarily, and we allow this.
+
     This function is called internally by public APIs like :meth:`DTensor.from_local` and
     :func:`distribute_tensor` to validate placements early, before DTensor construction.
 
@@ -506,7 +509,7 @@ def assert_no_mixed_partial_types(placements: Sequence[Placement]) -> None:
         if isinstance(p, Partial):
             partial_reduce_ops.add(p.reduce_op)
 
-    if len(partial_reduce_ops) > 1:
+    if len(partial_reduce_ops) > 1 and partial_reduce_ops != {"sum", "avg"}:
         raise ValueError(
             f"Mixed Partial reduce types are not supported in the same placement list. "
             f"Found reduce ops: {partial_reduce_ops}. "

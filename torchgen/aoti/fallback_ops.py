@@ -131,6 +131,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.narrow.default": {},
     "aten.native_dropout.default": {},
     "aten.nonzero.default": {},
+    "aten.nonzero_static.default": {},
     "aten.normal_functional.default": {},
     "aten.ormqr.default": {},
     "aten.pad.default": {},

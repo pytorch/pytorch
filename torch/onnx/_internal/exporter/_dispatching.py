@@ -5,10 +5,9 @@ import logging
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from onnxscript import ir
-
 import torch
 import torch.fx
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter import _registration, _schemas
 
 
