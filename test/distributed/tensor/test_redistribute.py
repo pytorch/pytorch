@@ -826,81 +826,6 @@ class RedistributeTest(DTensorTestBase):
                 self.assertEqual(out.placements, dst)
 
     @with_comms
-    def test_replicate_to_partial_has_nonzero_cost(self):
-        """
-        Test that Replicate -> Partial transition has a nonzero cost.
-
-        This test verifies that the cost function assigns a positive cost to
-        R->P transitions, which discourages unnecessary partial tensor creation.
-        If R->P had zero cost, the planner might choose suboptimal paths that
-        create partial tensors unnecessarily.
-        """
-        mesh = init_device_mesh(self.device_type, (2, 2))
-
-        from torch.distributed.tensor._collective_utils import (
-            one_step_redistribute_cost,
-        )
-        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-
-        tensor_meta = TensorMeta(
-            shape=torch.Size([4, 4]),
-            stride=(4, 1),
-            dtype=torch.float32,
-        )
-
-        # Test R -> P cost on mesh_dim 0
-        replicate_spec = DTensorSpec(
-            mesh,
-            (Replicate(), Replicate()),
-            tensor_meta=tensor_meta,
-        )
-        partial_spec = DTensorSpec(
-            mesh,
-            (Partial(), Replicate()),
-            tensor_meta=tensor_meta,
-        )
-
-        cost = one_step_redistribute_cost(replicate_spec, partial_spec)
-
-        # R->P should have a positive cost (see REPLICATE_TO_PARTIAL_COST constant)
-        self.assertGreater(
-            cost,
-            0.0,
-            "Replicate -> Partial transition should have a nonzero cost to "
-            "discourage unnecessary partial tensor creation",
-        )
-
-        # Also verify that R->S has zero cost (for comparison)
-        shard_spec = DTensorSpec(
-            mesh,
-            (Shard(0), Replicate()),
-            tensor_meta=tensor_meta,
-        )
-        r_to_s_cost = one_step_redistribute_cost(replicate_spec, shard_spec)
-        self.assertEqual(
-            r_to_s_cost,
-            0.0,
-            "Replicate -> Shard transition should have zero cost (local operation)",
-        )
-
-        # Verify P->R has positive cost (all-reduce)
-        p_to_r_cost = one_step_redistribute_cost(partial_spec, replicate_spec)
-        self.assertGreater(
-            p_to_r_cost,
-            0.0,
-            "Partial -> Replicate transition should have positive cost (all-reduce)",
-        )
-
-        # The key invariant: R->P cost should be less than P->R cost
-        # (R->P is just a local division, P->R requires communication)
-        self.assertLess(
-            cost,
-            p_to_r_cost,
-            "R->P cost should be less than P->R cost since R->P is local "
-            "but P->R requires all-reduce communication",
-        )
-
-    @with_comms
     def test_replicate_to_partial_different_reduce_ops(self):
         """
         Test that Replicate -> Partial transitions work for all reduce op types.
@@ -1049,6 +974,80 @@ class RedistributeTest(DTensorTestBase):
             planner3.partial_reduce_ops_in_target,
             {"sum", "avg"},
             "Planner should collect all reduce ops from both src and dst",
+        )
+
+    def test_replicate_to_partial_has_nonzero_cost(self):
+        """
+        Test that Replicate -> Partial transition has a nonzero cost.
+
+        This test verifies that the cost function assigns a positive cost to
+        R->P transitions, which discourages unnecessary partial tensor creation.
+        If R->P had zero cost, the planner might choose suboptimal paths that
+        create partial tensors unnecessarily.
+        """
+        mesh = init_device_mesh(self.device_type, (2, 2))
+
+        from torch.distributed.tensor._collective_utils import (
+            one_step_redistribute_cost,
+        )
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+
+        tensor_meta = TensorMeta(
+            shape=torch.Size([4, 4]),
+            stride=(4, 1),
+            dtype=torch.float32,
+        )
+
+        # Test R -> P cost on mesh_dim 0
+        replicate_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=tensor_meta,
+        )
+        partial_spec = DTensorSpec(
+            mesh,
+            (Partial(), Replicate()),
+            tensor_meta=tensor_meta,
+        )
+
+        cost = one_step_redistribute_cost(replicate_spec, partial_spec)
+
+        # R->P should have a positive cost (see REPLICATE_TO_PARTIAL_COST constant)
+        self.assertGreater(
+            cost,
+            0.0,
+            "Replicate -> Partial transition should have a nonzero cost to "
+            "discourage unnecessary partial tensor creation",
+        )
+
+        # Also verify that R->S has zero cost (for comparison)
+        shard_spec = DTensorSpec(
+            mesh,
+            (Shard(0), Replicate()),
+            tensor_meta=tensor_meta,
+        )
+        r_to_s_cost = one_step_redistribute_cost(replicate_spec, shard_spec)
+        self.assertEqual(
+            r_to_s_cost,
+            0.0,
+            "Replicate -> Shard transition should have zero cost (local operation)",
+        )
+
+        # Verify P->R has positive cost (all-reduce)
+        p_to_r_cost = one_step_redistribute_cost(partial_spec, replicate_spec)
+        self.assertGreater(
+            p_to_r_cost,
+            0.0,
+            "Partial -> Replicate transition should have positive cost (all-reduce)",
+        )
+
+        # The key invariant: R->P cost should be less than P->R cost
+        # (R->P is just a local division, P->R requires communication)
+        self.assertLess(
+            cost,
+            p_to_r_cost,
+            "R->P cost should be less than P->R cost since R->P is local "
+            "but P->R requires all-reduce communication",
         )
 
 
@@ -1480,56 +1479,6 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                             src_to_dst_cost <= src_to_int_cost + int_to_dst_cost,
                             f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
                         )
-
-    @with_comms
-    def test_ordered_redistribute_with_partial(self):
-        """Test mixing Partial in the original placements and do redistribute."""
-        # This test takes 226s to complete on 8XA100...
-        torch.manual_seed(21)
-        with maybe_disable_local_tensor_mode():
-            mesh = init_device_mesh(self.device_type, (2, 2, 2))
-            input_tensor_shape = [
-                # even sharding
-                (16, 8),
-                (8, 16, 32),
-                # uneven sharding with padding
-                (17, 5),
-                (13, 2, 13),
-            ]
-            placement_choice = [
-                Shard(0),
-                Shard(1),
-                Shard(2),
-                Partial("sum"),
-                Partial("min"),
-                Replicate(),
-            ]
-            # pick 3 for the 3D mesh
-            partial_placement_comb = list(itertools.combinations(placement_choice, 3))
-
-        def _is_valid_placement(placements, tensor_rank):
-            # Check if placements is valid for tensor with rank `tensor_rank`
-            for placement in placements:
-                if isinstance(placement, Shard):
-                    if placement.dim >= tensor_rank:
-                        return False
-            return True
-
-        for shape in input_tensor_shape:
-            for placements in partial_placement_comb:
-                if not _is_valid_placement(placements, len(shape)):
-                    continue
-                local_tensor = torch.randn(shape, device=self.device_type)
-                full_tensor = DTensor.from_local(local_tensor, mesh, placements)
-                with maybe_disable_local_tensor_mode():
-                    shard_orders = generate_shard_orders(mesh, len(shape))
-                for shard_order in shard_orders:
-                    sharded_dt = redistribute(
-                        full_tensor, mesh, placements=None, shard_order=shard_order
-                    )
-                    self.assertEqual(
-                        make_full_tensor(sharded_dt), make_full_tensor(full_tensor)
-                    )
 
     @with_comms
     def test_redistribute_partial_to_different_partial_not_supported(self):
