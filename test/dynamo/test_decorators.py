@@ -2513,7 +2513,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             else:
                 return (mod.linear(x) + x,)
 
-        @non_tracable_forward.fake_impl
+        @non_tracable_forward.register_fake
         def non_tracable_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2584,7 +2584,7 @@ class GraphModule(torch.nn.Module):
             print("Processing input")
             return (mod.linear(x),)
 
-        @logging_forward.fake_impl
+        @logging_forward.register_fake
         def logging_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2619,7 +2619,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (mod.linear(x) * 3,)
 
-        @configurable_scale.fake_impl
+        @configurable_scale.register_fake
         def configurable_scale_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2694,7 +2694,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (x @ y * 3,)
 
-        @configurable_scale.fake_impl
+        @configurable_scale.register_fake
         def configurable_scale_fake(x, y):
             return (x @ y,)
 
@@ -2759,7 +2759,7 @@ class GraphModule(torch.nn.Module):
             out = out + closure_tensor + mod.offset
             return (out,)
 
-        @closure_forward.fake_impl
+        @closure_forward.register_fake
         def closure_forward_fake(mod, x):
             return (mod.linear(x) + mod.offset,)
 
@@ -2835,7 +2835,7 @@ class GraphModule(torch.nn.Module):
                 return (mod.linear(inputs["x"]), inputs["y"] + 1)
             return (mod.linear(inputs["x"]) + inputs["y"], inputs["y"] - 1)
 
-        @pytree_forward.fake_impl
+        @pytree_forward.register_fake
         def pytree_forward_fake(mod, inputs):
             return (mod.linear(inputs["x"]), inputs["y"])
 
@@ -2866,7 +2866,7 @@ class GraphModule(torch.nn.Module):
             y = mod.linear(x)
             return (y + x,)
 
-        @inner_leaf_forward.fake_impl
+        @inner_leaf_forward.register_fake
         def inner_leaf_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2883,7 +2883,7 @@ class GraphModule(torch.nn.Module):
             z = mod.linear(x)
             return mod.inner(z + x)
 
-        @outer_leaf_forward.fake_impl
+        @outer_leaf_forward.register_fake
         def outer_leaf_forward_fake(mod, x):
             return mod.inner(mod.linear(x))
 
@@ -2960,7 +2960,7 @@ class GraphModule(torch.nn.Module):
             nonzero_indices = (out > 0).nonzero()
             return (out, nonzero_indices)
 
-        @nonzero_forward.fake_impl
+        @nonzero_forward.register_fake
         def nonzero_forward_fake(mod, x):
             out = mod.linear(x)
             return out, (out > 0).nonzero()
@@ -3003,7 +3003,7 @@ class GraphModule(torch.nn.Module):
             scalar_value = out.sum().item()
             return (out, scalar_value)
 
-        @item_forward.fake_impl
+        @item_forward.register_fake
         def item_forward_fake(mod, x):
             out = mod.linear(x)
             return (out, out.sum().item())
@@ -3033,7 +3033,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (mod.linear(x) + x,)
 
-        @leaf_forward.fake_impl
+        @leaf_forward.register_fake
         def leaf_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -3124,7 +3124,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (mod.linear(x) + 1,)
 
-        @leaf_forward.fake_impl
+        @leaf_forward.register_fake
         def leaf_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -3180,7 +3180,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (modules_dict["first"](x) - modules_dict["second"](x),)
 
-        @main_forward.fake_impl
+        @main_forward.register_fake
         def main_forward_fake(modules_dict, x):
             return (modules_dict["first"](x) + modules_dict["second"](x),)
 
@@ -3219,7 +3219,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (helper_mod(x) + x,)
 
-        @main_forward.fake_impl
+        @main_forward.register_fake
         def main_forward_fake(x, helper_mod=None):
             return (helper_mod(x),)
 
@@ -3267,7 +3267,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result[0].shape, (3, 3))
 
         compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(Exception, "requires a fake_impl"):
+        with self.assertRaisesRegex(Exception, "requires a fake implementation"):
             compiled_mod(x)
 
     @parametrize("backend", ["eager", "aot_eager"])
@@ -3278,7 +3278,7 @@ class GraphModule(torch.nn.Module):
         def constant_closure_forward(x):
             return (x @ constant_weight,)
 
-        @constant_closure_forward.fake_impl
+        @constant_closure_forward.register_fake
         def constant_closure_forward_fake(x):
             return (x @ constant_weight,)
 
@@ -3309,7 +3309,7 @@ class GraphModule(torch.nn.Module):
             x.add_(1)
             return (x,)
 
-        @mutate_input.fake_impl
+        @mutate_input.register_fake
         def mutate_input_fake(x):
             return (x + 1,)
 
@@ -3332,7 +3332,7 @@ class GraphModule(torch.nn.Module):
         def dtype_mismatch_forward(mod, x):
             return (mod.linear(x),)
 
-        @dtype_mismatch_forward.fake_impl
+        @dtype_mismatch_forward.register_fake
         def dtype_mismatch_forward_fake(mod, x):
             return (mod.linear(x).double(),)
 
@@ -3359,7 +3359,7 @@ class GraphModule(torch.nn.Module):
         def mismatched_forward(mod, x):
             return (mod.linear(x),)
 
-        @mismatched_forward.fake_impl
+        @mismatched_forward.register_fake
         def mismatched_forward_fake(mod, x):
             return (torch.zeros(x.shape[0], 6),)
 
@@ -3392,7 +3392,7 @@ class GraphModule(torch.nn.Module):
                 return (x * scale + y + offset, x.sum() + y.sum())
             return (x * scale - y + offset, x.sum() - y.sum())
 
-        @my_custom_fn.fake_impl
+        @my_custom_fn.register_fake
         def my_custom_fn_fake(
             inputs: dict[str, torch.Tensor], scale: float, offset: int
         ):
@@ -3433,7 +3433,7 @@ class GraphModule(torch.nn.Module):
         def uses_multiple_closures(x):
             return (x @ weight1 + x @ weight2,)
 
-        @uses_multiple_closures.fake_impl
+        @uses_multiple_closures.register_fake
         def uses_multiple_closures_fake(x):
             return (torch.empty(x.shape[0], 3),)
 
@@ -3464,7 +3464,7 @@ class GraphModule(torch.nn.Module):
         def uses_closure(x):
             return (x @ closure_weight,)
 
-        @uses_closure.fake_impl
+        @uses_closure.register_fake
         def uses_closure_fake(x):
             return (torch.empty(x.shape[0], 3),)
 
@@ -3496,7 +3496,7 @@ class GraphModule(torch.nn.Module):
             out2 = x @ closure_weight2
             return (out1, out2)
 
-        @mixed_inputs.fake_impl
+        @mixed_inputs.register_fake
         def mixed_inputs_fake(x, y):
             return (torch.empty(x.shape[0], 3), torch.empty(x.shape[0], 4))
 
@@ -3528,7 +3528,7 @@ class GraphModule(torch.nn.Module):
         def uses_closure(x):
             return (x @ closure_weight,)
 
-        @uses_closure.fake_impl
+        @uses_closure.register_fake
         def uses_closure_fake(x):
             return (torch.empty(x.shape[0], 5),)
 
@@ -3550,7 +3550,7 @@ class GraphModule(torch.nn.Module):
         def uses_closure(x):
             return (x @ closure_weight,)
 
-        @uses_closure.fake_impl
+        @uses_closure.register_fake
         def uses_closure_fake(x):
             return (torch.empty(x.shape[0], 3),)
 

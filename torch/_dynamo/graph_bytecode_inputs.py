@@ -96,9 +96,9 @@ def register_user_object(value: Any, source: Source) -> int:
     return index
 
 
-# Register our retriever with the invoke_leaf_function HOP.
-# This allows the HOP to retrieve nn.Module instances by index without
-# importing HOP modules in Dynamo.
+# Register a callback so invoke_leaf_function can retrieve nn.Module instances at runtime.
+# We use a callback pattern instead of having invoke_leaf_function import get_external_object_by_index
+# directly, because higher-order ops should not depend on dynamo (dynamo depends on them, not vice versa).
 from torch._higher_order_ops.invoke_leaf_function import (
     set_leaf_function_module_retriever,
 )
