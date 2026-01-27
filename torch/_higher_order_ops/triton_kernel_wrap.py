@@ -980,6 +980,7 @@ def identify_mutated_tensors(
     kernel: "TritonKernelType",
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
+    tensors_to_clone_hint: Optional[list[str]] = None,
 ) -> list[str]:
     """
     Given a triton kernel and the arguments for this kernel, this function
@@ -1035,6 +1036,16 @@ def identify_mutated_tensors(
                 log.debug("===\t%s\t===", name)
                 for ret, ops in fn.items():
                     log.debug("%s\t=>\t%s", ret, ops)
+        if tensors_to_clone_hint is not None:
+            keys = [
+                key
+                for key, value in kwargs.items()
+                if key in tensors_to_clone_hint
+                and isinstance(value, (Tensor, torch._inductor.ir.TensorBox))
+            ]
+            log.warning("Using tensors_to_clone hint as fallback: %s", keys)
+            return keys
+
         return [
             key
             for key, value in kwargs.items()
@@ -1058,6 +1069,7 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
         grid: list["TritonGridType"],
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
+        tensors_to_clone_hint: Optional[list[str]] = None,
     ) -> Any:
         # pyrefly: ignore [missing-attribute]
         return super().__call__(
@@ -1066,6 +1078,7 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
             grid=grid,
             tma_descriptor_metadata=tma_descriptor_metadata,
             kwargs=kwargs,
+            tensors_to_clone_hint=tensors_to_clone_hint,
         )
 
 
@@ -1112,6 +1125,7 @@ def triton_kernel_wrapper_mutation_dense(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    tensors_to_clone_hint: Optional[list[str]] = None,
 ) -> None:
     from torch._inductor.codegen.wrapper import user_defined_kernel_grid_fn_code
 
@@ -1201,6 +1215,7 @@ def triton_kernel_wrapper_mutation_fake_tensor_mode(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    tensors_to_clone_hint: Optional[list[str]] = None,
 ) -> None:
     with mode:
         return None
@@ -1251,6 +1266,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    tensors_to_clone_hint: Optional[list[str]] = None,
 ) -> None:
     trace_triton_kernel_wrapper(
         mode,
@@ -1261,6 +1277,7 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
             "grid": grid,
             "tma_descriptor_metadata": tma_descriptor_metadata,
             "kwargs": kwargs,
+            "tensors_to_clone_hint": tensors_to_clone_hint,
         },
     )
 
@@ -1272,11 +1289,15 @@ def get_mutated_tensors(
     constant_args_idx: int,
     kwargs: dict[str, Any],
     tma_descriptor_metadata: TMADescriptorMetadata,
+    tensors_to_clone_hint: Optional[list[str]] = None,
 ) -> list[str]:
     kernel = kernel_side_table.get_kernel(kernel_idx)
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     return identify_mutated_tensors(
-        kernel, {**kwargs, **constant_args}, tma_descriptor_metadata
+        kernel,
+        {**kwargs, **constant_args},
+        tma_descriptor_metadata,
+        tensors_to_clone_hint,
     )
 
 
@@ -1288,6 +1309,7 @@ def triton_kernel_wrapper_mutation_functionalize(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    tensors_to_clone_hint: Optional[list[str]] = None,
 ) -> None:
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)  # type: ignore[arg-type]
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
@@ -1295,7 +1317,11 @@ def triton_kernel_wrapper_mutation_functionalize(
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
     tensors_to_clone = get_mutated_tensors(
-        kernel_idx, constant_args_idx, unwrapped_kwargs, tma_descriptor_metadata
+        kernel_idx,
+        constant_args_idx,
+        unwrapped_kwargs,
+        tma_descriptor_metadata,
+        tensors_to_clone_hint,
     )
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(
@@ -1352,6 +1378,7 @@ def triton_kernel_wrapper_functional_dense(
         grid=grid,
         tma_descriptor_metadata=tma_descriptor_metadata,
         kwargs=kwargs,
+        tensors_to_clone_hint=list(tensors_to_clone),
     )
     return {key: val for key, val in kwargs.items() if key in tensors_to_clone}
 
