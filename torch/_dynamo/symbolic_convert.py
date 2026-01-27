@@ -1523,6 +1523,7 @@ class InstructionTranslatorBase(
                 reason=reason,
                 exc=e,
             )
+
         self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
         return False
 
