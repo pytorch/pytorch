@@ -16,7 +16,6 @@ from torch.nn.utils.stateless import _reparametrize_module
 from .flat_apply import func_to_graphable
 
 
-# Callback for retrieving nn.Module instances by index for leaf_function.
 _leaf_function_module_retriever: Callable[[int], Any] | None = None
 
 
@@ -72,21 +71,13 @@ def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
     return mod
 
 
-def _detach_tensors(tree: Any) -> Any:
-    return pytree.tree_map_only(
-        torch.Tensor,
-        lambda t: t.detach().requires_grad_(t.requires_grad),
-        tree,
-    )
-
-
 def check_escaped_gradients(
     outputs: Any,
     inputs: Sequence[Any],
     requires_grad_indices: set[int],
 ) -> None:
     """
-    Check if computation graph depends on tensors not passed as explicit inputs.
+    Check if autograd graph depends on tensors not passed as explicit inputs.
 
     Controlled by torch._dynamo.config.leaf_function_check_escaped_gradients.
     """
@@ -162,12 +153,6 @@ def check_escaped_gradients(
 def reconstruct_original_args(
     input_spec: pytree.TreeSpec | None, flat_args: tuple[Any, ...]
 ) -> Generator[tuple[list[Any] | tuple[Any, ...], dict[str, Any]], None, None]:
-    """
-    Reconstruct original (args, kwargs) from flattened arguments.
-
-    Handles LeafModuleState by retrieving the original module and reparametrizing
-    it with the parameters/buffers arguments.
-    """
     if input_spec is None:
         yield flat_args, {}
         return
@@ -204,10 +189,11 @@ def autograd_grad_with_gradient_info(
     allow_unused: bool = False,
 ) -> tuple[torch.Tensor | None, ...]:
     """
-    Compute gradients using GradientInfo instead of full tensors.
+    Compute gradients using GradientInfo, it additionally handles the case
+    where input and output infos are None.
 
     Args:
-        output_infos: GradientInfo for each output (None if no grad_fn)
+        output_infos: GradientInfo for each output (None if no grad_fn),
         input_infos: GradientInfo for each input (None if not requires_grad)
         grad_outputs: Gradients w.r.t. outputs
 
@@ -355,58 +341,6 @@ def _make_forward(
     return forward, state
 
 
-def make_runtime_wrappers(
-    fn: Callable,
-    requires_grad_indices: set[int],
-    input_spec: pytree.TreeSpec | None,
-    include_keys: DispatchKeySet,
-    exclude_keys: DispatchKeySet,
-) -> tuple[Callable, Callable]:
-    forward, state = _make_forward(
-        fn, requires_grad_indices, input_spec, include_keys, exclude_keys
-    )
-
-    def backward(*grads):
-        if state["inputs"] is None or state["outputs"] is None:
-            raise RuntimeError(
-                "invoke_leaf_function backward expects inputs/outputs to be set in forward."
-            )
-        return autograd_grad_with_gradient_info(
-            output_infos=state["outputs"],
-            input_infos=state["inputs"],
-            grad_outputs=grads,
-            allow_unused=True,
-        )
-
-    return forward, backward
-
-
-def make_tracing_wrappers(
-    fn: Callable,
-    requires_grad_indices: set[int],
-    input_spec: pytree.TreeSpec | None,
-    include_keys: DispatchKeySet,
-    exclude_keys: DispatchKeySet,
-) -> tuple[Callable, Callable]:
-    forward, state = _make_forward(
-        fn, requires_grad_indices, input_spec, include_keys, exclude_keys
-    )
-
-    def backward(*grads):
-        if state["inputs"] is None:
-            raise RuntimeError(
-                "invoke_leaf_function backward expects inputs to be set in forward."
-            )
-        return tuple(
-            torch.empty(info.size, dtype=info.dtype, device=info.device)
-            if info is not None
-            else None
-            for info in state["inputs"]
-        )
-
-    return forward, backward
-
-
 class InvokeLeafFunction(HigherOrderOperator):
     def __init__(self):
         super().__init__("invoke_leaf_function")
@@ -434,12 +368,36 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
             if isinstance(arg, torch.Tensor) and arg.requires_grad
         }
 
-        real_forward, real_backward = make_runtime_wrappers(
+        real_forward, real_state = _make_forward(
             real_fn, requires_grad_indices, input_spec, include_keys, exclude_keys
         )
-        fake_forward, fake_backward = make_tracing_wrappers(
+        fake_forward, fake_state = _make_forward(
             fake_fn, requires_grad_indices, input_spec, include_keys, exclude_keys
         )
+
+        def real_backward(*grads):
+            if real_state["inputs"] is None or real_state["outputs"] is None:
+                raise RuntimeError(
+                    "invoke_leaf_function backward expects inputs/outputs to be set in forward."
+                )
+            return autograd_grad_with_gradient_info(
+                output_infos=real_state["outputs"],
+                input_infos=real_state["inputs"],
+                grad_outputs=grads,
+                allow_unused=True,
+            )
+
+        def fake_backward(*grads):
+            if fake_state["inputs"] is None:
+                raise RuntimeError(
+                    "invoke_leaf_function backward expects inputs to be set in forward."
+                )
+            return tuple(
+                torch.empty(info.size, dtype=info.dtype, device=info.device)
+                if info is not None
+                else None
+                for info in fake_state["inputs"]
+            )
 
         _, new_real_fn_spec = func_to_graphable(real_forward)
         _, new_fake_fn_spec = func_to_graphable(fake_forward)
@@ -543,9 +501,16 @@ def _invoke_leaf_function_impl(fn_spec, input_spec, *flat_args):
     """
     Tensors are detached before and after invoking the function to ensure
     the leaf function is treated as an atomic operation from autograd's
-    perspective. Gradients flow through InvokeLeafFunctionAutogradOp's
-    custom backward instead.
+    perspective.
     """
+
+    def _detach_tensors(tree: Any) -> Any:
+        return pytree.tree_map_only(
+            torch.Tensor,
+            lambda t: t.detach().requires_grad_(t.requires_grad),
+            tree,
+        )
+
     fn = unwrap_fn_spec(fn_spec)
     flat_args = _detach_tensors(flat_args)
     with reconstruct_original_args(input_spec, flat_args) as (args, kwargs):
