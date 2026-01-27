@@ -12746,8 +12746,7 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device, dtype,
                 requires_grad=(dtype.is_floating_point or dtype.is_complex),
-                # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-                set_seed=False):
+                set_seed=True):
             #
             # Forward check
             #

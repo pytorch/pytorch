@@ -52,6 +52,7 @@ def _get_total_norm(
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach: bool | None = None,
+    skip_root: bool = False,
 ) -> torch.Tensor:
     r"""Compute the norm of an iterable of tensors.
 
@@ -70,6 +71,10 @@ def _get_total_norm(
             If ``None``, use the foreach implementation for CUDA and CPU native tensors and silently
             fall back to the slow implementation for other device types.
             Default: ``None``
+        skip_root (bool): if True, skip the final root operation (``^(1/p)``) and return
+            the sum of powered norms directly (``sum(|x|^p)``). This is useful for
+            distributed settings where delaying the root reduces unnecessary collectives.
+            Default: ``False``
 
     Returns:
         Total norm of the tensors (viewed as a single vector).
@@ -120,8 +125,10 @@ def _get_total_norm(
     stacked_norms = torch.stack([norm.to(first_device) for norm in norms])
 
     if use_powsum:
-        # norms are sum(|x|^p), just sum them and apply root once
-        total_norm = stacked_norms.sum() ** (1.0 / norm_type)
+        # norms are sum(|x|^p), just sum them
+        total_norm = stacked_norms.sum()
+        if not skip_root:
+            total_norm = total_norm ** (1.0 / norm_type)
     else:
         # For inf/-inf/0 norms, use vector_norm directly
         total_norm = torch.linalg.vector_norm(stacked_norms, norm_type)
