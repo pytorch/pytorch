@@ -861,6 +861,10 @@ combo_kernel_allow_mixed_sizes = 1
 combo_kernel_foreach_dynamic_shapes = True
 # Maximum number of arguments (read/write buffers) allowed in a combo kernel
 combo_kernel_max_num_args = 250
+# When True, each combo sub-kernel gets its own block sizes (XBLOCK_0, YBLOCK_0, etc.)
+# allowing different sub-kernels to use different tile sizes based on their heuristics.
+# When False, all sub-kernels share block sizes (XBLOCK, YBLOCK, etc.)
+combo_kernel_per_subkernel_blocks = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
