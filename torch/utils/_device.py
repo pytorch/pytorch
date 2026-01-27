@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Optional
 
 import torch
 from torch._C import _len_torch_function_stack
@@ -61,7 +62,7 @@ class DeviceContext(TorchFunctionMode):
     def __init__(self, device) -> None:
         # pyrefly: ignore [read-only]
         self.device = torch.device(device)
-        self.prev_mode = None
+        self.prev_mode: Optional[DeviceContext] = None
 
     def __enter__(self):
         global CURRENT_DEVICE
@@ -102,6 +103,7 @@ class DeviceContext(TorchFunctionMode):
                 raise AssertionError(
                     "Expected a DeviceContext at the bottom of the mode stack"
                 )
+        assert self.prev_mode is not None
         _push_mode(self.prev_mode)
 
         for mode in reversed(cur_stack):

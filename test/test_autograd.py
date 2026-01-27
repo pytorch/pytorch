@@ -4060,6 +4060,7 @@ class TestAutograd(TestCase):
             for ref in refs:
                 self.assertIsNone(ref())
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     def test_checkpoint_compile_no_recompile(self):
         # Check for ambient TorchFunctionMode, e.g. when PYTORCH_TEST_WITH_CROSSREF=1
         expect_fail = len(torch.overrides._get_current_function_mode_stack()) > 0
@@ -4079,7 +4080,10 @@ class TestAutograd(TestCase):
             prev = torch.get_default_device()
             try:
                 # Using torch.device("cuda") directly doesn't work here because
-                # it has some issues.
+                # it has some issues. In particular, unlike set_default_device or
+                # invoking the TorchFunctionMode directly, it doesn't update the
+                # global state dynamo references for guards:
+                # torch.utils._device.CURRENT_DEVICE
                 torch.set_default_device("cuda")
                 out = torch.utils.checkpoint.checkpoint(fn, x, use_reentrant=False)
                 out.sum().backward()
@@ -4111,7 +4115,7 @@ class TestAutograd(TestCase):
             return x.sin().cos()
 
         torch.set_default_device("cuda")
-        a = torch.tensor(1., requires_grad=True)
+        a = torch.tensor(1.0, requires_grad=True)
         out = torch.utils.checkpoint.checkpoint(
             fn, a, context_fn=context_fn, use_reentrant=False
         )
