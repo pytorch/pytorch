@@ -181,6 +181,7 @@ def write_view_information_to_args(
     mutable_arg_types: list[torch.Type],
     kwargs: dict[str, Any],
     arg_to_base_index: dict[str, Any],
+    all_bases: list[Tensor],
 ):
     """
     This function writes the view information into kwargs. It reads mutable_args from kwargs.
@@ -190,6 +191,7 @@ def write_view_information_to_args(
     kwargs: the original custom operator args.
     arg_to_base_index: maps mutable_arg_name to int | [int] that refers to the base tensor that
                        corresponds to the input tensor
+    all_bases: list of all base tensors (used for dtype view detection)
     """
 
     def write_single_view(prefix: str, tensor: Tensor, base_index: int):
@@ -227,6 +229,24 @@ def write_view_information_to_args(
             kwargs[f"{prefix}_base_index"] = None
         else:
             base = get_base(tensor)
+
+            # NEW: Check for dtype views by comparing storage
+            # If get_base returns None but tensor shares storage with a known base,
+            # it's likely a dtype view
+            if base is None and base_index is not None and base_index < len(all_bases):
+                actual_base = all_bases[base_index]
+                try:
+                    if (
+                        tensor.untyped_storage().data_ptr()
+                        == actual_base.untyped_storage().data_ptr()
+                        and tensor.dtype != actual_base.dtype
+                    ):
+                        # This is a dtype view! Treat actual_base as the base
+                        base = actual_base
+                except (RuntimeError, AttributeError):
+                    # Handle cases where storage access might fail
+                    pass
+
             kwargs[f"{prefix}_base_index"] = base_index
             if base is None:
                 # no need to add anything else other than _base_index
@@ -715,6 +735,7 @@ def do_auto_functionalize_v2(
         mutable_args_types,
         normalized_kwargs,
         arg_to_base_index,
+        all_bases,
     )
 
     # remove mutated args from the kwargs (its a function of _all_bases now)
