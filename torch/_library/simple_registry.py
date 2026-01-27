@@ -1,12 +1,19 @@
 from collections.abc import Callable
 from typing import Any, Optional
 
+from torch.utils._ordered_set import OrderedSet
+
 from .effects import EffectHolder
 from .fake_impl import FakeImplHolder
 from .utils import RegistrationHandle
 
 
-__all__ = ["SimpleLibraryRegistry", "SimpleOperatorEntry", "singleton"]
+__all__ = [
+    "SimpleLibraryRegistry",
+    "SimpleOperatorEntry",
+    "singleton",
+    "SymmMemArgsHolder",
+]
 
 
 class SimpleLibraryRegistry:
@@ -53,6 +60,7 @@ class SimpleOperatorEntry:
         )
 
         self.effect: EffectHolder = EffectHolder(qualname)
+        self.symm_mem_args: SymmMemArgsHolder = SymmMemArgsHolder(qualname)
 
     # For compatibility reasons. We can delete this soon.
     @property
@@ -81,6 +89,106 @@ class GenericTorchDispatchRuleHolder:
 
     def find(self, torch_dispatch_class: type) -> Optional[Callable[..., Any]]:
         return self._data.get(torch_dispatch_class, None)
+
+
+class SymmMemArgsHolder:
+    """Holder for symmetric memory argument metadata.
+
+    This tracks which arguments of an operator require symmetric memory
+    allocation. This metadata is used by Inductor during lowering to
+    automatically realize appropriate tensors as symmetric memory buffers.
+    """
+
+    def __init__(self, qualname: str) -> None:
+        self._symm_mem_args: Optional[OrderedSet[str]] = None
+        self.qualname: str = qualname
+
+    def register(
+        self, arg_names: list[str], *, op_overload: Optional[Any] = None
+    ) -> None:
+        """Register which arguments require symmetric memory.
+
+        Args:
+            arg_names: List of argument names that require symmetric memory
+            op_overload: Optional OpOverload object for validation
+
+        Raises:
+            ValueError: If arg_names is empty or validation fails
+        """
+        if not arg_names:
+            raise ValueError(
+                f"Cannot register empty arg_names list for {self.qualname}"
+            )
+
+        # Validate argument names if op_overload is provided
+        if op_overload is not None:
+            self._validate_arg_names(arg_names, op_overload)
+
+        # Warn if overwriting
+        if self._symm_mem_args is not None:
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Overwriting symm_mem arg registration for %s. Old: %s, New: %s",
+                self.qualname,
+                self._symm_mem_args,
+                arg_names,
+            )
+
+        self._symm_mem_args = OrderedSet(arg_names)
+
+    def get(self) -> Optional[OrderedSet[str]]:
+        """Get the set of argument names that require symmetric memory.
+
+        Returns:
+            OrderedSet of argument names, or None if not registered
+        """
+        return self._symm_mem_args
+
+    def is_registered(self) -> bool:
+        """Check if any symm_mem args are registered."""
+        return self._symm_mem_args is not None
+
+    def is_symm_mem_arg(self, arg_name: str) -> bool:
+        """Check if a specific argument requires symmetric memory.
+
+        Args:
+            arg_name: Argument name to check
+
+        Returns:
+            True if the argument requires symmetric memory, False otherwise
+        """
+        return self._symm_mem_args is not None and arg_name in self._symm_mem_args
+
+    def _validate_arg_names(self, arg_names: list[str], op_overload: Any) -> None:
+        """Validate that argument names exist in the operator schema.
+
+        Args:
+            arg_names: Argument names to validate
+            op_overload: OpOverload object with schema
+
+        Raises:
+            ValueError: If any argument name is invalid
+        """
+        try:
+            schema = op_overload._schema
+            schema_arg_names = {arg.name for arg in schema.arguments}
+
+            invalid_args = [name for name in arg_names if name not in schema_arg_names]
+            if invalid_args:
+                raise ValueError(
+                    f"Invalid argument names for {self.qualname}: {invalid_args}. "
+                    f"Valid arguments are: {sorted(schema_arg_names)}"
+                )
+        except AttributeError:
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Could not validate arg names for %s: OpOverload missing _schema attribute",
+                self.qualname,
+            )
 
 
 def find_torch_dispatch_rule(
