@@ -6,7 +6,6 @@ import enum
 import functools
 import logging
 import re
-import sys
 import threading
 import traceback
 import unittest.mock
@@ -16,18 +15,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
-
-
-if sys.version_info >= (3, 11):
-    from typing import dataclass_transform
-else:
-
-    def dataclass_transform():
-        def decorator(fn):
-            return fn
-
-        return decorator
-
+from typing_extensions import dataclass_transform
 
 import torch
 from torch.utils import _pytree as pytree
@@ -437,35 +425,6 @@ class Guard:
                 f"got {self.obj_weakref} vs {obj_weakref}"
             )
         self.obj_weakref = obj_weakref
-
-    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Guard:
-        """
-        Clone the guard, optionally applying a transformation to the originating_source.
-
-        Args:
-            transform_fn: Optional function to transform the originating_source during cloning.
-
-        Returns:
-            A new Guard instance with the cloned/transformed source.
-        """
-        # Clone the originating_source
-        cloned_source = self.originating_source.clone(transform_fn)
-
-        # Create a new Guard with the cloned source
-        # Note: We create a new Guard instance with the same create_fn but cloned source
-        # The _hash is reset to None so it will be recomputed
-        return Guard(
-            originating_source=cloned_source,
-            create_fn=self.create_fn,
-            guard_types=self.guard_types.copy() if self.guard_types else None,
-            code_list=self.code_list.copy() if self.code_list else None,
-            obj_weakref=self.obj_weakref,
-            guarded_class_weakref=self.guarded_class_weakref,
-            stack=self.stack,
-            user_stack=self.user_stack,
-            _hash=None,  # Reset hash so it gets recomputed
-            _unserializable=self._unserializable,
-        )
 
 
 T = TypeVar("T")
@@ -1258,12 +1217,6 @@ class Source:
     def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
         """
         Clone the source, optionally applying a transformation function.
-
-        Args:
-            transform_fn: Optional function to transform the source. If None, performs identity clone.
-
-        Returns:
-            The cloned/transformed source.
         """
         # For frozen dataclasses, returning self is effectively a clone
         # Subclasses should override this if they have mutable state or need custom clone logic
@@ -1319,15 +1272,6 @@ class ChainedSource(Source):
         return value
 
     def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
-        """
-        Clone the chained source, recursively cloning the base source.
-
-        Args:
-            transform_fn: Optional function to transform sources during cloning.
-
-        Returns:
-            The cloned/transformed source.
-        """
         # Clone the base recursively
         cloned_base = self.base.clone(transform_fn)
 
@@ -1359,24 +1303,25 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         get_plain_tensors,
     )
 
-    fake_modes = []
-
+    # If TracingContext has a fake_mode, use it authoritatively.
+    # This is the case when Dynamo is driving compilation - any fake tensors
+    # from other modes in the inputs will be refakified by the caller.
     if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            fake_modes.append((fake_mode, "tracing context", 0))
+            return fake_mode
+
+    fake_modes = []
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((m, "active fake mode", i))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
@@ -1385,7 +1330,6 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
                 x for x in out if isinstance(x, FakeTensor)
             ]
             fake_modes.extend(
-                # pyrefly: ignore [bad-argument-type]
                 [
                     (tensor.fake_mode, f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
@@ -1398,12 +1342,10 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
             if fake_mode is not m:
                 raise AssertionError(
                     f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                    # pyrefly: ignore [missing-attribute]
                     f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                    # pyrefly: ignore [missing-attribute]
                     f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
                 )
-        # pyrefly: ignore [bad-return]
+
         return fake_mode
     else:
         return None

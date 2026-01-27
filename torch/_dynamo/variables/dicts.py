@@ -23,7 +23,7 @@ import functools
 import operator
 import types
 from collections.abc import Iterable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
 
@@ -43,12 +43,12 @@ from ..utils import (
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .lists import ListIteratorVariable
 
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.variables.builtin import BuiltinVariable
 
     from .functions import UserFunctionVariable
 
@@ -142,7 +142,7 @@ class ConstDictVariable(VariableTracker):
                 return hash(self.vt.original_value())
             return self.vt.get_python_hash()
 
-        def __eq__(self, other) -> bool:
+        def __eq__(self, other: object) -> bool:
             """
             Checks equality between two _HashableTracker instances.
 
@@ -155,6 +155,8 @@ class ConstDictVariable(VariableTracker):
             Returns:
                 True if the underlying variable trackers are Python-equal, False otherwise
             """
+            if not isinstance(other, ConstDictVariable._HashableTracker):
+                return False
             if self.vt is other.vt:
                 return True
             return self.vt.is_python_equal(other.vt)
@@ -788,6 +790,8 @@ class ConstDictVariable(VariableTracker):
             self.call_method(tx, "update", args, kwargs)
             return self
         elif name == "__iter__":
+            from .lists import ListIteratorVariable
+
             if self.source and not is_constant_source(self.source):
                 tx.output.guard_on_key_order.add(self.source)
             return ListIteratorVariable(
@@ -829,7 +833,7 @@ class ConstDictVariable(VariableTracker):
         self.install_dict_keys_match_guard()
         return super().clone(**kwargs)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         """
         Dictionaries are mutable and therefore not hashable in Python.
         """
@@ -1020,7 +1024,20 @@ class SetVariable(ConstDictVariable):
         items: Iterable[VariableTracker],
         **kwargs: Any,
     ) -> None:
-        items = dict.fromkeys(items, SetVariable._default_value())
+        # Items can be either VariableTrackers or _HashableTrackers (from set ops).
+        # For VariableTrackers, realize them to ensure aliasing guards are installed
+        # when the same object appears multiple times.
+        realized_items = []
+        for item in items:
+            if isinstance(item, ConstDictVariable._HashableTracker):
+                # Already a _HashableTracker from a set operation
+                realized_items.append(item)
+            else:
+                # VariableTracker - realize to install guards
+                realized_items.append(item.realize())
+        # pyrefly: ignore[bad-assignment]
+        items = dict.fromkeys(realized_items, SetVariable._default_value())
+        # pyrefly: ignore[bad-argument-type]
         super().__init__(items, **kwargs)
 
     def debug_repr(self) -> str:
@@ -1294,7 +1311,7 @@ class SetVariable(ConstDictVariable):
             )
         return super().call_method(tx, name, args, kwargs)
 
-    def python_type_var(self):
+    def python_type_var(self) -> "BuiltinVariable":
         return variables.BuiltinVariable(set)
 
     def getitem_const(
@@ -1311,10 +1328,10 @@ class OrderedSetClassVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
-    def var_getattr(self, tx, name: str) -> VariableTracker:
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__new__":
             from .misc import GetAttrVariable
 
@@ -1357,7 +1374,7 @@ class OrderedSetClassVariable(VariableTracker):
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ):
+    ) -> "OrderedSetVariable":
         if len(args) > 1 or kwargs:
             raise_args_mismatch(
                 tx,
@@ -1382,13 +1399,14 @@ class OrderedSetVariable(SetVariable):
                 "OrderedSet([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
             )
 
-    def as_python_constant(self) -> OrderedSet:
+    def as_python_constant(self) -> OrderedSet[Any]:
         return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
 
-    def python_type(self) -> type[OrderedSet]:
+    def python_type(self) -> type[OrderedSet[Any]]:
         return OrderedSet
 
-    def python_type_var(self):
+    # pyrefly: ignore[bad-override]
+    def python_type_var(self) -> OrderedSetClassVariable:
         return OrderedSetClassVariable()
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1414,7 +1432,7 @@ class FrozensetVariable(SetVariable):
     def python_type(self) -> type:
         return frozenset
 
-    def python_type_var(self):
+    def python_type_var(self) -> "BuiltinVariable":
         return variables.BuiltinVariable(frozenset)
 
     def as_python_constant(self) -> Any:
@@ -1459,17 +1477,20 @@ class FrozensetVariable(SetVariable):
             return FrozensetVariable(r.items)  # type: ignore[attr-defined]
         return super().call_method(tx, name, args, kwargs)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         """
         Frozensets are immutable and hashable in Python.
         """
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 class DictKeySetVariable(SetVariable):
@@ -1568,6 +1589,8 @@ class DictViewVariable(VariableTracker):
         if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
         elif name == "__iter__":
+            from .lists import ListIteratorVariable
+
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )
@@ -1661,7 +1684,7 @@ class DictItemsVariable(DictViewVariable):
             return ConstantVariable.create(False)
         return super().call_method(tx, name, args, kwargs)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[False]:
         """
         Dictionary item views are not hashable in Python.
         """

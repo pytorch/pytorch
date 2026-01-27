@@ -98,7 +98,7 @@ def draw_buffers(
             dtype = node.data.dtype
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
-        # pyrefly: ignore [missing-attribute]
+
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
