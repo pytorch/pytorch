@@ -314,7 +314,6 @@ if torch.backends.mps.is_available():
             "put": None,
             "cholesky_solve": None,
             "frexp": None,
-            "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
@@ -767,8 +766,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.bfloat16,
             ],
-            # UnboundLocalError: cannot access local variable 'cpu_out' where it is not associated with a value
-            "vdot": [torch.bool],
         }
 
         ON_MPS_XFAILLIST: dict[str, Optional[list]] = {
@@ -976,10 +973,6 @@ if torch.backends.mps.is_available():
             "item": [torch.float16, torch.float32],
             # cpu error: grad requires non-empty inputs
             "randn": [torch.float16, torch.float32],
-            # Exception: Tensor-likes are not close!
-            # Greatest absolute difference: inf at index (10,) (up to 1e-05 allowed)
-            # Greatest relative difference: nan at index (10,) (up to 0.001 allowed)
-            "special.erfcx": [torch.float16],
             "signal.windows.bartlett": [torch.float32],
             "signal.windows.blackman": [torch.float32],
             "signal.windows.cosine": [torch.float32],
@@ -992,8 +985,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # topk fails with duplicate indices
-            "topk": [torch.float16],
             # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
             "to_sparse": None,
             # Exception: the derivative for '_unique2' is not implemented.
