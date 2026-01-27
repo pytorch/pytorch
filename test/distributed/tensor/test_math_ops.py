@@ -699,15 +699,18 @@ class DistMathOpsTest(DTensorTestBase):
         grad = torch.randn(12, 8, device=self.device_type)
         sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
 
-        norm = torch.linalg.vector_norm(sharded_grad, ord=2)
-        self.assertIsInstance(norm._spec.placements[0], _NormPartial)
+        for ord in [1.0, 2.0, 2.5]:
+            norm = torch.linalg.vector_norm(sharded_grad, ord=ord)
+            self.assertIsInstance(norm._spec.placements[0], _NormPartial)
 
-        with comm_mode:
-            result = torch.linalg.vector_norm(norm.unsqueeze(0), ord=2)
+            with comm_mode:
+                result = torch.linalg.vector_norm(norm.unsqueeze(0), ord=ord)
 
-        self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertIsInstance(result._spec.placements[0], _NormPartial)
-        self.assertEqual(result.full_tensor(), torch.linalg.vector_norm(grad, ord=2))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertIsInstance(result._spec.placements[0], _NormPartial)
+            self.assertEqual(
+                result.full_tensor(), torch.linalg.vector_norm(grad, ord=ord)
+            )
 
     @with_comms
     def test_foreach_norm(self):
