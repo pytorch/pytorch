@@ -360,9 +360,9 @@ if not TEST_WITH_DEV_DBG_ASAN:
             Tests that coalescing manager w/TORCH_DISTRIBUTED_DEBUG
             does not crash: https://github.com/pytorch/pytorch/issues/109520
             """
-            torch.accelerator.set_device_idx(self.rank)
+            torch.accelerator.set_device_index(self.rank)
             pg = self._create_wrapper_pg(with_new_group=True)
-            dev = torch.accelerator.current_device_idx()
+            dev = torch.accelerator.current_device_index()
             pg._start_coalescing(torch.device(dev))
             pg.allreduce([torch.ones(1, device=dev)])
             pg._end_coalescing(torch.device(dev))
@@ -484,7 +484,7 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
 
 
 if __name__ == "__main__":
-    assert not torch.accelerator.is_available(), (
+    assert not torch.get_device_module()._initialized, (
         "test_pg_wrapper must not have initialized CUDA context on main process"
     )
 
