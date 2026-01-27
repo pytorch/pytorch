@@ -229,7 +229,6 @@ struct ReduceJitOp {
     if (config.should_block_y_reduce()) {
       value = block_y_reduce<${output_vec_size}>(value, shared_memory);
     }
-
     using out_ptr_vec_t = Array<out_scalar_t*, ${output_vec_size}>;
     using offset_vec_t = Array<uint32_t, ${output_vec_size}>;
     offset_vec_t base_offsets;
