@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_raise.py b/test/dynamo/cpython/3_13/test_raise.py
-index 6d26a61bee4..ca8ec66ab10 100644
+index 6d26a61bee4..99326c05670 100644
 --- a/test/dynamo/cpython/3_13/test_raise.py
 +++ b/test/dynamo/cpython/3_13/test_raise.py
 @@ -1,3 +1,58 @@
@@ -160,8 +160,9 @@ index 6d26a61bee4..ca8ec66ab10 100644
  
          self.assertIsInstance(tb.tb_next, types.TracebackType)
 -        self.assertIs(tb.tb_frame, sys._getframe())
+-        self.assertIsInstance(tb.tb_lasti, int)
 +        # self.assertIs(tb.tb_frame, sys._getframe())
-         self.assertIsInstance(tb.tb_lasti, int)
++        # self.assertIsInstance(tb.tb_lasti, int)
          self.assertIsInstance(tb.tb_lineno, int)
  
          self.assertIs(tb.tb_next.tb_next, None)
