@@ -200,8 +200,6 @@ from .dicts import (
 )
 from .distributed import (
     DeviceMeshVariable,
-    PlacementClassVariable,
-    PlacementVariable,
     ProcessGroupVariable,
     WorldMetaClassVariable,
 )
@@ -1202,17 +1200,6 @@ class VariableBuilder:
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return DeviceMeshVariable(value, source=self.source)
-        elif PlacementClassVariable.is_placement_type(value):
-            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return PlacementClassVariable(value, source=self.source)
-        elif PlacementVariable.is_placement(value):
-            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.EQUALS_MATCH)
-            return PlacementVariable(
-                value,
-                source=self.source,
-            )
         elif value is OrderedSet:
             self.install_guards(GuardBuilder.ID_MATCH)
             return OrderedSetClassVariable()
@@ -2013,7 +2000,7 @@ class VariableBuilder:
                 context=str(value),
                 explanation="Dynamo does not support RNN, GRU, or LSTM.",
                 hints=[
-                    "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+                    "Set torch._dynamo.config.allow_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -3926,6 +3913,7 @@ def _automatic_dynamic(
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        shape_ids=getattr(e, "_dynamo_shape_ids", None),
     )
 
 
@@ -4124,8 +4112,6 @@ class SourcelessBuilder:
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
-        elif PlacementVariable.is_placement(value):
-            return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
         elif value is functools.wraps:
