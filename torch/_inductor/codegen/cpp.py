@@ -2135,27 +2135,33 @@ class CppKernel(Kernel):
         csevar.update_on_args("load", (self, name, index), {})
         return csevar
 
-    def store(self, name, index, value, mode=None):
-        assert "buf" in name
-        var = self.args.output(name)
-        index = self.rename_indexing(index)
+    def _maybe_cache_lowp_fp_to_f32(self, value):
+        """
+        Cache dtype conversion for store/load consistency.
+        See https://github.com/pytorch/pytorch/issues/115260
 
-        # Cache dtype conversion for store/load consistency
-        # (see https://github.com/pytorch/pytorch/issues/115260)
-        # When storing a low-precision value that came from a high-precision computation,
-        # cache the reverse conversion so that loading and promoting back gives the same
-        # result as using the high-precision value directly.
-        # This is ONLY done at store time (not at to_dtype time) to avoid incorrectly
-        # caching for internal computations where the low-precision is semantically meaningful.
+        When storing a low-precision value that came from a high-precision computation,
+        cache the reverse conversion so that loading and promoting back gives the same
+        result as using the high-precision value directly.
+
+        This is ONLY done at store time (not at to_dtype time) to avoid incorrectly
+        caching for internal computations where the low-precision is semantically meaningful.
+        """
         if (
             isinstance(value, CppCSEVariable)
             and hasattr(value, "_lowp_fp32_source")
             and value._lowp_fp32_source is not None
         ):
-            # Cache: to_f32(lowp_value) -> original_f32_value
             src_var = value._lowp_fp32_source
             src_dtype = getattr(value, "_lowp_src_dtype", torch.float)
             self.cache_dtype_convert(src_var, src_dtype, value, value.dtype)
+
+    def store(self, name, index, value, mode=None):
+        assert "buf" in name
+        var = self.args.output(name)
+        index = self.rename_indexing(index)
+
+        self._maybe_cache_lowp_fp_to_f32(value)
 
         if mode is None:
             line = f"{var}[{cexpr_index(index)}] = {value};"
@@ -2982,17 +2988,7 @@ class CppVecKernel(CppKernel):
         assert "buf" in name
         assert isinstance(value, CppCSEVariable), value
 
-        # Cache dtype conversion for store/load consistency
-        # (see https://github.com/pytorch/pytorch/issues/115260)
-        # Same as scalar store - cache at store time, not to_dtype time
-        if (
-            isinstance(value, CppCSEVariable)
-            and hasattr(value, "_lowp_fp32_source")
-            and value._lowp_fp32_source is not None
-        ):
-            src_var = value._lowp_fp32_source
-            src_dtype = getattr(value, "_lowp_src_dtype", torch.float)
-            self.cache_dtype_convert(src_var, src_dtype, value, value.dtype)
+        self._maybe_cache_lowp_fp_to_f32(value)
 
         if not value.is_vec:
             # this happens when we store a scalar into a vectorized buffer like "fill"
