@@ -142,7 +142,10 @@ bool CUDASymmetricMemory::has_multicast_support() {
 }
 
 void* CUDASymmetricMemory::get_multicast_ptr() {
-  return pai_->mc_addr_;
+  if (!has_multicast_support()) {
+    return nullptr;
+  }
+  return static_cast<char*>(pai_->mc_addr_) + offset_;
 }
 
 size_t CUDASymmetricMemory::get_offset() {

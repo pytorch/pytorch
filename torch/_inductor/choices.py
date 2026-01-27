@@ -343,7 +343,7 @@ class InductorChoices:
         ):
             return False
 
-        xhint = V.graph.sizevars.size_hint(features.numel, fallback=2)
+        xhint = V.graph.sizevars.optimization_hint(features.numel, fallback=2)
         if xhint <= 8:
             threshold = 32768 * xhint
         elif xhint <= 16:
@@ -351,6 +351,8 @@ class InductorChoices:
         else:
             return False
         # TODO(jansel): should this default on for dynamic shapes?
+        # TODO(laith) What if hint(features.reduction_numel) >= threshold ?
+        # shall we compare hints instead
         return V.graph.sizevars.statically_known_geq(
             features.reduction_numel, threshold
         )
@@ -428,13 +430,19 @@ class InductorChoices:
         so we will do the reduction in two phases."""
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
-        min_elements_per_thread = 32
+        warp_size = props.warp_size if props.warp_size is not None else 32
+        max_threads_per_sm = (
+            props.max_threads_per_multi_processor
+            if props.max_threads_per_multi_processor is not None
+            else 2048
+        )
+        min_elements_per_thread = warp_size
         max_elements_per_thread = 512
-        threads_per_sm = 2048
+        threads_per_sm = max_threads_per_sm
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
         num_warps = 8
-        num_threads = 32 * num_warps
+        num_threads = warp_size * num_warps
 
         if inner_reduction:
             # do heuristics that's close to eager mode for split inner reduction
