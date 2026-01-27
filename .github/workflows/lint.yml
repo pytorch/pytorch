@@ -116,9 +116,6 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       checkout-mode: treeless
-      additional-fetch-refs: |
-        refs/heads/main
-        refs/heads/viable/strict
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running all other linters"
