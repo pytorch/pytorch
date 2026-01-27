@@ -2675,7 +2675,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             VariableTracker.build(tx, (args, kwargs))
         ).unpack_var_sequence(tx)
 
-        # Build a mapping from module id -> module_index for all nn.Module arguments.
         module_to_index: dict[int, int] = {}
         for arg in flat_args_var.unpack_var_sequence(tx):
             if is_module_variable(arg):
@@ -2704,7 +2703,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             kwargs_var = VariableTracker.build(tx, kwargs)
             return args_var, kwargs_var
 
-        # transform nn.Modules to LeafModuleState. and build variable trackers
         def convert_modules_to_states(
             values: Any, module_to_index: dict[int, int]
         ) -> Any:
@@ -2743,7 +2741,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         real_impl = decorated_fn._torchdynamo_leaf_real_fn
         fake_impl = decorated_fn._torchdynamo_leaf_fake_fn
 
-        # fake_impl must be provided by the user via @fn.fake_impl decorator
         if fake_impl is None:
             raise ValueError(
                 f"leaf_function '{getattr(decorated_fn, '__name__', decorated_fn)}' "
