@@ -539,10 +539,14 @@ at::Tensor _qconv_prepack_onednn(
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
     kSpatialDim += 1;
   }
+#ifdef ONEDNN_FP8_QCONV_SUPPORTED
+  if (is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+#else
   if (is_fp8) {
-    // The current version of oneDNN does not support fp8 conv
-    // TODO(weiwen) Remove this when oneDNN supports fp8 conv
-    // FP8 convolution is not supported by oneDNN until v3.9
+#endif
+    // Fall back when FP8 convolution is not supported by oneDNN:
+    // - For oneDNN versions prior to v3.9, FP8 convolution is unsupported.
+    // - For oneDNN v3.9 and later, FP8 convolution requires AMX_FP16 support.
     return weight;
   }
   auto w_dims = weight.sizes().vec();
