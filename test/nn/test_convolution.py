@@ -1737,9 +1737,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 1,                      # groups
                 output_mask,            # output_mask: (grad_input, grad_weight, grad_bias)
             )
-            self.assertIsNotNone(grad_input) if output_mask[0] else self.assertIsNone(grad_input)
-            self.assertIsNotNone(grad_weight) if output_mask[1] else self.assertIsNone(grad_weight)
-            self.assertIsNotNone(grad_bias) if output_mask[2] else self.assertIsNone(grad_bias)
+            self.assertIsNotNone(grad_input) if output_mask[0] else self.assertIsNone(
+                grad_input
+            )
+            self.assertIsNotNone(grad_weight) if output_mask[1] else self.assertIsNone(
+                grad_weight
+            )
+            self.assertIsNotNone(grad_bias) if output_mask[2] else self.assertIsNone(
+                grad_bias
+            )
 
         # Convolution Backward(ConvB) propagation must return valid  input, weight, bias gradient
         output_mask = [True, True, True]
@@ -2364,7 +2370,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.shape, output_size)
 
     @skipMeta
-    @skipXPU #Refer https://github.com/intel/torch-xpu-ops/issues/2594
+    @skipXPU  # Refer https://github.com/intel/torch-xpu-ops/issues/2594
     @parametrize_test(
         "input_shape,transposed,dilated,groups,layout,backend_expected",
         [
@@ -4340,7 +4346,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
 
 
-instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(
+    TestConvolutionNNDeviceType, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_parametrized_tests(TestConvolutionNN)
 
 if __name__ == "__main__":
