@@ -411,6 +411,8 @@ dtensor_fails = {
     xfail("special.spherical_bessel_j0"),
     xfail("special.xlog1py"),
     xfail("special.zeta"),
+    # Test fails due to pre-existing bug where local squeeze removes sharded
+    # dims with local size 1. See FIXME in dim_squeeze and PR #166862.
     xfail("squeeze", "multiple"),
     xfail("squeeze_copy"),
     xfail("signal.windows.bartlett"),

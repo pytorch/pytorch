@@ -665,6 +665,53 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(dist_x.placements, [Partial(), Shard(0)])
 
     @with_comms
+    def test_squeeze_variants(self):
+        """Test all squeeze variants with DTensor.
+
+        Tests squeeze.default, squeeze.dim, and squeeze.dims.
+        For sharded tensors, we only squeeze dims that are NOT sharded to avoid
+        the FIXME bug where sharded dims with local size 1 get incorrectly squeezed.
+        """
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        # Test 1: squeeze.dims on sharded tensor - squeeze non-sharded dims
+        x1 = torch.randn(self.world_size, 1, 1, 8, device=self.device_type)
+        dt1 = distribute_tensor(x1, mesh, [Shard(0)])
+        result1 = dt1.squeeze((1, 2))
+        self.assertEqual(result1.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(result1.placements, (Shard(0),))
+        self.assertEqual(result1.to_local().shape, torch.Size([1, 8]))
+
+        # Test 2: squeeze.dim on sharded tensor - squeeze non-sharded dim
+        x2 = torch.randn(self.world_size, 1, 8, device=self.device_type)
+        dt2 = distribute_tensor(x2, mesh, [Shard(0)])
+        result2 = dt2.squeeze(1)
+        self.assertEqual(result2.shape, torch.Size([self.world_size, 8]))
+        self.assertEqual(result2.placements, (Shard(0),))
+        self.assertEqual(result2.to_local().shape, torch.Size([1, 8]))
+
+        # Test 3: squeeze.default on replicated tensor (avoids FIXME bug)
+        x3 = torch.randn(4, 1, 1, 8, device=self.device_type)
+        dt3 = distribute_tensor(x3, mesh, [Replicate()])
+        result3 = dt3.squeeze()
+        self.assertEqual(result3.shape, torch.Size([4, 8]))
+        self.assertEqual(result3.placements, (Replicate(),))
+
+        # Test 4: squeeze.dims on replicated tensor
+        x4 = torch.randn(2, 1, 3, 1, device=self.device_type)
+        dt4 = distribute_tensor(x4, mesh, [Replicate()])
+        result4 = dt4.squeeze((1, 3))
+        self.assertEqual(result4.shape, torch.Size([2, 3]))
+        self.assertEqual(result4.placements, (Replicate(),))
+
+        # Test 5: squeeze dim that is NOT size 1 (should be no-op)
+        x5 = torch.randn(self.world_size, 4, device=self.device_type)
+        dt5 = distribute_tensor(x5, mesh, [Shard(0)])
+        result5 = dt5.squeeze(1)  # dim 1 has size 4, not 1
+        self.assertEqual(result5.shape, torch.Size([self.world_size, 4]))
+        self.assertEqual(result5.placements, (Shard(0),))
+
+    @with_comms
     def test_storage_offset_slice(self):
         """
         Test that storage_offset is properly tracked on DTensor when slicing
