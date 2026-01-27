@@ -655,6 +655,144 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
     @onlyOn(["cuda", "xpu"])
     @dtypes(
+        *(
+            (torch.float, torch.double, torch.bfloat16, torch.half)
+            if TEST_WITH_ROCM
+            else (torch.float, torch.double, torch.half)
+        )
+    )
+    def test_embedding_backward_atomic_accumulate_kernel(self, device, dtype):
+        """
+        Test that embedding_dense_backward works correctly when using the atomic
+        accumute kernel path.
+
+        The atomic accumulate kernel is triggered when:
+        1. Not using EmbeddingBag (offset2bag is not defined)
+        2. Few unique indices (small num_of_segments) resulting in poor parallelism
+           for the original sum_and_scatter kernel
+        3. Many repeated indices creating many partial segments
+        4. In non-deterministic mode
+
+        """
+        torch.use_deterministic_algorithms(False)
+
+        num_embeddings = 100
+        embedding_dim = 256
+        num_unique_indices = 5
+        repetitions_per_index = 1000
+
+        unique_indices = torch.randint(
+            0, num_embeddings, (num_unique_indices,), device=device, dtype=torch.long
+        )
+        indices = unique_indices.repeat(repetitions_per_index)
+        total_indices = indices.numel()
+
+        embedding = nn.Embedding(num_embeddings, embedding_dim).to(device, dtype)
+        embedding.zero_grad()
+
+        output = embedding(indices)
+        grad_output = torch.randn_like(output)
+        output.backward(grad_output)
+
+        # Verify gradient shape and basic correctness
+        self.assertEqual(embedding.weight.grad.shape, (num_embeddings, embedding_dim))
+
+        # Verify that only the used indices have non-zero gradients
+        used_indices_set = set(unique_indices.tolist())
+        for i in range(num_embeddings):
+            if i in used_indices_set:
+                # Used indices should have non-zero gradients (accumulated from repetitions)
+                self.assertGreater(
+                    embedding.weight.grad[i].abs().sum(),
+                    0,
+                    f"Expected non-zero gradient for used index {i}",
+                )
+            else:
+                # Unused indices should have zero gradients
+                self.assertEqual(
+                    embedding.weight.grad[i].abs().sum(),
+                    0,
+                    f"Expected zero gradient for unused index {i}",
+                )
+
+        # Test correctness by comparing with a reference computation
+        # Manually compute expected gradients using the same accumulation type as the kernel:
+        # - For half/bfloat16: accumulate in float (acc_type)
+        # - For float/double: accumulate in the same dtype
+        acc_dtype = torch.float if dtype in [torch.half, torch.bfloat16] else dtype
+        expected_grad = torch.zeros(
+            num_embeddings, embedding_dim, device=device, dtype=acc_dtype
+        )
+        grad_output_acc = grad_output.to(acc_dtype)
+        for i in range(total_indices):
+            idx = indices[i].item()
+            expected_grad[idx] += grad_output_acc[i]
+        expected_grad = expected_grad.to(dtype)
+
+        # Compare with computed gradients (use appropriate tolerance for dtype)
+        if dtype in [torch.half, torch.bfloat16]:
+            atol = 1e-3
+            rtol = 1e-3
+        else:
+            atol = 5e-5
+            rtol = 5e-5
+        torch.testing.assert_close(
+            embedding.weight.grad, expected_grad, atol=atol, rtol=rtol
+        )
+
+    @onlyOn(["cuda", "xpu"])
+    @dtypes(
+        *(
+            (torch.float, torch.double, torch.bfloat16, torch.half)
+            if TEST_WITH_ROCM
+            else (torch.float, torch.double, torch.half)
+        )
+    )
+    def test_embedding_backward_atomic_accumulate_kernel_with_padding_idx(
+        self, device, dtype
+    ):
+        """
+        Test that embedding_dense_backward with padding_idx works correctly
+        when using the atomic accmulate kernel path.
+        """
+        torch.use_deterministic_algorithms(False)
+
+        num_embeddings = 50
+        embedding_dim = 128
+        padding_idx = 5
+        repetitions_per_index = 1000
+
+        unique_indices = torch.tensor(
+            [padding_idx, 10, 20, 30], device=device, dtype=torch.long
+        )
+        indices = unique_indices.repeat(repetitions_per_index)
+
+        embedding = nn.Embedding(
+            num_embeddings, embedding_dim, padding_idx=padding_idx
+        ).to(device, dtype)
+        embedding.zero_grad()
+
+        output = embedding(indices)
+        grad_output = torch.randn_like(output)
+        output.backward(grad_output)
+
+        # Verify padding_idx has zero gradient
+        self.assertEqual(
+            embedding.weight.grad[padding_idx].abs().sum(),
+            0,
+            f"Expected zero gradient for padding_idx {padding_idx}",
+        )
+
+        # Verify other used indices have non-zero gradients
+        for idx in [10, 20, 30]:
+            self.assertGreater(
+                embedding.weight.grad[idx].abs().sum(),
+                0,
+                f"Expected non-zero gradient for index {idx}",
+            )
+
+    @onlyOn(["cuda", "xpu"])
+    @dtypes(
         torch.bfloat16,
     )
     @largeTensorTest("80GB", device="cuda")
