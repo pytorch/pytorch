@@ -65,7 +65,7 @@ jobs:
       - name: Build PyTorch
         shell: bash
         env:
-          BUILD_ADDITIONAL_PACKAGES: 'vision audio'
+          BUILD_ADDITIONAL_PACKAGES: 'vision audio torchao'
         run: |
           set -eux
           bash .ci/pytorch/build.sh
