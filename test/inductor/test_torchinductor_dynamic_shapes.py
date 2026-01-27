@@ -578,6 +578,56 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_embedding_backward_dynamic_shapes_large_grid(self, device):
+        """
+        Test that _check_max_grid_x correctly handles large grid sizes on NVIDIA.
+        Previously, the function incorrectly used (num_blocks * num_warps * warp_size)
+        instead of just num_blocks when checking against maxGridSize on NVIDIA GPUs.
+        This caused XBLOCK to be incorrectly doubled beyond the maximum allowed (4096),
+        resulting in 'XBLOCK too large. Maximum: 4096. Actual: 8192' errors.
+
+        Original repro used [50000, 349200] embedding table but that requires ~65GB.
+        Instead we directly test the _check_max_grid_x function logic.
+        """
+        from torch._inductor.runtime.triton_heuristics import _check_max_grid_x
+
+        # The bug occurs when:
+        # - num_blocks * num_warps * warp_size > max_grid_x (old buggy check triggers)
+        # - but num_blocks <= max_grid_x (correct check should NOT trigger)
+        #
+        # With max_grid_x = 2^31 - 1 = 2,147,483,647
+        # If num_warps = 8, warp_size = 32 (NVIDIA), multiplier = 256
+        # Bug triggers when num_blocks > 2,147,483,647 / 256 = 8,388,607
+        #
+        # To get num_blocks > 8,388,607 with x = 64:
+        # size_hints["x"] > 8,388,607 * 64 = 536,870,848
+        #
+        # Use size that triggers buggy path but NOT the correct path
+        size_hints = {"x": 600_000_000}  # 600 million elements
+        x = 64
+        num_warps = 8
+
+        # num_blocks = ceil(600_000_000 / 64) = 9,375,000
+        # Buggy check: 9,375,000 * 8 * 32 = 2,400,000,000 > 2,147,483,647 → TRIGGERS!
+        # Correct check: 9,375,000 < 2,147,483,647 → does NOT trigger
+
+        result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+
+        # With the fix (NVIDIA path checking only num_blocks), x should stay at 64
+        # With the bug, x would be doubled to 128 since
+        # num_blocks * num_warps * warp_size > max_grid_x
+        self.assertEqual(
+            result_x,
+            64,
+            f"XBLOCK should remain 64 on NVIDIA (got {result_x}). "
+            "The buggy check incorrectly doubles XBLOCK when "
+            "num_blocks * num_warps * warp_size > max_grid_x.",
+        )
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
         @torch.library.custom_op("test_dynamic_stride_nobreak::foo", mutates_args=())
