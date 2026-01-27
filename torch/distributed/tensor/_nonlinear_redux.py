@@ -295,3 +295,84 @@ def minmax_dim_handler(
         ),
         output_sharding.output_spec,
     )
+
+
+def vector_norm_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+) -> object:
+    """
+    Custom handler for linalg_vector_norm that decomposes p-norms.
+
+    For p-norms (p not in {inf, -inf, 0, 1}) on Shard inputs:
+    - Computes linalg._powsum to get sum(|x|^p) as Partial("sum")
+    - Redistributes Partial to Replicate (allreduce), preserving Shard on non-reduced dims
+    - Applies root locally: result ** (1/p)
+
+    This avoids the sqrt->pow->sqrt cycle of the old _NormPartial approach
+    while only allreducing a scalar instead of allgathering the full tensor.
+
+    For other cases (inf/-inf/0/1 norms or Partial inputs), uses normal dispatch.
+    """
+    input_tensor = args[0]
+    if not isinstance(input_tensor, dtensor.DTensor):
+        # Non-DTensor input, use regular op
+        return op_call(*args, **kwargs)
+
+    norm_type = args[1] if len(args) > 1 else 2
+    dim = args[2] if len(args) > 2 else None
+    keepdim = args[3] if len(args) > 3 else False
+    dtype = kwargs.get("dtype")
+
+    # Check if input has any Partial placements - if so, use normal dispatch
+    # because the decomposition only works correctly for Shard inputs
+    has_partial = any(p.is_partial() for p in input_tensor.placements)
+
+    # For p-norms on non-Partial inputs, decompose using powsum
+    if (
+        norm_type not in (float("inf"), "inf", float("-inf"), "-inf", 0, 1)
+        and not has_partial
+    ):
+        # Decompose: vector_norm(x, p) = powsum(x, p) ** (1/p)
+        # Step 1: Compute sum(|x|^p) with powsum -> Partial("sum")
+        # pyrefly: ignore[missing-attribute]
+        partial_result = torch.linalg._powsum(
+            input_tensor,
+            ord=norm_type,
+            dim=dim,
+            keepdim=keepdim,
+            dtype=dtype,
+        )
+        # Step 2: Redistribute Partial to Replicate (allreduce), preserving Shard
+        # on non-reduced dims
+        new_placements = tuple(
+            Replicate() if p.is_partial() else p for p in partial_result.placements
+        )
+        replicated_result = partial_result.redistribute(placements=new_placements)
+        # Step 3: Apply root locally
+        # pyrefly: ignore[bad-argument-type]
+        return replicated_result ** (1.0 / float(norm_type))
+
+    # For inf/-inf/0/1 norms or Partial inputs, use normal dispatch
+    op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
+    dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    output_sharding = op_info.output_sharding
+    assert output_sharding is not None
+
+    # Handle redistribution if needed
+    if output_sharding.needs_redistribute:
+        assert output_sharding.redistribute_schema is not None
+        dtensor.DTensor._op_dispatcher.redistribute_local_args(
+            op_info,
+            output_sharding.redistribute_schema,
+            output_sharding.use_val_from_redistribute_schema,
+        )
+
+    # Call local op
+    local_results = op_call(*op_info.local_args, **op_info.local_kwargs)
+
+    # Wrap result
+    return dtensor.DTensor._op_dispatcher.wrap(
+        local_results, output_sharding.output_spec
+    )
