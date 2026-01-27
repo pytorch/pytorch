@@ -8,7 +8,7 @@ import logging
 import operator
 import textwrap
 import traceback
-from collections.abc import Callable, Container, Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
@@ -3990,8 +3990,14 @@ class FlexibleLayout(Layout):
             return []
         reversed_strides = [sympy.S.One]
         for size in reversed(sizes[1:]):
-            # Use Max(size, 1) to handle zero-size tensors correctly
-            reversed_strides.append(sympy.Max(size, 1) * reversed_strides[-1])
+            # Use Max(size, 1) to handle zero-size tensors correctly.
+            # Only apply Max when we can't prove size >= 1 to preserve
+            # simplification for dimension merging.
+            if V.graph.sizevars.statically_known_geq(size, 1):
+                stride_factor = size
+            else:
+                stride_factor = sympy.Max(size, 1)
+            reversed_strides.append(stride_factor * reversed_strides[-1])
         return list(reversed(reversed_strides))
 
     @staticmethod
@@ -4008,8 +4014,15 @@ class FlexibleLayout(Layout):
 
         for i in order:
             strides[i] = next_stride
-            # Use Max(sizes[i], 1) to handle zero-size tensors correctly
-            next_stride = next_stride * sympy.Max(sizes[i], 1)
+            size = sizes[i]
+            # Use Max(size, 1) to handle zero-size tensors correctly.
+            # Only apply Max when we can't prove size >= 1 to preserve
+            # simplification for dimension merging.
+            if V.graph.sizevars.statically_known_geq(size, 1):
+                stride_factor = size
+            else:
+                stride_factor = sympy.Max(size, 1)
+            next_stride = next_stride * stride_factor
         return strides
 
     @staticmethod
@@ -5452,7 +5465,12 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         kernel: Any,
         accumulator_type: Any,
+        variant: Any,  # GemmVariant, use Any to avoid circular import
         workspace_size: int = 0,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -5460,6 +5478,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.accumulator_type = accumulator_type
         self.outputs: list[Buffer] = [self]
         self.workspace_size = workspace_size
+        self.variant = variant
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -5508,6 +5531,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             kernel_metadata=self.kernel_metadata,
             accumulator_type=self.accumulator_type,
             workspace_size=self.workspace_size,
+            variant=self.variant,
+            scale_type_a=self.scale_type_a,
+            scale_type_b=self.scale_type_b,
+            swizzle_type_a=self.swizzle_type_a,
+            swizzle_type_b=self.swizzle_type_b,
         )
 
         def render():
@@ -7895,13 +7923,13 @@ class FallbackKernel(ExternKernelAlloc):
             self.get_name(), self.outputs, getattr(self, "unbacked_bindings", None)
         )
 
-    def get_unbacked_symbol_defs(self) -> Container[sympy.Symbol]:  # type: ignore[override]
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
             resolved = resolve_unbacked_bindings(
                 V.graph.sizevars.shape_env, unbacked_bindings
             )
             assert resolved is not None
-            return resolved.keys()
+            return OrderedSet(resolved.keys())
         else:
             return OrderedSet()
 
