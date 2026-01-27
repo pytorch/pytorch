@@ -631,6 +631,10 @@ def make_pointwise(
     allow_alpha=False,
     triton_fallback=None,
 ):
+    """
+    Create a pointwise operation wrapper that applies a function element-wise across tensors.
+    """
+
     def inner(*inputs: TensorBox, alpha=None):
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
