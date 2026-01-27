@@ -506,9 +506,9 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
 
 @functools.cache
 def get_comprehension_bytecode_prefix() -> list[str]:
-    assert sys.version_info >= (3, 12)
-
     """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
+
+    assert sys.version_info >= (3, 12)
 
     def fn():
         return [i for i in range(1)]
