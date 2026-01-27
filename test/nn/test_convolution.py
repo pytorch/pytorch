@@ -41,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoCudnn,
     skipCUDAIfNoMiopen,
     skipCUDAIfRocm,
+    skipCUDAIfRocmHipBlasltVersionLessThan,
     skipMeta,
     skipMPS,
 )
@@ -4185,7 +4186,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_input.shape, input.shape)
         self.assertEqual(grad_weight.shape, weight.shape)
 
-    @skipCUDAIfRocm
+    @skipCUDAIfRocmHipBlasltVersionLessThan((1, 2, 0))
     @onlyCUDA
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")

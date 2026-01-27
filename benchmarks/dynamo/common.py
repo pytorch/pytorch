@@ -1945,6 +1945,15 @@ class BenchmarkRunner:
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return False
 
+    def use_iou_for_bool_accuracy(self, name):
+        return False
+
+    def get_iou_threshold(self, name):
+        return 0.99
+
+    def get_accuracy_check_runs(self, name):
+        return 1
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2306,120 +2315,161 @@ class BenchmarkRunner:
 
             correct_rerun_result = None
 
-            # Run with Dynamo
-            reset_rng_state()
-            torch._dynamo.reset()
-            torch._dynamo.utils.counters.clear()
-            model_copy = None
-            try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                if (
-                    self.args.export
-                    or self.args.export_aot_inductor
-                    or self.args.export_nativert
-                    or self.args.torchscript_jit_trace
-                    or self.args.aot_precompile
-                ):
-                    # apply export on module directly
-                    # no need for n iterations
-                    # the logic should be the same to self.model_iter_fn (forward_pass)
-                    with self.autocast(**self.autocast_arg):
-                        optimized_model_iter_fn = optimize_ctx(
-                            model_copy, example_inputs
-                        )
-                        new_result = optimized_model_iter_fn(model_copy, example_inputs)
-                else:
-                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                    new_result = self.run_n_iterations(
-                        model_copy, example_inputs, optimized_model_iter_fn
-                    )
-            except Exception as e:
-                log.exception("")
-                print(
-                    "TorchDynamo optimized model failed to run because of following error"
-                )
-                accuracy_status = (
-                    "OOM"
-                    if isinstance(e, torch.cuda.OutOfMemoryError)
-                    else "fail_to_run"
-                )
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
-            finally:
-                del model_copy
+            # Support multiple accuracy check runs for flaky models
+            accuracy_check_runs = self.get_accuracy_check_runs(name)
+            pass_count = 0
 
-            if name in self.skip_accuracy_check_as_eager_non_deterministic:
-                return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
+            for run_idx in range(accuracy_check_runs):
+                # Run with Dynamo
+                reset_rng_state()
+                torch._dynamo.reset()
+                torch._dynamo.utils.counters.clear()
+                model_copy = None
+                run_passed = True
 
-            force_max_multiplier = False
-            if (
-                self.args.freezing
-                and self.args.bfloat16
-                and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"] > 0
-            ):
-                force_max_multiplier = True
-
-            try:
-                if self.args.training and self.args.amp:
-                    if process_fn := self.get_output_amp_train_process_func.get(
-                        name, None
+                try:
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    if (
+                        self.args.export
+                        or self.args.export_aot_inductor
+                        or self.args.export_nativert
+                        or self.args.torchscript_jit_trace
+                        or self.args.aot_precompile
                     ):
-                        correct_result = process_fn(correct_result)
-                        new_result = process_fn(new_result)
-                        fp64_outputs = process_fn(fp64_outputs)
+                        # apply export on module directly
+                        # no need for n iterations
+                        # the logic should be the same to self.model_iter_fn (forward_pass)
+                        with self.autocast(**self.autocast_arg):
+                            optimized_model_iter_fn = optimize_ctx(
+                                model_copy, example_inputs
+                            )
+                            new_result = optimized_model_iter_fn(
+                                model_copy, example_inputs
+                            )
+                    else:
+                        optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                        new_result = self.run_n_iterations(
+                            model_copy, example_inputs, optimized_model_iter_fn
+                        )
+                except Exception as e:
+                    log.exception("")
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    accuracy_status = (
+                        "OOM"
+                        if isinstance(e, torch.cuda.OutOfMemoryError)
+                        else "fail_to_run"
+                    )
+                    return record_status(
+                        accuracy_status, dynamo_start_stats=start_stats
+                    )
+                finally:
+                    del model_copy
 
+                if name in self.skip_accuracy_check_as_eager_non_deterministic:
+                    return record_status(
+                        "pass_due_to_skip", dynamo_start_stats=start_stats
+                    )
+
+                force_max_multiplier = False
                 if (
-                    self.args.save_model_outputs_to
-                    and self.args.compare_model_outputs_with
-                    and self.args.save_model_outputs_to
-                    == self.args.compare_model_outputs_with
+                    self.args.freezing
+                    and self.args.bfloat16
+                    and torch._dynamo.utils.counters["inductor"]["binary_folding_conv"]
+                    > 0
                 ):
-                    log.warning(
-                        "args.save_model_outputs_to and args.compare_model_outputs_with points to the same path."
-                        "Result will be undefined."
-                    )
+                    force_max_multiplier = True
 
-                if self.args.save_model_outputs_to:
-                    print(f"Save model outputs to: {self.args.save_model_outputs_to}")
-                    torch.save(new_result, self.args.save_model_outputs_to)
+                try:
+                    if self.args.training and self.args.amp:
+                        if process_fn := self.get_output_amp_train_process_func.get(
+                            name, None
+                        ):
+                            correct_result = process_fn(correct_result)
+                            new_result = process_fn(new_result)
+                            fp64_outputs = process_fn(fp64_outputs)
 
-                if self.args.compare_model_outputs_with:
-                    print(
-                        f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
-                    )
-                    saved_result = torch.load(
-                        self.args.compare_model_outputs_with, weights_only=False
-                    )
-                    is_bitwise_same = bitwise_same(saved_result, new_result)
-                    if not is_bitwise_same:
+                    if (
+                        self.args.save_model_outputs_to
+                        and self.args.compare_model_outputs_with
+                        and self.args.save_model_outputs_to
+                        == self.args.compare_model_outputs_with
+                    ):
+                        log.warning(
+                            "args.save_model_outputs_to and args.compare_model_outputs_with points to the same path."
+                            "Result will be undefined."
+                        )
+
+                    if self.args.save_model_outputs_to:
                         print(
-                            "The result is not bitwise equivalent to the previously saved result"
+                            f"Save model outputs to: {self.args.save_model_outputs_to}"
                         )
-                        return record_status(
-                            "not_bitwise_equivalent", dynamo_start_stats=start_stats
-                        )
+                        torch.save(new_result, self.args.save_model_outputs_to)
 
-                    print(
-                        "The result is bitwise equivalent to the previously saved result"
+                    if self.args.compare_model_outputs_with:
+                        print(
+                            f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
+                        )
+                        saved_result = torch.load(
+                            self.args.compare_model_outputs_with, weights_only=False
+                        )
+                        is_bitwise_same = bitwise_same(saved_result, new_result)
+                        if not is_bitwise_same:
+                            print(
+                                "The result is not bitwise equivalent to the previously saved result"
+                            )
+                            return record_status(
+                                "not_bitwise_equivalent",
+                                dynamo_start_stats=start_stats,
+                            )
+
+                        print(
+                            "The result is bitwise equivalent to the previously saved result"
+                        )
+                        del saved_result
+
+                    if not same(
+                        correct_result,
+                        new_result,
+                        fp64_outputs,
+                        equal_nan=self.equal_nan,
+                        use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
+                            name
+                        ),
+                        cos_similarity=cos_similarity,
+                        tol=tolerance,
+                        force_max_multiplier=force_max_multiplier,
+                        use_iou_for_bool=self.use_iou_for_bool_accuracy(name),
+                        iou_threshold=self.get_iou_threshold(name),
+                    ):
+                        run_passed = False
+                except Exception:
+                    # Sometimes torch.allclose may throw RuntimeError
+                    run_passed = False
+
+                if run_passed:
+                    pass_count += 1
+
+                if accuracy_check_runs > 1:
+                    log.info(
+                        "Accuracy check run %d/%d: %s",
+                        run_idx + 1,
+                        accuracy_check_runs,
+                        "passed" if run_passed else "failed",
                     )
-                    del saved_result
 
-                if not same(
-                    correct_result,
-                    new_result,
-                    fp64_outputs,
-                    equal_nan=self.equal_nan,
-                    use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
-                        name
-                    ),
-                    cos_similarity=cos_similarity,
-                    tol=tolerance,
-                    force_max_multiplier=force_max_multiplier,
-                ):
-                    is_same = False
-            except Exception:
-                # Sometimes torch.allclose may throw RuntimeError
-                is_same = False
+            # Pass if majority of runs pass (more than half)
+            is_same = pass_count > accuracy_check_runs // 2
+
+            if accuracy_check_runs > 1:
+                log.info(
+                    "Accuracy check summary: %d/%d runs passed, %s",
+                    pass_count,
+                    accuracy_check_runs,
+                    "PASS" if is_same else "FAIL",
+                )
 
             if not is_same:
                 if self.args.skip_accuracy_check:

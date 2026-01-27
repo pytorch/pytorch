@@ -1,8 +1,10 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
+#include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -49,6 +51,11 @@ struct NVSHMEMAllocation {
   }
 };
 
+// A map from group name to rank-to-global rank mapping
+static std::unordered_map<std::string, std::vector<int>> rank_to_global_rank_map{};
+// A map from group name to rank-to-global rank device array
+static std::unordered_map<std::string, int*> rank_to_global_rank_dev_map{};
+
 // A class to hold the base pointers and signal pad pointers for a group of
 // peers. One `NVSHMEMPeerAllocInfo` object can be shared by multiple
 // `NVSHMEMSymmetricMemory` objects when latter reside on the same allocation
@@ -64,30 +71,43 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
     static int exchanged_n_times = 0;
     c10::cuda::CUDAGuard guard(allocation->device_idx);
 
-    auto global_rank = get_group_info("0").rank;
-    GroupInfo& group_info = get_group_info(group_name);
-    auto store = group_info.store;
-    rank_ = group_info.rank;
-    world_size_ = group_info.world_size;
+    auto group = resolve_process_group(group_name);
+    rank_ = group->getRank();
+    world_size_ = group->getSize();
+    auto store = group->getStore();
+
     // Exchange rank to global rank mapping for this group.
     // If it is already available, skip the exchange.
-    if (group_info.rank_to_global_rank.empty()) {
-      group_info.rank_to_global_rank =
+    auto it = rank_to_global_rank_map.find(group_name);
+    if (it == rank_to_global_rank_map.end()) {
+      auto global_group = resolve_process_group("0");
+      auto global_rank = global_group->getRank();
+      auto rank_to_global_rank =
           storeExchange.all_gather(store, rank_, world_size_, global_rank);
       exchanged_n_times++;
       if (rank_ == 0) {
         LOG(INFO) << "[rank " << rank_ << ']'
-                  << " rank_to_global_rank: " << group_info.rank_to_global_rank
+                  << " rank_to_global_rank: " << rank_to_global_rank
                   << ", group_name: " << group_name
                   << ", exchanged_n_times: " << exchanged_n_times;
       }
+      it = rank_to_global_rank_map.emplace_hint(it, group_name, rank_to_global_rank);
+
+      // Emplace a device array of rank to global rank mapping
+      auto rank_to_global_rank_dev = reinterpret_cast<int*>(
+          c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
+      AT_CUDA_CHECK(cudaMemcpy(
+          rank_to_global_rank_dev,
+          rank_to_global_rank.data(),
+          sizeof(int) * world_size_,
+          cudaMemcpyHostToDevice));
+      rank_to_global_rank_dev_map[group_name] = rank_to_global_rank_dev;
     }
-    TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
-    rank_to_global_rank_ = group_info.rank_to_global_rank;
+    auto& rank_to_global_rank = it->second;
 
     world_within_cuda_p2p_ = true;
     for (int r = 0; r < world_size_; ++r) {
-      auto peer_ptr = nvshmem_ptr(base_ptr_, rank_to_global_rank_[r]);
+      auto peer_ptr = nvshmem_ptr(base_ptr_, rank_to_global_rank[r]);
       buffers_.push_back(peer_ptr);
       // If a peer is over network, `nvshmem_ptr` returns null
       if (peer_ptr == nullptr) {
@@ -103,7 +123,7 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
 
     for (int r = 0; r < world_size_; ++r) {
       signal_pads_.push_back(
-          nvshmem_ptr(signal_pad_ptr, rank_to_global_rank_[r]));
+          nvshmem_ptr(signal_pad_ptr, rank_to_global_rank[r]));
     }
 
     const size_t arr_size = sizeof(void*) * world_size_;
@@ -120,13 +140,12 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
         arr_size,
         cudaMemcpyHostToDevice));
 
-    rank_to_global_rank_dev_ = reinterpret_cast<int*>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
-    AT_CUDA_CHECK(cudaMemcpy(
-        rank_to_global_rank_dev_,
-        rank_to_global_rank_.data(),
-        sizeof(int) * world_size_,
-        cudaMemcpyHostToDevice));
+    // Initialize multicast address
+    // On unsupported platforms, this API returns a nullptr.
+    auto device = c10::Device(c10::DeviceType::CUDA, allocation->device_idx);
+    auto& team_manager = c10d::nvshmem_extension::TeamManager::get(device);
+    auto team = team_manager.get_team(group_name, rank_to_global_rank);
+    mc_addr_ = nvshmemx_mc_ptr(team, base_ptr_);
   }
 
  private:
@@ -138,10 +157,10 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
   std::vector<void*> signal_pads_;
   void** buffers_dev_;
   void** signal_pads_dev_;
-  std::vector<int> rank_to_global_rank_;
-  int* rank_to_global_rank_dev_;
   // Whether the world is within CUDA P2P only, not network
   bool world_within_cuda_p2p_;
+  // Multicast address
+  void* mc_addr_{nullptr};
 
   friend class NVSHMEMSymmetricMemory;
 };
@@ -197,13 +216,14 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   bool has_multicast_support() override {
-    // TODO
-    return false;
+    return pai_->mc_addr_ != nullptr;
   }
 
   void* get_multicast_ptr() override {
-    // TODO
-    return nullptr;
+    if (!has_multicast_support()) {
+      return nullptr;
+    }
+    return static_cast<char*>(pai_->mc_addr_) + offset_;
   }
 
   size_t get_offset() override {
@@ -235,11 +255,19 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   const std::vector<int>& get_rank_to_global_rank() override {
-    return pai_->rank_to_global_rank_;
+    auto it = rank_to_global_rank_map.find(group_name_);
+    if (it == rank_to_global_rank_map.end()) {
+      TORCH_CHECK(false, "Group name not found in rank_to_global_rank_map");
+    }
+    return it->second;
   };
 
   int* get_rank_to_global_rank_dev() override {
-    return pai_->rank_to_global_rank_dev_;
+    auto it = rank_to_global_rank_dev_map.find(group_name_);
+    if (it == rank_to_global_rank_dev_map.end()) {
+      TORCH_CHECK(false, "Group name not found in rank_to_global_rank_dev_map");
+    }
+    return it->second;
   };
 
   bool world_within_direct_access() override {
@@ -328,12 +356,10 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "must not be called with a group_name");
     c10::cuda::CUDAGuard guard(device_idx);
 
-    auto group_info = get_group_info("0");
-    auto store = group_info.store;
-    int rank = group_info.rank;
-    int world_size = group_info.world_size;
+    // NVSHMEM needs to be initialized with the global group
+    auto group = resolve_process_group("0");
+    initialize_nvshmem_with_store(group->getStore(), group->getRank(), group->getSize(), device_idx);
 
-    initialize_nvshmem_with_store(store, rank, world_size, device_idx);
     auto ptr = nvshmem_malloc(size);
     // If size is 0 (which is legal allocation request) we shouldn't error out
     TORCH_CHECK(ptr != nullptr || size == 0, "nvshmem_malloc failed");
@@ -417,9 +443,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   bool has_multicast_support(int device_idx) override {
-    // TODO
-    return false;
-  };
+    return device_has_multicast_support(device_idx);
+  }
 
   c10::DeviceType supported_device_type() override {
     return c10::DeviceType::CUDA;
