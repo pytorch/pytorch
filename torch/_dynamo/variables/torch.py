@@ -107,6 +107,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._library.opaque_object import OpaqueType
     from torch.utils._pytree import TreeSpec
 
 
@@ -276,7 +277,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
     grad_fns: set[torch.autograd.graph.Node] = set()
 
-    plain_tensors: list[torch.SymInt | torch.Tensor | int] = []
+    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueType] = []
     # Get all plain tensors (handles nested subclasses)
     if is_traceable_wrapper_subclass(tensor):
         get_plain_tensors(tensor, out=plain_tensors)
