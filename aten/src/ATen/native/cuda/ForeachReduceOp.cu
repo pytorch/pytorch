@@ -436,7 +436,6 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
       max_chunks_per_tensor = max_chunks_this_tensor;
     }
   }
-
   const auto options = tensors[0].options();
   const ScalarType output_dtype =
       dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
