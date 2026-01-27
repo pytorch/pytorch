@@ -692,21 +692,23 @@ class TestFlexAttention(InductorTestCase):
         paged_attention = PagedAttention(
             n_pages, page_size, max_batch_size, device=device
         )
+
+        def make_reserve_tensor(fractions):
+            pattern = [KV_S * f for f in fractions]
+            return torch.tensor(
+                [pattern[i % len(pattern)] for i in range(KV_B)],
+                device=device,
+                dtype=torch.int64,
+            )
+
         batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 4, KV_S // 3], device=device),
+            paged_attention, make_reserve_tensor([1 / 4, 1 / 2, 1 / 4, 1 / 3])
         )
         batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 4, KV_S // 2, KV_S // 2, KV_S // 2], device=device),
+            paged_attention, make_reserve_tensor([1 / 4, 1 / 2, 1 / 2, 1 / 2])
         )
-        batch_reserve(
-            paged_attention,
-            torch.tensor([KV_S // 2, KV_S, KV_S // 2, KV_S], device=device),
-        )
-        batch_reserve(
-            paged_attention, torch.tensor([KV_S, KV_S, KV_S, KV_S], device=device)
-        )
+        batch_reserve(paged_attention, make_reserve_tensor([1 / 2, 1, 1 / 2, 1]))
+        batch_reserve(paged_attention, make_reserve_tensor([1, 1, 1, 1]))
 
         # update cache with k and v
         input_pos = (
