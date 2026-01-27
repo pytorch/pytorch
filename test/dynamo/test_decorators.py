@@ -2343,7 +2343,7 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             else:
                 return (mod.linear(x) + x,)
 
-        @non_tracable_forward.fake_impl
+        @non_tracable_forward.register_fake
         def non_tracable_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2414,7 +2414,7 @@ class GraphModule(torch.nn.Module):
             print("Processing input")
             return (mod.linear(x),)
 
-        @logging_forward.fake_impl
+        @logging_forward.register_fake
         def logging_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2449,7 +2449,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (mod.linear(x) * 3,)
 
-        @configurable_scale.fake_impl
+        @configurable_scale.register_fake
         def configurable_scale_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2524,7 +2524,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (x @ y * 3,)
 
-        @configurable_scale.fake_impl
+        @configurable_scale.register_fake
         def configurable_scale_fake(x, y):
             return (x @ y,)
 
@@ -2589,7 +2589,7 @@ class GraphModule(torch.nn.Module):
             out = out + closure_tensor + mod.offset
             return (out,)
 
-        @closure_forward.fake_impl
+        @closure_forward.register_fake
         def closure_forward_fake(mod, x):
             return (mod.linear(x) + mod.offset,)
 
@@ -2665,7 +2665,7 @@ class GraphModule(torch.nn.Module):
                 return (mod.linear(inputs["x"]), inputs["y"] + 1)
             return (mod.linear(inputs["x"]) + inputs["y"], inputs["y"] - 1)
 
-        @pytree_forward.fake_impl
+        @pytree_forward.register_fake
         def pytree_forward_fake(mod, inputs):
             return (mod.linear(inputs["x"]), inputs["y"])
 
@@ -2696,7 +2696,7 @@ class GraphModule(torch.nn.Module):
             y = mod.linear(x)
             return (y + x,)
 
-        @inner_leaf_forward.fake_impl
+        @inner_leaf_forward.register_fake
         def inner_leaf_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2713,7 +2713,7 @@ class GraphModule(torch.nn.Module):
             z = mod.linear(x)
             return mod.inner(z + x)
 
-        @outer_leaf_forward.fake_impl
+        @outer_leaf_forward.register_fake
         def outer_leaf_forward_fake(mod, x):
             return mod.inner(mod.linear(x))
 
@@ -2790,7 +2790,7 @@ class GraphModule(torch.nn.Module):
             nonzero_indices = (out > 0).nonzero()
             return (out, nonzero_indices)
 
-        @nonzero_forward.fake_impl
+        @nonzero_forward.register_fake
         def nonzero_forward_fake(mod, x):
             out = mod.linear(x)
             return out, (out > 0).nonzero()
@@ -2833,7 +2833,7 @@ class GraphModule(torch.nn.Module):
             scalar_value = out.sum().item()
             return (out, scalar_value)
 
-        @item_forward.fake_impl
+        @item_forward.register_fake
         def item_forward_fake(mod, x):
             out = mod.linear(x)
             return (out, out.sum().item())
@@ -2863,7 +2863,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (mod.linear(x) + x,)
 
-        @leaf_forward.fake_impl
+        @leaf_forward.register_fake
         def leaf_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -2954,7 +2954,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (mod.linear(x) + 1,)
 
-        @leaf_forward.fake_impl
+        @leaf_forward.register_fake
         def leaf_forward_fake(mod, x):
             return (mod.linear(x),)
 
@@ -3010,7 +3010,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (modules_dict["first"](x) - modules_dict["second"](x),)
 
-        @main_forward.fake_impl
+        @main_forward.register_fake
         def main_forward_fake(modules_dict, x):
             return (modules_dict["first"](x) + modules_dict["second"](x),)
 
@@ -3049,7 +3049,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return (helper_mod(x) + x,)
 
-        @main_forward.fake_impl
+        @main_forward.register_fake
         def main_forward_fake(x, helper_mod=None):
             return (helper_mod(x),)
 
@@ -3097,7 +3097,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result[0].shape, (3, 3))
 
         compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(Exception, "requires a fake_impl"):
+        with self.assertRaisesRegex(Exception, "requires a fake implementation"):
             compiled_mod(x)
 
     @parametrize("backend", ["eager", "aot_eager"])
@@ -3108,7 +3108,7 @@ class GraphModule(torch.nn.Module):
         def constant_closure_forward(x):
             return (x @ constant_weight,)
 
-        @constant_closure_forward.fake_impl
+        @constant_closure_forward.register_fake
         def constant_closure_forward_fake(x):
             return (x @ constant_weight,)
 
@@ -3139,7 +3139,7 @@ class GraphModule(torch.nn.Module):
             x.add_(1)
             return (x,)
 
-        @mutate_input.fake_impl
+        @mutate_input.register_fake
         def mutate_input_fake(x):
             return (x + 1,)
 
@@ -3162,7 +3162,7 @@ class GraphModule(torch.nn.Module):
         def dtype_mismatch_forward(mod, x):
             return (mod.linear(x),)
 
-        @dtype_mismatch_forward.fake_impl
+        @dtype_mismatch_forward.register_fake
         def dtype_mismatch_forward_fake(mod, x):
             return (mod.linear(x).double(),)
 
@@ -3189,7 +3189,7 @@ class GraphModule(torch.nn.Module):
         def mismatched_forward(mod, x):
             return (mod.linear(x),)
 
-        @mismatched_forward.fake_impl
+        @mismatched_forward.register_fake
         def mismatched_forward_fake(mod, x):
             return (torch.zeros(x.shape[0], 6),)
 
@@ -3222,7 +3222,7 @@ class GraphModule(torch.nn.Module):
                 return (x * scale + y + offset, x.sum() + y.sum())
             return (x * scale - y + offset, x.sum() - y.sum())
 
-        @my_custom_fn.fake_impl
+        @my_custom_fn.register_fake
         def my_custom_fn_fake(
             inputs: dict[str, torch.Tensor], scale: float, offset: int
         ):
@@ -3263,7 +3263,7 @@ class GraphModule(torch.nn.Module):
         def uses_multiple_closures(x):
             return (x @ weight1 + x @ weight2,)
 
-        @uses_multiple_closures.fake_impl
+        @uses_multiple_closures.register_fake
         def uses_multiple_closures_fake(x):
             return (torch.empty(x.shape[0], 3),)
 
@@ -3294,7 +3294,7 @@ class GraphModule(torch.nn.Module):
         def uses_closure(x):
             return (x @ closure_weight,)
 
-        @uses_closure.fake_impl
+        @uses_closure.register_fake
         def uses_closure_fake(x):
             return (torch.empty(x.shape[0], 3),)
 
@@ -3326,7 +3326,7 @@ class GraphModule(torch.nn.Module):
             out2 = x @ closure_weight2
             return (out1, out2)
 
-        @mixed_inputs.fake_impl
+        @mixed_inputs.register_fake
         def mixed_inputs_fake(x, y):
             return (torch.empty(x.shape[0], 3), torch.empty(x.shape[0], 4))
 
@@ -3358,7 +3358,7 @@ class GraphModule(torch.nn.Module):
         def uses_closure(x):
             return (x @ closure_weight,)
 
-        @uses_closure.fake_impl
+        @uses_closure.register_fake
         def uses_closure_fake(x):
             return (torch.empty(x.shape[0], 5),)
 
@@ -3380,7 +3380,7 @@ class GraphModule(torch.nn.Module):
         def uses_closure(x):
             return (x @ closure_weight,)
 
-        @uses_closure.fake_impl
+        @uses_closure.register_fake
         def uses_closure_fake(x):
             return (torch.empty(x.shape[0], 3),)
 
@@ -3419,6 +3419,157 @@ class GraphModule(torch.nn.Module):
             @leaf_function
             def bad_fn2(x):
                 return (x,)
+
+    def test_leaf_function_dict_output(self):
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def dict_output_fn(linear1, linear2, x):
+            if x.sum() > 0:
+                return {"a": linear1(x), "b": linear2(x)}
+            else:
+                return {"a": linear1(x) + 1, "b": linear2(x) + 1}
+
+        @dict_output_fn.fake_impl
+        def dict_output_fn_fake(linear1, linear2, x):
+            return {"a": linear1(x), "b": linear2(x)}
+
+        class DictOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return dict_output_fn(self.linear1, self.linear2, x)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out["a"].sum() + out["b"].sum()
+
+        self._test_leaf_function_helper(DictOutputModule, args_fn, loss_fn)
+
+    def test_leaf_function_nested_output(self):
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def nested_output_fn(linear1, linear2, linear3, x):
+            if x.sum() > 0:
+                return {
+                    "out": (linear1(x), linear2(x)),
+                    "extra": linear3(x),
+                }
+            else:
+                return {
+                    "out": (linear1(x) + 1, linear2(x) + 1),
+                    "extra": linear3(x) + 1,
+                }
+
+        @nested_output_fn.fake_impl
+        def nested_output_fn_fake(linear1, linear2, linear3, x):
+            return {
+                "out": (linear1(x), linear2(x)),
+                "extra": linear3(x),
+            }
+
+        class NestedOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.linear3 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return nested_output_fn(self.linear1, self.linear2, self.linear3, x)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out["out"][0].sum() + out["out"][1].sum() + out["extra"].sum()
+
+        self._test_leaf_function_helper(NestedOutputModule, args_fn, loss_fn)
+
+    def test_leaf_function_custom_pytree_input(self):
+        """Test leaf_function with custom pytree class input."""
+        from torch._dynamo.decorators import leaf_function
+
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        self.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
+        )
+
+        @leaf_function
+        def point_fn(linear, p):
+            return (linear(p.x) * p.y,)
+
+        @point_fn.fake_impl
+        def point_fn_fake(linear, p):
+            return (linear(p.x) * p.y,)
+
+        class PointModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, p):
+                return point_fn(self.linear, p)
+
+        def args_fn():
+            return (
+                Point(
+                    torch.randn(3, 3, requires_grad=True),
+                    torch.randn(3, 3, requires_grad=True),
+                ),
+            )
+
+        def loss_fn(out):
+            return out[0].sum()
+
+        self._test_leaf_function_helper(PointModule, args_fn, loss_fn)
+
+    def test_leaf_function_primitive_output(self):
+        """Test leaf_function with primitive type outputs (int, float)."""
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def fn_with_primitives(linear, x):
+            y = linear(x)
+            return (y, len(x.shape), 0.5)
+
+        @fn_with_primitives.fake_impl
+        def fn_with_primitives_fake(linear, x):
+            y = linear(x)
+            return (y, len(x.shape), 0.5)
+
+        class PrimitiveOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                y, n, f = fn_with_primitives(self.linear, x)
+                return y * n + f
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out.sum()
+
+        self._test_leaf_function_helper(PrimitiveOutputModule, args_fn, loss_fn)
 
 
 instantiate_parametrized_tests(DecoratorTests)
