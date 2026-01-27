@@ -1047,6 +1047,7 @@ class ProfilerTraceEstimator:
             element_size = 4  # Default to float32
             if dtype_str:
                 dtype_lower = dtype_str.lower()
+                # Check more specific types first to avoid substring matches
                 if "float64" in dtype_lower or "double" in dtype_lower:
                     element_size = 8
                 elif "float16" in dtype_lower or "half" in dtype_lower:
@@ -1055,12 +1056,12 @@ class ProfilerTraceEstimator:
                     element_size = 2
                 elif "int64" in dtype_lower or "long" in dtype_lower:
                     element_size = 8
-                elif "int32" in dtype_lower or "int" in dtype_lower:
-                    element_size = 4
                 elif "int16" in dtype_lower or "short" in dtype_lower:
                     element_size = 2
                 elif "int8" in dtype_lower or "byte" in dtype_lower:
                     element_size = 1
+                elif "int32" in dtype_lower or dtype_lower == "int":
+                    element_size = 4
                 elif "bool" in dtype_lower:
                     element_size = 1
 
