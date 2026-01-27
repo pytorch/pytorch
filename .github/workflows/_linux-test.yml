@@ -340,8 +340,8 @@ jobs:
           # from HF when the PR has a special ci-refresh-hf-cache label. This label is
           # automatically added to the vLLM pinned commit hash update, which effectively
           # refreshes the cache daily
-          TRANSFORMERS_OFFLINE: ${{ contains(github.event.pull_request.labels.*.name, 'ci-refresh-hf-cache') && '0' || '1' }}
-          HF_DATASETS_OFFLINE: ${{ contains(github.event.pull_request.labels.*.name, 'ci-refresh-hf-cache') && '0' || '1' }}
+          TRANSFORMERS_OFFLINE: ${{ contains(steps.keep-going.output.labels, 'ci-refresh-hf-cache') && '0' || '1' }}
+          HF_DATASETS_OFFLINE: ${{ contains(steps.keep-going.output.labels, 'ci-refresh-hf-cache') && '0' || '1' }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
