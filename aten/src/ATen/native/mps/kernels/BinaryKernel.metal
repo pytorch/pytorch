@@ -265,6 +265,17 @@ struct hypot_functor {
   }
 };
 
+struct atan2_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(precise::atan2(float(a), float(b)));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return precise::atan2(float(a), float(b));
+  }
+};
+
 // Complex binary functors
 struct polar_functor {
   template <typename U>
@@ -406,6 +417,8 @@ struct igammac_functor {
   REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
 
 REGISTER_FLOAT_BINARY_OP(hypot);
+REGISTER_FLOAT_BINARY_OP(atan2);
+REGISTER_INT2FLOAT_BINARY_OP(atan2);
 REGISTER_FLOAT_BINARY_OP(copysign);
 REGISTER_INT2FLOAT_BINARY_OP(copysign);
 REGISTER_FLOAT_BINARY_OP(fmax);

@@ -24,7 +24,6 @@ class _WithExport:
             args,
             kwargs=kwargs,
             dynamo=True,
-            fallback=False,
             verbose=False,
             **options,
         )
