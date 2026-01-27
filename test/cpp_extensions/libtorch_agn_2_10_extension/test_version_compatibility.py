@@ -282,36 +282,26 @@ if not IS_WINDOWS:
         return test_method_impl
 
     # Test discovery: generate a test for each .cpp and .cu file
-    _csrc_dir = Path(__file__).parent / "libtorch_agn_2_10" / "csrc"
-    if _csrc_dir.exists():
-        # Collect both .cpp and .cu files, excluding those used for negative test
-        # already defined above
-        _source_files = sorted(
-            [
-                f
-                for f in _csrc_dir.rglob("*.cpp")
-                if f.name != "mv_tensor_accessor_cpu.cpp"
-            ]
-            + [
-                f
-                for f in _csrc_dir.rglob("*.cu")
-                if f.name != "mv_tensor_accessor_cuda.cu"
-            ]
-        )
+    _csrc_dir = Path(__file__).parent / "csrc"
+    assert _csrc_dir.exists()
+    # Collect both .cpp and .cu files, excluding those used for negative test
+    # already defined above
+    _source_files = sorted(
+        [f for f in _csrc_dir.rglob("*.cpp") if f.name != "mv_tensor_accessor_cpu.cpp"]
+        + [f for f in _csrc_dir.rglob("*.cu") if f.name != "mv_tensor_accessor_cuda.cu"]
+    )
 
-        for _source_file in _source_files:
-            _test_method = _create_test_method_for_file(_source_file)
-            setattr(
-                FunctionVersionCompatibilityTest, _test_method.__name__, _test_method
-            )
+    for _source_file in _source_files:
+        _test_method = _create_test_method_for_file(_source_file)
+        setattr(FunctionVersionCompatibilityTest, _test_method.__name__, _test_method)
 
-        del (
-            _create_test_method_for_file,
-            _csrc_dir,
-            _source_files,
-            _source_file,
-            _test_method,
-        )
+    del (
+        _create_test_method_for_file,
+        _csrc_dir,
+        _source_files,
+        _source_file,
+        _test_method,
+    )
 
 if __name__ == "__main__":
     run_tests()

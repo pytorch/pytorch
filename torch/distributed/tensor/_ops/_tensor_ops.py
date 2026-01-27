@@ -197,9 +197,16 @@ def create_like_strategy(op_schema: OpSchema) -> StrategyType:
                 Replicate() if isinstance(p, Partial) else p
                 for p in arg_spec.placements
             ),
+            tensor_meta=arg_spec.tensor_meta,
         )
         create_like_strategy.strategies.append(
-            OpSpec(output_specs=output_spec, input_specs=(arg_spec,))
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=(arg_spec,),
+                redistribute_cost=[
+                    generate_redistribute_costs(select_strategy, arg_spec),
+                ],
+            )
         )
 
     return create_like_strategy
@@ -824,8 +831,12 @@ def cat_single_dim_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     input_list = args_schema[0]
     # unfortunate naming, but yes it's a TensorList input, and we represent it as a tuple of TensorMeta
-    assert isinstance(input_list, tuple), type(input_list)
+    assert isinstance(input_list, (tuple, list)), type(input_list)
     assert all(isinstance(tm, TensorMeta) for tm in input_list)
+
+    if isinstance(input_list, list):
+        input_list = tuple(input_list)
+
     num_inputs = len(input_list)
     ndim_set = {len(meta.shape) for meta in input_list}
     assert len(ndim_set) in (1, 2), (

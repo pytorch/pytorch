@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
-    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
+    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -2255,9 +2255,18 @@ class TestTorchDeviceType(TestCase):
         for x in self._generate_correlation_tensors(device, dtype):
             res = torch.corrcoef(x)
             ref = np.corrcoef(x.cpu().numpy())
-            self.assertEqual(res, ref, atol=1e-04, rtol=1e-03, exact_dtype=False)
+            # complex cov can produce rounding errors, and when the norm factor is 0,
+            # the imag portion of the answer could be +/- inf instead of nan, causing
+            # the numpy answer to differ from the torch answer. We always check the real
+            # part, but only check the imag part if it contains some normal values
+            # (indicating that the norm factor was not 0).
+            if res.is_complex():
+                self.assertEqual(res.real, ref.real, atol=1e-05, rtol=1e-05, exact_dtype=False)
+                if not (torch.isnan(res.imag) | torch.isinf(res.imag)).all():
+                    self.assertEqual(res.imag, ref.imag, atol=1e-05, rtol=1e-05, exact_dtype=False)
+            else:
+                self.assertEqual(res, ref, atol=1e-05, rtol=1e-05, exact_dtype=False)
 
-    @skipRocmIfTorchInductor
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_cov(self, device, dtype):
         def check(t, correction=1, fweights=None, aweights=None):
@@ -2266,7 +2275,17 @@ class TestTorchDeviceType(TestCase):
             fweights = fweights.cpu().numpy() if fweights is not None else None
             aweights = aweights.cpu().numpy() if aweights is not None else None
             ref = np.cov(t, ddof=correction, fweights=fweights, aweights=aweights)
-            self.assertEqual(res, ref, atol=1e-05, rtol=1e-05, exact_dtype=False)
+            # complex cov can produce rounding errors, and when the norm factor is 0,
+            # the imag portion of the answer could be +/- inf instead of nan, causing
+            # the numpy answer to differ from the torch answer. We always check the real
+            # part, but only check the imag part if it contains some normal values
+            # (indicating that the norm factor was not 0).
+            if res.is_complex():
+                self.assertEqual(res.real, ref.real, atol=1e-05, rtol=1e-05, exact_dtype=False)
+                if not (torch.isnan(res.imag) | torch.isinf(res.imag)).all():
+                    self.assertEqual(res.imag, ref.imag, atol=1e-05, rtol=1e-05, exact_dtype=False)
+            else:
+                self.assertEqual(res, ref, atol=1e-05, rtol=1e-05, exact_dtype=False)
 
         for x in self._generate_correlation_tensors(device, dtype):
             check(x)
@@ -6240,6 +6259,18 @@ class TestTorchDeviceType(TestCase):
         actual = t_non_contig.masked_scatter_(mask_contig, source)
         self.assertEqual(actual, expected)
 
+    def test_tolist_with_grad(self, device):
+        def f(x):
+            result = x.tolist()
+            for l, r in zip(result, [1.0, 2.0, 3.0]):
+                assert l == r
+            return sum(x)
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True, device=device)
+        grad_f = torch.func.grad(f)
+        result = grad_f(x)
+        self.assertEqual(result.tolist() , [1.0, 1.0, 1.0])
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -6704,11 +6735,21 @@ class TestTorch(TestCase):
             ref_out = tensor.index_add(dim, index, source, alpha=2.) / 2.
             ref_out = ref_out.to(dtype=dtype)
             out = tensor.index_add(dim, index, source)
-            if device == 'cuda':
-                self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
+
+            # Determine tolerances based on dtype and device
+            # Low-precision types (float16, bfloat16) on GPU have non-deterministic
+            # accumulation order, leading to larger rounding differences.
+            # See: https://github.com/pytorch/pytorch/issues/91184
+            if device == 'cuda' and dtype in (torch.half, torch.bfloat16):
+                # Relaxed tolerance for low-precision GPU accumulation
+                atol, rtol = 1e-1, 1e-1
+            elif device == 'cuda':
+                atol, rtol = 1e-2, 1e-2
             else:
                 # scatter_add uses fp32 as accumulate type, while index_add doesn't.
-                self.assertEqual(out, ref_out.to(dtype=dtype), atol=1e-2, rtol=1e-2)
+                atol, rtol = 1e-2, 1e-2
+
+            self.assertEqual(out, ref_out.to(dtype=dtype), atol=atol, rtol=rtol)
 
         for dim in [-1, -2, -3]:
             for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
@@ -10691,7 +10732,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             x.item()  # No warning
 
             self.assertEqual(len(w), 0)
-
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests

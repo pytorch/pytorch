@@ -466,7 +466,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
 
-        add_nv_universal_gemm_choices(choices, layout, kernel_inputs.nodes())
+        add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
 
     if out_dtype is None and use_cpp_gemm_template(layout, mat1, mat2):
         CppGemmTemplate.add_choices(
@@ -1000,6 +1000,16 @@ def tuned_scaled_mm(
             kwarg_overrides=kwarg_overrides,
         )
     )
+
+    # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
+
+        add_nv_universal_scaled_gemm_choices(
+            choices,
+            layout,
+            input_nodes,
+        )
 
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
