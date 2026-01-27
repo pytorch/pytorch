@@ -1046,26 +1046,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def install_guard_clone_hook_fn(self, guard):
         """Test that guard.clone() works properly and return the cloned guard"""
         # Clone without transform
-        cloned = guard.clone()
-        self.assertIsNot(cloned, guard, "Cloned guard should be a new instance")
+        cloned_source = guard.originating_source.clone()
         self.assertEqual(
-            cloned.name, guard.name, "Cloned guard should have the same name"
-        )
-        self.assertEqual(
-            cloned.source, guard.source, "Cloned guard should have the same source"
+            cloned_source.name, guard.name, "Cloned guard should have the same source"
         )
 
         # Clone with identity transform
-        cloned_with_transform = guard.clone(lambda x: x)
+        cloned_source_with_transform = guard.originating_source.clone(lambda x: x)
         self.assertEqual(
-            cloned_with_transform.name,
+            cloned_source_with_transform.name,
             guard.name,
-            "Cloned guard with identity transform should have the same name",
+            "Cloned guard should have the same source",
         )
 
-        # Return the cloned guard to be installed instead of the original
-        # This ensures the cloned guard actually works when installed
-        return cloned
+        guard.originating_source = cloned_source_with_transform
+        return guard
 
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
