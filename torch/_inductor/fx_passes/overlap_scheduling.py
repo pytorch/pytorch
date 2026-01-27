@@ -27,6 +27,24 @@ from torch._inductor.fx_passes.bucketing import bucket_key
 from ..pattern_matcher import stable_topological_sort
 
 
+def make_all_device_put_sync(gm: torch.fx.GraphModule) -> None:
+    g = gm.graph
+    for n in g.nodes:
+        if n.op == "call_function" and n.target is torch.ops.prims.device_put.default:
+            opt_args_kwargs = normalize_function(
+                n.target,
+                args=n.args,
+                kwargs=n.kwargs,
+                normalize_to_only_use_kwargs=True,
+            )
+            if opt_args_kwargs is not None:
+                _, kwargs = opt_args_kwargs
+                if kwargs.get("non_blocking", False):
+                    kwargs["non_blocking"] = False
+                    n.args = tuple(kwargs.values())
+                    n.kwargs = {}
+
+
 def estimate_runtime_analytical(n: torch.fx.Node) -> float:
     """Estimate runtime using analytical roofline model for mm operations."""
     if n.target != torch.ops.aten.mm.default:
@@ -322,6 +340,12 @@ class OverlapScheduler:
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
+
+        # Make all to(device) non_blocking=False,
+        # They can be implicitly depending by user logic on other to(device) non_blocking=True.
+        # OverlapScheduler can put reads of non_blocking device_put before blocking one.
+        # This results in dirty reads.
+        make_all_device_put_sync(gm)
 
         # Build and collapse fusion regions FIRST so all subsequent operations
         # work on the collapsed graph where fused ops are atomic units
