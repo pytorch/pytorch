@@ -9,6 +9,6 @@ bump this list w/ their description. I made this static because the full set of 
 `bot-triaged` whenever any triage action is taken; you can filter those decisions here: https://fburl.com/pt-bot-triaged
 2. `templates.json`: This is basically where we want to put canned responses. It includes `redirect_to_forum` (for usage questions) and
 `request_more_info` (when classification is unclear). There are likely others we should add here as we notice more patterns.
-3. There is a pre-tool use hook in `/scripts` that filters out any labels that we never want the bot to add.
+3. There are hooks in `/scripts`: a pre-hook (`validate_labels.py`) that filters out labels we never want the bot to add, and a post-hook (`add_bot_triaged.py`) that automatically applies `bot-triaged` after any issue mutation.
 4. The gh action is here: `.github/workflows/claude-issue-triage.yml`. It sets up roles, checks forks, and logs usage. We are using sonnet-4.5 since from testing it is much cheaper and appears to do a more than adequate job at triaging.
 5. To disable the flow, disable the GitHub Actions workflow in the repo settings or remove/disable `.github/workflows/claude-issue-triage.yml`.

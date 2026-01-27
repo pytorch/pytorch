@@ -6,7 +6,12 @@ hooks:
     - matcher: "mcp__github__issue_write|mcp__github__update_issue"
       hooks:
         - type: command
-          command: "python3 ./scripts/validate_labels.py"
+          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/triaging-issues/scripts/validate_labels.py"
+  PostToolUse:
+    - matcher: "mcp__github__issue_write|mcp__github__update_issue|mcp__github__add_issue_comment|mcp__github__transfer_issue"
+      hooks:
+        - type: command
+          command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/skills/triaging-issues/scripts/add_bot_triaged.py"
 ---
 
 # PyTorch Issue Triage Skill
@@ -24,7 +29,7 @@ This skill helps triage GitHub issues by routing issues, applying labels, and le
   - Step 3: Redirect to Secondary Oncall
   - Step 4: Label the Issue
   - Step 5: High Priority — REQUIRES HUMAN REVIEW
-  - Step 6: Mark Bot-Triaged
+  - Step 6: bot-triaged (automatic)
   - Step 7: Mark Triaged
 - [V1 Constraints](#v1-constraints)
 
@@ -133,9 +138,9 @@ High priority criteria:
 - Many users affected
 - Core component or popular model impact
 
-### 6) Mark bot-triaged
+### 6) bot-triaged (automatic)
 
-If any triage action was taken (label added, comment added, or issue closed), add `bot-triaged`.
+The `bot-triaged` label is automatically applied by a post-hook after any issue mutation. You do not need to add it manually.
 
 ### 7) Mark triaged
 
@@ -157,5 +162,6 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
-- Add `bot-triaged` whenever a triage action is taken
 - Add `triaged` label when classification is complete
+
+**Note:** `bot-triaged` is automatically applied by a post-hook after any issue mutation.

@@ -78,9 +78,7 @@ jobs:
             --mcp-config /tmp/mcp-config/mcp-servers.json
             --allowedTools "mcp__github__issue_read,mcp__github__get_issue,mcp__github__issue_write,mcp__github__update_issue,mcp__github__add_issue_comment,mcp__github__search_issues"
           prompt: |
-            Triage issue #${{ inputs.issue_number || github.event.issue.number }} in ${{ github.repository }}.
-
-            Read `.claude/skills/triaging-issues/SKILL.md` for complete instructions, then follow the triage decision flow.
+            /triaging-issues #${{ inputs.issue_number || github.event.issue.number }}
 
             SECURITY:
             - ONLY modify issue #${{ inputs.issue_number || github.event.issue.number }} in ${{ github.repository }}
