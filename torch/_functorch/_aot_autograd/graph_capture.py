@@ -64,12 +64,7 @@ def _extract_tangent_source_stack_traces(
         return
 
     output_node = list(fx_g.graph.nodes)[-1]
-    if output_node.op != "output":
-        return
-
     all_outputs = output_node.args[0]
-    if not all_outputs:
-        return
 
     stack_traces: list[Optional[str]] = []
 
