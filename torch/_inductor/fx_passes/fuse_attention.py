@@ -712,11 +712,17 @@ def _warn_tf32_disabled() -> None:
         torch.cuda.is_available()
         and not torch.backends.cuda.matmul.allow_tf32
         and torch.cuda.get_device_capability() >= (8, 0)
-    ) or (torch.xpu.is_available() and not torch.backends.mkldnn.allow_tf32):
+    ):
         warnings.warn(
             "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
             "Skipping pattern matching to fused flash-attention. "
             "Consider setting `torch.set_float32_matmul_precision('high')` for better performance."
+        )
+    if torch.xpu.is_available() and not torch.backends.mkldnn.allow_tf32:
+        warnings.warn(
+            "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. "
+            "Skipping pattern matching to fused flash-attention. "
+            "Consider setting `torch.backends.mkldnn.allow_tf32 = True` for better performance."
         )
 
 
