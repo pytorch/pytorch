@@ -876,7 +876,10 @@ def _(subgraph, identifier, *operands):
     from torch._dynamo.utils import dynamo_timed
 
     with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
-        return subgraph(*operands)
+        if getattr(subgraph, "_boxed_call", False):
+            return subgraph(list(operands))
+        else:
+            return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
