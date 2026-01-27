@@ -562,6 +562,17 @@ def _pre_bucket_all_gather(
     ],  # dtype enum values, that inputs are converted to before all_gather
     rank: int,
 ) -> torch.Tensor:
+    """
+    Pre-bucket all gather operation.
+
+    Args:
+        ag_ins: Input tensors to gather
+        group_size: Size of the process group
+        group_name: Name of the process group
+        dtype: Target dtype for the bucket
+        out_dtype_ints: Dtype enum values for each input
+        rank: Current rank
+    """
     # Convert int indices back to torch.dtype
     out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
     ins_split_sizes_bytes = [
@@ -584,7 +595,26 @@ def _pre_bucket_all_gather(
         for dst, out_dtype in zip(foreach_copy_dsts, out_dtypes, strict=True)
     ]
     ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
-    torch._foreach_copy_(foreach_copy_dsts_typed, ag_ins_flattened)
+
+    # Group foreach_copy calls by same src/dst dtype and numel for better performance
+    # At runtime tensors are concrete so we can use numel() directly
+    # TODO: pre-compute groups, but custom ops don't support list[list[int]]
+    groups: defaultdict[tuple[torch.dtype, torch.dtype, int], list[int]] = defaultdict(
+        list
+    )
+    for i, (ag_in, out_dtype) in enumerate(zip(ag_ins_flattened, out_dtypes)):
+        key = (ag_in.dtype, out_dtype, ag_in.numel())
+        groups[key].append(i)
+
+    if len(groups) > 1:
+        # Multiple groups - call foreach_copy_ per group for better performance
+        for group_indices in groups.values():
+            group_dsts = [foreach_copy_dsts_typed[idx] for idx in group_indices]
+            group_srcs = [ag_ins_flattened[idx] for idx in group_indices]
+            torch._foreach_copy_(group_dsts, group_srcs)
+    else:
+        # Single group - call foreach_copy_ once
+        torch._foreach_copy_(foreach_copy_dsts_typed, ag_ins_flattened)
     return new_ag_out
 
 
@@ -641,7 +671,12 @@ def all_gather_merge_fn_to_trace_custom_ops(
     out_dtype_ints = [_ALL_DTYPES.index(dt) for dt in out_dtypes]
 
     new_ag_out = torch.ops.bucketing._pre_bucket_all_gather(
-        ag_ins, group_size, group_name, dtype, out_dtype_ints, rank
+        ag_ins,
+        group_size,
+        group_name,
+        dtype,
+        out_dtype_ints,
+        rank,
     )
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(

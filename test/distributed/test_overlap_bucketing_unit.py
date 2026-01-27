@@ -1207,5 +1207,62 @@ class TestOverlapSchedulingFixes(InductorTestCase):
         result.graph.lint()
 
 
+class TestForeachGroupsUnit(InductorTestCase):
+    """Unit tests for _pre_bucket_all_gather foreach optimization."""
+
+    @unittest.skipIf(not HAS_GPU, "Requires GPU")
+    def test_pre_bucket_all_gather_basic(self):
+        """Test that _pre_bucket_all_gather works correctly."""
+        from torch._inductor.fx_passes.bucketing import (
+            _ALL_DTYPES,
+            _pre_bucket_all_gather,
+        )
+
+        t1 = torch.randn(10, device="cuda")
+        t2 = torch.randn(20, device="cuda")
+        t3 = torch.randn(10, device="cuda")
+
+        ag_ins = [t1, t2, t3]
+        out_dtype_ints = [
+            _ALL_DTYPES.index(torch.float32),
+            _ALL_DTYPES.index(torch.float32),
+            _ALL_DTYPES.index(torch.float32),
+        ]
+
+        # Test that the function works
+        result = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0
+        )
+        # Expected size: (10 + 20 + 10) * 2 = 80
+        self.assertEqual(result.numel(), 80)
+
+    @unittest.skipIf(not HAS_GPU, "Requires GPU")
+    def test_pre_bucket_all_gather_mixed_dtypes(self):
+        """Test _pre_bucket_all_gather with mixed dtypes triggers internal grouping."""
+        from torch._inductor.fx_passes.bucketing import (
+            _ALL_DTYPES,
+            _pre_bucket_all_gather,
+        )
+
+        t1 = torch.randn(10, device="cuda")
+        t2 = torch.randn(20, dtype=torch.float16, device="cuda")
+        t3 = torch.randn(10, device="cuda")
+
+        ag_ins = [t1, t2, t3]
+        out_dtype_ints = [
+            _ALL_DTYPES.index(torch.float32),
+            _ALL_DTYPES.index(torch.float16),
+            _ALL_DTYPES.index(torch.float32),
+        ]
+
+        # Test that the function works with mixed dtypes
+        # (internal grouping should handle this efficiently)
+        result = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0
+        )
+        # Size: ((10*4) + (20*2) + (10*4)) / 4 * 2 = (40 + 40 + 40) / 4 * 2 = 60
+        self.assertEqual(result.numel(), 60)
+
+
 if __name__ == "__main__":
     run_tests()
