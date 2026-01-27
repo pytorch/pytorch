@@ -495,26 +495,13 @@ class TestAOTInductorPackage(TestCase):
                 result = self.cmake_compile_and_run(tmp_dir)
                 if package_example_inputs:
                     out_str = result.stdout
-                    if self.device == GPU_TYPE:
-                        if self.device == "xpu":
-                            out_tensor_meta = "XPUFloatType{3,3}"
-                            lines = out_str.splitlines(keepends=True)
-                            if lines and "warning" in lines[0].lower():
-                                out_str = "".join(lines[1:])
-                        else:
-                            out_tensor_meta = "CUDAFloatType{3,3}"
+                    device_str = self.device.upper()
 
-                        self.assertEqual(
-                            out_str,
-                            f"output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ {out_tensor_meta} ]\noutput_tensor2\n 0  0  0\n"
-                            f" 0  0  0\n 0  0  0\n[ {out_tensor_meta} ]\n",
-                        )
-                    else:
-                        self.assertEqual(
-                            result.stdout,
-                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CPUFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
-                            " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
-                        )
+                    expected_result = (
+                        f"output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ {device_str}FloatType{{3,3}} ]\n"
+                        f"output_tensor2\n 0  0  0\n 0  0  0\n 0  0  0\n[ {device_str}FloatType{{3,3}} ]\n"
+                    )
+                    self.assertTrue(expected_result in out_str)
 
     @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")

@@ -424,9 +424,10 @@ class _ExportPackage:
                 if isinstance(inp, torch.Tensor):
                     device_types.add(inp.device.type)
             device_types.discard("cpu")
-            assert len(device_types) <= 1, "Does not support mixing {}".format(
-                "+".join(list(device_types))
-            )
+            if len(device_types) > 1:
+                raise AssertionError(
+                    "Does not support mixing {}".format("+".join(list(device_types)))
+                )
             device_type = "cpu" if len(device_types) == 0 else device_types.pop()
 
             if package_example_inputs:
