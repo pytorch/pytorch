@@ -329,6 +329,18 @@ op_db: list[OpInfo] = [
                 }
             ),
         ),
+        skips=(
+            # Exception: Tensor-likes are not close!
+            # Greatest absolute difference: inf at index (10,) (up to 1e-05 allowed)
+            # Greatest relative difference: nan at index (10,) (up to 0.001 allowed)
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+        ),
         dtypes=all_types_and(torch.bool),
         dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         supports_forward_ad=True,
@@ -415,6 +427,12 @@ op_db: list[OpInfo] = [
                 ),
                 "TestConsistency",
                 "test_output_match",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=0.0004, rtol=0.009)}),
+                "TestConsistency",
+                "test_output_grad_match",
                 device_type="mps",
             ),
         ),
