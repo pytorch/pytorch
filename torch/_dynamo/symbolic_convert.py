@@ -509,6 +509,7 @@ def get_comprehension_bytecode_prefix() -> list[str]:
     assert sys.version_info >= (3, 12)
 
     """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
+
     def fn():
         return [i for i in range(1)]
 
@@ -604,6 +605,7 @@ class ComprehensionAnalysis:
         walrus_vars: Variables assigned via walrus operator (:=) inside comprehension
         captured_vars: Variables read from outer scope via LOAD_FAST inside comprehension
     """
+
     end_ip: int
     result_var: Optional[str]
     result_on_stack: bool
@@ -3436,7 +3438,11 @@ class InstructionTranslatorBase(
 
     def BUILD_LIST(self, inst: Instruction) -> None:
         # Nested graph breaks are currently not supported for 3.12+ comprehension handling
-        if sys.version_info >= (3, 12) and inst.argval == 0 and not config.nested_graph_breaks:
+        if (
+            sys.version_info >= (3, 12)
+            and inst.argval == 0
+            and not config.nested_graph_breaks
+        ):
             is_comp_start = self._is_comprehension_start()
             if is_comp_start:
                 # For comprehensions, we use more permissive conditions:
@@ -3500,7 +3506,11 @@ class InstructionTranslatorBase(
 
     def BUILD_MAP(self, inst: Instruction) -> None:
         # Nested graph breaks are currently not supported for 3.12+ comprehension handling
-        if sys.version_info >= (3, 12) and inst.argval == 0 and not config.nested_graph_breaks:
+        if (
+            sys.version_info >= (3, 12)
+            and inst.argval == 0
+            and not config.nested_graph_breaks
+        ):
             is_comp_start = self._is_comprehension_start()
             if is_comp_start:
                 # For comprehensions, we use more permissive conditions:
@@ -4448,7 +4458,7 @@ class InstructionTranslatorBase(
         ip = self.instruction_pointer - 1
 
         pattern = get_comprehension_bytecode_prefix()
-        prefix = [inst.opname for inst in self.instructions[ip - len(pattern):ip]]
+        prefix = [inst.opname for inst in self.instructions[ip - len(pattern) : ip]]
 
         return prefix == pattern
 
@@ -4537,7 +4547,10 @@ class InstructionTranslatorBase(
                         if next_inst.opname == "STORE_FAST":
                             var_name = next_inst.argval
                             # Exclude iterator variables and deduplicate
-                            if var_name not in iterator_vars and var_name not in walrus_vars:
+                            if (
+                                var_name not in iterator_vars
+                                and var_name not in walrus_vars
+                            ):
                                 walrus_vars.append(var_name)
 
                 scan_ip += 1
@@ -4585,7 +4598,10 @@ class InstructionTranslatorBase(
             result_var = post_end_for_inst.argval
             ip += 1
             # Consume iterator STORE_FASTs
-            while ip < len(self.instructions) and self.instructions[ip].opname == "STORE_FAST":
+            while (
+                ip < len(self.instructions)
+                and self.instructions[ip].opname == "STORE_FAST"
+            ):
                 ip += 1
             return ComprehensionAnalysis(
                 end_ip=ip,
@@ -4600,7 +4616,10 @@ class InstructionTranslatorBase(
         elif post_end_for_inst.opname == patterns["on_stack_indicator"]:
             # Result stays on stack, skip SWAP and iterator STORE_FASTs
             ip += 1  # Skip SWAP
-            while ip < len(self.instructions) and self.instructions[ip].opname == "STORE_FAST":
+            while (
+                ip < len(self.instructions)
+                and self.instructions[ip].opname == "STORE_FAST"
+            ):
                 ip += 1
 
             # Check what happens to the result on stack
@@ -4655,7 +4674,10 @@ class InstructionTranslatorBase(
         else:
             # Unexpected pattern - fallback to old behavior
             ip = end_for_ip + 1
-            while ip < len(self.instructions) and self.instructions[ip].opname == "STORE_FAST":
+            while (
+                ip < len(self.instructions)
+                and self.instructions[ip].opname == "STORE_FAST"
+            ):
                 ip += 1
             return ComprehensionAnalysis(
                 end_ip=ip,
@@ -4667,9 +4689,7 @@ class InstructionTranslatorBase(
                 captured_vars=captured_vars,
             )
 
-    def _handle_comprehension_graph_break(
-        self, inst: Instruction
-    ) -> None:
+    def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
         """Handle graph break for a comprehension by skipping the comprehension bytecode.
 
         Steps
@@ -4709,11 +4729,11 @@ class InstructionTranslatorBase(
         # This ensures the same object is used everywhere.
         pre_subgraph_insts = []
         if analysis.captured_vars:
-            from .codegen import PyCodegen
             from .bytecode_transformation import create_instruction, create_load_const
+            from .codegen import PyCodegen
             from .source import LocalSource
             from .utils import is_safe_constant
-            from .variables.tensor import TensorVariable, SymNodeVariable
+            from .variables.tensor import SymNodeVariable, TensorVariable
 
             cg = PyCodegen(self)
             cg.value_from_source = False  # Don't try to load from source
@@ -4820,8 +4840,8 @@ class InstructionTranslatorBase(
             self.symbolic_locals[walrus_var] = UnknownVariable()
 
         # Generate bytecode to extend the frame values list with result variable
-        from .codegen import PyCodegen
         from .bytecode_transformation import create_dup_top, create_instruction
+        from .codegen import PyCodegen
 
         cg = PyCodegen(self)
 
@@ -4833,7 +4853,9 @@ class InstructionTranslatorBase(
             # Stack: [..., frame_values_list, frame_values_list, 0]
             cg.append_output(cg.create_binary_subscr())
             # Stack: [..., frame_values_list, frame_values_list[0]]
-            cg.append_output(create_instruction("LOAD_FAST", argval=analysis.result_var))
+            cg.append_output(
+                create_instruction("LOAD_FAST", argval=analysis.result_var)
+            )
             # Stack: [..., frame_values_list, frame_values_list[0], value]
             # LIST_APPEND: append TOS to TOS[-2], pops TOS
             cg.append_output(create_instruction("LIST_APPEND", arg=1))
