@@ -533,6 +533,16 @@ graph_partition: bool = (
 # "namespace::kernel_name.overload" (e.g., aten::mm.default).
 custom_should_partition_ops: list[str] = []
 
+# register ops whose OUTPUT unbacked symints should cause partition. Any tensors or ops
+# that use these output unbacked symints (e.g. in their shapes, strides, or offsets)
+# will be excluded from cudagraph partitions. This is useful for operators that produce
+# data-dependent unbacked symints (e.g., from a custom op that returns a SymInt).
+# Note: Input symints to these ops remain cudagraph-safe; only the output symints are
+# marked as cudagraph-unsafe. Name format should be "namespace::kernel_name"
+# (e.g., mylib::get_split_point) for op overload packet, or
+# "namespace::kernel_name.overload" for specific overloads.
+cudagraph_unsafe_unbacked_ops: list[str] = []
+
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
@@ -880,25 +890,6 @@ joint_graph_constant_folding = True
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
-
-# Mode to emulate PyTorch eager numerics when doing lower precision compute
-# (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
-# and downcasting after.  When two low precision operators are fused together,
-# Inductor will elide the downcast-upcast pairs (effectively a precision
-# truncation) that would occur between these two operators.  Typically,
-# Inductor's behavior should be closer to fp64 ref numerics.  However, with
-# this knob you can ensure the downcast-upcast are preserved so that you can
-# emulate the eager numerics.
-emulate_precision_casts = (
-    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
-)
-
-# x / y in Triton is lowered to div.full which is approx
-# PyTorch eager uses the equivalent of Triton's div_rn, which can
-# come at a performance penalty
-emulate_divison_rounding = (
-    os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
-)
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
@@ -2467,6 +2458,29 @@ class test_configs:
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
+
+class eager_numerics:
+    # x / y in Triton is lowered to div.full which is approx
+    # PyTorch eager uses the equivalent of Triton's div_rn, which can
+    # come at a performance penalty
+    division_rounding: bool = (
+        os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
+    )
+
+    disable_ftz: bool = False
+
+
+# Mode to emulate PyTorch eager numerics when doing lower precision compute
+# (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
+# and downcasting after.  When two low precision operators are fused together,
+# Inductor will elide the downcast-upcast pairs (effectively a precision
+# truncation) that would occur between these two operators.  Typically,
+# Inductor's behavior should be closer to fp64 ref numerics.  However, with
+# this knob you can ensure the downcast-upcast are preserved so that you can
+# emulate the eager numerics.
+emulate_precision_casts: bool = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
