@@ -14,6 +14,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch._C._distributed_c10d import FakeProcessGroup
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
@@ -28,7 +29,6 @@ from torch.distributed.utils import (
     _p_assert,
 )
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
-from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
 from ._fsdp_extensions import (
     _ext_post_unflatten_transform,
