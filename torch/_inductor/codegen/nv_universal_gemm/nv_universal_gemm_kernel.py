@@ -8,7 +8,12 @@ This module generates Python code that calls cutlass_api to execute GEMM operati
 import logging
 from typing import Any, Optional, Union
 
-from torch._inductor.codegen.common import IndentedBuffer, Kernel
+from torch._inductor.codegen.common import (
+    IndentedBuffer,
+    Kernel,
+    WorkspaceArg,
+    WorkspaceZeroMode,
+)
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.ir import (
     BaseView,
@@ -52,6 +57,7 @@ class NVUniversalGemmKernel(Kernel):
         output_node: Buffer,
         kernel_metadata: dict[str, Any],
         accumulator_type: Any,
+        workspace_size: int = 0,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -59,6 +65,7 @@ class NVUniversalGemmKernel(Kernel):
         self.output_node = output_node
         self.kernel_metadata = kernel_metadata
         self.accumulator_type = accumulator_type
+        self.workspace_size = workspace_size
 
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
@@ -96,10 +103,18 @@ class NVUniversalGemmKernel(Kernel):
         )
 
         input_params = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
-        input_params.extend(["out_ptr0", "stream=None"])
+        input_params.extend(["out_ptr0"])
+        # Add workspace parameter if needed
+        if self.workspace_size > 0:
+            input_params.append("workspace")
+        input_params.append("stream=None")
         params_str = ", ".join(input_params)
 
         code = IndentedBuffer()
+
+        # Build workspace argument for kernel.run() call
+        workspace_arg = "workspace" if self.workspace_size > 0 else "None"
+
         code.splice(
             f"""
             import cutlass
@@ -134,7 +149,7 @@ class NVUniversalGemmKernel(Kernel):
                     _nv_universal_gemm_artifact_cache[cache_key] = kernel.compile(args)
 
                 artifact = _nv_universal_gemm_artifact_cache[cache_key]
-                kernel.run(args, artifact, stream=stream, assume_supported_args=True)
+                kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
             """
         )
 
@@ -177,6 +192,20 @@ class NVUniversalGemmKernel(Kernel):
         arg_types.append(V.graph.get_dtype(output_name))
         raw_args.append(None)  # Output buffer is findable by name
 
+        # Allocate workspace if needed
+        ws: Optional[WorkspaceArg] = None
+        if self.workspace_size > 0:
+            ws = WorkspaceArg(
+                count=self.workspace_size,
+                device=V.graph.get_current_device_or_throw(),
+                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
+                outer_name=WorkspaceArg.unique_name(),
+            )
+            wrapper.generate_workspace_allocation(ws)
+            call_args.append(ws.outer_name)
+            arg_types.append(ws.dtype)
+            raw_args.append(None)
+
         # Generate the kernel call using triton=True for Python-based kernels
         # Pass raw_keys as None list to match raw_args length
         # TODO(nikhilap)  We don't use autotune_args like the Triton path
@@ -188,3 +217,7 @@ class NVUniversalGemmKernel(Kernel):
             raw_args=raw_args,
             raw_keys=[None] * len(raw_args),
         )
+
+        # Deallocate workspace after kernel call
+        if ws is not None:
+            wrapper.generate_workspace_deallocation(ws)

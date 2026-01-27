@@ -178,26 +178,31 @@ def try_import_cutlass() -> bool:
 
 @functools.lru_cache(8)
 def _normalize_cuda_arch(arch: str) -> str:
-    if int(arch) >= 100:
-        log.warning(
-            "Detected CUDA architecture >= 100: %s. We will generate operations with "
-            "GenerateSM100 (if available) and GenerateSM90. Please file an "
-            "issue for any problems and feedback. ",
-            arch,
-        )
-
-    if int(arch) >= 100:
-        return "100"
-    elif int(arch) >= 90:
-        return "90"
-    elif int(arch) >= 80:
-        return "80"
-    elif int(arch) >= 75:
-        return "75"
-    elif int(arch) >= 70:
-        return "70"
+    arch_num = arch
+    if isinstance(arch, str):
+        digits = "".join(ch for ch in arch if ch.isdigit())
+        if not digits:
+            raise ValueError(f"Unrecognized cuda arch: {arch}")
+        arch_num = int(digits)
     else:
-        raise NotImplementedError(f"Unsupported cuda arch: {arch}")
+        arch_num = int(arch)
+
+    if arch_num > 103:
+        log.warning("Detected CUDA architecture > 103: %s. Please file an issue.", arch)
+        return str(arch_num)
+    if arch_num >= 103:
+        return "103"
+    if arch_num >= 100:
+        return "100"
+    if arch_num >= 90:
+        return "90"
+    if arch_num >= 80:
+        return "80"
+    if arch_num >= 75:
+        return "75"
+    if arch_num >= 70:
+        return "70"
+    raise NotImplementedError(f"Unsupported cuda arch: {arch}")
 
 
 @dataclass
@@ -252,9 +257,12 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
         )
         return {}
     arch = _normalize_cuda_arch(arch)
+    gen_arch = (
+        "100" if arch == "103" else arch
+    )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
     instantiation_level: str = config.cuda.cutlass_instantiation_level
     args = CUTLASSArgs(
-        architectures=arch,
+        architectures=gen_arch,
         cuda_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
@@ -262,17 +270,17 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     manifest = cutlass_manifest.Manifest(args)
 
     start_time = time.time()
-    if arch == "100":
+    if gen_arch == "100":
         if hasattr(cutlass_generator, "GenerateSM100"):
             cutlass_generator.GenerateSM100(manifest, args.cuda_version)
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
     else:
         try:
-            func = getattr(cutlass_generator, "GenerateSM" + arch)
+            func = getattr(cutlass_generator, "GenerateSM" + gen_arch)
             func(manifest, args.cuda_version)
         except AttributeError as e:
             raise NotImplementedError(
-                "Arch " + arch + " is not supported by current cutlass lib."
+                "Arch " + gen_arch + " is not supported by current cutlass lib."
             ) from e
 
     log.info(

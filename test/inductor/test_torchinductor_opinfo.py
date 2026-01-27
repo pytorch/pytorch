@@ -308,6 +308,24 @@ inductor_expected_failures_single_sample["xpu"] = {
     "std_mean": {f64},
     "var_mean": {f64},
     # [End]
+    "fft.fft": {f16},
+    "fft.fft2": {f16},
+    "fft.fftn": {f16},
+    "fft.hfft": {f16},
+    "fft.hfft2": {f16},
+    "fft.hfftn": {f16},
+    "fft.rfft": {f16},
+    "fft.rfft2": {f16},
+    "fft.rfftn": {f16},
+    "fft.ifft": {f16},
+    "fft.ifft2": {f16},
+    "fft.ifftn": {f16},
+    "fft.ihfft": {f16},
+    "fft.ihfft2": {f16},
+    "fft.ihfftn": {f16},
+    "fft.irfft": {f16},
+    "fft.irfft2": {f16},
+    "fft.irfftn": {f16},
 }
 
 
@@ -976,6 +994,43 @@ inductor_one_sample["xpu"] = {
     "xlogy": {f16},
 }
 
+# TODO: Fix these so strides match.
+inductor_skip_exact_stride = {
+    "complex",
+    "empty_permuted",
+    "fft.irfftn",
+    "fft.irfft2",
+    "linalg.diagonal",
+    "linalg.eigvals",  # Fails for ROCM
+    "linalg.lu_factor",
+    "linalg.matrix_norm",
+    "linalg.norm",
+    "linalg.norm.subgradients_at_zero",
+    "linalg.pinv.singular",
+    "linalg.svdvals",
+    "linalg.solve",
+    "linalg.solve_ex",
+    "linalg.qr",
+    "matmul",
+    "__rmatmul__",
+    "nn.functional.adaptive_avg_pool1d",
+    "nn.functional.group_norm",
+    "nn.functional.linear",
+    "nn.functional.max_pool2d",
+    "nn.functional.unfold",
+    "ormqr",
+    "polar",
+    "prod",
+    "qr",
+    "rot90",
+    "stack",
+    "sum",
+    "tensordot",
+    "tril_indices",
+    "triu_indices",
+    "unbind",
+    "unbind_copy",
+}
 
 # Custom replacements for assertEquals, in cases where a difference in value
 # may not indicate correctness.
@@ -1347,12 +1402,14 @@ class TestInductorOpInfo(TestCase):
                         adjusted_kwargs.update(kwarg_overrides)
 
                         # Call the appropriate check method based on device type
+                        exact_stride = op_name not in inductor_skip_exact_stride
                         if device_type == GPU_TYPE:
                             self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
                         else:
                             self.check_model(
@@ -1360,6 +1417,7 @@ class TestInductorOpInfo(TestCase):
                                 args,
                                 kwargs,
                                 **adjusted_kwargs,
+                                exact_stride=exact_stride,
                             )
 
         except Exception as e:

@@ -2748,6 +2748,9 @@ def _max_unpoolnd(
     # equal. If this condition is not satisfied, the operation is
     # non-deterministic as one of the different values in `self` 'wins'.
     utils.alert_not_deterministic(f"max_unpooling{dim}d_forward_out")
+    output_shape = list(self.shape[:-dim]) + list(output_size)
+    if any(s == 0 for s in output_shape):
+        return self.new_zeros(output_shape)
     nc = reduce(operator.mul, self.shape[:-dim])
     hw = reduce(operator.mul, output_size)
     indices_nc_shape = [1] * self.ndim
@@ -2756,7 +2759,7 @@ def _max_unpoolnd(
         indices + aten.arange(nc, device=self.device).view(indices_nc_shape) * hw
     ).reshape(-1)
 
-    output = self.new_zeros(list(self.shape[:-dim]) + list(output_size))
+    output = self.new_zeros(output_shape)
     return aten._unsafe_index_put(
         output.reshape(-1), [indices_flat], self.reshape(-1), accumulate=False
     ).view(output.shape)
@@ -3126,7 +3129,13 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
         # Same as Pillow and Scikit-Image/Scipy ndi.zoom
         osize = output_size[d]
         isize = input.shape[-num_spatial_dims + d]
-        scale = isize / (isize * scales[d]) if scales[d] is not None else isize / osize
+
+        # check for scales[d] > 0 is in compute_scales_value in aten/src/ATen/native/UpSample.h
+        scale = (
+            isize / (isize * scales[d])
+            if scales[d] is not None and scales[d] > 0
+            else isize / osize
+        )
 
         output_indices = torch.arange(osize, dtype=torch.float32, device=input.device)
         input_indices = ((output_indices + offset) * scale).to(torch.int64)
@@ -5397,6 +5406,9 @@ def bernoulli(
 def isin_default(elements, test_elements, *, invert=False):
     if elements.numel() == 0:
         return torch.empty_like(elements, dtype=torch.bool)
+    if test_elements.ndim == 0:
+        res = elements == test_elements
+        return ~res if invert else res
     expanded_elem_shape = elements.shape + (1,) * test_elements.ndim
     x = elements.view(expanded_elem_shape)
     dim = tuple(range(-1, -test_elements.ndim - 1, -1))

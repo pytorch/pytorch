@@ -94,9 +94,6 @@ torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
-STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
-
-
 class LogCaptureHandler(logging.Handler):
     def __init__(self, level):
         super().__init__(level)
@@ -300,11 +297,9 @@ class TestFxGraphCache(TestCase):
             and not SM80OrLater
         ):
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_triton_launcher and not (
-            device in STATIC_LAUNCHER_DEVICES and bundle_triton
-        ):
+        if use_static_triton_launcher and not (device == "cuda" and bundle_triton):
             raise unittest.SkipTest(
-                "Static triton launcher requires cuda/xpu and triton bundling"
+                "Static cuda launcher requires cuda and triton bundling"
             )
         if use_static_triton_launcher and TEST_WITH_ROCM:
             raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
@@ -369,7 +364,7 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
+                        grad_multiplier if device == "cuda" else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"], 0
@@ -417,11 +412,11 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
+                        grad_multiplier if device == "cuda" else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
-                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
+                        grad_multiplier if device == "cuda" else 0,
                     )
 
             self.reset()
@@ -465,11 +460,11 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier * 2 if device in STATIC_LAUNCHER_DEVICES else 0,
+                        grad_multiplier * 2 if device == "cuda" else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
-                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
+                        grad_multiplier if device == "cuda" else 0,
                     )
 
     @requires_triton()
@@ -491,9 +486,7 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_triton_launcher and not (
-            device in STATIC_LAUNCHER_DEVICES and bundle_triton
-        ):
+        if use_static_triton_launcher and not (device == "cuda" and bundle_triton):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
