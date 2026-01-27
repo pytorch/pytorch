@@ -77,6 +77,13 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   export PATH=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:$PATH
 fi
 
+# Verify required docs packages are installed
+echo "Verifying docs dependencies..."
+python -c "import sphinx_tippy; print(f'sphinx_tippy version: {sphinx_tippy.__version__}')" || {
+  echo "ERROR: sphinx_tippy is not installed. Please check requirements-docs.txt"
+  exit 1
+}
+
 rm -rf pytorch || true
 
 # Get all the documentation sources, put them in one place
