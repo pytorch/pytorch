@@ -999,13 +999,22 @@ class LRUCacheWarningTests(LoggingTestCase):
 class ReproTests(torch._dynamo.test_case.TestCase):
     def setUp(self) -> None:
         try:
-            from .utils import install_guard_manager_testing_hook
+            from .utils import (
+                install_guard_manager_testing_hook,
+                install_install_guard_testing_hook,
+            )
         except ImportError:
-            from utils import install_guard_manager_testing_hook
+            from utils import (
+                install_guard_manager_testing_hook,
+                install_install_guard_testing_hook,
+            )
 
         self.exit_stack = contextlib.ExitStack()
         self.exit_stack.enter_context(
             install_guard_manager_testing_hook(self.guard_manager_clone_hook_fn)
+        )
+        self.exit_stack.enter_context(
+            install_install_guard_testing_hook(self.install_guard_clone_hook_fn)
         )
         super().setUp()
 
@@ -1033,6 +1042,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(cloned_root.check(f_locals))
         if guard_manager_wrapper.diff_guard_root:
             self.assertTrue(guard_manager_wrapper.diff_guard_root.check(f_locals))
+
+    def install_guard_clone_hook_fn(self, guard):
+        """Test that guard.clone() works properly and return the cloned guard"""
+        # Clone without transform
+        cloned_source = guard.originating_source.clone()
+        self.assertEqual(
+            cloned_source.name, guard.name, "Cloned guard should have the same source"
+        )
+
+        # Clone with identity transform
+        cloned_source_with_transform = guard.originating_source.clone(lambda x: x)
+        self.assertEqual(
+            cloned_source_with_transform.name,
+            guard.name,
+            "Cloned guard should have the same source",
+        )
+
+        guard.originating_source = cloned_source_with_transform
+        return guard
 
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()

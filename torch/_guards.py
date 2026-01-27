@@ -1214,6 +1214,17 @@ class Source:
         """True if you can guard on attributes of this"""
         return self.guard_source != GuardSource.SYNTHETIC_LOCAL
 
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        """
+        Clone the source, optionally applying a transformation function.
+        """
+        # For frozen dataclasses, returning self is effectively a clone
+        # Subclasses should override this if they have mutable state or need custom clone logic
+        result = self
+        if transform_fn is not None:
+            result = transform_fn(result)
+        return result
+
 
 # Subclasses can be found in torch/_dynamo/source.py
 @dataclass_with_cached_hash(frozen=True)
@@ -1259,6 +1270,20 @@ class ChainedSource(Source):
         del locals[tmpvar]
         cache[self] = value
         return value
+
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        # Clone the base recursively
+        cloned_base = self.base.clone(transform_fn)
+
+        # Create a new instance with the cloned base
+        # Using dataclasses.replace to create a new frozen dataclass instance
+        result = dataclasses.replace(self, base=cloned_base)
+
+        # Apply transform_fn to the result if provided
+        if transform_fn is not None:
+            result = transform_fn(result)
+
+        return result
 
 
 def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
