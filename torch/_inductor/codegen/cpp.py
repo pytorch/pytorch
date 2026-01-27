@@ -709,39 +709,13 @@ class CppOverrides(OpOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
-            """
-            https://github.com/pytorch/pytorch/issues/115260
-            For FusedSchedulerNode[node1, node2], the node2 loads what node1 stores and the buffer is
-            in low-precision floating point data type. When the output of node1 also serves as the output of the
-            kernel, the result of nodes would be different from the case when output of node1 is not the output
-            of the kernel (where we don't need to insert `to_dtype` for legalization). To address the problem, on
-            storing the lowp node1 output, we also add the inverse dtype conversion to high precision data type
-            to the cse cache.
-
-            Example (pseudo code):
-                node1_output = ...
-                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-                store(buf, node1_output_lowp)
-                node2_input_lowp = load(buf)
-                node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
-
-            Without cse cache trick:
-                node1_output = ...
-                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-                store(buf, node1_output_lowp)
-                node2_input_lowp = node_output_lowp # hit store cache
-                node2_input = to_dtype(node2_input_lowp, dtype=torch.float)
-
-            With cse cache trick:
-                node1_output = ...
-                node1_output_lowp = to_dtype(node1_output, dtype=torch.bfloat16)
-                # also add `to_dtype(node1_input_lowp, dtype=torch.float)` -> `node1_output` to cse cache
-                store(buf, node1_output_lowp)
-                node2_input_lowp = node_output_lowp # hit store cache
-                node2_input = node1_output # hit cse cache
-            """
-            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
+        # NOTE: We removed the cache_dtype_convert optimization here because it can cause
+        # numerical divergence when the low-precision intermediate is semantically meaningful.
+        # See https://github.com/pytorch/pytorch/issues/115260 for context.
+        # The optimization assumed that convert<float>(convert<bf16>(x)) == x, but this
+        # ignores precision loss through the bf16 intermediate.
+        # TODO: Re-enable this optimization only for store/load legalization cases where
+        # the precision loss is not semantically meaningful.
         return csevar
 
     @staticmethod
@@ -1655,8 +1629,9 @@ class CppVecOverrides(CppOverrides):
         expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("to_dtype", (x, dtype), {"src_dtype": src_dtype})
-        if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
-            V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
+        # NOTE: We removed the cache_dtype_convert optimization here because it can cause
+        # numerical divergence when the low-precision intermediate is semantically meaningful.
+        # TODO: Re-enable this optimization only for store/load legalization cases.
         return csevar
 
     @staticmethod
