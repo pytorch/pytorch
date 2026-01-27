@@ -186,7 +186,8 @@ class MixOrderReductionTest(TestBase):
         def f(x):
             return x.sum(dim=-1), x.sum(dim=0)
 
-        x = torch.randn(32768 * 256, 2, dtype=torch.float, device=GPU_TYPE)
+        M = 32768 * 1024 if torch.version.hip is not None else 32768 * 256
+        x = torch.randn(M, 2, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
         # We don't do mix order reduction for split redutions
         # with more than 2 layers
