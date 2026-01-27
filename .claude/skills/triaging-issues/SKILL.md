@@ -114,7 +114,6 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 
 Only if the issue stays in the general queue:
 - Add 1+ `module: ...` labels based on the affected area
-- If flaky test: add `module: flaky-tests`
 - If feature request: add `feature` (or `function request` for a new function or new arguments/modes)
 - If small improvement: add `enhancement`
 
