@@ -656,6 +656,43 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(result.placements, (Partial(reduce_op),))
 
     @with_comms
+    def test_neg_partial(self):
+        # test that neg preserves Partial placement without communication
+        # math: -(A1 + A2) = -A1 + -A2
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input = torch.full((8, 8), 2.0, device=self.device_type)
+
+        for partial_op in ["sum", "avg"]:
+            expected_full = (
+                torch.full((8, 8), -2.0 * self.world_size, device=self.device_type)
+                if partial_op == "sum"
+                else torch.full((8, 8), -2.0, device=self.device_type)
+            )
+
+            d_input = DTensor.from_local(input, device_mesh, [Partial(partial_op)])
+
+            with comm_mode:
+                z = torch.neg(d_input)
+
+            comm_counts = comm_mode.get_total_counts()
+            self.assertEqual(comm_counts, 0)
+            self.assertTrue(isinstance(z, DTensor))
+            self.assertEqual(z.placements, (Partial(partial_op),))
+            self.assertEqual(z.full_tensor(), expected_full)
+
+        # test non-sum/avg partial to assert the partial not getting propagated
+        # since -max(A1, A2) != max(-A1, -A2)
+        d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
+
+        z = torch.neg(d_input)
+        self.assertEqual(z.placements, (Replicate(),))
+        self.assertEqual(
+            z.to_local(), torch.full((8, 8), -2.0, device=self.device_type)
+        )
+
+    @with_comms
     def test_maximum_mixed_partials_redistribution(self):
         # Test that mixing Partial("max") with Partial("sum") correctly
         # redistributes the incompatible partial before computing maximum
