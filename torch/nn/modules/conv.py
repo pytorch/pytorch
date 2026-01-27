@@ -835,8 +835,10 @@ class ConvTranspose1d(_ConvTransposeNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero padding on both
-      sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
-      below for details.
+      sides for ``dilation * (kernel_size - 1) - padding`` number of points.
+      It can be either a string {{'valid', 'same'}} or a tuple of ints giving
+      the amount of implicit padding applied on both sides.
+      See note below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
@@ -861,6 +863,12 @@ class ConvTranspose1d(_ConvTransposeNd):
         not actually add zero-padding to output.
 
     Note:
+        ``padding='valid'`` is the same as no padding.
+        ``padding='same'`` crops the output so that its shape matches the input.
+        Note that ``padding='same'`` only supports a stride of 1 and
+        requires ``output_padding=0``.
+
+    Note:
         In some circumstances when using the CUDA backend with CuDNN, this operator
         may select a nondeterministic algorithm to increase performance. If this is
         undesirable, you can try to make the operation deterministic (potentially at
@@ -874,7 +882,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
+        padding (int, tuple or str, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
             will be added to both sides of the input. Default: 0
         output_padding (int or tuple, optional): Additional size added to one side
             of the output shape. Default: 0
@@ -935,7 +943,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         out_channels: int,
         kernel_size: _size_1_t,
         stride: _size_1_t = 1,
-        padding: _size_1_t = 0,
+        padding: Union[Literal["valid", "same"], _size_1_t] = 0,
         output_padding: _size_1_t = 0,
         groups: int = 1,
         bias: bool = True,
@@ -947,7 +955,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        padding = _single(padding)
+        padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
         output_padding = _single(output_padding)
         super().__init__(
@@ -971,8 +979,6 @@ class ConvTranspose1d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose1d"
             )
 
-        if not isinstance(self.padding, tuple):
-            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 1
@@ -1017,9 +1023,11 @@ class ConvTranspose2d(_ConvTransposeNd):
       behavior of transposed convolutions, which can increase the spatial resolution and is equivalent to a learnable
       upsampling operation.
 
-    * :attr:`padding` controls the amount of implicit zero padding on both
-      sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
-      below for details.
+    * :attr:`padding` controls the amount of implicit zero padding on both sides
+      for ``dilation * (kernel_size - 1) - padding`` number of points.
+      It can be either a string {{'valid', 'same'}} or a tuple of ints giving
+      the amount of implicit padding applied on both sides.
+      See note below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
@@ -1049,6 +1057,12 @@ class ConvTranspose2d(_ConvTransposeNd):
         effectively increasing the calculated output shape on one side. Note
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
+
+    Note:
+        ``padding='valid'`` is the same as no padding.
+        ``padding='same'`` crops the output so that its shape matches the input.
+        Note that ``padding='same'`` only supports a stride of 1 and
+        requires ``output_padding=0``.
 
     Note:
         {cudnn_reproducibility_note}
@@ -1124,7 +1138,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         out_channels: int,
         kernel_size: _size_2_t,
         stride: _size_2_t = 1,
-        padding: _size_2_t = 0,
+        padding: Union[Literal["valid", "same"], _size_2_t] = 0,
         output_padding: _size_2_t = 0,
         groups: int = 1,
         bias: bool = True,
@@ -1136,7 +1150,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
-        padding = _pair(padding)
+        padding = padding if isinstance(padding, str) else _pair(padding)
         dilation = _pair(dilation)
         output_padding = _pair(output_padding)
         super().__init__(
@@ -1168,8 +1182,6 @@ class ConvTranspose2d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose2d"
             )
 
-        if not isinstance(self.padding, tuple):
-            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 2
@@ -1214,9 +1226,11 @@ class ConvTranspose3d(_ConvTransposeNd):
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
-    * :attr:`padding` controls the amount of implicit zero padding on both
-      sides for ``dilation * (kernel_size - 1) - padding`` number of points. See note
-      below for details.
+    * :attr:`padding` controls the amount of implicit zero padding on both sides
+      for ``dilation * (kernel_size - 1) - padding`` number of points.
+      It can be either a string {{'valid', 'same'}} or a tuple of ints giving
+      the amount of implicit padding applied on both sides.
+      See note below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
@@ -1248,6 +1262,12 @@ class ConvTranspose3d(_ConvTransposeNd):
         not actually add zero-padding to output.
 
     Note:
+        ``padding='valid'`` is the same as no padding.
+        ``padding='same'`` crops the output so that its shape matches the input.
+        Note that ``padding='same'`` only supports a stride of 1 and
+        requires ``output_padding=0``.
+
+    Note:
         {cudnn_reproducibility_note}
 
     Args:
@@ -1255,7 +1275,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         out_channels (int): Number of channels produced by the convolution
         kernel_size (int or tuple): Size of the convolving kernel
         stride (int or tuple, optional): Stride of the convolution. Default: 1
-        padding (int or tuple, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
+        padding (int, tuple or str, optional): ``dilation * (kernel_size - 1) - padding`` zero-padding
             will be added to both sides of each dimension in the input. Default: 0
         output_padding (int or tuple, optional): Additional size added to one side
             of each dimension in the output shape. Default: 0
@@ -1316,7 +1336,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         out_channels: int,
         kernel_size: _size_3_t,
         stride: _size_3_t = 1,
-        padding: _size_3_t = 0,
+        padding: Union[Literal["valid", "same"], _size_3_t] = 0,
         output_padding: _size_3_t = 0,
         groups: int = 1,
         bias: bool = True,
@@ -1328,7 +1348,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
-        padding = _triple(padding)
+        padding = padding if isinstance(padding, str) else _triple(padding)
         dilation = _triple(dilation)
         output_padding = _triple(output_padding)
         super().__init__(
@@ -1352,8 +1372,6 @@ class ConvTranspose3d(_ConvTransposeNd):
                 "Only `zeros` padding mode is supported for ConvTranspose3d"
             )
 
-        if not isinstance(self.padding, tuple):
-            raise AssertionError("self.padding must be a tuple")
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         num_spatial_dims = 3
