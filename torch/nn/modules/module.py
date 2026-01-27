@@ -2410,6 +2410,7 @@ class Module:
         )
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
+        allow_partial = local_metadata.get("allow_partial", False)
         use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
@@ -2438,6 +2439,26 @@ class Module:
                     input_param = input_param[0]
 
                 if not is_param_lazy and input_param.shape != param.shape:
+                    if allow_partial and len(input_param.shape) == len(param.shape):
+                        # Partial load: copy overlapping region only
+                        try:
+                            slices = tuple(
+                                slice(0, min(s1, s2))
+                                for s1, s2 in zip(input_param.shape, param.shape)
+                            )
+                            with torch.no_grad():
+                                param[slices].copy_(input_param[slices])
+                            warnings.warn(
+                                f"Partial load for {key}: copied {input_param.shape} "
+                                f"into subset of {param.shape}.",
+                                stacklevel=5,
+                            )
+                            continue  # Skip normal copy
+                        except Exception as ex:
+                            error_msgs.append(
+                                f"Partial copy failed for {key}: {ex}"
+                            )
+                            continue
                     # local shape should match the one in checkpoint
                     error_msgs.append(
                         f"size mismatch for {key}: copying a param with shape {input_param.shape} from checkpoint, "
@@ -2528,7 +2549,11 @@ class Module:
                         unexpected_keys.append(key)
 
     def load_state_dict(
-        self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False
+        self,
+        state_dict: Mapping[str, Any],
+        strict: bool = True,
+        assign: bool = False,
+        allow_partial: bool = False,
     ):
         r"""Copy parameters and buffers from :attr:`state_dict` into this module and its descendants.
 
@@ -2552,6 +2577,10 @@ class Module:
                 properties of the Tensors in the state dict. The only
                 exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`
                 for which the value from the module is preserved. Default: ``False``
+            allow_partial (bool, optional): When ``True`` and ``strict=False``, allows
+                loading weights even when shapes don't match. Checkpoint values are copied
+                into the overlapping region of the model tensor. Useful for transfer learning
+                when model size has grown (e.g., more output classes). Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
@@ -2585,6 +2614,8 @@ class Module:
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             if assign:
                 local_metadata["assign_to_params_buffers"] = assign
+            if allow_partial:
+                local_metadata["allow_partial"] = allow_partial
             module._load_from_state_dict(
                 local_state_dict,
                 prefix,
