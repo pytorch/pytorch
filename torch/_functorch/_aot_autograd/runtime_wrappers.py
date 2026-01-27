@@ -415,7 +415,14 @@ class _FirstInvocationContext:
         Returns a context manager: _AnalyzeCustomOpInputOutputMode on first invocation, nullcontext thereafter.
         Automatically updates state after first use.
         """
-        if self._is_first and config.check_custom_op_aliasing:
+        # NB: Don't run the analyzer when you're forcing compile during FX
+        # tracing, as the analyzer doesn't play nicely when it's being
+        # make_fx'ed through
+        if (
+            self._is_first
+            and config.check_custom_op_aliasing
+            and not torch._dynamo.config.force_compile_during_fx_trace
+        ):
             self._is_first = False
             return _AnalyzeCustomOpInputOutputMode()
         return nullcontext()
