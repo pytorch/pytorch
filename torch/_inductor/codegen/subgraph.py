@@ -157,11 +157,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
         with V.set_graph_handler(bm_graph_lowering):
-            # Don't bother autotuning on Triton here
+            # Disable nested autotuning to prevent recursion,
+            # but allow Triton backend for accurate benchmarking of Triton vs ATen
             with config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
+                # Removed: max_autotune_gemm_backends="ATEN"
             ):
                 bm_graph_lowering.run(*self.example_inputs)
                 return bm_graph_lowering.compile_to_module()
