@@ -3,7 +3,7 @@ import os
 
 import torch
 from torch.distributed import init_process_group
-from torch.distributed._tensor import distribute_tensor, DTensor, Shard
+from torch.distributed._tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
 
 
@@ -29,7 +29,10 @@ def test_case(plan=1):
     out = original_tensor.sum()
     if plan == 1:
         out = DTensor.from_local(
-            out.to_local(), out.device_mesh, out.placements, run_check=False
+            out.to_local(grad_placements=[Replicate()]),
+            out.device_mesh,
+            out.placements,
+            run_check=False,
         )
     elif plan == 2:
         pass  # do nothing
