@@ -1230,6 +1230,99 @@ class TestInductorDynamic(TestCase):
         actual = compiled_fn(arg0, arg1, arg2, arg3, arg4, arg5, arg6)
         self.assertEqual(actual, expected, atol=1e-2, rtol=1e-2)
 
+    def test_combinations_dynamic_shapes(self, device):
+        """
+        Test that torch.combinations works correctly with dynamic shapes.
+        Regression test for https://github.com/pytorch/pytorch/issues/163759
+
+        Previously, torch.combinations would fail with dynamic shapes because
+        it called numel() which doesn't work with symbolic sizes/strides.
+        The fix uses sym_size(0) instead of numel().
+        """
+
+        def fn(x):
+            return torch.combinations(x.flatten(), r=2)
+
+        x = torch.randn(3, 1, 1, device=device)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        # Test that compiled output matches eager output
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
+        # Test with a different input shape to verify dynamic shapes work
+        x2 = torch.randn(4, 1, 1, device=device)
+        expected2 = fn(x2)
+        actual2 = compiled_fn(x2)
+        self.assertEqual(actual2, expected2)
+
+    def test_combinations_dynamic_shapes_with_replacement(self, device):
+        """
+        Test torch.combinations with replacement and dynamic shapes.
+        Regression test for https://github.com/pytorch/pytorch/issues/163759
+        """
+
+        def fn(x):
+            return torch.combinations(x, r=2, with_replacement=True)
+
+        x = torch.randn(4, device=device)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
+        # Test with different input size
+        x2 = torch.randn(5, device=device)
+        expected2 = fn(x2)
+        actual2 = compiled_fn(x2)
+        self.assertEqual(actual2, expected2)
+
+    def test_combinations_dynamic_shapes_r1(self, device):
+        """
+        Test torch.combinations with r=1 (edge case) and dynamic shapes.
+        Regression test for https://github.com/pytorch/pytorch/issues/163759
+        """
+
+        def fn(x):
+            return torch.combinations(x, r=1)
+
+        x = torch.randn(5, device=device)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
+        # Test with different input size
+        x2 = torch.randn(7, device=device)
+        expected2 = fn(x2)
+        actual2 = compiled_fn(x2)
+        self.assertEqual(actual2, expected2)
+
+    def test_combinations_dynamic_shapes_r3(self, device):
+        """
+        Test torch.combinations with r=3 (higher combinations) and dynamic shapes.
+        Regression test for https://github.com/pytorch/pytorch/issues/163759
+        """
+
+        def fn(x):
+            return torch.combinations(x, r=3)
+
+        x = torch.randn(5, device=device)
+        compiled_fn = torch.compile(fn, dynamic=True)
+
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
+        # Test with different input size
+        x2 = torch.randn(6, device=device)
+        expected2 = fn(x2)
+        actual2 = compiled_fn(x2)
+        self.assertEqual(actual2, expected2)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 
