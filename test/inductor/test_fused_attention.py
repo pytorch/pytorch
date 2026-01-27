@@ -1149,6 +1149,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
+    allow_nonbracketed_mutation = torch.backends.__allow_nonbracketed_mutation
 
     class SDPAPatternRewriterGpuTests(TestSDPAPatternRewriterTemplate):
         device = GPU_TYPE
@@ -1232,39 +1233,46 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
 
         @skipIfXpu(msg="FIXME: ENable for XPU")
         def test_skip_non_tf32(self):
-            try:
-                orig = torch.backends.cuda.matmul.allow_tf32
-                torch.backends.cuda.matmul.allow_tf32 = False
+            with allow_nonbracketed_mutation():
+                backend = (
+                    torch.backends.mkldnn
+                    if self.device == "xpu"
+                    else torch.backends.cuda.matmul
+                )
+                try:
+                    orig = backend.allow_tf32
+                    backend.allow_tf32 = False
 
-                class Model(torch.nn.Module):
-                    def __init__(self):
-                        super().__init__()
-                        self.inv_scale = 1.0 / 8**0.5
-                        self.query = torch.nn.Linear(64, 64)
-                        self.key = torch.nn.Linear(64, 64)
-                        self.value = torch.nn.Linear(64, 64)
+                    class Model(torch.nn.Module):
+                        def __init__(self):
+                            super().__init__()
+                            self.inv_scale = 1.0 / 8**0.5
+                            self.query = torch.nn.Linear(64, 64)
+                            self.key = torch.nn.Linear(64, 64)
+                            self.value = torch.nn.Linear(64, 64)
 
-                    def forward(self, x1, attn_mask):
-                        q = self.query(x1).permute([0, 2, 1, 3])
-                        k = self.key(x1).permute([0, 2, 1, 3])
-                        v = self.value(x1).permute([0, 2, 1, 3])
-                        t1 = torch.matmul(q, k.transpose(-2, -1))
-                        t2 = t1.div(self.inv_scale)
-                        t3 = t2 + attn_mask
-                        t4 = t3.softmax(dim=-1)
-                        t5 = t4.matmul(v)
-                        return t5
-                func = Model().to(self.device)
-                x1 = torch.randn(1, 16, 64, 64, device=self.device)
-                attn_mask = torch.zeros(1, 1, 16, 16, device=self.device)
-                test_inputs = [x1, attn_mask]
+                        def forward(self, x1, attn_mask):
+                            q = self.query(x1).permute([0, 2, 1, 3])
+                            k = self.key(x1).permute([0, 2, 1, 3])
+                            v = self.value(x1).permute([0, 2, 1, 3])
+                            t1 = torch.matmul(q, k.transpose(-2, -1))
+                            t2 = t1.div(self.inv_scale)
+                            t3 = t2 + attn_mask
+                            t4 = t3.softmax(dim=-1)
+                            t5 = t4.matmul(v)
+                            return t5
 
-                out, code = run_and_get_code(torch.compile(func), *test_inputs)
-                FileCheck().check_not("scaled_dot_product").run(code[0])
-                self.assertEqual(out, func(*test_inputs))
+                    func = Model().to(self.device)
+                    x1 = torch.randn(1, 16, 64, 64, device=self.device)
+                    attn_mask = torch.zeros(1, 1, 16, 16, device=self.device)
+                    test_inputs = [x1, attn_mask]
 
-            finally:
-                torch.backends.cuda.matmul.allow_tf32 = orig
+                    out, code = run_and_get_code(torch.compile(func), *test_inputs)
+                    FileCheck().check_not("scaled_dot_product").run(code[0])
+                    self.assertEqual(out, func(*test_inputs))
+
+                finally:
+                    backend.allow_tf32 = orig
 
     class SDPAPatternRewriterGpuDynamicTests(SDPAPatternRewriterGpuTests):
         use_static_shapes = False
