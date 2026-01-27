@@ -11263,7 +11263,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
-    @config.patch({"force_disable_caches": True})
+    @config.patch({"force_disable_caches": True, "benchmark_kernel": True})
     def test_mark_dynamic_with_hint_override(self):
         @torch.compile
         def no_override(x):
@@ -11275,13 +11275,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x_small = torch.randn(4096, 512, device=GPU_TYPE)
         torch._dynamo.decorators.mark_dynamic(x_small, 0)
-        code1 = run_and_get_triton_code(no_override, x_small)
 
         torch._dynamo.reset_code_caches()
 
-        torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=4096 * 10)
+        hint_size = 4096 * 10
+        torch._dynamo.decorators.mark_dynamic(x_small, 0, hint_override=hint_size)
         code2 = run_and_get_triton_code(override, x_small)
-        self.assertNotEqual(code1, code2)
+
+        # Verify the benchmark harness uses the hint size, not actual size
+        # The benchmark harness creates inputs via rand_strided with the hint size
+        self.assertIn(f"rand_strided(({hint_size},", code2)
+        self.assertNotIn("rand_strided((4096,", code2)
 
         self.assertEqual(no_override(x_small), override(x_small))
 
@@ -11290,7 +11294,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
-    @config.patch({"force_disable_caches": True})
+    @config.patch({"force_disable_caches": True, "benchmark_kernel": True})
     def test_mark_unbacked_with_hint_override(self):
         @torch.compile
         def no_override(x):
@@ -11308,13 +11312,17 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         x_small = torch.randn(4096, 512, device=GPU_TYPE)
         torch._dynamo.decorators.mark_unbacked(x_small, 0)
-        code1 = run_and_get_triton_code(no_override, x_small)
 
         torch._dynamo.reset_code_caches()
 
-        torch._dynamo.decorators.mark_unbacked(x_small, 0, hint_override=4096 * 10)
+        hint_size = 4096 * 10
+        torch._dynamo.decorators.mark_unbacked(x_small, 0, hint_override=hint_size)
         code2 = run_and_get_triton_code(override, x_small)
-        self.assertNotEqual(code1, code2)
+
+        # Verify the benchmark harness uses the hint size, not actual size
+        # The benchmark harness creates inputs via rand_strided with the hint size
+        self.assertIn(f"rand_strided(({hint_size},", code2)
+        self.assertNotIn("rand_strided((4096,", code2)
 
         self.assertEqual(no_override(x_small), override(x_small))
 
