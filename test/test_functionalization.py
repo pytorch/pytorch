@@ -2304,7 +2304,7 @@ def forward(self, arg0_1):
     def test_lift_fresh_copy_preserves_pin_memory(self):
         # Test that lift_fresh_copy preserves the is_pinned() attribute
         # This is important for CUDA graphs with non_blocking copies
-        # See https://github.com/pytorch/pytorch/issues/XXXXX
+        # See https://github.com/pytorch/pytorch/issues/171894
         pinned_tensor = torch.tensor([1.0, 2.0, 3.0], pin_memory=True)
         self.assertTrue(pinned_tensor.is_pinned())
 
