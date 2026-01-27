@@ -435,8 +435,8 @@ def _has_self_referential_shape(
 
 
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
+    """Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."""
     with torch.utils._python_dispatch._disable_current_modes():
-        "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
         aten = torch.ops.aten
 
         # Constant folding can leak memory, especially with repeated compilation, so we are only going to
@@ -468,7 +468,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
 
         if not node_replacements:
-            remove_no_ops(gm)
+            remove_no_ops(gm, zeros, ones)
             return
 
         # Precompute ancestors for nodes representing shape dimensions to avoid
