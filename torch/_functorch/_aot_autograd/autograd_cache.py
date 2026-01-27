@@ -440,6 +440,65 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             }
         )
 
+    def reducer_override(self, obj: Any) -> Any:
+        """
+        Override to handle tensor subclasses (like DTensor) that aren't caught
+        by the dispatch_table's exact type matching.
+
+        The dispatch_table only matches exact types, so subclasses like DTensor
+        fall through to the default __reduce_ex__ which includes non-deterministic
+        storage addresses. This method catches those cases using isinstance checks.
+        """
+        # Handle tensor subclasses that aren't exactly torch.Tensor
+        # dispatch_table already handles torch.Tensor exactly
+        if isinstance(obj, torch.Tensor) and type(obj) is not torch.Tensor:
+            return self._reduce_tensor_subclass(obj)
+        # Return NotImplemented to fall back to default behavior
+        return NotImplemented
+
+    def _reduce_tensor_subclass(self, tensor: torch.Tensor) -> Any:
+        """
+        Reduce a tensor subclass (like DTensor) to a stable key for caching.
+
+        For tensor subclasses, we extract:
+        1. Base tensor metadata (shape, dtype, device, etc.)
+        2. Subclass-specific metadata via __tensor_flatten__ if available
+        """
+        from torch._inductor.codecache import extract_tensor_metadata_for_cache_key
+
+        # Get base tensor metadata
+        metadata = extract_tensor_metadata_for_cache_key(tensor)
+
+        # Get subclass type for differentiation
+        subclass_type = type(tensor).__module__ + "." + type(tensor).__qualname__
+
+        # Try to get subclass-specific metadata via __tensor_flatten__
+        # This is the standard protocol for tensor subclasses
+        subclass_metadata: Any = None
+        if hasattr(tensor, "__tensor_flatten__"):
+            try:
+                inner_tensors, flatten_spec = tensor.__tensor_flatten__()
+                # Recursively reduce inner tensors to get their stable metadata
+                inner_tensor_metadata = {}
+                for name in inner_tensors:
+                    inner_tensor = getattr(tensor, name)
+                    if isinstance(inner_tensor, torch.Tensor):
+                        inner_tensor_metadata[name] = extract_tensor_metadata_for_cache_key(
+                            inner_tensor
+                        )
+                # Use repr for flatten_spec to get a stable string representation.
+                # Objects like DTensorSpec may contain DeviceMesh which has non-deterministic
+                # pickle data (process group handles, etc.), but their repr is stable.
+                subclass_metadata = (inner_tensor_metadata, repr(flatten_spec))
+            except Exception:
+                # Fall back to repr if __tensor_flatten__ fails
+                subclass_metadata = repr(tensor)
+        else:
+            # Fall back to repr for subclasses without __tensor_flatten__
+            subclass_metadata = repr(tensor)
+
+        return (_ident, (metadata, subclass_type, subclass_metadata))
+
     def _reduce_aot_config(self, aot_config: AOTConfig):
         """
         Reduce the config to a stable key for caching.
