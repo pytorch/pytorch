@@ -1,4 +1,11 @@
 redirects = {
+    # Redirects for deprecated TorchScript documentation
+    "jit": "torch.compiler_api.html",
+    "jit_language_reference": "torch.compiler_api.html",
+    "jit_language_reference_v2": "torch.compiler_api.html",
+    "jit_python_reference": "torch.compiler_api.html",
+    "jit_unsupported": "torch.compiler_api.html",
+    "jit_builtin_functions": "torch.compiler_api.html",
     # Redirects for documents moved from source/ to source/user_guide/torch_compiler/
     "torch.compiler": "user_guide/torch_compiler/torch.compiler.html",
     "torch.compiler.config": "user_guide/torch_compiler/torch.compiler.config.html",
