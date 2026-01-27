@@ -98,6 +98,15 @@ class _ToTorchTensor(torch.autograd.Function):
         )
         tensor_stride = tuple(tensor_stride)
         grad_placements = grad_placements or dtensor_spec.placements
+
+        normalized_grad_placements: list[Placement] = []
+        for p in grad_placements:
+            if p.is_partial():
+                normalized_grad_placements.append(Replicate())
+            else:
+                normalized_grad_placements.append(p)
+        grad_placements = tuple(normalized_grad_placements)
+
         if (
             tensor_stride == dtensor_meta.stride
             and grad_placements == dtensor_spec.placements
