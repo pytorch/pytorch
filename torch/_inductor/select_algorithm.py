@@ -68,6 +68,7 @@ from .codegen.triton import (
     TMACompatibilityChecker,
     TritonKernel,
     TritonScheduling,
+    TritonSymbols,
 )
 from .codegen.triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 from .codegen.wrapper import pexpr
@@ -352,18 +353,26 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
 
         buf_name = self._add_kernel_input(name)
-        index_str = self._process_indexing(index)
-        index_str = f"tl.broadcast_to({index_str}, {value}.shape)"
-        store = f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
-        return store
+        index_str = self._broadcast_index(index, f"{value}.shape")
+        return f"tl.atomic_add({buf_name} + {index_str}, {value}, {self.mask}, sem='relaxed')"
 
-    def _add_kernel_input(self, name: str):
-        """Add name as input to kernel and return input ref."""
+    def _add_kernel_input(self, name: str) -> str:
         return self.kernel.args.input(name)
 
-    def _process_indexing(self, index):
-        """Process and rename indexing, adding symbols as kernel inputs."""
+    def _process_indexing(self, index: sympy.Expr) -> str:
         return self.kernel.kexpr(self.kernel.rename_indexing(index))
+
+    def _broadcast_index(self, index: sympy.Expr, shape: str) -> str:
+        index_str = self._process_indexing(index)
+        index_shape = TritonSymbols.get_block_shape(index)
+        if not index_shape:
+            return f"tl.broadcast_to({index_str}, {shape})"
+        if all(
+            V.graph.sizevars.statically_known_equals(sympy.sympify(d), 1)
+            for d in index_shape
+        ):
+            return f"tl.broadcast_to(tl.reshape({index_str}, []), {shape})"
+        return index_str
 
 
 # Function name, followed by args and kwargs.

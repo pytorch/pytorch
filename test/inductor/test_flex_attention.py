@@ -1949,6 +1949,21 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
 
     @supported_platform
+    @skip_on_cpu
+    @dtypes(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
+    def test_captured_scalar_grad(self, device, dtype):
+        """Test learnable scalar parameter with shape (1,) using literal index."""
+        scale = torch.ones((1,), device=device, dtype=dtype, requires_grad=True)
+
+        def score_mod_scale(qk, b, h, q, kv):
+            return qk + scale[0]
+
+        self.run_test(score_mod_scale, dtype, device=device)
+        self.run_test_with_paged_attention(score_mod_scale, dtype, device=device)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
