@@ -4920,7 +4920,23 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 @register_decomposition(aten.view.default)
-def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
+def view(a: TensorLikeType, *shape: ShapeType | tuple[ShapeType]) -> TensorLikeType:
+    from torch._subclasses.fake_impls import (
+        _view_has_unbacked_input,
+        _view_unbacked_meta,
+    )
+
+    # Cast to satisfy the type checker since the varargs annotation creates
+    # tuple[ShapeType | tuple[ShapeType], ...] but the function expects
+    # Union[ShapeType, tuple[ShapeType]].
+    shape_tuple = utils.extract_shape_from_varargs(
+        cast(Union[ShapeType, tuple[ShapeType]], shape), validate=False
+    )
+    if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
+        a,
+        shape_tuple,
+    ):
+        return _view_unbacked_meta(a, shape_tuple)
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
 
