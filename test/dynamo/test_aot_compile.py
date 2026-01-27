@@ -1617,6 +1617,63 @@ from user code:
             c10d.destroy_process_group()
 
 
+class TestTritonKernelSerialization(torch._inductor.test_case.TestCase):
+    """Tests for triton kernel serialization utilities."""
+
+    def test_serialize_deserialize_triton_kernel_roundtrip(self):
+        """Test that serialization and deserialization work correctly for a real module function."""
+        from torch._dynamo.aot_compile_types import (
+            _deserialize_triton_kernel,
+            _serialize_triton_kernel,
+        )
+
+        # Create a mock kernel-like object that mimics triton JITFunction structure.
+        # Triton JITFunction has a `fn` attribute pointing to the wrapped function.
+        class MockKernel:
+            def __init__(self, fn):
+                self.fn = fn
+
+        # Use a real function from a real module for the roundtrip test
+        mock_kernel = MockKernel(torch.sin)
+
+        # Serialize
+        module_path, func_name = _serialize_triton_kernel(mock_kernel)
+
+        self.assertEqual(module_path, "torch")
+        self.assertEqual(func_name, "sin")
+
+        # Deserialize
+        restored = _deserialize_triton_kernel((module_path, func_name))
+
+        # Should get back the same function
+        self.assertIs(restored, torch.sin)
+
+    def test_serialize_kernel_no_fn_attribute(self):
+        """Test that serialization raises RuntimeError when kernel has no fn attribute."""
+        from torch._dynamo.aot_compile_types import _serialize_triton_kernel
+
+        class BadKernel:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has no 'fn' attribute"):
+            _serialize_triton_kernel(BadKernel())
+
+    def test_serialize_kernel_missing_module_or_name(self):
+        """Test that serialization raises RuntimeError when fn is missing __module__ or __name__."""
+        from torch._dynamo.aot_compile_types import _serialize_triton_kernel
+
+        # Create an object that has fn attribute but fn lacks __module__/__name__
+        class MockKernel:
+            def __init__(self):
+                # Use an object with explicit None for __module__
+                self.fn = type("AnonFn", (), {"__module__": None, "__name__": "test"})()
+
+        mock_kernel = MockKernel()
+
+        with self.assertRaisesRegex(RuntimeError, "missing __module__ or __name__"):
+            _serialize_triton_kernel(mock_kernel)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
