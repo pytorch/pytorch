@@ -337,19 +337,19 @@ __device__ __forceinline__ void countRadixLoop(
                               // memory accessor or a shared memory accessor.
 
   // the kernel consists of two parts:
-  // 1. a vectorized part that reads 4 values at a time
-  // 2. a non-vectorized part that reads 1 value at a time
+  // phase 1: processing 4 elements at an iteration.
+  // phase 2: processing 1 element at an iteration.
 
-  // we vectorize the loop by 4.
   constexpr index_t unroll_factor = 4;
-  // number of elements to be read in a vectorized fashion.
-  index_t vectorized_segment =
+  index_t unroll_segment =
       (loopBound / (blockDim.x * unroll_factor)) * blockDim.x * unroll_factor;
 
-  // loop over the vectorized segment.
-  for (index_t i = threadIdx.x * unroll_factor; i < vectorized_segment;
+  // phase 1: processing 4 elements at an iteration.
+
+  for (index_t i = threadIdx.x * unroll_factor; i < unroll_segment;
        i += blockDim.x * unroll_factor) {
-    // read 4 values at a time.
+
+    // prefetch 4 elements.
     scalar_t v0 = getData(i);
     scalar_t v1 = getData(i + 1);
     scalar_t v2 = getData(i + 2);
@@ -393,19 +393,19 @@ __device__ __forceinline__ void countRadixLoop(
     }
   }
 
-  // non-vectorized part. Loop over the remaining elements
+  // phase 2: processing 1 element at an iteration.
 
   // prefetching. This is specifically useful for global memory access.
-  scalar_t v = vectorized_segment + threadIdx.x < loopBound
-      ? getData(vectorized_segment + threadIdx.x)
+  scalar_t v = unroll_segment + threadIdx.x < loopBound
+      ? getData(unroll_segment + threadIdx.x)
       : static_cast<scalar_t>(0);
   // we pad loopbound to round_up(loopbound, warpSize) to make sure all threads
   // in the warp participate in the ballot.
-  for (index_t i = vectorized_segment + threadIdx.x;
+  for (index_t i = unroll_segment + threadIdx.x;
        i < round_up(
                static_cast<index_t>(loopBound), static_cast<index_t>(warpSize));
        i += blockDim.x) {
-    // prefetch the next value.
+    // prefetch the next element.
     scalar_t v_next = i + blockDim.x < loopBound ? getData(i + blockDim.x)
                                                  : static_cast<scalar_t>(0);
 
