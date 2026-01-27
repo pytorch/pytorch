@@ -978,11 +978,15 @@ def sdpa_dense_backward(
     key = torch.repeat_interleave(key, G, dim=1)
     value = torch.repeat_interleave(value, G, dim=1)
 
+    if grad_out is None:
+        grad_out = torch.zeros_like(out)
+    if grad_logsumexp is None:
+        grad_logsumexp = torch.zeros_like(logsumexp)
+
     # We're undoing the log -> log2 change of base in the forwards
     logsumexp = logsumexp * math.log(2)
     # The backwards formula for the log -> log2 change of base in the forwards
-    if grad_logsumexp is not None:
-        grad_logsumexp = grad_logsumexp / math.log(2)
+    grad_logsumexp = grad_logsumexp / math.log(2)
     scores, post_mod_scores = _math_attention_inner(
         query,
         key,
@@ -998,9 +1002,6 @@ def sdpa_dense_backward(
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
     softmax_scores = torch.where(masked_out_rows.unsqueeze(-1), 0, softmax_scores)
 
-    if grad_out is None:
-        grad_out = torch.zeros_like(out)
-
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
     grad_softmax_scores = grad_out.to(dtype=softmax_scores.dtype) @ value.to(
@@ -1012,12 +1013,9 @@ def sdpa_dense_backward(
         -1,
         keepdim=True,
     )
-    if grad_logsumexp is not None:
-        grad_score_mod = softmax_scores * (
-            grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
-        )
-    else:
-        grad_score_mod = softmax_scores * (grad_softmax_scores - sum_scores)
+    grad_score_mod = softmax_scores * (
+        grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
+    )
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
