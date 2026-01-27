@@ -1519,6 +1519,82 @@ class CudaReproTests(TestCase):
                 )
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_no_redundant_conversions(self):
+        """
+        Test that emulate_precision_casts doesn't create redundant bf16->fp32->bf16->fp32
+        conversion chains that can crash Triton's PassManager.
+
+        This test uses chained pow operations with bf16 tensors which previously caused
+        RuntimeError: PassManager::run failed in Triton's make_ttgir phase due to
+        excessive type conversion chains.
+        """
+
+        with dynamo_config.patch(
+            capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+        ):
+
+            def foo(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8):
+                t1 = arg0.std(dim=0)
+                t2 = t1.std(dim=1)
+                t4 = arg1.var(dim=1)
+                t9 = torch.pow(
+                    torch.pow(torch.pow(torch.pow(arg2, arg3), arg2), arg4), arg5
+                )
+                t10 = torch.nn.functional.group_norm(t4, 1)
+                t12 = t10 * t10 * t2 * t2 * arg6
+                t14 = arg7.reshape((15, 91, 88))
+                t16 = arg8.contiguous()
+                t17 = torch.pow(
+                    torch.pow(torch.pow(torch.pow(t12, t10), t10), t14), t16
+                )
+                t18 = torch.pow(torch.pow(torch.pow(t2, t2), t17), t10)
+                return t18
+
+            arg0 = torch.rand(
+                [3, 15, 2, 91, 88],
+                dtype=torch.bfloat16,
+                device="cuda",
+                requires_grad=True,
+            )
+            arg1 = torch.rand(
+                [15, 4, 91, 88],
+                dtype=torch.bfloat16,
+                device="cuda",
+                requires_grad=True,
+            )
+            arg2 = torch.randint(0, 1000, [1], dtype=torch.int64, device="cuda")
+            arg3 = torch.randint(0, 1000, [1], dtype=torch.int64, device="cuda")
+            arg4 = torch.randint(0, 1000, [1], dtype=torch.int64, device="cuda")
+            arg5 = torch.randint(0, 1000, [1], dtype=torch.int64, device="cuda")
+            arg6 = torch.rand(
+                [15, 91, 88],
+                dtype=torch.bfloat16,
+                device="cuda",
+                requires_grad=True,
+            )
+            arg7 = torch.rand(
+                [455, 4, 66],
+                dtype=torch.bfloat16,
+                device="cuda",
+                requires_grad=True,
+            )
+            arg8 = torch.rand(
+                [15, 91, 88],
+                dtype=torch.bfloat16,
+                device="cuda",
+                requires_grad=True,
+            )
+
+            compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+
+            # This should not raise RuntimeError: PassManager::run failed
+            # The backward pass is what triggers the crash with redundant conversions
+            out_compiled = compiled_foo(
+                arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8
+            )
+            out_compiled.sum().backward()
+
+    @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
         torch.cuda.manual_seed_all(12345)
