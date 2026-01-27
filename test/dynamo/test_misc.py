@@ -6663,7 +6663,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         f_opt = torch.compile(f, backend="eager")
 
         def g(x):
-            with torch._dynamo.config.global_patch(
+            with torch._dynamo.config.patch(
                 automatic_dynamic_shapes=False, assume_static_by_default=True
             ):
                 f_opt(x)
