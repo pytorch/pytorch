@@ -665,30 +665,48 @@ class DTensorRedistributePlanner:
         state_list = [
             cur_state,
         ]
+        # Track whether each transition is flattened (for visualization)
+        is_flattened_list: list[bool] = []
+
         for transform_info in transform_infos:
             src_dim_placement, dst_dim_placement = transform_info.src_dst_placements
 
             # Handle flattened transforms specially - they affect multiple mesh dims
             if isinstance(transform_info, _FlattenedTransformInfo):
                 mesh_dims_to_update = transform_info.original_mesh_dims
+                is_flattened = True
             else:
                 mesh_dims_to_update = (transform_info.mesh_dim,)
+                is_flattened = False
 
             if src_dim_placement.is_shard():
                 src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
                 assert (
                     src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
                 )
-                # Remove mesh dims in order (from shard_order_dict perspective)
+                # Remove mesh dims in reverse order and verify they match expected dims
+                # (shard_order_dict stores in innermost-to-outermost order)
+                removed_dims = []
                 for _ in mesh_dims_to_update:
-                    shard_order_dict[src_dim].pop()
+                    removed_dim = shard_order_dict[src_dim].pop()
+                    removed_dims.append(removed_dim)
+                # Verify the removed dims match what we expect (in reverse order)
+                removed_dims.reverse()
+                assert tuple(removed_dims) == mesh_dims_to_update, (
+                    f"Flattened transform mesh dims mismatch: "
+                    f"expected {mesh_dims_to_update}, but shard_order had {tuple(removed_dims)}"
+                )
 
             if dst_dim_placement.is_shard():
                 dst_dim = dst_dim_placement.dim  # type: ignore[attr-defined]
                 if dst_dim not in shard_order_dict:
                     shard_order_dict[dst_dim] = []
-                # Add mesh dims in order
+                # Add mesh dims in order and verify they don't already exist
                 for mesh_dim in mesh_dims_to_update:
+                    assert mesh_dim not in shard_order_dict[dst_dim], (
+                        f"Mesh dim {mesh_dim} already in shard_order for tensor dim {dst_dim}: "
+                        f"existing={shard_order_dict[dst_dim]}, adding={mesh_dims_to_update}"
+                    )
                     shard_order_dict[dst_dim].append(mesh_dim)
 
             # Update placements for all affected mesh dims
@@ -700,7 +718,15 @@ class DTensorRedistributePlanner:
                 DTensorRedistributePlanner._dict_to_ShardOrder(shard_order_dict),
             )
             state_list.append(new_state)
-        return "->".join([str(s) for s in state_list])
+            is_flattened_list.append(is_flattened)
+
+        # Build the trace string using '-->' for flattened transforms, '->' for regular
+        trace_parts = [str(state_list[0])]
+        for i, is_flattened in enumerate(is_flattened_list):
+            separator = "-->" if is_flattened else "->"
+            trace_parts.append(separator)
+            trace_parts.append(str(state_list[i + 1]))
+        return "".join(trace_parts)
 
     def __init__(
         self,

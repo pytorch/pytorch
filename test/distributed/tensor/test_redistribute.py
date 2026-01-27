@@ -1427,9 +1427,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         torch.manual_seed(42)
 
         # Create a 2D mesh with flattened submesh
-        mesh = init_device_mesh(
-            self.device_type, (4, 2), mesh_dim_names=("A", "B")
-        )
+        mesh = init_device_mesh(self.device_type, (4, 2), mesh_dim_names=("A", "B"))
         mesh["A", "B"]._flatten("A_B")
 
         input_data = torch.randn((8, 8), device=self.device_type)
@@ -1456,18 +1454,30 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         )
 
         import torch.distributed as dist
+
         if dist.get_rank() == 0:
             print(f"\nDebug trace: {trace_str}")
 
         # The trace should show the OPTIMIZED redistribution:
-        # S(0)[0]S(0)[1] -> RR in a SINGLE all_gather (flattened)
-        # Not: S(0)[0]S(0)[1] -> S(0)R -> RR (two separate all_gathers)
-        # The optimized trace should NOT contain an intermediate S(0)R state
-        self.assertNotIn("S(0)R", trace_str,
-            "Debug trace should show optimized (flattened) redistribution, "
-            "not unoptimized individual all_gathers")
+        # S(0)[0]S(0)[1]-->RR (single flattened all_gather, note double arrow)
+        # Not: S(0)[0]S(0)[1]->S(0)R->RR (two separate all_gathers)
 
-        # Verify the expected optimized trace format
+        # Verify '-->' is used for the flattened transform
+        self.assertIn(
+            "-->",
+            trace_str,
+            "Debug trace should use '-->' to indicate flattened/optimized transform",
+        )
+
+        # The optimized trace should NOT contain an intermediate S(0)R state
+        self.assertNotIn(
+            "S(0)R",
+            trace_str,
+            "Debug trace should show optimized (flattened) redistribution, "
+            "not unoptimized individual all_gathers",
+        )
+
+        # Verify the expected optimized trace format: S(0)[0]S(0)[1]-->RR
         self.assertIn("S(0)[0]S(0)[1]", trace_str)
         self.assertIn("RR", trace_str)
 
