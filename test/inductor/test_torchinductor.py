@@ -11316,7 +11316,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code2 = run_and_get_triton_code(override, x_small)
         self.assertNotEqual(code1, code2)
 
-        self.assertEqual(no_override(x_small), override(x_small))
+        # Different size hints can produce different reduction orderings,
+        # so we need tolerance for floating-point associativity differences
+        self.assertEqual(no_override(x_small), override(x_small), atol=1e-4, rtol=1e-4)
 
         with self.assertRaisesRegex(
             RuntimeError, "Could not guard on data-dependent expression"
