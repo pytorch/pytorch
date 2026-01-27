@@ -12,14 +12,13 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import (
     OffloadPolicy,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
-from torch.distributed.fsdp._fully_shard import _fsdp_init
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _apply_fsdp_to_module,
     _get_device_from_mesh,
-    _get_managed_states,
+    _get_modules_and_states,
     _init_default_mesh,
     _init_param_group,
-    _move_states_to_device,
+    _validate_module,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
 from torch.distributed.fsdp._fully_shard._fully_shard import (
@@ -27,7 +26,6 @@ from torch.distributed.fsdp._fully_shard._fully_shard import (
     FSDPModule,
 )
 from torch.distributed.tensor import DeviceMesh
-from torch.distributed.utils import _get_root_modules
 
 from .contract import _get_registry, contract
 
@@ -138,15 +136,7 @@ def replicate(
     """
     torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
 
-    if not is_composable_with_replicate(module):
-        raise RuntimeError(
-            "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
-        )
-
-    if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
-        raise ValueError(
-            f"replicate does not support containers that do not implement forward: {module}"
-        )
+    _validate_module_for_replicate(module)
 
     mesh = mesh or _init_default_mesh(mesh_dim_names=("replicate",))
     if mesh.ndim != 1:
@@ -157,22 +147,16 @@ def replicate(
 
     post_forward_mesh_info = None
 
-    arg_module = module
-    modules = (
-        (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
-    )
-    state = replicate.state(modules[0])  # type: ignore[attr-defined] # see [1]
-    state.init(modules, device, mp_policy)
-
-    managed_modules = _fsdp_init._get_managed_modules(
-        modules,
+    arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
+        module,
+        device,
         ignored_params,
         is_composable_fn=is_composable_with_replicate,
         get_state_fn=_get_module_replicate_state,
     )
-    params, buffers = _get_managed_states(managed_modules, ignored_params)
+    state = replicate.state(modules[0])  # type: ignore[attr-defined]
+    state.init(modules, device, mp_policy)
 
-    _move_states_to_device(params, buffers, device)
     _init_param_group(
         state,
         params,
@@ -205,3 +189,17 @@ def is_composable_with_replicate(module: nn.Module) -> bool:
         return True
     # Registry keys by function name
     return "fully_shard" not in registry
+
+
+def _validate_module_for_replicate(module: nn.Module) -> None:
+    """
+    Validate that the module can be used with replicate.
+
+    Raises RuntimeError if already managed by fully_shard.
+    Raises ValueError if the module is a container that doesn't implement forward.
+    """
+    if not is_composable_with_replicate(module):
+        raise RuntimeError(
+            "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
+        )
+    _validate_module(module, "replicate")

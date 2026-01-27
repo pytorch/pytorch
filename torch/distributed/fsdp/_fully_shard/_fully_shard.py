@@ -11,19 +11,17 @@ from typing_extensions import deprecated
 import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _apply_fsdp_to_module,
     _get_device_from_mesh,
-    _get_managed_modules,
-    _get_managed_states,
+    _get_modules_and_states,
     _get_post_forward_mesh_info,
     _init_default_mesh,
     _init_param_group,
-    _move_states_to_device,
+    _validate_module,
 )
 from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
@@ -189,10 +187,7 @@ def fully_shard(
         FSDPModule: The module with FSDP applied (in-place).
     """
     torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
-    if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
-        raise ValueError(
-            f"fully_shard does not support containers that do not implement forward: {module}"
-        )
+    _validate_module(module, "fully_shard")
     mesh = mesh or _init_default_mesh()
     if mesh.ndim not in (1, 2):
         raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
@@ -213,17 +208,11 @@ def fully_shard(
         mesh_info,
     )
 
-    arg_module = module
-    modules = (
-        (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
+    arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
+        module, device, ignored_params
     )
-    state = fully_shard.state(modules[0])  # type: ignore[attr-defined] # see [1]
+    state = fully_shard.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy, auto_reshard_after_forward)
-
-    managed_modules = _get_managed_modules(modules, ignored_params)
-    params, buffers = _get_managed_states(managed_modules, ignored_params)
-
-    _move_states_to_device(params, buffers, device)
     _init_param_group(
         state,
         params,
