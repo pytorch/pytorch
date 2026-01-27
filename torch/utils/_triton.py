@@ -144,6 +144,28 @@ def has_triton_stable_tma_api() -> bool:
     return False
 
 
+def _cuda_extra_check(device_interface: Any) -> bool:
+    return device_interface.Worker.get_device_properties().major >= 7
+
+
+def _cpu_extra_check(device_interface: Any) -> bool:
+    import triton.backends
+
+    return "cpu" in triton.backends.backends
+
+
+def _return_true(device_interface: Any) -> bool:
+    return True
+
+
+triton_supported_devices = {
+    "cuda": _cuda_extra_check,
+    "xpu": _return_true,
+    "cpu": _cpu_extra_check,
+    "mtia": _return_true,
+}
+
+
 @functools.cache
 def has_triton() -> bool:
     if not has_triton_package():
@@ -156,26 +178,8 @@ def has_triton() -> bool:
 
     from torch._dynamo.device_interface import get_interface_for_device
 
-    def cuda_extra_check(device_interface: Any) -> bool:
-        return device_interface.Worker.get_device_properties().major >= 7
-
-    def cpu_extra_check(device_interface: Any) -> bool:
-        import triton.backends
-
-        return "cpu" in triton.backends.backends
-
-    def _return_true(device_interface: Any) -> bool:
-        return True
-
-    triton_supported_devices = {
-        "cuda": cuda_extra_check,
-        "xpu": _return_true,
-        "cpu": cpu_extra_check,
-        "mtia": _return_true,
-        "privateuseone": _return_true,
-    }
-
     def is_device_compatible_with_triton() -> bool:
+        global triton_supported_devices
         for device, extra_check in triton_supported_devices.items():
             device_interface = get_interface_for_device(device)
             if device_interface.is_available() and extra_check(device_interface):
