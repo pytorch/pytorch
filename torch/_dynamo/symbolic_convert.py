@@ -132,7 +132,12 @@ from .utils import (
     proxy_args_kwargs,
 )
 from .variables.base import typestr, ValueMutationNew, VariableTracker
-from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
+from .variables.builder import (
+    FrameStateSizeEntry,
+    SourcelessBuilder,
+    VariableBuilder,
+    wrap_fx_proxy,
+)
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -166,7 +171,6 @@ from .variables.misc import (
     ExceptionVariable,
     GetAttrVariable,
     NullVariable,
-    PythonModuleVariable,
     TracebackVariable,
     UnknownVariable,
 )
@@ -1081,7 +1085,7 @@ class ExceptionStack:
                 break
 
             if context is val:
-                o.set_context(ConstantVariable(None))  # type: ignore[union-attr, arg-type]
+                o.set_context(SourcelessBuilder.create(self, None))  # type: ignore[union-attr, arg-type]
                 break
 
             o = context  # type: ignore[assignment]
@@ -1247,22 +1251,28 @@ class InstructionTranslatorBase(
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
     def inline_generator_function(
-        self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
-    ) -> Any:
+        self,
+        fn: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         """
         Redirect the call to the generator "call_function"
         """
         if not isinstance(fn, LocalGeneratorFunctionVariable):
-            fn = LocalGeneratorFunctionVariable(fn)  # type: ignore[arg-type]
+            fn = LocalGeneratorFunctionVariable(fn)
         return fn.call_function(self, args, kwargs)  # type: ignore[arg-type]
 
     def inline_user_function_return(
-        self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
+        self,
+        fn: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> Any:
         """
         A call to some user defined function by inlining it.
         """
-        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):  # type: ignore[attr-defined]
+        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
@@ -2009,7 +2019,7 @@ class InstructionTranslatorBase(
         # pyrefly: ignore [unbound-name]
         if istype(value, (types.ModuleType, DummyModule)):
             # pyrefly: ignore [unbound-name]
-            self.push(PythonModuleVariable(value, source=source))
+            self.push(VariableTracker.build(self, value, source=source))
         else:
             unimplemented(
                 gb_type="Bad import result",
@@ -2152,7 +2162,7 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [bad-argument-type]
             self,
             "__setattr__",
-            [ConstantVariable("__traceback__"), new_tb],
+            [SourcelessBuilder.create(self, "__traceback__"), new_tb],
             {},
         )
 
@@ -2171,7 +2181,9 @@ class InstructionTranslatorBase(
             and isinstance(val, variables.ExceptionVariable)
             and val.exc_type is StopIteration
         ):
-            val = variables.BuiltinVariable(RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            val = SourcelessBuilder.create(self, RuntimeError).call_function(
+                self, [], {}
+            )  # type: ignore[arg-type]
 
         # Capture the python_stack when the exception is first raised.
         # This preserves the original exception location even if the exception
@@ -2206,7 +2218,7 @@ class InstructionTranslatorBase(
     def RAISE_VARARGS(self, inst: Instruction) -> None:
         if inst.arg == 0:
             if not len(self.exn_vt_stack):
-                msg = ConstantVariable("No active exception to reraise")
+                msg = SourcelessBuilder.create(self, "No active exception to reraise")
                 exc.raise_observed_exception(RuntimeError, self, args=[msg])
 
             # re-raise the previous exception. Here CPython refers to the exception
@@ -2235,7 +2247,9 @@ class InstructionTranslatorBase(
                 curr_exc = self.exn_vt_stack.get_current_exception()
                 self._attach_traceback_to_exception(curr_exc)
                 cause = self._create_exception_type(from_vt)
-                curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
+                curr_exc.call_setattr(  # pyrefly: ignore [missing-attribute]
+                    self, SourcelessBuilder.create(self, "__cause__"), cause
+                )  # type: ignore[arg-type, union-attr, assignment]
 
     def CLEANUP_THROW(self, inst: Instruction) -> None:
         # https://github.com/python/cpython/pull/96010
@@ -2294,9 +2308,9 @@ class InstructionTranslatorBase(
             fn = self.stack[-fn_loc]
             val = self.stack[-1]
             assert self._isinstance_exception(val)
-            typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
+            typ = SourcelessBuilder.create(self, val.exc_type)  # type: ignore[attr-defined, union-attr]
             tb = val.var_getattr(
-                # pyrefly: ignore[bad-argument-type]
+                # pyrefly: ignore [bad-argument-type]
                 self,
                 "__traceback__",
             )
@@ -2308,7 +2322,7 @@ class InstructionTranslatorBase(
             fn = self.stack[-7]
             val = self.stack[-2]
             assert self._isinstance_exception(val)
-            typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
+            typ = SourcelessBuilder.create(self, val.exc_type)  # type: ignore[attr-defined]
 
             tb = val.var_getattr(self, "__traceback__")
 
@@ -2350,7 +2364,7 @@ class InstructionTranslatorBase(
                 # 2) if 'lasti' is true, then push the offset that the exception was raised at
                 if exn_tab_entry.lasti:
                     self.push(
-                        variables.ConstantVariable(self.current_instruction.offset)
+                        SourcelessBuilder.create(self, self.current_instruction.offset)
                     )
 
                 # 3) push the exception to the stack
@@ -2422,19 +2436,19 @@ class InstructionTranslatorBase(
                     self.push(variables.UnknownVariable())
                     self.push(old_exception)
 
-                    self.push(variables.BuiltinVariable(old_exception.exc_type))
+                    self.push(SourcelessBuilder.create(self, old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
-                    self.push(variables.ConstantVariable(None))
-                    self.push(variables.ConstantVariable(None))
-                    self.push(variables.ConstantVariable(None))
+                    self.push(SourcelessBuilder.create(self, None))
+                    self.push(SourcelessBuilder.create(self, None))
+                    self.push(SourcelessBuilder.create(self, None))
 
                 # Push new exception - tb, val, type
                 # Traceback is currently mapped to UnknownVariable
                 self.push(variables.UnknownVariable())
                 self.push(exception_var)
 
-                self.push(variables.BuiltinVariable(exception_var.exc_type))
+                self.push(SourcelessBuilder.create(self, exception_var.exc_type))
 
                 # Jump to target
                 self.jump(block_stack_entry)
@@ -2468,7 +2482,7 @@ class InstructionTranslatorBase(
 
         val = self.pop()
         if len(self.exn_vt_stack) == 0:
-            prev_exc: VariableTracker = ConstantVariable(None)
+            prev_exc: VariableTracker = SourcelessBuilder.create(self, None)
         else:
             prev_exc = self.exn_vt_stack[-1]
         self.push(prev_exc)
@@ -2580,7 +2594,7 @@ class InstructionTranslatorBase(
         return False
 
     def CHECK_EXC_MATCH(self, inst: Instruction) -> None:
-        self.push(variables.ConstantVariable(self.check_if_exc_matches()))
+        self.push(SourcelessBuilder.create(self, self.check_if_exc_matches()))
 
     def JUMP_IF_NOT_EXC_MATCH(self, inst: Instruction) -> None:
         if not self.check_if_exc_matches():
@@ -2593,7 +2607,7 @@ class InstructionTranslatorBase(
             self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst: Instruction) -> None:
-        self.call_function(BuiltinVariable(iter), [self.pop()], {})
+        self.call_function(SourcelessBuilder.create(self, iter), [self.pop()], {})
 
     @break_graph_if_unsupported(
         push=True,
@@ -2609,6 +2623,7 @@ class InstructionTranslatorBase(
         msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_EX: a variadic function call, e.g. f(*args)",
     )
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
+        argsvars: VariableTracker
         kwargsvars: VariableTracker
         if inst.argval == 0:
             kwargsvars = ConstDictVariable({})
@@ -2639,38 +2654,50 @@ class InstructionTranslatorBase(
             assert isinstance(null, NullVariable)
 
         if not isinstance(
-            # pyrefly: ignore [unbound-name]
-            argsvars,
+            argsvars,  # pyrefly: ignore[unbound-name]
             BaseListVariable,
-            # pyrefly: ignore [unbound-name]
-        ) and argsvars.has_force_unpack_var_sequence(self):
-            # pyrefly: ignore [unbound-name]
-            argsvars = TupleVariable(argsvars.force_unpack_var_sequence(self))
+        ) and argsvars.has_force_unpack_var_sequence(  # pyrefly: ignore[unbound-name]
+            self
+        ):
+            argsvars = SourcelessBuilder.create(
+                self,
+                tuple(
+                    argsvars.force_unpack_var_sequence(  # pyrefly: ignore[unbound-name]
+                        self
+                    )
+                ),
+            )
 
         # Unpack for cases like fn(**obj) where obj is a map
-        # pyrefly: ignore [unbound-name]
-        if isinstance(kwargsvars, UserDefinedObjectVariable):
+        if isinstance(
+            kwargsvars,  # pyrefly: ignore[unbound-name]
+            UserDefinedObjectVariable,
+        ):
             kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
-        # pyrefly: ignore [unbound-name]
-        if not isinstance(argsvars, BaseListVariable) or not isinstance(
-            # pyrefly: ignore [unbound-name]
-            kwargsvars,
+        if not isinstance(
+            argsvars,  # pyrefly: ignore[unbound-name]
+            BaseListVariable,
+        ) or not isinstance(
+            kwargsvars,  # pyrefly: ignore[unbound-name]
             ConstDictVariable,
         ):
             unimplemented(
                 gb_type="Variadic function call with bad args/kwargs type",
-                # pyrefly: ignore [unbound-name]
-                context=f"args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",
+                context=f"args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",  # pyrefly: ignore[unbound-name]
                 explanation="Expected args to be a list and kwargs to be a dict",
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
         # Map to a dictionary of str -> VariableTracker
-        # pyrefly: ignore [unbound-name, missing-attribute]
-        kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore [unbound-name, missing-attribute]
-        self.call_function(fn, argsvars.items, kwargsvars)
+        kwargsvars = (
+            kwargsvars.keys_as_python_constant()  # pyrefly: ignore[unbound-name,missing-attribute]
+        )
+        self.call_function(
+            fn,
+            argsvars.items,  # pyrefly: ignore[unbound-name,missing-attribute]
+            kwargsvars,
+        )
 
     @break_graph_if_unsupported(
         push=True,
@@ -2728,7 +2755,7 @@ class InstructionTranslatorBase(
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
-        result = BuiltinVariable(getattr).call_function(
+        result = SourcelessBuilder.create(self, getattr).call_function(
             self,  # type: ignore[arg-type]
             [obj, ConstantVariable.create(attr)],
             {},
@@ -2749,7 +2776,7 @@ class InstructionTranslatorBase(
     )
     def STORE_ATTR(self, inst: Instruction) -> None:
         val, obj = self.popn(2)
-        BuiltinVariable(setattr).call_function(
+        SourcelessBuilder.create(self, setattr).call_function(
             self,  # type: ignore[arg-type]
             [obj, ConstantVariable.create(inst.argval), val],
             {},
@@ -2757,7 +2784,7 @@ class InstructionTranslatorBase(
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
         obj = self.pop()
-        BuiltinVariable(delattr).call_function(
+        SourcelessBuilder.create(self, delattr).call_function(
             self,  # type: ignore[arg-type]
             [obj, ConstantVariable.create(inst.argval)],
             {},
@@ -3308,7 +3335,7 @@ class InstructionTranslatorBase(
 
     def BUILD_TUPLE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(TupleVariable(items))
+        self.push(SourcelessBuilder.create(self, tuple(items)))
 
     def BUILD_SLICE(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
@@ -3316,7 +3343,7 @@ class InstructionTranslatorBase(
 
     def BUILD_LIST(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
-        self.push(ListVariable(items, mutation_type=ValueMutationNew()))
+        self.push(SourcelessBuilder.create(self, list(items)))
 
     def BUILD_SET(self, inst: Instruction) -> None:
         if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
@@ -3359,7 +3386,14 @@ class InstructionTranslatorBase(
     def BUILD_MAP_UNPACK(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
         # ensure everything is a dict
-        items = [BuiltinVariable(dict).call_function(self, [x], {}) for x in items]  # type: ignore[arg-type]
+        items = [
+            SourcelessBuilder.create(self, dict).call_function(
+                self,
+                [x],
+                {},  # pyrefly: ignore[bad-argument-type]
+            )
+            for x in items
+        ]  # type: ignore[arg-type]
         result: dict[Any, Any] = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
@@ -3509,7 +3543,7 @@ class InstructionTranslatorBase(
             vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
                 self.push(item)
-            self.push(TupleVariable(vals_list))
+            self.push(SourcelessBuilder.create(self, tuple(vals_list)))
             for item in reversed(vals_prefix):
                 self.push(item)
         else:
@@ -3582,11 +3616,13 @@ class InstructionTranslatorBase(
 
     def _convert_value(self, value: VariableTracker, flag: int) -> VariableTracker:
         if flag == 1:
-            return BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
+            return SourcelessBuilder.create(self, str).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 2:
-            return BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
+            return SourcelessBuilder.create(self, repr).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 3:
-            return BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+            return SourcelessBuilder.create(self, ascii).call_function(
+                self, [value], {}
+            )  # type: ignore[arg-type]
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
@@ -3607,7 +3643,9 @@ class InstructionTranslatorBase(
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
-        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
+        self.call_function(
+            SourcelessBuilder.create(self, str.format), [fmt_var, value], {}
+        )
 
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
@@ -3700,7 +3738,13 @@ class InstructionTranslatorBase(
         obj.call_method(self, "extend", [v], {})  # type: ignore[arg-type]
 
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
-        self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
+        self.push(
+            SourcelessBuilder.create(self, tuple).call_function(
+                self,
+                [self.pop()],
+                {},  # pyrefly: ignore[bad-argument-type]
+            )
+        )  # type: ignore[arg-type]
 
     def STOPITERATION_ERROR(self, inst: Instruction) -> None:
         # wrap the generator body in a try: ... except StopIteration: ... which
@@ -3711,13 +3755,15 @@ class InstructionTranslatorBase(
         val = self.stack[-1]
         assert self._isinstance_exception(val)
         if val.exc_type is StopIteration:  # type: ignore[union-attr]
-            new_val = variables.BuiltinVariable(RuntimeError).call_function(
+            new_val = SourcelessBuilder.create(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
-                [ConstantVariable("generator raised StopIteration")],
+                [SourcelessBuilder.create(self, "generator raised StopIteration")],
                 {},
             )
-            new_val.call_setattr(self, ConstantVariable("__context__"), val)  # type: ignore[attr-defined]
-            new_val.call_setattr(self, ConstantVariable("__cause__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(  # pyrefly: ignore[missing-attribute]
+                self, SourcelessBuilder.create(self, "__context__"), val
+            )  # type: ignore[attr-defined]
+            new_val.call_setattr(self, SourcelessBuilder.create(self, "__cause__"), val)  # type: ignore[attr-defined]
             self.stack[-1] = new_val
 
     def DICT_MERGE(self, inst: Instruction) -> None:
@@ -3768,7 +3814,16 @@ class InstructionTranslatorBase(
         assert isinstance(tos1, ConstDictVariable)
 
         if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
-            self.push(TupleVariable([tos1.getitem_const(self, k) for k in keys]))  # type: ignore[attr-defined,arg-type]
+            self.push(
+                SourcelessBuilder.create(
+                    self,
+                    tuple(
+                        [
+                            tos1.getitem_const(self, k) for k in keys
+                        ]  # pyrefly: ignore[bad-argument-type]
+                    ),
+                )
+            )  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
@@ -4057,7 +4112,11 @@ class InstructionTranslatorBase(
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
-            self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
+            self.push(
+                SourcelessBuilder.create(
+                    self, tuple(self.pop().force_unpack_var_sequence(self))
+                )
+            )
         else:
             unimplemented(
                 gb_type="Missing CALL_INTRINSIC_1 handler",
@@ -4513,7 +4572,7 @@ class InstructionTranslatorBase(
         if f_code.co_flags & (
             CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR
         ):
-            self.push(BuiltinVariable(None))
+            self.push(SourcelessBuilder.create(self, None))
 
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
@@ -4838,12 +4897,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     parent: InstructionTranslatorBase
 
     @classmethod
-    def inline_call(cls, parent: Any, func: Any, args: Any, kwargs: Any) -> Any:
+    def inline_call(
+        cls,
+        parent: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tracer = cls.build_inline_tracer(parent, func, args, kwargs)
         return tracer.inline_call_()
 
     @staticmethod
-    def check_inlineable(func: Any) -> trace_rules.SkipResult:
+    def check_inlineable(
+        func: BaseUserFunctionVariable,
+    ) -> trace_rules.SkipResult:
         if func.has_self():
             unimplemented(
                 gb_type="Inline attempt with __self__",
@@ -4876,7 +4943,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if (
-                hasattr(getattr(func, "fn", None), "_origin")
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4908,9 +4976,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def build_inline_tracer(
         parent: Any,
-        func: VariableTracker,
-        args: list[VariableTracker],
-        kwargs: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         assert isinstance(
             func,
@@ -4918,7 +4986,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
-                LocalGeneratorObjectVariable,
             ),
         )
         code: types.CodeType = func.get_code()
@@ -4935,15 +5002,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 result = previous_result
 
         if result is None:
-            if isinstance(func, SkipFunctionVariable):
-                unimplemented(
-                    gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
-                    context=f"Attempted to inline a SkipFunctionVariable {func}",
-                    explanation=(
-                        "Attempted to inline a function that was previously determined to be marked as intentionally skipped."
-                    ),
-                    hints=[],
-                )
             result = InliningInstructionTranslator.check_inlineable(func)
             assert result.skipped is False
 
@@ -5214,7 +5272,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.symbolic_result = self.pop()  # type: ignore[assignment]
+        self.symbolic_result = self.pop()
         self.instruction_pointer = None
         raise ReturnValueOp
 
@@ -5244,7 +5302,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 fglobals_value = _import_module(module_name)
             # Dont use lazy vt because we will do a setattr afterwards
             # TODO: fix InstructionTranslator -> InstructionTranslatorBase
-            # pyrefly: ignore[bad-argument-type]
+            # pyrefly: ignore [bad-argument-type]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
             global_source = AttrSource(module_source, name)
         else:
@@ -5254,7 +5312,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             # Dont use lazy vt because we will do a setattr afterwards
-            # pyrefly: ignore[bad-argument-type]
+            # pyrefly: ignore [bad-argument-type]
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
 
@@ -5333,7 +5391,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if not isinstance(tos, ListIteratorVariable):
             self.pop()
-            res = BuiltinVariable(iter).call_function(self, [tos], {})  # type: ignore[arg-type]
+            res = SourcelessBuilder.create(self, iter).call_function(self, [tos], {})  # type: ignore[arg-type]
             self.push(res)
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
