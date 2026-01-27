@@ -11,6 +11,7 @@ from torch._library.effects import EffectType
 from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -190,6 +191,22 @@ def with_effects_proxy(
 
 with_effects.fallthrough(DispatchKey.AutogradCPU)
 with_effects.fallthrough(DispatchKey.AutogradCUDA)
+
+
+# handle with_effects when FunctionalTensorMode is active.
+# this is needed when regional inductor compiles a graph that already contains
+# with_effects nodes (from a prev. functionalization pass).
+@with_effects.py_impl(FunctionalTensorMode)
+def with_effects_functional(
+    mode,
+    token: torch.Tensor,
+    op: torch._ops.OpOverload,
+    *args: tuple[Any, ...],
+    **kwargs: dict[str, Any],
+) -> tuple[torch.Tensor, ...]:
+    with mode:
+        result = with_effects_dense(token, op, *args, **kwargs)
+        return result
 
 
 def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema:
