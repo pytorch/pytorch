@@ -1,3 +1,9 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "pyyaml==6.0.2",
+# ]
+# ///
 """Checks for consistency of jobs between different GitHub workflows.
 
 Any job with a specific `sync-tag` must match all other jobs with the same `sync-tag`.

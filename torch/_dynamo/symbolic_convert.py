@@ -1251,22 +1251,28 @@ class InstructionTranslatorBase(
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
     def inline_generator_function(
-        self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
-    ) -> Any:
+        self,
+        fn: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         """
         Redirect the call to the generator "call_function"
         """
         if not isinstance(fn, LocalGeneratorFunctionVariable):
-            fn = LocalGeneratorFunctionVariable(fn)  # type: ignore[arg-type]
+            fn = LocalGeneratorFunctionVariable(fn)
         return fn.call_function(self, args, kwargs)  # type: ignore[arg-type]
 
     def inline_user_function_return(
-        self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
+        self,
+        fn: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> Any:
         """
         A call to some user defined function by inlining it.
         """
-        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):  # type: ignore[attr-defined]
+        if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):
             return self.inline_generator_function(fn, args, kwargs)
         else:
             return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
@@ -2241,7 +2247,7 @@ class InstructionTranslatorBase(
                 curr_exc = self.exn_vt_stack.get_current_exception()
                 self._attach_traceback_to_exception(curr_exc)
                 cause = self._create_exception_type(from_vt)
-                curr_exc.call_setattr(
+                curr_exc.call_setattr(  # pyrefly: ignore [missing-attribute]
                     self, SourcelessBuilder.create(self, "__cause__"), cause
                 )  # type: ignore[arg-type, union-attr, assignment]
 
@@ -2304,7 +2310,7 @@ class InstructionTranslatorBase(
             assert self._isinstance_exception(val)
             typ = SourcelessBuilder.create(self, val.exc_type)  # type: ignore[attr-defined, union-attr]
             tb = val.var_getattr(
-                # pyrefly: ignore[bad-argument-type]
+                # pyrefly: ignore [bad-argument-type]
                 self,
                 "__traceback__",
             )
@@ -2617,6 +2623,7 @@ class InstructionTranslatorBase(
         msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_EX: a variadic function call, e.g. f(*args)",
     )
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
+        argsvars: VariableTracker
         kwargsvars: VariableTracker
         if inst.argval == 0:
             kwargsvars = ConstDictVariable({})
@@ -2647,40 +2654,50 @@ class InstructionTranslatorBase(
             assert isinstance(null, NullVariable)
 
         if not isinstance(
-            # pyrefly: ignore [unbound-name]
-            argsvars,
+            argsvars,  # pyrefly: ignore[unbound-name]
             BaseListVariable,
-            # pyrefly: ignore [unbound-name]
-        ) and argsvars.has_force_unpack_var_sequence(self):
-            # pyrefly: ignore [unbound-name]
+        ) and argsvars.has_force_unpack_var_sequence(  # pyrefly: ignore[unbound-name]
+            self
+        ):
             argsvars = SourcelessBuilder.create(
-                self, tuple(argsvars.force_unpack_var_sequence(self))
+                self,
+                tuple(
+                    argsvars.force_unpack_var_sequence(
+                        self
+                    )  # pyrefly: ignore[unbound-name]
+                ),
             )
 
         # Unpack for cases like fn(**obj) where obj is a map
-        # pyrefly: ignore [unbound-name]
-        if isinstance(kwargsvars, UserDefinedObjectVariable):
+        if isinstance(
+            kwargsvars,
+            UserDefinedObjectVariable,  # pyrefly: ignore[unbound-name]
+        ):
             kwargsvars = BuiltinVariable.call_custom_dict(self, dict, kwargsvars)  # type: ignore[arg-type]
 
-        # pyrefly: ignore [unbound-name]
-        if not isinstance(argsvars, BaseListVariable) or not isinstance(
-            # pyrefly: ignore [unbound-name]
-            kwargsvars,
+        if not isinstance(
+            argsvars,
+            BaseListVariable,  # pyrefly: ignore[unbound-name]
+        ) or not isinstance(
+            kwargsvars,  # pyrefly: ignore[unbound-name]
             ConstDictVariable,
         ):
             unimplemented(
                 gb_type="Variadic function call with bad args/kwargs type",
-                # pyrefly: ignore [unbound-name]
-                context=f"args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",
+                context=f"args type: {typestr(argsvars)}, kwargs type: {typestr(kwargsvars)}",  # pyrefly: ignore[unbound-name]
                 explanation="Expected args to be a list and kwargs to be a dict",
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
         # Map to a dictionary of str -> VariableTracker
-        # pyrefly: ignore [unbound-name, missing-attribute]
-        kwargsvars = kwargsvars.keys_as_python_constant()
-        # pyrefly: ignore [unbound-name, missing-attribute]
-        self.call_function(fn, argsvars.items, kwargsvars)
+        kwargsvars = (
+            kwargsvars.keys_as_python_constant()  # pyrefly: ignore[unbound-name,missing-attribute]
+        )
+        self.call_function(
+            fn,
+            argsvars.items,
+            kwargsvars,  # pyrefly: ignore[unbound-name,missing-attribute]
+        )
 
     @break_graph_if_unsupported(
         push=True,
@@ -3370,7 +3387,9 @@ class InstructionTranslatorBase(
         items = self.popn(inst.argval)
         # ensure everything is a dict
         items = [
-            SourcelessBuilder.create(self, dict).call_function(self, [x], {})
+            SourcelessBuilder.create(self, dict).call_function(
+                self, [x], {}
+            )  # pyrefly: ignore[bad-argument-type]
             for x in items
         ]  # type: ignore[arg-type]
         result: dict[Any, Any] = {}
@@ -3718,7 +3737,9 @@ class InstructionTranslatorBase(
 
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
         self.push(
-            SourcelessBuilder.create(self, tuple).call_function(self, [self.pop()], {})
+            SourcelessBuilder.create(self, tuple).call_function(
+                self, [self.pop()], {}
+            )  # pyrefly: ignore[bad-argument-type]
         )  # type: ignore[arg-type]
 
     def STOPITERATION_ERROR(self, inst: Instruction) -> None:
@@ -3735,7 +3756,7 @@ class InstructionTranslatorBase(
                 [SourcelessBuilder.create(self, "generator raised StopIteration")],
                 {},
             )
-            new_val.call_setattr(
+            new_val.call_setattr(  # pyrefly: ignore[missing-attribute]
                 self, SourcelessBuilder.create(self, "__context__"), val
             )  # type: ignore[attr-defined]
             new_val.call_setattr(self, SourcelessBuilder.create(self, "__cause__"), val)  # type: ignore[attr-defined]
@@ -3791,7 +3812,10 @@ class InstructionTranslatorBase(
         if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
             self.push(
                 SourcelessBuilder.create(
-                    self, tuple([tos1.getitem_const(self, k) for k in keys])
+                    self,
+                    tuple(
+                        [tos1.getitem_const(self, k) for k in keys]
+                    ),  # pyrefly: ignore[bad-argument-type]
                 )
             )  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
@@ -4867,12 +4891,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     parent: InstructionTranslatorBase
 
     @classmethod
-    def inline_call(cls, parent: Any, func: Any, args: Any, kwargs: Any) -> Any:
+    def inline_call(
+        cls,
+        parent: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         tracer = cls.build_inline_tracer(parent, func, args, kwargs)
         return tracer.inline_call_()
 
     @staticmethod
-    def check_inlineable(func: Any) -> trace_rules.SkipResult:
+    def check_inlineable(
+        func: BaseUserFunctionVariable,
+    ) -> trace_rules.SkipResult:
         if func.has_self():
             unimplemented(
                 gb_type="Inline attempt with __self__",
@@ -4905,7 +4937,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
             if (
-                hasattr(getattr(func, "fn", None), "_origin")
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4937,9 +4970,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @staticmethod
     def build_inline_tracer(
         parent: Any,
-        func: VariableTracker,
-        args: list[VariableTracker],
-        kwargs: Any,
+        func: BaseUserFunctionVariable,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
     ) -> InliningInstructionTranslator:
         assert isinstance(
             func,
@@ -4947,7 +4980,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
                 LocalGeneratorFunctionVariable,
-                LocalGeneratorObjectVariable,
             ),
         )
         code: types.CodeType = func.get_code()
@@ -4964,15 +4996,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 result = previous_result
 
         if result is None:
-            if isinstance(func, SkipFunctionVariable):
-                unimplemented(
-                    gb_type="Attempted to inline function marked as skipped (SkipFunctionVariable)",
-                    context=f"Attempted to inline a SkipFunctionVariable {func}",
-                    explanation=(
-                        "Attempted to inline a function that was previously determined to be marked as intentionally skipped."
-                    ),
-                    hints=[],
-                )
             result = InliningInstructionTranslator.check_inlineable(func)
             assert result.skipped is False
 
@@ -5243,7 +5266,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         )
 
     def RETURN_VALUE(self, inst: Instruction) -> None:
-        self.symbolic_result = self.pop()  # type: ignore[assignment]
+        self.symbolic_result = self.pop()
         self.instruction_pointer = None
         raise ReturnValueOp
 
@@ -5273,7 +5296,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 fglobals_value = _import_module(module_name)
             # Dont use lazy vt because we will do a setattr afterwards
             # TODO: fix InstructionTranslator -> InstructionTranslatorBase
-            # pyrefly: ignore[bad-argument-type]
+            # pyrefly: ignore [bad-argument-type]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
             global_source = AttrSource(module_source, name)
         else:
@@ -5283,7 +5306,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             # Dont use lazy vt because we will do a setattr afterwards
-            # pyrefly: ignore[bad-argument-type]
+            # pyrefly: ignore [bad-argument-type]
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
 

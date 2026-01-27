@@ -566,7 +566,7 @@ class NNModuleVariable(VariableTracker):
                 else:
                     assert istype(fn, types.FunctionType)
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=fn_source),
+                    VariableTracker.build(tx, fn, source=fn_source),
                     args,
                     kwargs,
                 )
@@ -872,7 +872,7 @@ class NNModuleVariable(VariableTracker):
 
                 src = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=src),
+                    VariableTracker.build(tx, fn, source=src),
                     [self] + list(args),
                     kwargs,
                 )
@@ -1098,7 +1098,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     self.var_getattr(tx, "_backward_hooks").realize().len()  # type: ignore[attr-defined]
                     or self.var_getattr(tx, "_backward_pre_hooks").realize().len()  # type: ignore[attr-defined]
                     or self.var_getattr(tx, "_forward_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_forward_hooks_with_kwargs")  # type: ignore[attr-defined]
+                    .realize()
+                    .len()
                     or self.var_getattr(tx, "_forward_pre_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_forward_pre_hooks_with_kwargs")  # type: ignore[attr-defined]
+                    .realize()
+                    .len()
                     or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
@@ -1137,7 +1143,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # source=source) but that introduces guard on the
                 # `forward.__code__` object. Given that we already guard on the
                 # forward not present in generic dict, we dont need this guard.
-                return variables.UserFunctionVariable(fn, source=source).call_function(
+                return VariableTracker.build(tx, fn, source=source).call_function(
                     tx, [self] + list(args), kwargs
                 )
 
@@ -1244,7 +1250,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         if name in (
             "_backward_hooks",
             "_backward_pre_hooks",
+            "_forward_hooks_with_kwargs",
             "_forward_hooks",
+            "_forward_pre_hooks_with_kwargs",
             "_forward_pre_hooks",
         ):
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
@@ -1270,7 +1278,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             self.source
             and name
             in (
+                "_forward_pre_hooks_with_kwargs",
                 "_forward_pre_hooks",
+                "_forward_hooks_with_kwargs",
                 "_forward_hooks",
             )
             and not tx.output.side_effects.has_pending_mutation_of_attr(self, name)
@@ -1311,7 +1321,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         directly look into the underlying datastructures. This saves a lot of
         compilation time.
         """
-        name_vt = variables.ConstantVariable(name)
+        from .builder import SourcelessBuilder
+
+        name_vt = SourcelessBuilder.create(tx, name)
         out = self.getattr_helper(tx, "_parameters", name_vt)
         if out is None:
             out = self.getattr_helper(tx, "_modules", name_vt)
