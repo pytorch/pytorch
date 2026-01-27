@@ -3852,7 +3852,7 @@ def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
     return real_value
 
 
-def assert_no_fake_params_or_buffers(gm: torch.fx.GraphModule) -> None:
+def assert_no_fake_params_or_buffers(gm: torch.nn.Module) -> None:
     from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
     def stack_or_hint(t: Any) -> str:
