@@ -165,6 +165,31 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
     aten::pow.Tensor_Scalar(t: f32[], 0.5)  ->  t: f32[]""",
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_get_total_norm_skip_root(self):
+        """Test that skip_root=True returns Partial(sum) with correct numerics."""
+        from torch.distributed.tensor import Partial
+
+        dp_mesh = init_device_mesh(device_type.type, (self.world_size,))
+
+        torch.manual_seed(42 + dp_mesh.get_local_rank())
+        tensors = [
+            DTensor.from_local(
+                torch.randn(4, 8, device=device_type), dp_mesh, [Shard(0)]
+            )
+            for _ in range(3)
+        ]
+
+        result = torch.nn.utils.get_total_norm(tensors, norm_type=2.0, skip_root=True)
+
+        # Verify placement is Partial(sum)
+        self.assertEqual(result.placements, (Partial("sum"),))
+
+        # Verify numerics: result should be sum(|x|^2) across all tensors
+        full_tensors = [t.full_tensor() for t in tensors]
+        expected = sum((t.abs() ** 2).sum() for t in full_tensors)
+        self.assertEqual(result.full_tensor(), expected)
+
 
 class TestClipGradNormWorldSize4(_TestClipGradNormBase):
     @property
