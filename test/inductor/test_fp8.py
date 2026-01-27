@@ -7,7 +7,8 @@ from typing import Union
 import torch
 from torch import Tensor
 from torch._C import FileCheck
-from torch._inductor import config, utils
+from torch._inductor import config, inductor_prims, utils
+from torch._inductor.fx_passes.misc_patterns import _misc_patterns_init
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -17,6 +18,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
+    SM100OrLater,
     SM90OrLater,
 )
 from torch.testing._internal.common_device_type import (
@@ -1465,6 +1467,62 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
         self.assertTrue("Invalid scaling configuration." in str(cm.exception))
+
+
+@unittest.skipIf(not SM100OrLater, "Requires SM100+ (Blackwell) for PTX instruction")
+class TestCvtE8M0Rceil(TestCase):
+    """Tests for cvt_e8m0_rceil prim with PTX lowering on Blackwell."""
+
+    def test_correctness(self):
+        """Test correctness for various dtypes."""
+
+        def fn(inp):
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        for dtype in [torch.float32, torch.bfloat16, torch.float16]:
+            inp = torch.cat(
+                [
+                    torch.arange(-1024, 0, device="cuda", dtype=dtype),
+                    torch.arange(1, 1025, device="cuda", dtype=dtype),
+                ]
+            )
+            eager_result = fn(inp)
+            compiled_result = torch.compile(fn)(inp)
+            self.assertEqual(compiled_result, eager_result)
+
+    def test_pattern_match(self):
+        """Test that the log2+ceil pattern gets matched and replaced."""
+        _misc_patterns_init()
+
+        E8M0_BIAS = 127
+
+        def fn_with_log2_pattern(inp):
+            log2_val = torch.log2(inp)
+            ceil_val = torch.ceil(log2_val)
+            clamped = torch.clamp(ceil_val, min=-E8M0_BIAS, max=E8M0_BIAS)
+            biased = clamped + E8M0_BIAS
+            return biased.to(torch.uint8)
+
+        inp = torch.tensor(
+            [1.0, 2.0, 4.0, 3.0, 1.5], device="cuda", dtype=torch.float32
+        )
+
+        eager_result = fn_with_log2_pattern(inp)
+        compiled_result = torch.compile(fn_with_log2_pattern)(inp)
+        self.assertEqual(compiled_result, eager_result)
+
+    def test_ptx_code_generation(self):
+        """Test that PTX instruction appears in generated code."""
+
+        def fn(inp):
+            return inductor_prims.cvt_e8m0_rceil(inp)
+
+        inp = torch.rand(32, device="cuda", dtype=torch.float32)
+        compiled_fn = torch.compile(fn)
+        _, code = run_and_get_code(compiled_fn, inp)
+
+        code_str = "\n".join(code)
+        self.assertIn("cvt.rp.satfinite.ue8m0x2.f32", code_str)
 
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
