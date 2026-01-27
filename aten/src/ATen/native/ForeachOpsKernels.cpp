@@ -491,7 +491,7 @@ std::vector<Tensor> foreach_tensor_norm_slow(
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
-    // If the tensor is empty and norm == infty, we cannot compute the norm
+    // If the tensor is empty and norm == infinity, we cannot compute the norm
     // because the operation does not have an identity
     if (p == std::numeric_limits<double>::infinity()) {
       TORCH_CHECK(
