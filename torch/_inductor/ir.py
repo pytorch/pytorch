@@ -9201,9 +9201,7 @@ class Conditional(ExternKernel):
             """
             graph = graph_module.graph
             input_nodes = [n for n in graph.nodes if n.op == "placeholder"]
-            output_node = next(
-                (n for n in graph.nodes if n.op == "output"), None
-            )
+            output_node = next((n for n in graph.nodes if n.op == "output"), None)
 
             if output_node is None:
                 return {}
@@ -9224,7 +9222,10 @@ class Conditional(ExternKernel):
             # This means output should have same identity as input
             inp_out_same_identity: dict[int, int] = {}
             for node in graph.nodes:
-                if node.op == "call_function" and node.target == torch.ops.aten.copy_.default:
+                if (
+                    node.op == "call_function"
+                    and node.target == torch.ops.aten.copy_.default
+                ):
                     dst, src = node.args[0], node.args[1]
                     # Check: dst is input, src is a node, and src is returned
                     if (
@@ -9239,11 +9240,17 @@ class Conditional(ExternKernel):
             return inp_out_same_identity
 
         # Store branch-specific identity mappings for codegen
-        conditional.true_inp_out_same_identity = detect_inp_out_same_identity(true_fn.graph_module)
-        conditional.false_inp_out_same_identity = detect_inp_out_same_identity(false_fn.graph_module)
+        conditional.true_inp_out_same_identity = detect_inp_out_same_identity(
+            true_fn.graph_module
+        )
+        conditional.false_inp_out_same_identity = detect_inp_out_same_identity(
+            false_fn.graph_module
+        )
 
         # Operand indices that are mutated by either branch
-        mutated_operand_indices = set(true_mutated_inputs) | set(false_mutated_inputs)
+        mutated_operand_indices = OrderedSet(true_mutated_inputs) | OrderedSet(
+            false_mutated_inputs
+        )
 
         # Create MutationOutput for each mutated operand (for scheduler dependencies)
         conditional.mutation_outputs = [

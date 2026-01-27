@@ -3741,9 +3741,9 @@ class PythonWrapperCodegen(CodeGen):
 
         # Save references to operands that need to be used for output.
         # This must be done before subgraph calls as buffers may be freed
-        all_aliased_operand_indices = set(true_inp_out_same_identity.values()) | set(
-            false_inp_out_same_identity.values()
-        )
+        all_aliased_operand_indices = OrderedSet(
+            true_inp_out_same_identity.values()
+        ) | OrderedSet(false_inp_out_same_identity.values())
         saved_operand_refs: dict[int, str] = {}
         for operand_idx in sorted(all_aliased_operand_indices):
             saved_name = f"{name}_saved_operand_{operand_idx}"

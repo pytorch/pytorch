@@ -8950,13 +8950,17 @@ class GraphModule(torch.nn.Module):
                 else:
                     torch.compile(fn)(f, x)
 
-    def test_cond_input_mutation_same_identity(self,):
-        predicate_true = torch.tensor(True, device="cuda")
-        predicate_false = torch.tensor(False, device="cuda")
-        org_data = torch.ones(2,2, device="cuda")
+    @requires_cuda
+    @parametrize("device", ["cuda", "cpu"])
+    def test_cond_input_mutation_same_identity(self, device):
+        predicate_true = torch.tensor(True, device=device)
+        predicate_false = torch.tensor(False, device=device)
+        org_data = torch.ones(2, 2, device=device)
 
         def fn(predicate, data):
-            return torch.cond(predicate, lambda x: x+1, lambda x: x.sin_().add_(2), [data])
+            return torch.cond(
+                predicate, lambda x: x + 1, lambda x: x.sin_().add_(2), [data]
+            )
 
         with torch.no_grad():
             expected = org_data.sin() + 2
@@ -8967,7 +8971,7 @@ class GraphModule(torch.nn.Module):
 
             data = org_data.clone()
             output = fn(predicate_true, data)
-            torch.testing.assert_close(output, org_data+1)
+            torch.testing.assert_close(output, org_data + 1)
             assert id(output) != id(data)
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
@@ -9391,7 +9395,7 @@ class TestAutoFunctionalizeControlFlow(TestCase):
             torch._dynamo.variables.higher_order_ops.CondHigherOrderVariable,
             "supports_input_mutation",
             True,
-       ):
+        ):
             # Only suuport input mutation in inference
             cloned_args = [_clone(args) for _ in range(3)]
             with torch.no_grad():
