@@ -98,7 +98,7 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_python_path = path_join(config.cuda.cutlass_dir, "python")
+    cutlass_python_path = path_join(config.cutlass.cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
         torch_root,
@@ -260,7 +260,7 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     gen_arch = (
         "100" if arch == "103" else arch
     )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
-    instantiation_level: str = config.cuda.cutlass_instantiation_level
+    instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=gen_arch,
         cuda_version=version,

@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import \
      runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
+     skipCUDAIfNoCusolverROCMIfNoMagma,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
@@ -2254,7 +2255,7 @@ class TestLinalg(TestCase):
         self.assertEqual(result, expected)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoCusolverROCMIfNoMagma
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)
@@ -2303,7 +2304,7 @@ class TestLinalg(TestCase):
             run_test(shape, symmetric=True)
 
     @onlyCUDA
-    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoCusolverROCMIfNoMagma
     @dtypes(*floating_and_complex_types())
     def test_eig_identity(self, device, dtype):
 
@@ -2413,7 +2414,7 @@ class TestLinalg(TestCase):
 
 
     @onlyCUDA
-    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoCusolverROCMIfNoMagma
     @dtypes(*floating_and_complex_types())
     def test_eig_out_variants(self, device, dtype):
         from torch.testing._internal.common_utils import random_symmetric_matrix
@@ -2464,8 +2465,9 @@ class TestLinalg(TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
+
     @onlyCUDA
-    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoCusolverROCMIfNoMagma
     @dtypes(torch.float32, torch.float64)
     def test_eig_cuda_complex_eigenvectors(self, device, dtype):
         """Test CUDA eigenvector decoding with known ground truth, including batching."""
@@ -2550,8 +2552,8 @@ class TestLinalg(TestCase):
         rhs = vals_batch.unsqueeze(-2) * vecs_batch
         self.assertEqual(lhs, rhs, atol=1e-5, rtol=1e-5)
 
-    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolverROCMIfNoMagma
     @dtypes(*floating_and_complex_types())
     def test_eig_errors_and_warnings(self, device, dtype):
         # eig requires the input to be at least 2 dimensional tensor
@@ -2613,7 +2615,7 @@ class TestLinalg(TestCase):
                 torch.linalg.eig(a, out=(out_w, out_v))
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoCusolverROCMIfNoMagma
     @dtypes(*floating_and_complex_types())
     def test_eig_with_nan(self, device, dtype):
         for val in [np.inf, np.nan]:
@@ -3097,8 +3099,8 @@ class TestLinalg(TestCase):
                 S_s = torch.svd(A, compute_uv=False).S
                 self.assertEqual(S_s, S)
 
-    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolverROCMIfNoMagma
     @dtypes(torch.complex128)
     def test_invariance_error_spectral_decompositions(self, device, dtype):
         make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=True)
