@@ -2417,8 +2417,15 @@ class test_configs:
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
-    autotune_choice_name_regex: Optional[str] = None
-    autotune_choice_desc_regex: Optional[str] = None
+    # Can be set via TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX and
+    # TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX environment variables
+
+    autotune_choice_name_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_NAME_REGEX"
+    )
+    autotune_choice_desc_regex: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_AUTOTUNE_CHOICE_DESC_REGEX"
+    )
 
     graphsafe_rng_func_ignores_fallback_random = False
 

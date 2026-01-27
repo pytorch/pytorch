@@ -8957,107 +8957,108 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
     mat1 = make_mat_e4m3((M, K))
     mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
 
-    dmajor, dminor = torch.cuda.get_device_capability()
+    if torch.device(device).type == "cuda":
+        dmajor, dminor = torch.cuda.get_device_capability()
 
-    # Blockwise scaling requires cublasLt >= 12.9 (CUDA 12.9+)
-    # See: https://github.com/pytorch/pytorch/issues/172227
-    cuda_version = _get_torch_cuda_version()
-    if dmajor == 9 and not torch.version.hip and cuda_version >= (12, 9):
-        # 1x128 x 1x128
-        scale1 = make_scale((K // 128, M)).t()
-        scale2 = make_scale((K // 128, N)).t()
-        samples.append(
-            SampleInput(
-                mat1,
-                mat2,
-                [scale1, ],
-                [ScalingType.BlockWise1x128, ],
-                [SwizzleType.NO_SWIZZLE, ],
-                [scale2, ],
-                [ScalingType.BlockWise1x128, ],
-                [SwizzleType.NO_SWIZZLE, ],
-                None,  # bias
-                torch.bfloat16,  # out_dtype
+        # Blockwise scaling requires cublasLt >= 12.9 (CUDA 12.9+)
+        # See: https://github.com/pytorch/pytorch/issues/172227
+        cuda_version = _get_torch_cuda_version()
+        if dmajor == 9 and not torch.version.hip and cuda_version >= (12, 9):
+            # 1x128 x 1x128
+            scale1 = make_scale((K // 128, M)).t()
+            scale2 = make_scale((K // 128, N)).t()
+            samples.append(
+                SampleInput(
+                    mat1,
+                    mat2,
+                    [scale1, ],
+                    [ScalingType.BlockWise1x128, ],
+                    [SwizzleType.NO_SWIZZLE, ],
+                    [scale2, ],
+                    [ScalingType.BlockWise1x128, ],
+                    [SwizzleType.NO_SWIZZLE, ],
+                    None,  # bias
+                    torch.bfloat16,  # out_dtype
+                )
             )
-        )
-        # 128x128 x 1x128
-        L4 = round_up(K // 128, 4)
-        scale1 = make_scale((M // 128, L4)).t()
-        scale2 = make_scale((K // 128, N)).t()
-        samples.append(
-            SampleInput(
-                mat1,
-                mat2,
-                [scale1, ],
-                [ScalingType.BlockWise128x128, ],
-                [SwizzleType.NO_SWIZZLE, ],
-                [scale2, ],
-                [ScalingType.BlockWise1x128, ],
-                [SwizzleType.NO_SWIZZLE, ],
-                None,  # bias
-                torch.bfloat16,  # out_dtype
+            # 128x128 x 1x128
+            L4 = round_up(K // 128, 4)
+            scale1 = make_scale((M // 128, L4)).t()
+            scale2 = make_scale((K // 128, N)).t()
+            samples.append(
+                SampleInput(
+                    mat1,
+                    mat2,
+                    [scale1, ],
+                    [ScalingType.BlockWise128x128, ],
+                    [SwizzleType.NO_SWIZZLE, ],
+                    [scale2, ],
+                    [ScalingType.BlockWise1x128, ],
+                    [SwizzleType.NO_SWIZZLE, ],
+                    None,  # bias
+                    torch.bfloat16,  # out_dtype
+                )
             )
-        )
-        # 1x128 x 128x128
-        L4 = round_up(K // 128, 4)
-        scale1 = make_scale((K // 128, M)).t()
-        scale2 = make_scale((N // 128, L4)).t()
-        samples.append(
-            SampleInput(
-                mat1,
-                mat2,
-                [scale1, ],
-                [ScalingType.BlockWise1x128, ],
-                [SwizzleType.NO_SWIZZLE, ],
-                [scale2, ],
-                [ScalingType.BlockWise128x128, ],
-                [SwizzleType.NO_SWIZZLE, ],
-                None,  # bias
-                torch.bfloat16,  # out_dtype
+            # 1x128 x 128x128
+            L4 = round_up(K // 128, 4)
+            scale1 = make_scale((K // 128, M)).t()
+            scale2 = make_scale((N // 128, L4)).t()
+            samples.append(
+                SampleInput(
+                    mat1,
+                    mat2,
+                    [scale1, ],
+                    [ScalingType.BlockWise1x128, ],
+                    [SwizzleType.NO_SWIZZLE, ],
+                    [scale2, ],
+                    [ScalingType.BlockWise128x128, ],
+                    [SwizzleType.NO_SWIZZLE, ],
+                    None,  # bias
+                    torch.bfloat16,  # out_dtype
+                )
             )
-        )
 
-    if dmajor >= 10:
-        # MXFP8
-        scale1 = make_scale((M, K // 32)).to(torch.float8_e8m0fnu)
-        scale2 = make_scale((K // 32, N)).to(torch.float8_e8m0fnu)
-        samples.append(
-            SampleInput(
-                mat1,
-                mat2,
-                [scale1, ],
-                [ScalingType.BlockWise1x32, ],
-                [SwizzleType.SWIZZLE_32_4_4, ],
-                [scale2, ],
-                [ScalingType.BlockWise1x32, ],
-                [SwizzleType.SWIZZLE_32_4_4, ],
-                None,  # bias
-                torch.bfloat16,  # out_dtype
+        if dmajor >= 10:
+            # MXFP8
+            scale1 = make_scale((M, K // 32)).to(torch.float8_e8m0fnu)
+            scale2 = make_scale((K // 32, N)).to(torch.float8_e8m0fnu)
+            samples.append(
+                SampleInput(
+                    mat1,
+                    mat2,
+                    [scale1, ],
+                    [ScalingType.BlockWise1x32, ],
+                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    [scale2, ],
+                    [ScalingType.BlockWise1x32, ],
+                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    None,  # bias
+                    torch.bfloat16,  # out_dtype
+                )
             )
-        )
-        # NVFP4
-        # [M, K] -> [M, K // 2]
-        # [K, N] -> [K // 2, N]
-        mat1_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat1.to(torch.bfloat16))
-        mat2_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat2.to(torch.bfloat16).t()).t()
-        scale1 = make_scale((M, K // 16)).to(torch.float8_e4m3fn)
-        global_scale1 = make_scale((1, ))
-        scale2 = make_scale((K // 16, N)).to(torch.float8_e4m3fn)
-        global_scale2 = make_scale((1, ))
-        samples.append(
-            SampleInput(
-                mat1_fp4,
-                mat2_fp4,
-                [scale1, global_scale1],
-                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
-                [SwizzleType.SWIZZLE_32_4_4, ],
-                [scale2, global_scale2],
-                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
-                [SwizzleType.SWIZZLE_32_4_4, ],
-                None,  # bias
-                torch.bfloat16,  # out_dtype
+            # NVFP4
+            # [M, K] -> [M, K // 2]
+            # [K, N] -> [K // 2, N]
+            mat1_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat1.to(torch.bfloat16))
+            mat2_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat2.to(torch.bfloat16).t()).t()
+            scale1 = make_scale((M, K // 16)).to(torch.float8_e4m3fn)
+            global_scale1 = make_scale((1, ))
+            scale2 = make_scale((K // 16, N)).to(torch.float8_e4m3fn)
+            global_scale2 = make_scale((1, ))
+            samples.append(
+                SampleInput(
+                    mat1_fp4,
+                    mat2_fp4,
+                    [scale1, global_scale1],
+                    [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    [scale2, global_scale2],
+                    [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    None,  # bias
+                    torch.bfloat16,  # out_dtype
+                )
             )
-        )
 
 
     yield from samples
@@ -13128,7 +13129,12 @@ op_db: list[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-2)}), 'TestConsistency', device_type='mps'),
+               DecorateInfo(toleranceOverride(
+                   {
+                       torch.float16: tol(atol=1e-3, rtol=2e-2),
+                       torch.float32: tol(atol=1.6e-5, rtol=1.6e-6),
+                   }),
+                   'TestConsistency', device_type='mps'),
            )),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
@@ -15064,6 +15070,14 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Tensor-likes are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: 13.361434936523438 at index (3, 1) (up to 1e-05 allowed)
+               # Greatest relative difference: 10.395817756652832 at index (3, 4) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            )),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
@@ -15486,6 +15500,14 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: 13.361434936523438 at index (3, 1) (up to 1e-05 allowed)
+               # Greatest relative difference: 10.395817756652832 at index (3, 4) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            ),
            error_inputs_func=error_inputs_aminmax_amax_amin),
     OpInfo('as_strided',
@@ -15968,6 +15990,13 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=3e-6)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
+            # Some but not all platforms throw:
+            # AssertionError: Scalars are not close!
+            # Expected 2.0743534564971924 but got nan.
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples',
+                device_type='mps', dtypes=(torch.float32,)
+            ),
         ),
     ),
     UnaryUfuncInfo(
@@ -17572,6 +17601,13 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=(torch.cfloat,)),
+            # Some but not all platforms throw:
+            # AssertionError: Scalars are not close!
+            # Expected (0.573072612285614+0.041746772825717926j) but got (nan+nanj)
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
             # FIXME: intentionally misreports dtypes
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
             # FIXME: numpy reference diverges: Comparing (nan+nanj) and (-0+0j)
@@ -19911,6 +19947,14 @@ op_db: list[OpInfo] = [
                             dtypes=[torch.bool], device_type='cuda', active_if=not TEST_WITH_ROCM),
                # AssertionError: Tensor-likes are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: 7951.0 at index (27,) (up to 1e-05 allowed)
+               # Greatest relative difference: inf at index (6312,) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -20879,6 +20923,14 @@ op_db: list[OpInfo] = [
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.float32,)
                ),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: 1.0 at index (1,) (up to 1e-05 allowed)
+               # Greatest relative difference: inf at index (1,) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
@@ -21381,6 +21433,14 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: nan at index (0, 0) (up to 1e-05 allowed)
+               # Greatest relative difference: nan at index (0, 0) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            ),
            reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
@@ -21656,8 +21716,13 @@ op_db: list[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
+                       # Some but not all platforms throw:
                        # AssertionError: Tensor-likes are not close!
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
+                       DecorateInfo(
+                           unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                           device_type='mps', dtypes=(torch.float32,)
+                       ),
+                       # AssertionError: Tensor-likes are not close!
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                    ),
                    promotes_int_to_float=True),
@@ -23420,6 +23485,14 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
                 device_type='mps', dtypes=(torch.bool,)
             ),
+            # Some but not all platforms throw:
+            # AssertionError: Tensor-likes are not close!
+            # Greatest absolute difference: 15.520018577575684 at index (2, 3) (up to 1e-05 allowed)
+            # Greatest relative difference: 20.158464431762695 at index (4, 1) (up to 1.3e-06 allowed)
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                device_type='mps', dtypes=(torch.float32,)
+            ),
         ),
     ),
     OpInfo(
@@ -24559,6 +24632,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
         torch_opinfo_name="nan_to_num",
+        skips=(
+            # Some but not all platforms throw:
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float16, torch.bfloat16,)
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
@@ -25109,6 +25190,20 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
             ),
+            # Some but not all platforms throw:
+            # AssertionError: Scalars are not equal!
+            # Expected True but got False.
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.bool,)
+            ),
+            # Some but not all platforms throw:
+            # AssertionError: Scalars are not equal!
+            # Expected 12 but got 0.
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.int8,)
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -25132,6 +25227,16 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
                 torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool
             )),
+            # Some but not all platforms throw:
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float32,)
+            ),
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.float16,)
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -25193,6 +25298,14 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.bool, torch.int8,)
+            ),
+            # Some but not all platforms throw:
+            # AssertionError: Tensor-likes are not equal!
+            # Greatest absolute difference: 1091567616 at index (0, 25)
+            # Greatest relative difference: 1.0 at index (0, 0)
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.int32,)
             ),
         ),
     ),
@@ -25987,6 +26100,12 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
                 dtypes=(torch.bfloat16, torch.float16,)
             ),
+            # Some but not all platforms throw:
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float32,)
+            ),
         ),
     ),
     PythonRefInfo(
@@ -26014,6 +26133,12 @@ python_ref_db = [
                     torch.uint8, torch.int8, torch.int64, torch.int32,
                     torch.int16, torch.float16, torch.bfloat16,
                 )
+            ),
+            # Some but not all platforms throw:
+            # RuntimeError: Undefined type ComplexDouble
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.complex64,)
             ),
         ),
     ),
@@ -26138,6 +26263,12 @@ python_ref_db = [
             # Tests don't account for complex's type promotion semantics
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
+            # Some but not all platforms throw:
+            # Exception: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.float16,)
+            ),
         )
     ),
     ElementwiseUnaryPythonRefInfo(

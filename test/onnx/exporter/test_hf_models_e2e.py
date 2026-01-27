@@ -19,7 +19,6 @@ class DynamoExporterHfModelsTest(common_utils.TestCase):
             args,
             kwargs=kwargs,
             dynamo=True,
-            fallback=False,
             verbose=False,
             **options,
         )
