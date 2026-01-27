@@ -16,7 +16,7 @@ mystnb:
 
 {func}`torch.export.export` takes a {class}`torch.nn.Module` and produces a traced graph
 representing only the Tensor computation of the function in an Ahead-of-Time
-(AOT) fashion, which can subsequently be executed with different outputs or
+(AOT) fashion, which can subsequently be executed with different inputs or
 serialized.
 
 ```{code-cell}
