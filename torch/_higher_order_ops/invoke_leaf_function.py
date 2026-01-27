@@ -17,39 +17,21 @@ from .flat_apply import func_to_graphable
 
 
 # Callback for retrieving nn.Module instances by index for leaf_function.
-# This is set by Dynamo's graph_bytecode_inputs module to avoid the HOP
-# importing from Dynamo (which would be a layering violation).
 _leaf_function_module_retriever: Callable[[int], Any] | None = None
 
 
 def set_leaf_function_module_retriever(retriever: Callable[[int], Any]) -> None:
-    """
-    Set the callback for retrieving nn.Module instances by index.
-
-    This is called by torch._dynamo.graph_bytecode_inputs to register
-    its get_external_object_by_index function, allowing invoke_leaf_function
-    to retrieve nn.Module instances without importing from Dynamo.
-    """
     global _leaf_function_module_retriever
     _leaf_function_module_retriever = retriever
 
 
 class LeafModuleState(NamedTuple):
     """
-    A pytree representation of an nn.Module for use in invoke_leaf_function.
-
     In dynamo, nn.Module arguments to leaf functions are converted to this
     pytree format (index, parameters, buffers). This structure is then
-    flattened to produce the actual inputs to invoke_leaf_function. At
-    runtime, the original module is reconstructed via pytree unflatten and
-    _reparametrize_module.
+    flattened to produce the actual inputs to invoke_leaf_function.
 
-    Fields:
-    - nn_module_index: Index to retrieve the original nn module at runtime.
-      Objects are registered by Dynamo during tracing and retrieved via
-      the external object retriever callback (set by Dynamo at import time).
-    - named_parameters: Named parameters of the module, used to reparametrize
-    - named_buffers: Named buffers of the module, used to reparametrize
+    At runtime, the original module is reconstructed from it.
     """
 
     nn_module_index: int
@@ -60,14 +42,14 @@ class LeafModuleState(NamedTuple):
 @dataclass
 class GradientInfo:
     """
-    Lightweight gradient metadata for invoke_leaf_function backward.
+    Instead of storing full tensors in the forward state, we store just the
+    information needed for backward.
 
-    Instead of storing full tensors in the forward state (which can be large),
-    we store just the information needed for backward:
-    - edge: GradientEdge for torch.autograd.grad (points to autograd graph node)
-    - size: torch.Size for creating zero gradients when needed
-    - dtype: torch.dtype for creating zero gradients
-    - device: torch.device for creating zero gradients
+    We need the gradient edge to trigger the autograd engine backward.
+
+    We need the tensor metadata (size, dtype, device) to create zeros when
+    gradient is None at runtime but required by the backward graph (because the graph
+    is traced with fake implementation).
     """
 
     edge: torch.autograd.graph.GradientEdge
@@ -82,23 +64,18 @@ def unwrap_fn_spec(fn_spec: pytree.TreeSpec) -> Callable:
 
 def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
     if _leaf_function_module_retriever is None:
-        raise RuntimeError(
-            "Leaf function module retriever not set. This typically means "
-            "torch._dynamo.graph_bytecode_inputs was not imported before "
-            "invoke_leaf_function was called with nn.Module arguments."
-        )
+        raise RuntimeError("Leaf function module retriever not set.")
 
     mod = _leaf_function_module_retriever(nn_module_index)
     if not isinstance(mod, torch.nn.Module):
         raise TypeError(
             f"Expected nn.Module at index {nn_module_index} for leaf function invocation, "
-            f"but got {type(mod).__name__}. This may indicate the module index is invalid."
+            f"but got {type(mod).__name__}."
         )
     return mod
 
 
 def _detach_tensors(tree: Any) -> Any:
-    """Detach all tensors in the tree while preserving requires_grad."""
     return pytree.tree_map_only(
         torch.Tensor,
         lambda t: t.detach().requires_grad_(t.requires_grad),
@@ -129,17 +106,14 @@ def check_escaped_gradients(
     Raises:
         RuntimeError: If closure-captured tensors with requires_grad are detected
     """
-    # Early exit if no inputs require grad
     if not requires_grad_indices:
         return
 
-    # Lazy import to avoid overhead when check is disabled
     import torch._dynamo.config as config
 
     if not config.leaf_function_check_escaped_gradients:
         return
 
-    # Collect autograd nodes for tracked inputs - these form the traversal boundary
     input_nodes: set[torch.autograd.graph.Node] = set()
     for i, inp in enumerate(inputs):
         if (
@@ -151,7 +125,6 @@ def check_escaped_gradients(
             if edge.node is not None:
                 input_nodes.add(edge.node)
 
-    # Get output grad_fns as starting points for graph traversal
     flat_outputs = outputs if isinstance(outputs, tuple) else (outputs,)
     start_nodes: set[torch.autograd.graph.Node] = {
         out.grad_fn
@@ -163,7 +136,6 @@ def check_escaped_gradients(
     if not start_nodes:
         return
 
-    # Walk graph to find leaf nodes not in our input set
     escaped: set[torch.autograd.graph.Node] = set()
     visited: set[torch.autograd.graph.Node] = set()
     stack = list(start_nodes)
@@ -177,14 +149,12 @@ def check_escaped_gradients(
         for next_node, _ in node.next_functions:
             if next_node is None or next_node in input_nodes:
                 continue
-            # Empty next_functions means this is a leaf node (AccumulateGrad)
             if not next_node.next_functions:
                 escaped.add(next_node)
             else:
                 stack.append(next_node)
 
     if escaped:
-        # Build detailed info about escaped tensors
         tensor_info = []
         for node in escaped:
             if hasattr(node, "variable"):
@@ -330,20 +300,13 @@ def _make_forward(
     include_keys: DispatchKeySet,
     exclude_keys: DispatchKeySet,
 ) -> tuple[Callable, dict[str, Any]]:
-    """
-    Create a forward wrapper that captures gradient info for backward.
-
-    Returns (forward_fn, state_dict) where state_dict is shared with backward.
-    Instead of storing full tensors, we store lightweight GradientInfo to
-    minimize memory usage.
-    """
     state: dict[str, Any] = {"inputs": None, "outputs": None}
 
     @functools.wraps(fn)
     def forward(*args):
         # NB: We mutate requires_grad in-place here, but this is safe because
         # the args are already detached tensors. In dense/fake dispatch,
-        # _detach_tensors() is called before invoking this function, so we're
+        # input tensors are detached before invoking this function, so we're
         # not touching the caller's original tensors' requires_grad state.
         #
         # We need this because we capture which inputs have requires_grad=True
@@ -383,10 +346,8 @@ def _make_forward(
                 ):
                     outputs = fn(*new_args, **new_kwargs)
 
-                # Check for escaped gradients (must be inside enable_grad for get_gradient_edge)
                 check_escaped_gradients(outputs, inputs, requires_grad_indices)
 
-                # Capture lightweight gradient info instead of storing full tensors.
                 state["inputs"] = tuple(
                     GradientInfo(
                         edge=get_gradient_edge(inp),
@@ -426,9 +387,6 @@ def make_runtime_wrappers(
     include_keys: DispatchKeySet,
     exclude_keys: DispatchKeySet,
 ) -> tuple[Callable, Callable]:
-    """
-    Create forward/backward wrappers for runtime execution.
-    """
     forward, state = _make_forward(
         fn, requires_grad_indices, input_spec, include_keys, exclude_keys
     )
@@ -455,9 +413,6 @@ def make_tracing_wrappers(
     include_keys: DispatchKeySet,
     exclude_keys: DispatchKeySet,
 ) -> tuple[Callable, Callable]:
-    """
-    Create forward/backward wrappers for tracing.
-    """
     forward, state = _make_forward(
         fn, requires_grad_indices, input_spec, include_keys, exclude_keys
     )
@@ -631,19 +586,13 @@ def _check_no_input_mutation(
     flat_args: tuple[Any, ...],
     version_before: list[int],
 ) -> None:
-    """
-    Check that no input tensors were mutated in-place during leaf function execution.
-
-    Raises RuntimeError if any input tensor's version counter changed.
-    """
     for i, arg in enumerate(flat_args):
         if isinstance(arg, torch.Tensor):
             if arg._version != version_before[i]:
                 raise RuntimeError(
                     f"In-place mutation detected on input tensor at position {i} "
                     f"(in the pytree-flattened inputs with nn.Module states expanded) in "
-                    f"@leaf_function. In-place mutations on inputs are not tracked "
-                    f"across the leaf function boundary and may cause incorrect results. "
+                    f"@leaf_function. In-place mutations on inputs are not supported yet."
                     f"Consider cloning the input before mutating it."
                 )
 
@@ -657,17 +606,14 @@ def invoke_leaf_function_fake(real_fn_spec, fake_fn_spec, input_spec, *flat_args
 def invoke_leaf_function_dense(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
     from torch._dynamo import config as dynamo_config
 
-    # Record version counters before calling function to detect input mutations
     version_before = [
         arg._version if isinstance(arg, torch.Tensor) else 0 for arg in flat_args
     ]
 
     real_output = _invoke_leaf_function_impl(real_fn_spec, input_spec, *flat_args)
 
-    # Check for input mutations
     _check_no_input_mutation(flat_args, version_before)
 
-    # Validate fake_impl outputs match real_impl outputs when enabled
     if dynamo_config.leaf_function_validate_outputs:
         fake_output = _invoke_leaf_function_impl(fake_fn_spec, input_spec, *flat_args)
         _validate_outputs_match(fake_output, real_output)
