@@ -82,4 +82,28 @@ C10_EXPORT at::Tensor broadcast(
     int64_t src,
     std::string group_name);
 
+C10_EXPORT at::Tensor& scatter_(
+    at::Tensor& output,
+    const std::vector<at::Tensor>& scatter_list,
+    int64_t src,
+    std::string group_name);
+
+C10_EXPORT at::Tensor scatter(
+    const at::Tensor& output,
+    const std::vector<at::Tensor>& scatter_list,
+    int64_t src,
+    std::string group_name);
+
+C10_EXPORT std::vector<at::Tensor> gather_(
+    std::vector<at::Tensor> output_list,
+    const at::Tensor& input,
+    int64_t dst,
+    std::string group_name);
+
+C10_EXPORT std::vector<at::Tensor> gather(
+    const at::Tensor& input,
+    const std::vector<at::Tensor>& gather_list,
+    int64_t dst,
+    std::string group_name);
+
 } // namespace c10d
