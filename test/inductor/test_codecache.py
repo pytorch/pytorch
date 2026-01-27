@@ -2843,6 +2843,24 @@ class TestFxGraphCacheHashing(TestCase):
                 torch.fx.experimental._backward_state.BackwardState()
             )
 
+    def test_bypass_on_runtime_error(self):
+        """
+        Test that RuntimeError raised during pickling (e.g., from pybind11 objects)
+        is caught and converted to BypassFxGraphCache.
+        """
+
+        class UnpickleableObject:
+            """An object that raises RuntimeError when pickled."""
+
+            def __reduce__(self):
+                raise RuntimeError("This object is not pickleable")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        with self.assertRaises(BypassFxGraphCache):
+            pickler.dumps(UnpickleableObject())
+
     def test_stable_strings(self):
         """
         Test that objects containing identical strings pickle the same
