@@ -74,6 +74,8 @@ def unregister_export_chrome_trace_callback(callback: Callable[[dict], dict]) ->
     """Remove a previously registered export_chrome_trace callback."""
     if callback in _export_chrome_trace_callbacks:
         _export_chrome_trace_callbacks.remove(callback)
+
+
 PROFILER_STEP_NAME = "ProfilerStep"
 
 _WARNINGS_SHOWN = set()
