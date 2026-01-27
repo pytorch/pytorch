@@ -11,24 +11,30 @@
 
 namespace {
 
+// Struct to hold shared state
+struct CounterState {
+  std::atomic<int> startCount{0};
+  std::atomic<int> stopCount{0};
+};
+
 // Mock backend for testing WaitCounter functionality
 class MockWaitCounterBackend
     : public c10::monitor::detail::WaitCounterBackendIf {
  public:
-  explicit MockWaitCounterBackend(
-      std::atomic<int>& startCount,
-      std::atomic<int>& stopCount)
-      : startCount_(startCount), stopCount_(stopCount) {}
+  // Backend now holds a shared_ptr to the state
+  explicit MockWaitCounterBackend(std::shared_ptr<CounterState> state)
+      : state_(state) {}
 
   intptr_t start(std::chrono::steady_clock::time_point now) noexcept override {
-    startCount_.fetch_add(1);
+    state_->startCount.fetch_add(1);
     lastStartTime_ = now;
     return reinterpret_cast<intptr_t>(this);
   }
 
-  void stop(std::chrono::steady_clock::time_point now, intptr_t ctx) noexcept
-      override {
-    stopCount_.fetch_add(1);
+  void stop(
+      std::chrono::steady_clock::time_point now,
+      intptr_t ctx) noexcept override {
+    state_->stopCount.fetch_add(1);
     lastStopTime_ = now;
     EXPECT_EQ(ctx, reinterpret_cast<intptr_t>(this));
   }
@@ -42,8 +48,7 @@ class MockWaitCounterBackend
   }
 
  private:
-  std::atomic<int>& startCount_;
-  std::atomic<int>& stopCount_;
+  std::shared_ptr<CounterState> state_;
   std::chrono::steady_clock::time_point lastStartTime_;
   std::chrono::steady_clock::time_point lastStopTime_;
 };
@@ -51,102 +56,102 @@ class MockWaitCounterBackend
 class MockWaitCounterBackendFactory
     : public c10::monitor::detail::WaitCounterBackendFactoryIf {
  public:
+  // Factory accepts and stores a shared_ptr to the state
   MockWaitCounterBackendFactory(
-      std::atomic<int>& startCount,
-      std::atomic<int>& stopCount,
+      std::shared_ptr<CounterState> state,
       std::string_view keyFilter = "")
-      : startCount_(startCount), stopCount_(stopCount), keyFilter_(keyFilter) {}
+      : state_(state), keyFilter_(keyFilter) {}
 
   std::unique_ptr<c10::monitor::detail::WaitCounterBackendIf> create(
       std::string_view key) noexcept override {
     if (!keyFilter_.empty() && key.find(keyFilter_) == std::string_view::npos) {
       return nullptr;
     }
-    return std::make_unique<MockWaitCounterBackend>(startCount_, stopCount_);
+    // Pass the shared_ptr to the backend
+    return std::make_unique<MockWaitCounterBackend>(state_);
   }
 
  private:
-  std::atomic<int>& startCount_;
-  std::atomic<int>& stopCount_;
+  std::shared_ptr<CounterState> state_;
   std::string keyFilter_;
 };
 
 TEST(WaitCounter, BackendRegistration) {
-  auto backends = c10::monitor::detail::getRegisteredWaitCounterBackends();
-  size_t initialCount = backends.size();
-
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "backend_registration";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(startCount, stopCount));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  backends = c10::monitor::detail::getRegisteredWaitCounterBackends();
-  EXPECT_EQ(backends.size(), initialCount + 1);
+  c10::monitor::WaitCounterHandle handle(key);
+  {
+    auto guard = handle.start();
+    EXPECT_EQ(state->startCount.load(), 1);
+    EXPECT_EQ(state->stopCount.load(), 0);
+  }
+  EXPECT_EQ(state->startCount.load(), 1);
+  EXPECT_EQ(state->stopCount.load(), 1);
 }
 
 TEST(WaitCounter, WaitGuardStartStop) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "wait_guard_start_stop";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "wait_guard_start_stop"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
-  EXPECT_GE(startCount.load(), startBefore);
+  EXPECT_GE(state->startCount.load(), startBefore);
   {
-    c10::monitor::WaitCounterHandle handle("wait_guard_start_stop");
+    c10::monitor::WaitCounterHandle handle(key);
     auto guard = handle.start();
-    EXPECT_GE(startCount.load(), startBefore + 1);
-    EXPECT_EQ(stopCount.load(), stopBefore);
+    EXPECT_GE(state->startCount.load(), startBefore + 1);
+    EXPECT_EQ(state->stopCount.load(), stopBefore);
   }
 
-  EXPECT_GE(stopCount.load(), stopBefore + 1);
+  EXPECT_GE(state->stopCount.load(), stopBefore + 1);
 }
 
 TEST(WaitCounter, WaitGuardExplicitStop) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "wait_guard_explicit_stop";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "wait_guard_explicit_stop"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
-  c10::monitor::WaitCounterHandle handle("wait_guard_explicit_stop");
+  c10::monitor::WaitCounterHandle handle(key);
   auto guard = handle.start();
-  EXPECT_GE(startCount.load(), startBefore + 1);
-  EXPECT_EQ(stopCount.load(), stopBefore);
+  EXPECT_GE(state->startCount.load(), startBefore + 1);
+  EXPECT_EQ(state->stopCount.load(), stopBefore);
 
   guard.stop();
-  EXPECT_GE(stopCount.load(), stopBefore + 1);
+  EXPECT_GE(state->stopCount.load(), stopBefore + 1);
 
   // Calling stop() again should be a no-op (guard is already stopped)
-  int stopAfterFirst = stopCount.load();
+  int stopAfterFirst = state->stopCount.load();
   guard.stop();
-  EXPECT_EQ(stopCount.load(), stopAfterFirst);
+  EXPECT_EQ(state->stopCount.load(), stopAfterFirst);
 }
 
 TEST(WaitCounter, WaitGuardMoveConstruction) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "wait_guard_move";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "wait_guard_move"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
   {
-    c10::monitor::WaitCounterHandle handle("wait_guard_move");
+    c10::monitor::WaitCounterHandle handle(key);
     auto guard1 = handle.start();
-    EXPECT_GE(startCount.load(), startBefore + 1);
+    EXPECT_GE(state->startCount.load(), startBefore + 1);
 
     // Move the guard
     auto guard2 = std::move(guard1);
@@ -154,116 +159,110 @@ TEST(WaitCounter, WaitGuardMoveConstruction) {
   }
 
   // Stop should be called exactly once when guard2 is destroyed
-  EXPECT_GE(stopCount.load(), stopBefore + 1);
+  EXPECT_GE(state->stopCount.load(), stopBefore + 1);
 }
 
 TEST(WaitCounter, StaticWaitCounterMacro) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "static_macro_test";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "static_macro_test"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
   {
     auto guard = STATIC_WAIT_COUNTER(static_macro_test).start();
-    EXPECT_GE(startCount.load(), startBefore + 1);
+    EXPECT_GE(state->startCount.load(), startBefore + 1);
   }
 
-  EXPECT_GE(stopCount.load(), stopBefore + 1);
+  EXPECT_GE(state->stopCount.load(), stopBefore + 1);
 }
 
 TEST(WaitCounter, StaticScopedWaitCounterMacro) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "static_scoped_test";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "static_scoped_test"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
   {
     STATIC_SCOPED_WAIT_COUNTER(static_scoped_test);
-    EXPECT_GE(startCount.load(), startBefore + 1);
+    EXPECT_GE(state->startCount.load(), startBefore + 1);
   }
 
-  EXPECT_GE(stopCount.load(), stopBefore + 1);
+  EXPECT_GE(state->stopCount.load(), stopBefore + 1);
 }
 
 TEST(WaitCounter, WithWaitCounterMacroAssign) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "execute_with_test_assign";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "execute_with_test"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
   int value = 0;
-  WITH_WAIT_COUNTER(execute_with_test, value = 42);
+  WITH_WAIT_COUNTER(execute_with_test_assign, value = 42);
 
   EXPECT_EQ(value, 42);
-  EXPECT_GE(startCount.load(), startBefore + 1);
-  EXPECT_GE(stopCount.load(), stopBefore + 1);
+  EXPECT_GE(state->startCount.load(), startBefore + 1);
+  EXPECT_GE(state->stopCount.load(), stopBefore + 1);
 }
 
 TEST(WaitCounter, WithWaitCounterMacroReturn) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "execute_with_test_return";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "execute_with_test"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
   int value = 0;
-  value = WITH_WAIT_COUNTER(execute_with_test, []() { return 42; }());
+  value = WITH_WAIT_COUNTER(execute_with_test_return, []() { return 42; }());
 
   EXPECT_EQ(value, 42);
-  EXPECT_GE(startCount.load(), startBefore + 1);
-  EXPECT_GE(stopCount.load(), stopBefore + 1);
+  EXPECT_GE(state->startCount.load(), startBefore + 1);
+  EXPECT_GE(state->stopCount.load(), stopBefore + 1);
 }
 
 TEST(WaitCounter, SameHandleMultipleTimes) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "multiple_times_test";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "multiple_times_test"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
-  c10::monitor::WaitCounterHandle handle("multiple_times_test");
+  c10::monitor::WaitCounterHandle handle(key);
 
   for (int i = 0; i < 5; ++i) {
     auto guard = handle.start();
   }
 
-  EXPECT_GE(startCount.load(), startBefore + 5);
-  EXPECT_GE(stopCount.load(), stopBefore + 5);
+  EXPECT_GE(state->startCount.load(), startBefore + 5);
+  EXPECT_GE(state->stopCount.load(), stopBefore + 5);
 }
 
 TEST(WaitCounter, ConcurrentUsage) {
-  std::atomic<int> startCount{0};
-  std::atomic<int> stopCount{0};
+  auto state = std::make_shared<CounterState>();
+  constexpr std::string_view key = "concurrent_test";
 
   c10::monitor::detail::registerWaitCounterBackend(
-      std::make_unique<MockWaitCounterBackendFactory>(
-          startCount, stopCount, "concurrent_test"));
+      std::make_unique<MockWaitCounterBackendFactory>(state, key));
 
-  int startBefore = startCount.load();
-  int stopBefore = stopCount.load();
+  int startBefore = state->startCount.load();
+  int stopBefore = state->stopCount.load();
 
   constexpr int kNumThreads = 10;
   constexpr int kIterationsPerThread = 100;
@@ -285,8 +284,8 @@ TEST(WaitCounter, ConcurrentUsage) {
   }
 
   EXPECT_GE(
-      startCount.load(), startBefore + kNumThreads * kIterationsPerThread);
-  EXPECT_GE(stopCount.load(), stopBefore + kNumThreads * kIterationsPerThread);
+      state->startCount.load(), startBefore + kNumThreads * kIterationsPerThread);
+  EXPECT_GE(state->stopCount.load(), stopBefore + kNumThreads * kIterationsPerThread);
 }
 
 TEST(WaitCounter, StaticHandlePerCallSite) {
