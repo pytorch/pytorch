@@ -622,7 +622,7 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
+            size = V.graph.sizevars.optimization_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
@@ -635,7 +635,7 @@ class TritonTemplateKernel(TritonKernel):
                 if f is not None:
                     if isinstance(f, torch.SymInt):
                         f = f.node.expr
-                    return V.graph.sizevars.size_hint(f, fallback=0)
+                    return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
     def jit_lines(self):
@@ -4340,21 +4340,9 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            *tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    stride,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for stride in node.get_stride()
-            ),
-            sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
+            *sizevars.optimization_hints(node.get_size()),
+            *V.graph.sizevars.optimization_hints(node.get_stride()),
+            sizevars.optimization_hint(node.get_layout().offset),
         )
 
     def add_feedback_saver(self, fn: FeedbackFunction):
@@ -4501,12 +4489,7 @@ def _autotune_metadata(input_nodes):
         # argument, and extracting those out there directly
         "autotune_strides_hinted": ", ".join(
             [
-                str(
-                    V.graph.sizevars.size_hints(
-                        n.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                    )
-                )
+                str(V.graph.sizevars.optimization_hints(n.get_stride()))
                 for n in input_nodes
             ]
         ),
@@ -4515,10 +4498,7 @@ def _autotune_metadata(input_nodes):
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.size_hints(
-                            n.get_size(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
+                        V.graph.sizevars.optimization_hints(n.get_size()),
                     )
                 )
                 for n in input_nodes
