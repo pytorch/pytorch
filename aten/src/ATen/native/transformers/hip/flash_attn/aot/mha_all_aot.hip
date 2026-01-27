@@ -37,7 +37,6 @@
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/core/Tensor.h>
 #include <ATen/hip/HIPContext.h>
-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 #include <ATen/hip/HIPGraphsUtils.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -162,7 +161,7 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
             std::optional<int64_t> window_size_right,
             const bool return_softmax,
             const std::optional<at::Generator>& gen_) {
-  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
   check_gpu_arch(stream);
 
   auto q_dtype = q.dtype();
@@ -348,8 +347,8 @@ mha_varlen_fwd_aot(const at::Tensor &q,  // total_q x num_heads x head_size, tot
   TORCH_CHECK(!paged_KV, "[ROCm] mha_varlen_fwd: block_table_ must be nullopt");
   TORCH_CHECK(!alibi_slopes_.has_value(), "[ROCm] mha_varlen_fwd: alibi_slopes_ must be nullopt");
 
-  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
-  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
   check_gpu_arch(stream);
 
   auto q_dtype = q.dtype();
@@ -560,8 +559,8 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
         const at::Tensor& philox_offset) {
   // Otherwise the kernel will be launched from cuda:0 device
   // Cast to char to avoid compiler warning about narrowing
-  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
-  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
   check_gpu_arch(stream);
 
   bool is_dropout = p_dropout > 0.0;
@@ -793,8 +792,8 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
 
   // Otherwise the kernel will be launched from cuda:0 device
   // Cast to char to avoid compiler warning about narrowing
-  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
-  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
   check_gpu_arch(stream);
 
   bool is_dropout = p_dropout > 0.0;
