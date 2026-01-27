@@ -748,16 +748,17 @@ class DistMathOpsTest(DTensorTestBase):
         grad = torch.randn(12, 8)
         sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
 
-        # powsum computes sum(|x|^p) without the root
-        sharded_out = torch.ops.aten.linalg__powsum(sharded_grad, 2)
+        # Test multiple ord values to validate output placements
+        for ord in [1, 2, 3]:
+            # powsum computes sum(|x|^ord) without the root
+            sharded_out = torch.ops.aten.linalg__powsum(sharded_grad, ord)
 
-        # Expected: sum(|x|^2) over all elements
-        expected = (grad.abs() ** 2).sum()
-        self.assertEqual(sharded_out.full_tensor(), expected)
+            # The placement should be Partial("sum")
+            self.assertEqual(sharded_out.placements, (Partial("sum"),))
 
-        # The placement should be Partial("sum")
-        self.assertTrue(sharded_out.placements[0].is_partial())
-        self.assertEqual(sharded_out.placements[0].reduce_op, "sum")
+            # Expected: sum(|x|^ord) over all elements
+            expected = (grad.abs() ** ord).sum()
+            self.assertEqual(sharded_out.full_tensor(), expected)
 
     @with_comms
     def test_vector_norm_special_norms_placement(self):
@@ -794,7 +795,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     def test_foreach_powsum_sharded(self):
-        """Test that _foreach_powsum produces correct values for sharded input."""
+        """Test that _foreach_powsum produces correct values and placements for sharded input."""
         device_mesh = self.build_device_mesh()
 
         torch.manual_seed(42)
@@ -804,15 +805,22 @@ class DistMathOpsTest(DTensorTestBase):
         sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
         sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
 
-        # foreach_powsum computes sum(|x|^p) for each tensor
-        sharded_out = torch.ops.aten._foreach_powsum([sharded_grad0, sharded_grad1], 2)
+        # Test multiple ord values to validate output placements
+        for ord in [1, 2, 3]:
+            sharded_out = torch.ops.aten._foreach_powsum(
+                [sharded_grad0, sharded_grad1], ord
+            )
 
-        # Expected: sum(|x|^2) for each tensor
-        expected0 = (grad0.abs() ** 2).sum()
-        expected1 = (grad1.abs() ** 2).sum()
+            # Output should be Partial("sum") since powsum computes sum(|x|^ord)
+            self.assertEqual(sharded_out[0].placements, (Partial("sum"),))
+            self.assertEqual(sharded_out[1].placements, (Partial("sum"),))
 
-        self.assertEqual(sharded_out[0].full_tensor(), expected0)
-        self.assertEqual(sharded_out[1].full_tensor(), expected1)
+            # Check values: sum(|x|^ord) for each tensor
+            expected0 = (grad0.abs() ** ord).sum()
+            expected1 = (grad1.abs() ** ord).sum()
+
+            self.assertEqual(sharded_out[0].full_tensor(), expected0)
+            self.assertEqual(sharded_out[1].full_tensor(), expected1)
 
     @with_comms
     def test_vector_norm_handler_decomposition(self):
