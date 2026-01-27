@@ -835,6 +835,60 @@ class TestCustomOp(CustomOpTestCaseBase):
         schema = infer_schema(substringy_fn, mutates_args={})
         self.assertExpectedInline(schema, "(Tensor x) -> Tensor[]")
 
+    def test_infer_schema_nested_list(self):
+        # Test list[list[int]] -> SymInt[][]
+        def nested_list_fn(x: Tensor, groups: list[list[int]]) -> Tensor:
+            return x
+
+        self.assertExpectedInline(
+            infer_schema(nested_list_fn, mutates_args=()),
+            """(Tensor x, SymInt[][] groups) -> Tensor""",
+        )
+
+        # Test optional nested list
+        def optional_nested_list_fn(
+            x: Tensor, groups: list[list[int]] | None = None
+        ) -> Tensor:
+            return x
+
+        self.assertExpectedInline(
+            infer_schema(optional_nested_list_fn, mutates_args=()),
+            """(Tensor x, SymInt[][]? groups=None) -> Tensor""",
+        )
+
+    def test_nested_list_custom_op(self):
+        # Test that a custom op with list[list[int]] actually works end-to-end
+        @torch.library.custom_op(
+            f"{TestCustomOp.test_ns}::nested_list_op", mutates_args={}
+        )
+        def nested_list_op(x: Tensor, groups: list[list[int]]) -> Tensor:
+            # Verify we receive the groups correctly (as list of lists of ints)
+            result = x.clone()
+            for group in groups:
+                for idx in group:
+                    result = result + idx
+            return result
+
+        @nested_list_op.register_fake
+        def nested_list_op_fake(x: Tensor, groups: list[list[int]]) -> Tensor:
+            return torch.empty_like(x)
+
+        x = torch.randn(10)
+        groups = [[0, 1, 2], [3, 4]]
+
+        result = nested_list_op(x, groups)
+        # Sum of indices: 0+1+2+3+4 = 10
+        expected = x + 10
+        self.assertEqual(result, expected)
+
+        # Test with empty groups
+        result_empty = nested_list_op(x, [])
+        self.assertEqual(result_empty, x)
+
+        # Test with single group
+        result_single = nested_list_op(x, [[5]])
+        self.assertEqual(result_single, x + 5)
+
     def test_infer_schema_unsupported(self):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
