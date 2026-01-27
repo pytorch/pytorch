@@ -222,6 +222,7 @@ def derived_types(
     list_base: bool,
     optional_base_list: bool,
     optional_list_base: bool,
+    nested_list_base: bool = False,
 ):
     result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
         (base_type, cpp_type),
@@ -252,26 +253,38 @@ def derived_types(
             (typing.Optional[seq_typ], f"{cpp_type}[]?")
             for seq_typ in derived_seq_types(base_type)
         )
+    if nested_list_base:
+        # Support for list[list[T]] -> T[][]
+        for inner_seq_typ in derived_seq_types(base_type):
+            result.extend(
+                (outer_seq_typ, f"{cpp_type}[][]")
+                for outer_seq_typ in derived_seq_types(inner_seq_typ)
+            )
+            # Also support Optional[list[list[T]]] -> T[][]?
+            result.extend(
+                (typing.Optional[outer_seq_typ], f"{cpp_type}[][]?")
+                for outer_seq_typ in derived_seq_types(inner_seq_typ)
+            )
     return result
 
 
 def get_supported_param_types():
-    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
-        # (python type, schema type, type[] variant, type?[] variant, type[]? variant
-        (Tensor, "Tensor", True, True, False),
-        (int, "SymInt", True, False, True),
-        (float, "float", True, False, True),
-        (bool, "bool", True, False, True),
-        (str, "str", False, False, False),
-        (types.Number, "Scalar", True, False, False),
-        (dtype, "ScalarType", False, False, False),
-        (device, "Device", False, False, False),
+    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool, bool]] = [
+        # (python type, schema type, type[] variant, type?[] variant, type[]? variant, type[][] variant)
+        (Tensor, "Tensor", True, True, False, False),
+        (int, "SymInt", True, False, True, True),
+        (float, "float", True, False, True, False),
+        (bool, "bool", True, False, True, False),
+        (str, "str", False, False, False, False),
+        (types.Number, "Scalar", True, False, False, False),
+        (dtype, "ScalarType", False, False, False, False),
+        (device, "Device", False, False, False, False),
     ]
 
     if torch.distributed.is_available():
         from torch.distributed.distributed_c10d import GroupName
 
-        data.append((typing.cast(type, GroupName), "str", False, False, False))
+        data.append((typing.cast(type, GroupName), "str", False, False, False, False))
 
     result = []
     for line in data:
