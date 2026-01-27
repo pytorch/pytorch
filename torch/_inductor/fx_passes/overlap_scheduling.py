@@ -41,7 +41,7 @@ def make_all_device_put_sync(gm: torch.fx.GraphModule) -> None:
                 _, kwargs = opt_args_kwargs
                 if kwargs.get("non_blocking", False):
                     kwargs["non_blocking"] = False
-                    n.args = tuple(kwargs.values())
+                    n.args = n.args[0], kwargs["device"], kwargs["non_blocking"]
                     n.kwargs = {}
 
 
