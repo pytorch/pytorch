@@ -496,7 +496,20 @@ else:
                 )
                 if dim_group is None:
                     return None
-                return dim_group.group_name
+                # Use canonical name based on the first subgroup's ranks for
+                # cross-rank consistency. All ranks can compute this locally
+                # since pg_ranks_by_dim is the same across all ranks.
+                first_subgroup_ranks = pg_ranks_by_dim[0].tolist()
+                canonical_name = f"group_{group_desc}_{first_subgroup_ranks[0]}"
+                # Register alias from canonical name to our actual group name.
+                # Skip if alias already exists (e.g., mesh was already created).
+                try:
+                    torch._C._distributed_c10d._register_process_group_alias(
+                        canonical_name, dim_group.group_name
+                    )
+                except RuntimeError:
+                    pass  # Alias already registered
+                return canonical_name
 
             # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
             # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
