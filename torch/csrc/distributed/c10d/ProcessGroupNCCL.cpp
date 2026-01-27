@@ -288,10 +288,10 @@ static std::mutex ncclCommMemPoolMapMutex;
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
 static void cacheAllocatorRegisterHook(
-    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+    const c10::CachingDeviceAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
   if (te.action_ !=
-      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
+      c10::CachingDeviceAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
     return;
   }
 
@@ -321,10 +321,10 @@ static void cacheAllocatorRegisterHook(
 }
 
 static void cacheAllocatorDeregisterHook(
-    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+    const c10::CachingDeviceAllocator::TraceEntry& te) {
   // deregister before SEGMENT_FREE
   if (te.action_ !=
-      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) {
+      c10::CachingDeviceAllocator::TraceEntry::Action::SEGMENT_FREE) {
     return;
   }
 
