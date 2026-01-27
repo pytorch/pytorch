@@ -79,7 +79,7 @@ That issue belongs to the sub-oncall team. They own their queue.
 ### 1) Question vs Bug/Feature
 
 - If it is a question (not a bug report or feature request): close and use the `redirect_to_forum` template from `templates.json`.
-- If unclear: request additional information (minimal repro, full logs, `collect_env.py` output).
+- If unclear whether it is a bug/feature vs a question: request additional information using the `request_more_info` template and stop.
 
 ### 2) Transfer (domain library or ExecuTorch)
 
@@ -106,8 +106,6 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 | `oncall: mobile` | Mobile (iOS/Android), excludes ExecuTorch |
 | `oncall: profiler` | Profiler issues (CPU, GPU, Kineto) |
 | `oncall: releng` | Release engineering, CI infrastructure |
-| `oncall: package/deploy` | torch.package, torch.deploy |
-| `oncall: java` | Java bindings |
 | `oncall: visualization` | TensorBoard integration |
 
 **Note:** `oncall: cpu inductor` is a sub-queue of PT2. For general triage, just use `oncall: pt2`.
@@ -117,13 +115,13 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 Only if the issue stays in the general queue:
 - Add 1+ `module: ...` labels based on the affected area
 - If flaky test: add `module: flaky-tests`
-- If feature request: add `feature`
+- If feature request: add `feature` (or `function request` for a new function or new arguments/modes)
 - If small improvement: add `enhancement`
 
 ### 5) High Priority — REQUIRES HUMAN REVIEW
 
 **CRITICAL:** If you believe an issue is high priority, you MUST:
-1. Add `triage review` label (not just `triaged`)
+1. Add `triage review` label and do not add `triaged`
 
 Do NOT directly add `high priority` without human confirmation.
 
@@ -145,13 +143,14 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 
 **DO NOT:**
 - Close bug reports or feature requests automatically
+- Close issues unless they are clear usage questions per Step 1
 - Assign issues to users
 - Add `high priority` directly without human confirmation
 - Add module labels when redirecting to oncall
-- Add comments to bug reports or feature requests
+- Add comments to bug reports or feature requests, except a single info request when classification is unclear
 
 **DO:**
 - Close clear usage questions and point to discuss.pytorch.org (per step 1)
 - Be conservative - when in doubt, add `triage review` for human attention
-- Apply type labels when confident
+- Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete

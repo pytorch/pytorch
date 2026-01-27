@@ -9,9 +9,11 @@ Exit codes:
   0 - Allow the tool call
   2 - Block the tool call (feedback sent to Claude)
 """
+
 import json
-import sys
 import re
+import sys
+
 
 # Patterns that match forbidden label prefixes (case-insensitive)
 FORBIDDEN_PATTERNS = [
@@ -59,10 +61,19 @@ def main():
         if blocked:
             # Exit code 2 blocks the tool and sends stderr as feedback to Claude
             print(f"BLOCKED: Cannot add forbidden labels: {blocked}", file=sys.stderr)
-            print("These labels are reserved for CI/infrastructure use only.", file=sys.stderr)
-            print("", file=sys.stderr)
-            print("ACTION REQUIRED: Add ONLY the 'triage review' label instead.", file=sys.stderr)
-            print("Do NOT add any other labels. A human will review this issue.", file=sys.stderr)
+            print(
+                "These labels are reserved for CI/infrastructure use only.",
+                file=sys.stderr,
+            )
+            print(file=sys.stderr)
+            print(
+                "ACTION REQUIRED: Add ONLY the 'triage review' label instead.",
+                file=sys.stderr,
+            )
+            print(
+                "Do NOT add any other labels. A human will review this issue.",
+                file=sys.stderr,
+            )
             sys.exit(2)
 
         sys.exit(0)
