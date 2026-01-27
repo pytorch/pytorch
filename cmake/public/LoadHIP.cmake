@@ -185,7 +185,7 @@ if(HIP_FOUND)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
   find_package_and_print_version(rocsolver REQUIRED)
-  if (USE_NVSHMEM)
+  if(USE_NVSHMEM)
     find_package_and_print_version(rocshmem REQUIRED)
   endif()
   # workaround cmake 4 build issue

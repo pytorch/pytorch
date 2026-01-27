@@ -1001,34 +1001,34 @@ elseif(USE_CUDA)
   # Compile with NVSHMEM
   # Default value of `USE_NVSHMEM` is set in CMakeLists.txt under root, to ON.
   if(USE_NVSHMEM)
-      message(STATUS "NVSHMEM_HOME set to:  '$ENV{NVSHMEM_HOME}'")
-      message(STATUS "NVSHMEM wheel installed at:  '${NVSHMEM_PY_DIR}'")
-      # Search order:
-      # 1. If user has specified `NVSHMEM_HOME`, we use it;
-      # 2. If NVSHMEM wheel has been installed, we use it, see
-      # tools/setup_helpers/cmake.py, where we set `NVSHMEM_PY_DIR` to the wheel
-      # location, e.g.
-      # `/path/to/conda/lib/python3.10/site-packages/nvidia/nvshmem`,
-      # 3. Let CMake find it in the default system paths, e.g. /usr/local.
-      find_library(NVSHMEM_HOST_LIB
-        # In pip install case, the lib suffix is `.so.3` instead of `.so`
-        NAMES nvshmem_host libnvshmem_host.so.3 NAMES_PER_DIR
-        HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
-        PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
-        DOC "The location of NVSHMEM host library.")
-      find_library(NVSHMEM_DEVICE_LIB
-        # Device lib is a `.a` file
-        NAMES nvshmem_device
-        HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
-        PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
-        DOC "The location of NVSHMEM device library.")
-      find_path(NVSHMEM_INCLUDE_DIR
-        NAMES nvshmem.h
-        HINTS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
-        DOC "The location of NVSHMEM headers.")
-      message(STATUS "NVSHMEM_HOST_LIB:  '${NVSHMEM_HOST_LIB}'")
-      message(STATUS "NVSHMEM_DEVICE_LIB:  '${NVSHMEM_DEVICE_LIB}'")
-      message(STATUS "NVSHMEM_INCLUDE_DIR:  '${NVSHMEM_INCLUDE_DIR}'")
+    message(STATUS "NVSHMEM_HOME set to:  '$ENV{NVSHMEM_HOME}'")
+    message(STATUS "NVSHMEM wheel installed at:  '${NVSHMEM_PY_DIR}'")
+    # Search order:
+    # 1. If user has specified `NVSHMEM_HOME`, we use it;
+    # 2. If NVSHMEM wheel has been installed, we use it, see
+    # tools/setup_helpers/cmake.py, where we set `NVSHMEM_PY_DIR` to the wheel
+    # location, e.g.
+    # `/path/to/conda/lib/python3.10/site-packages/nvidia/nvshmem`,
+    # 3. Let CMake find it in the default system paths, e.g. /usr/local.
+    find_library(NVSHMEM_HOST_LIB
+      # In pip install case, the lib suffix is `.so.3` instead of `.so`
+      NAMES nvshmem_host libnvshmem_host.so.3 NAMES_PER_DIR
+      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
+      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
+      DOC "The location of NVSHMEM host library.")
+    find_library(NVSHMEM_DEVICE_LIB
+      # Device lib is a `.a` file
+      NAMES nvshmem_device
+      HINTS $ENV{NVSHMEM_HOME} ${NVSHMEM_PY_DIR}
+      PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64
+      DOC "The location of NVSHMEM device library.")
+    find_path(NVSHMEM_INCLUDE_DIR
+      NAMES nvshmem.h
+      HINTS $ENV{NVSHMEM_HOME}/include ${NVSHMEM_PY_DIR}/include
+      DOC "The location of NVSHMEM headers.")
+    message(STATUS "NVSHMEM_HOST_LIB:  '${NVSHMEM_HOST_LIB}'")
+    message(STATUS "NVSHMEM_DEVICE_LIB:  '${NVSHMEM_DEVICE_LIB}'")
+    message(STATUS "NVSHMEM_INCLUDE_DIR:  '${NVSHMEM_INCLUDE_DIR}'")
   endif()
 
   # If NVSHMEM_LIBRARY is found, we build torch_cuda with NVSHMEM support.
@@ -1464,7 +1464,7 @@ if(USE_ROCM)
 
   message(WARNING "USE_NVSHMEM=${USE_NVSHMEM} USE_ROCM=${USE_ROCM}")
   if(USE_NVSHMEM)
-    if (NOT ${rocshmem_FOUND})
+    if(NOT ${rocshmem_FOUND})
       message(FATAL_ERROR "USE_NVSHMEM=1 and roccshmem is NOT FOUND")
     endif()
 
@@ -1480,7 +1480,7 @@ if(USE_ROCM)
     set_source_files_properties(${TORCH_ROCSHMEM_SRCS} PROPERTIES LANGUAGE HIP)
 
     hip_add_library(torch_rocshmem SHARED ${TORCH_ROCSHMEM_SRCS})
-    
+
     # Set the linker language to HIP to ensure hipcc is used for linking
     set_target_properties(torch_rocshmem PROPERTIES LINKER_LANGUAGE HIP)
 
@@ -2021,9 +2021,6 @@ if(BUILD_TEST)
   if(USE_ROCM)
     string(JOIN " " HIP_HIPCC_FLAGS_STR ${HIP_HIPCC_FLAGS})
     set(HIP_HIPCC_FLAGS ${HIP_HIPCC_FLAGS_STR})
-
-    message(WARNING "PG HIP_HIPCC_FLAGS_STR: ${HIP_HIPCC_FLAGS_STR}")
-    message(WARNING "PG HIP_HIPCC_FLAGS: ${HIP_HIPCC_FLAGS}")
     set(BASE_HIPCC_FLAGS ${HIP_HIPCC_FLAGS})
 
     foreach(test_src ${Caffe2_HIP_TEST_SRCS})
