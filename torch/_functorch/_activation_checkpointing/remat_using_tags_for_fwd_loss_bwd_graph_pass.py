@@ -59,7 +59,7 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
 
     if has_recomputable_rng_ops(gm):
         raise RuntimeError(
-            "Activation checkpoint rematerializing in forward-loss-backward graph does not support RNG ops "
+            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops "
             "in checkpointed regions. Please move RNG operations outside "
             "of checkpoint regions, or use joint graph mode (where partitioner handles RNG)."
         )
