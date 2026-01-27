@@ -132,7 +132,12 @@ from .utils import (
     proxy_args_kwargs,
 )
 from .variables.base import typestr, ValueMutationNew, VariableTracker
-from .variables.builder import FrameStateSizeEntry, SourcelessBuilder, VariableBuilder, wrap_fx_proxy
+from .variables.builder import (
+    FrameStateSizeEntry,
+    SourcelessBuilder,
+    VariableBuilder,
+    wrap_fx_proxy,
+)
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -166,7 +171,6 @@ from .variables.misc import (
     ExceptionVariable,
     GetAttrVariable,
     NullVariable,
-    PythonModuleVariable,
     TracebackVariable,
     UnknownVariable,
 )
@@ -2171,7 +2175,9 @@ class InstructionTranslatorBase(
             and isinstance(val, variables.ExceptionVariable)
             and val.exc_type is StopIteration
         ):
-            val = SourcelessBuilder.create(self, RuntimeError).call_function(self, [], {})  # type: ignore[arg-type]
+            val = SourcelessBuilder.create(self, RuntimeError).call_function(
+                self, [], {}
+            )  # type: ignore[arg-type]
 
         # Capture the python_stack when the exception is first raised.
         # This preserves the original exception location even if the exception
@@ -2235,7 +2241,9 @@ class InstructionTranslatorBase(
                 curr_exc = self.exn_vt_stack.get_current_exception()
                 self._attach_traceback_to_exception(curr_exc)
                 cause = self._create_exception_type(from_vt)
-                curr_exc.call_setattr(self, SourcelessBuilder.create(self, "__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
+                curr_exc.call_setattr(
+                    self, SourcelessBuilder.create(self, "__cause__"), cause
+                )  # type: ignore[arg-type, union-attr, assignment]
 
     def CLEANUP_THROW(self, inst: Instruction) -> None:
         # https://github.com/python/cpython/pull/96010
@@ -2645,7 +2653,9 @@ class InstructionTranslatorBase(
             # pyrefly: ignore [unbound-name]
         ) and argsvars.has_force_unpack_var_sequence(self):
             # pyrefly: ignore [unbound-name]
-            argsvars = SourcelessBuilder.create(self, tuple(argsvars.force_unpack_var_sequence(self)))
+            argsvars = SourcelessBuilder.create(
+                self, tuple(argsvars.force_unpack_var_sequence(self))
+            )
 
         # Unpack for cases like fn(**obj) where obj is a map
         # pyrefly: ignore [unbound-name]
@@ -3359,7 +3369,10 @@ class InstructionTranslatorBase(
     def BUILD_MAP_UNPACK(self, inst: Instruction) -> None:
         items = self.popn(inst.argval)
         # ensure everything is a dict
-        items = [SourcelessBuilder.create(self, dict).call_function(self, [x], {}) for x in items]  # type: ignore[arg-type]
+        items = [
+            SourcelessBuilder.create(self, dict).call_function(self, [x], {})
+            for x in items
+        ]  # type: ignore[arg-type]
         result: dict[Any, Any] = {}
         for x in items:
             assert isinstance(x, ConstDictVariable)
@@ -3586,7 +3599,9 @@ class InstructionTranslatorBase(
         elif flag == 2:
             return SourcelessBuilder.create(self, repr).call_function(self, [value], {})  # type: ignore[arg-type]
         elif flag == 3:
-            return SourcelessBuilder.create(self, ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+            return SourcelessBuilder.create(self, ascii).call_function(
+                self, [value], {}
+            )  # type: ignore[arg-type]
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
@@ -3607,7 +3622,9 @@ class InstructionTranslatorBase(
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
-        self.call_function(SourcelessBuilder.create(self, str.format), [fmt_var, value], {})
+        self.call_function(
+            SourcelessBuilder.create(self, str.format), [fmt_var, value], {}
+        )
 
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
@@ -3700,7 +3717,9 @@ class InstructionTranslatorBase(
         obj.call_method(self, "extend", [v], {})  # type: ignore[arg-type]
 
     def LIST_TO_TUPLE(self, inst: Instruction) -> None:
-        self.push(SourcelessBuilder.create(self, tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
+        self.push(
+            SourcelessBuilder.create(self, tuple).call_function(self, [self.pop()], {})
+        )  # type: ignore[arg-type]
 
     def STOPITERATION_ERROR(self, inst: Instruction) -> None:
         # wrap the generator body in a try: ... except StopIteration: ... which
@@ -3716,7 +3735,9 @@ class InstructionTranslatorBase(
                 [SourcelessBuilder.create(self, "generator raised StopIteration")],
                 {},
             )
-            new_val.call_setattr(self, SourcelessBuilder.create(self, "__context__"), val)  # type: ignore[attr-defined]
+            new_val.call_setattr(
+                self, SourcelessBuilder.create(self, "__context__"), val
+            )  # type: ignore[attr-defined]
             new_val.call_setattr(self, SourcelessBuilder.create(self, "__cause__"), val)  # type: ignore[attr-defined]
             self.stack[-1] = new_val
 
@@ -3768,7 +3789,11 @@ class InstructionTranslatorBase(
         assert isinstance(tos1, ConstDictVariable)
 
         if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
-            self.push(SourcelessBuilder.create(self, tuple([tos1.getitem_const(self, k) for k in keys])))  # type: ignore[attr-defined,arg-type]
+            self.push(
+                SourcelessBuilder.create(
+                    self, tuple([tos1.getitem_const(self, k) for k in keys])
+                )
+            )  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable.create(True))
         else:
@@ -4057,7 +4082,11 @@ class InstructionTranslatorBase(
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
-            self.push(SourcelessBuilder.create(self, tuple(self.pop().force_unpack_var_sequence(self))))
+            self.push(
+                SourcelessBuilder.create(
+                    self, tuple(self.pop().force_unpack_var_sequence(self))
+                )
+            )
         else:
             unimplemented(
                 gb_type="Missing CALL_INTRINSIC_1 handler",
