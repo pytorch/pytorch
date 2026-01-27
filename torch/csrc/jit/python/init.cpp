@@ -1613,9 +1613,22 @@ void initJITBindings(PyObject* module) {
              const std::string& key,
              size_t numel,
              py::object data_type_obj) {
-            at::DataPtr data(std::get<0>(self.getRecord(key)));
+            auto [data, size] = self.getRecord(key);
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
+
+            TORCH_CHECK(
+                size == numel * elementSize(scalar_type),
+                "record size (",
+                size,
+                " bytes) does not match expected size (",
+                numel * elementSize(scalar_type),
+                " bytes = ",
+                numel,
+                " elements * ",
+                elementSize(scalar_type),
+                " bytes/element) for dtype ",
+                scalar_type);
 
             c10::Storage storage(
                 c10::Storage::use_byte_size_t(),
@@ -1873,6 +1886,12 @@ void initJITBindings(PyObject* module) {
         return torch::jit::isRegisteredOpaqueType(type_name);
       },
       R"doc(Checks if a type name is registered as an opaque type.)doc");
+  m.def(
+      "_unregister_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::unregisterOpaqueType(type_name);
+      },
+      R"doc(Unregisters a type name from the opaque type registry.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);

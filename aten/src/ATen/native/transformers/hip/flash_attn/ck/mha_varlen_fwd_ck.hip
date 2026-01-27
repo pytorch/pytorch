@@ -273,7 +273,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 
     // Otherwise the kernel will be launched from cuda:0 device
     // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
     bool has_lse = true;
@@ -307,7 +307,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
         std::lock_guard<std::mutex> lock(gen->mutex_);
         auto philox_args = gen->philox_cuda_state(counter_offset);
         hipLaunchKernelGGL(
-            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::hip::getCurrentHIPStreamMasqueradingAsCUDA(), philox_args, rng_state_ptr);
+            flash::ParsePhiloxCudaState, dim3(1), dim3(64), 0, at::cuda::getCurrentCUDAStream(), philox_args, rng_state_ptr);
     }
 
     // remove const from attn_bias_
@@ -320,7 +320,7 @@ mha_varlen_fwd_ck(const at::Tensor &q,                   // total_q x num_heads 
 
     if (max_seqlen_k > 0) {
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
-        auto stream = at::cuda::getCurrentHIPStream().stream();
+        auto stream = at::cuda::getCurrentCUDAStream().stream();
         ck_tile::stream_config stream_config{stream};
 
         auto traits =

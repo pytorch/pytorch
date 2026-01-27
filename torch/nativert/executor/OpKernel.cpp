@@ -1,5 +1,7 @@
 #include <torch/nativert/executor/OpKernel.h>
 
+#include <algorithm>
+
 #include <fmt/ostream.h>
 
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -75,6 +77,18 @@ const bool OpKernel::blockingEnabled_ =
 
 void OpKernel::compute(ExecutionFrame& executionFrame) const {
   VLOG(2) << "Executing: " << *node_;
+
+  struct ResetOutputResizeGuard {
+    explicit ResetOutputResizeGuard(const OpKernel& opKernel)
+        : opKernel_(opKernel) {}
+    ~ResetOutputResizeGuard() {
+      std::fill(
+          opKernel_._outputResized.begin(),
+          opKernel_._outputResized.end(),
+          false);
+    }
+    const OpKernel& opKernel_;
+  } guard(*this);
 
   computeInternal(executionFrame);
 
