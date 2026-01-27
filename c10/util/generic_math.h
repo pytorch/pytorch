@@ -4,12 +4,13 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <cmath>
 
+#if defined(__CUDA_ARCH__) || defined(__HIPCC__)
 #if defined(__CUDA_ARCH__)
 #include <c10/cuda/CUDAMathCompat.h>
-#define C10_COMPAT_COPYSIGN c10::cuda::compat::copysign
 #elif defined(__HIPCC__)
 #include <c10/hip/HIPMathCompat.h>
-#define C10_COMPAT_COPYSIGN c10::hip::compat::copysign
+#endif
+#define C10_COMPAT_COPYSIGN c10::cuda::compat::copysign
 #else
 #include <c10/util/copysign.h>
 #define C10_COMPAT_COPYSIGN c10::copysign
