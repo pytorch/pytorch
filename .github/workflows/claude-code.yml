@@ -1,0 +1,79 @@
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened]
+
+jobs:
+  claude-code:
+    # Early exit conditions:
+    # 1. Must be pytorch org
+    # 2. Must be triggered by pilot user
+    # 3. Must mention @claude
+    if: |
+      github.repository_owner == 'pytorch' &&
+      contains(fromJSON('["huydhn", "seemethere", "malfet", "ZainRizvi", "jeanschmidt", "atalman", "wdvr", "izaitsevfb", "yangw-dev", "ezyang", "drisspg", "albanD"]'), github.actor) &&
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: bedrock
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      # Check if this is a fork PR (not supported yet)
+      # See: https://github.com/anthropics/claude-code-action/issues/821
+      - name: Check if fork PR
+        id: fork-check
+        if: |
+          (github.event_name == 'issue_comment' && github.event.issue.pull_request) ||
+          github.event_name == 'pull_request_review_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            PR_NUMBER="${{ github.event.issue.number }}"
+          fi
+          IS_FORK=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json isCrossRepository -q '.isCrossRepository')
+          echo "is_fork=$IS_FORK" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "Is fork PR: $IS_FORK (PR #$PR_NUMBER)"
+
+      - name: Post fork PR notice and exit
+        if: steps.fork-check.outputs.is_fork == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment ${{ steps.fork-check.outputs.pr_number }} --repo ${{ github.repository }} --body \
+            "Sorry, Claude can't review fork PRs yet due to a limitation in the GitHub Action. Tracking issue: https://github.com/anthropics/claude-code-action/issues/821"
+          echo "::error::Claude Code does not support fork PRs yet"
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          use_bedrock: "true"
+          claude_args: "--model global.anthropic.claude-opus-4-5-20251101-v1:0"
+          settings: '{"alwaysThinkingEnabled": true}'
