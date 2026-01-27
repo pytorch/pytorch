@@ -22,7 +22,11 @@ from torch.distributed.distributed_c10d import (
     ProcessGroup,
 )
 from torch.distributed.tensor import DTensor
-from torch.distributed.tensor._collective_utils import unpad_tensor
+from torch.distributed.tensor._collective_utils import (
+    mesh_broadcast,
+    mesh_scatter,
+    unpad_tensor,
+)
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
@@ -1241,7 +1245,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     def test_broadcast_1d(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
-        local_tensor = funcol.broadcast(local_tensor, 0, (mesh, 0))
+        mesh_broadcast(local_tensor, mesh, mesh_dim=0)
         self.assertEqual(local_tensor, torch.zeros(3, 3))
 
     @with_comms
@@ -1259,7 +1263,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             recv_tensor = torch.empty_like(splitted_list[mesh.get_rank()])
             # scatter on dim > 0 would generate non-contiguous tensor, verify that works
-            recv_tensor = funcol.scatter(recv_tensor, splitted_list, 0, (mesh, 0))
+            mesh_scatter(recv_tensor, splitted_list, mesh, mesh_dim=0)
             self.assertEqual(recv_tensor, splitted_list[mesh.get_rank()])
 
     @with_comms
@@ -1288,9 +1292,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
 
             scattered_tensor = torch.empty_like(padded_tensor_list[my_rank])
-            scattered_tensor = funcol.scatter(
-                scattered_tensor, padded_tensor_list, 0, (device_mesh, 0)
-            )
+            mesh_scatter(scattered_tensor, padded_tensor_list, device_mesh, mesh_dim=0)
 
             if pad_sizes[my_rank] != 0:
                 scattered_tensor = unpad_tensor(
@@ -1465,7 +1467,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 get_global_rank(dim_group, i) for i in range(dim_group_size)
             ]
             cloned_local_tensor = local_tensor.clone()
-            cloned_local_tensor = funcol.broadcast(cloned_local_tensor, 0, (mesh, dim))
+            mesh_broadcast(cloned_local_tensor, mesh, mesh_dim=dim)
             res_num = global_ranks[0]
             self.assertEqual(cloned_local_tensor, torch.ones(3, 3) * res_num)
 
@@ -1488,9 +1490,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             received_tensor = torch.empty_like(
                 scattered_tensors[mesh.get_coordinate()[dim]]
             )
-            received_tensor = funcol.scatter(
-                received_tensor, scattered_tensors, 0, (mesh, dim)
-            )
+            mesh_scatter(received_tensor, scattered_tensors, mesh, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
 
 
