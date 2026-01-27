@@ -11,6 +11,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch.overrides import (
     _get_current_function_mode_stack,
@@ -797,6 +798,379 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                         torch.ones(2, 2, 2, 2),
                     )
+
+
+class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_make_fx_over_compiled_function(self):
+        """Test that make_fx can trace over torch.compile'd functions using invoke_subgraph backend.
+
+        When force_compile_during_fx_trace=True, the invoke_subgraph backend should
+        emit an invoke_subgraph HOP in the traced graph instead of inlining the subgraph.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()  # Clear any cached graphs
+
+        def simple_fn(x, y):
+            return x * 2 + y
+
+        compiled_fn = torch.compile(simple_fn, backend="invoke_subgraph")
+
+        def outer_fn(x, y):
+            z = x + 1
+            result = compiled_fn(z, y)
+            return result * 2
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        # Trace with make_fx - the compiled_fn should appear as invoke_subgraph HOP
+        traced = make_fx(
+            outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x, y)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]"):
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', add, y_1);  repeated_subgraph0 = add = y_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+        mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
+        return mul
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, arg1_1);  mul = arg1_1 = None
+            return (add,)
+""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_same_compiled_fn_called_twice_shares_subgraph(self):
+        """Test that calling the same compiled function twice uses the same subgraph.
+
+        When the same compiled function is called multiple times with inputs that
+        don't cause guard failures, both calls should reference the same subgraph.
+        """
+        from torch._guards import tracing, TracingContext
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()
+
+        def simple_fn(x):
+            return x * 2
+
+        compiled_fn = torch.compile(simple_fn, backend="invoke_subgraph")
+
+        def outer_fn(x, y):
+            # Call the same compiled function twice
+            a = compiled_fn(x)
+            b = compiled_fn(y)
+            return a + b
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        # Set up TracingContext so invoke_subgraph cache works
+        tracing_ctx = TracingContext(fake_mode=None)
+        with tracing(tracing_ctx):
+            traced = make_fx(
+                outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+            )(x, y)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1);  repeated_subgraph0 = x_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+        repeated_subgraph0_1 = self.repeated_subgraph0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'invoke_subgraph_0', y_1);  repeated_subgraph0_1 = y_1 = None
+        getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        return add
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]"):
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            return (mul,)
+""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_guard_failure_creates_separate_subgraphs(self):
+        """Test that guard failures create separate subgraphs.
+
+        When the same compiled function is called with inputs that cause guard
+        failures (e.g., different bool values), each compilation should result
+        in a separate invoke_subgraph with a different identifier.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()
+
+        def conditional_fn(x, flag: bool):
+            if flag:
+                return x * 2
+            else:
+                return x * 3
+
+        compiled_fn = torch.compile(conditional_fn, backend="invoke_subgraph")
+
+        def outer_fn(x):
+            # Call with flag=True, then flag=False - should trigger recompilation
+            a = compiled_fn(x, True)
+            b = compiled_fn(x, False)
+            return a + b
+
+        x = torch.randn(3, 3)
+
+        traced = make_fx(
+            outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1);  repeated_subgraph0 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+        repeated_subgraph1 = self.repeated_subgraph1
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', x_1);  repeated_subgraph1 = x_1 = None
+        getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        return add
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]"):
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 2);  arg0_1 = None
+            return (mul,)
+
+    class repeated_subgraph1(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]"):
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
+            return (mul,)
+""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_multiple_inputs(self):
+        """Test invoke_subgraph with multiple tensor inputs.
+
+        Verifies that the invoke_subgraph HOP correctly handles functions
+        that take more than 2 tensor inputs.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()
+
+        def multi_input_fn(a, b, c, d):
+            return a * b + c * d
+
+        compiled_fn = torch.compile(multi_input_fn, backend="invoke_subgraph")
+
+        def outer_fn(w, x, y, z):
+            return compiled_fn(w, x, y, z)
+
+        w = torch.randn(3, 3)
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        z = torch.randn(3, 3)
+
+        traced = make_fx(
+            outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(w, x, y, z)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, w_1: "f32[3, 3]", x_1: "f32[3, 3]", y_1: "f32[3, 3]", z_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', w_1, x_1, y_1, z_1);  repeated_subgraph0 = w_1 = x_1 = y_1 = z_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+        return getitem
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]", arg2_1: "f32[3, 3]", arg3_1: "f32[3, 3]"):
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, arg3_1);  arg2_1 = arg3_1 = None
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
+            return (add,)
+""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_multiple_outputs(self):
+        """Test invoke_subgraph with multiple tensor outputs.
+
+        Verifies that the invoke_subgraph HOP correctly handles functions
+        that return multiple tensors.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()
+
+        def multi_output_fn(x, y):
+            return x + y, x - y, x * y
+
+        compiled_fn = torch.compile(multi_output_fn, backend="invoke_subgraph")
+
+        def outer_fn(a, b):
+            sum_out, diff_out, prod_out = compiled_fn(a, b)
+            return sum_out * diff_out + prod_out
+
+        a = torch.randn(3, 3)
+        b = torch.randn(3, 3)
+
+        traced = make_fx(
+            outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(a, b)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, a_1: "f32[3, 3]", b_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', a_1, b_1);  repeated_subgraph0 = a_1 = b_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0]
+        getitem_1: "f32[3, 3]" = invoke_subgraph[1]
+        getitem_2: "f32[3, 3]" = invoke_subgraph[2];  invoke_subgraph = None
+        mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, getitem_2);  mul = getitem_2 = None
+        return add
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+            sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1)
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            return (add, sub, mul)
+""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_multiple_inputs_and_outputs(self):
+        """Test invoke_subgraph with both multiple inputs and outputs.
+
+        Verifies that the invoke_subgraph HOP correctly handles functions
+        that have both multiple tensor inputs and multiple tensor outputs.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()
+
+        def multi_io_fn(a, b, c):
+            # Multiple inputs, multiple outputs
+            return a + b + c, a * b * c
+
+        compiled_fn = torch.compile(multi_io_fn, backend="invoke_subgraph")
+
+        def outer_fn(x, y, z):
+            sum_out, prod_out = compiled_fn(x, y, z)
+            return sum_out - prod_out
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        z = torch.randn(3, 3)
+
+        traced = make_fx(
+            outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x, y, z)
+
+        self.assertExpectedInline(
+            normalize_gm(traced.print_readable(print_output=False)),
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]", z_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1, y_1, z_1);  repeated_subgraph0 = x_1 = y_1 = z_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0]
+        getitem_1: "f32[3, 3]" = invoke_subgraph[1];  invoke_subgraph = None
+        sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        return sub
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]", arg2_1: "f32[3, 3]"):
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+            add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, arg2_1);  add = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(mul, arg2_1);  mul = arg2_1 = None
+            return (add_1, mul_1)
+""",  # noqa: B950
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_with_requires_grad(self):
+        """Test AOTAutograd tracing over a torch.compile'd function with requires_grad inputs.
+
+        This tests the scenario where:
+        1. An outer aot_function traces a function with requires_grad inputs
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. AOTAutograd partitions into forward/backward graphs
+        4. The inner Dynamo region should only be compiled once
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._functorch.aot_autograd import aot_function
+        from torch._functorch.compilers import nop
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        def inner_fn(x):
+            return x * 2 + 1
+
+        compiled_fn = torch.compile(inner_fn, backend=compile_counter)
+
+        def outer_fn(x):
+            y = x + 1
+            z = compiled_fn(y)
+            return z.sum()
+
+        x = torch.randn(3, 3, requires_grad=True)
+
+        # Track forward graph to verify invoke_subgraph appears
+        fw_graph = None
+
+        def fw_compiler(gm, example_inputs):
+            nonlocal fw_graph
+            fw_graph = gm
+            return gm
+
+        aot_fn = aot_function(
+            outer_fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            _disable_torch_fn_metadata_mode=True,
+        )
+
+        # Run forward and backward
+        result = aot_fn(x)
+        result.backward()
+
+        # Check that we got a forward graph with invoke_subgraph
+        self.assertIsNotNone(fw_graph, "Expected a forward graph")
+        fw_graph_code = fw_graph.print_readable(print_output=False)
+        self.assertIn("invoke_subgraph", fw_graph_code)
+
+        # Check compile count - should be 1 (compiled once during tracing)
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
+        )
 
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
