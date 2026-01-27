@@ -4125,7 +4125,8 @@ class CommonTemplate:
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.no_grad():
                 torch.compile(fn)(t)
-        with self.assertRaisesRegex(RuntimeError, "Autograd not support dtype:.*"):
+        # Dtype mismatch is now caught early in meta registration
+        with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
     @unittest.skipIf(
