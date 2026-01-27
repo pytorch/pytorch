@@ -1229,6 +1229,7 @@ def _(
     grid: list["TritonGridType"],
     tma_descriptor_metadata: TMADescriptorMetadata,
     kwargs: dict[str, Any],
+    tensors_to_clone_hint: Optional[list[str]] = None,
 ) -> None:
     return None
 
