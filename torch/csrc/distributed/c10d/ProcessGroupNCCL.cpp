@@ -5850,6 +5850,7 @@ bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
 at::Tensor ProcessGroupNCCL::allocateTensor(
     long size,
     at::TensorOptions options) {
+  std::cout << "XXXAA " << __FILE__ << ":" << __LINE__ << ":" << __FUNCTION__ << std::endl;
   // Some checks
   TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
   auto device = options.device();

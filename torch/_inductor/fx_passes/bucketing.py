@@ -520,11 +520,23 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
 
     # TODO - either use torch.cat or make sure inductor foreach codegen
     # fires more reliably
-    new_rs_out = torch.ops.c10d_functional.wait_tensor(
-        torch.ops._c10d_functional.reduce_scatter_tensor.default(
-            new_rs_in, reduce_op, group_size, group_name
+    if torch._inductor.config.bucket_ops_ag_use_pg_alloc:
+        pg = _resolve_process_group(group_name)
+        backend = pg._get_backend(device)
+        size = new_rs_in.shape
+        size[0] //= group_size
+        new_rs_out = backend.allocate_tensor(size, dtype=dtype, device=device)
+        torch.ops.c10d_functional.wait_tensor(
+            torch.ops._c10d_functional.reduce_scatter_tensor_out.default(
+                new_rs_in, reduce_op, group_size, group_name, out=new_rs_out
+            )
         )
-    )
+    else:
+        new_rs_out = torch.ops.c10d_functional.wait_tensor(
+            torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                new_rs_in, reduce_op, group_size, group_name
+            )
+        )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
     new_outs = [x.view(s) for x, s in zip(new_out_flat, new_out_sizes)]
     return new_outs
