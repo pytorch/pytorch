@@ -608,8 +608,6 @@ if torch.backends.mps.is_available():
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
-            "geometric": None,
-            "geometric_": None,
             "cdouble": None,
             "double": None,
             "log_softmaxwith_dtype": [
@@ -704,6 +702,16 @@ if torch.backends.mps.is_available():
             "exponential": [torch.float16, torch.float32, torch.bfloat16],
             "log_normal": [torch.float16, torch.float32, torch.bfloat16],
             "cauchy": [torch.float16, torch.float32, torch.bfloat16],
+            "geometric": [
+                torch.float16,
+                torch.float32,
+                torch.bfloat16,
+                torch.int32,
+                torch.int16,
+                torch.int64,
+                torch.int8,
+                torch.uint8,
+            ],
             "nn.functional.feature_alpha_dropoutwith_train": [
                 torch.float16,
                 torch.float32,
@@ -759,6 +767,8 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.bfloat16,
             ],
+            # UnboundLocalError: cannot access local variable 'cpu_out' where it is not associated with a value
+            "vdot": [torch.bool],
         }
 
         ON_MPS_XFAILLIST: dict[str, Optional[list]] = {
@@ -945,6 +955,7 @@ if torch.backends.mps.is_available():
             "exponential": [torch.float16, torch.float32],
             "log_normal": [torch.float16, torch.float32],
             "cauchy": [torch.float16, torch.float32],
+            "geometric": [torch.float16, torch.float32],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
@@ -965,6 +976,10 @@ if torch.backends.mps.is_available():
             "item": [torch.float16, torch.float32],
             # cpu error: grad requires non-empty inputs
             "randn": [torch.float16, torch.float32],
+            # Exception: Tensor-likes are not close!
+            # Greatest absolute difference: inf at index (10,) (up to 1e-05 allowed)
+            # Greatest relative difference: nan at index (10,) (up to 0.001 allowed)
+            "special.erfcx": [torch.float16],
             "signal.windows.bartlett": [torch.float32],
             "signal.windows.blackman": [torch.float32],
             "signal.windows.cosine": [torch.float32],
