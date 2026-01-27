@@ -543,6 +543,14 @@ class DTensorRedistributePlanner:
             for reduce_op in self.partial_reduce_ops_in_target:
                 new_placements = list(placements)
                 new_placements[mesh_dim] = Partial(reduce_op)
+
+                # Skip if this would create mixed partial types (except sum+avg which commute)
+                partial_reduce_ops = {
+                    p.reduce_op for p in new_placements if isinstance(p, Partial)
+                }
+                if len(partial_reduce_ops) > 1 and partial_reduce_ops != {"sum", "avg"}:
+                    continue
+
                 dist_state = self.DistState(
                     self._to_tuple(new_placements), tensor_mesh_dim_tuple
                 )
