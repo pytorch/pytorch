@@ -4745,11 +4745,9 @@ class InstructionTranslatorBase(
                 if var_name in self.symbolic_locals:
                     var = self.symbolic_locals[var_name]
 
-                    # Skip tensor variables - they're handled by the graph
                     if isinstance(var, (TensorVariable, SymNodeVariable)):
                         continue
 
-                    # Skip variables that already have LocalSource matching their name
                     if (
                         isinstance(var.source, LocalSource)
                         and var.source.local_name == var_name
@@ -4801,27 +4799,22 @@ class InstructionTranslatorBase(
             inst_map[original_inst] = copied_inst
             copied_insts.append(copied_inst)
 
-        # Fix up jump targets to point to copied instructions
         for copied_inst in copied_insts:
             if copied_inst.target is not None and copied_inst.target in inst_map:
                 copied_inst.target = inst_map[copied_inst.target]
 
         self.output.add_output_instructions(copied_insts)
 
-        # Get the metadata for the current frame (first in list for single frame)
         meta = all_stack_locals_metadata[0]
 
         from .variables.misc import UnknownVariable
 
-        # Handle different result dispositions
-        if analysis.result_disposition == "stored":
-            # Result is stored in a named variable - add it to resume function args
-            if analysis.result_var is not None:
-                if analysis.result_var not in meta.locals_names:
-                    meta.locals_names[analysis.result_var] = len(meta.locals_names)
-                self.symbolic_locals[analysis.result_var] = UnknownVariable()
+        vars_to_pass: list[str] = []
+        if analysis.result_disposition == "stored" and analysis.result_var is not None:
+            vars_to_pass.append(analysis.result_var)
+        vars_to_pass.extend(analysis.walrus_vars)
 
-        elif analysis.result_disposition == "discarded":
+        if analysis.result_disposition == "discarded":
             # Result is discarded (POP_TOP) - nothing to pass to resume
             pass
 
@@ -4836,19 +4829,17 @@ class InstructionTranslatorBase(
             # Push a placeholder onto the symbolic stack to represent the result.
             self.push(UnknownVariable())
 
-        # Handle walrus operator variables - add them to resume function args
-        for walrus_var in analysis.walrus_vars:
-            if walrus_var not in meta.locals_names:
-                meta.locals_names[walrus_var] = len(meta.locals_names)
-            self.symbolic_locals[walrus_var] = UnknownVariable()
+        for var_name in vars_to_pass:
+            if var_name not in meta.locals_names:
+                meta.locals_names[var_name] = len(meta.locals_names)
+            self.symbolic_locals[var_name] = UnknownVariable()
 
-        # Generate bytecode to extend the frame values list with result variable
         from .bytecode_transformation import create_dup_top, create_instruction
         from .codegen import PyCodegen
 
         cg = PyCodegen(self)
 
-        if analysis.result_var is not None:
+        for var_name in vars_to_pass:
             # Stack: [..., frame_values_list]
             cg.append_output(create_dup_top())
             # Stack: [..., frame_values_list, frame_values_list]
@@ -4856,27 +4847,7 @@ class InstructionTranslatorBase(
             # Stack: [..., frame_values_list, frame_values_list, 0]
             cg.append_output(cg.create_binary_subscr())
             # Stack: [..., frame_values_list, frame_values_list[0]]
-            cg.append_output(
-                create_instruction("LOAD_FAST", argval=analysis.result_var)
-            )
-            # Stack: [..., frame_values_list, frame_values_list[0], value]
-            # LIST_APPEND: append TOS to TOS[-2], pops TOS
-            cg.append_output(create_instruction("LIST_APPEND", arg=1))
-            # Stack: [..., frame_values_list, frame_values_list[0]]
-            # Pop the frame_values_list[0] reference
-            cg.append_output(create_instruction("POP_TOP"))
-            # Stack: [..., frame_values_list]
-
-        # Generate bytecode to append walrus variables to frame values list
-        for walrus_var in analysis.walrus_vars:
-            # Stack: [..., frame_values_list]
-            cg.append_output(create_dup_top())
-            # Stack: [..., frame_values_list, frame_values_list]
-            cg.append_output(cg.create_load_const(0))
-            # Stack: [..., frame_values_list, frame_values_list, 0]
-            cg.append_output(cg.create_binary_subscr())
-            # Stack: [..., frame_values_list, frame_values_list[0]]
-            cg.append_output(create_instruction("LOAD_FAST", argval=walrus_var))
+            cg.append_output(create_instruction("LOAD_FAST", argval=var_name))
             # Stack: [..., frame_values_list, frame_values_list[0], value]
             # LIST_APPEND: append TOS to TOS[-2], pops TOS
             cg.append_output(create_instruction("LIST_APPEND", arg=1))
