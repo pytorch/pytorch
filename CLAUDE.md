@@ -68,3 +68,46 @@ this line is too long...
 """,  # noqa: B950
     )
 ```
+
+# Logging and Structured Tracing
+
+When adding debug logging for errors or diagnostic info, consider two user personas:
+
+1. **Local development**: Users run locally and can access files on disk
+2. **Production jobs**: Users can only access logs via `tlparse` from structured traces
+
+For production debugging, use `trace_structured` to log artifacts:
+
+```python
+from torch._logging import trace_structured
+
+# Log an artifact (graph, edge list, etc.)
+trace_structured(
+    "artifact",
+    metadata_fn=lambda: {
+        "name": "my_debug_artifact",
+        "encoding": "string",
+    },
+    payload_fn=lambda: my_content_string,
+)
+```
+
+To check if structured tracing is enabled (for conditional messaging):
+
+```python
+from torch._logging._internal import trace_log
+
+if trace_log.handlers:
+    # Structured tracing is enabled, suggest tlparse in error messages
+    msg += "[Use tlparse to extract debug artifacts]"
+```
+
+**Best practices for error diagnostics:**
+
+- Always log to `trace_structured` for production (no runtime cost if disabled)
+- If you're dumping debug info in the event of a true internal compiler exception,
+  you can also consider writing to local files for local debugging convenience
+- In error messages, tell users about both options:
+  - Local files: "FX graph dump: min_cut_failed_graph.txt"
+  - Production: "Use tlparse to extract artifacts" (only if tracing enabled)
+- Use `_get_unique_path()` pattern to avoid overwriting existing debug files
