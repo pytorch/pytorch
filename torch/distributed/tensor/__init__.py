@@ -4,6 +4,7 @@ import torch
 import torch.distributed.tensor._ops  # force import all built-in dtensor ops
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh  # noqa: F401
 from torch.distributed.tensor._api import (
+    create_distributed_block_mask,
     distribute_module,
     distribute_tensor,
     DTensor,
@@ -14,6 +15,9 @@ from torch.distributed.tensor._api import (
     randn,
     zeros,
 )
+
+# Register DTensor impl for flex_attention AFTER DTensor is imported
+from torch.distributed.tensor._ops._flex_attention import *  # noqa: F403
 from torch.distributed.tensor.placement_types import (
     Partial,
     Placement,
@@ -43,6 +47,7 @@ __all__ = [
     "rand",
     "randn",
     "zeros",
+    "create_distributed_block_mask",
 ]
 
 # For weights_only torch.load
@@ -86,3 +91,4 @@ full.__module__ = "torch.distributed.tensor"
 rand.__module__ = "torch.distributed.tensor"
 randn.__module__ = "torch.distributed.tensor"
 zeros.__module__ = "torch.distributed.tensor"
+create_distributed_block_mask.__module__ = "torch.distributed.tensor"
