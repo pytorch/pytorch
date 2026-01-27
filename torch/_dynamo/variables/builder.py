@@ -3926,6 +3926,7 @@ def _automatic_dynamic(
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        shape_ids=getattr(e, "_dynamo_shape_ids", None),
     )
 
 
