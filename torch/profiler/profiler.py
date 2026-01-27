@@ -35,7 +35,36 @@ __all__ = [
     "tensorboard_trace_handler",
     "profile",
     "ExecutionTraceObserver",
+    "register_export_chrome_trace_callback",
 ]
+
+# Callbacks to run when export_chrome_trace is called.
+# Each callback takes trace data (dict) and returns modified trace data.
+# Use register_export_chrome_trace_callback() to add callbacks.
+_export_chrome_trace_callbacks: list[Callable[[dict], dict]] = []
+
+
+def register_export_chrome_trace_callback(callback: Callable[[dict], dict]) -> None:
+    """
+    Register a callback to be run when export_chrome_trace() is called.
+
+    The callback receives the trace data as a dict and should return the
+    (potentially modified) trace data. Callbacks are run in registration order.
+
+    This can be used to add custom annotations to traces, e.g., FLOPS/bandwidth
+    utilization metrics.
+
+    Example::
+
+        def add_custom_annotation(data):
+            for event in data["traceEvents"]:
+                if event.get("cat") == "kernel":
+                    event["args"]["custom"] = "value"
+            return data
+
+        torch.profiler.register_export_chrome_trace_callback(add_custom_annotation)
+    """
+    _export_chrome_trace_callbacks.append(callback)
 PROFILER_STEP_NAME = "ProfilerStep"
 
 _WARNINGS_SHOWN = set()
@@ -279,6 +308,9 @@ class _KinetoProfile:
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
+
+        Any callbacks registered via ``register_export_chrome_trace_callback()``
+        will be executed to augment the trace before saving.
         """
         if self.profiler is None:
             raise AssertionError(
@@ -287,11 +319,36 @@ class _KinetoProfile:
         if path.endswith(".gz"):
             with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
                 retvalue = self.profiler.export_chrome_trace(fp.name)
+                # Run callbacks on the uncompressed trace
+                self._run_export_callbacks(fp.name)
                 with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
             return retvalue
         else:
-            return self.profiler.export_chrome_trace(path)
+            retvalue = self.profiler.export_chrome_trace(path)
+            # Run callbacks on the trace
+            self._run_export_callbacks(path)
+            return retvalue
+
+    def _run_export_callbacks(self, path: str) -> None:
+        """Run registered export callbacks on the trace file."""
+        if not _export_chrome_trace_callbacks:
+            return
+
+        try:
+            with open(path) as f:
+                data = json.load(f)
+
+            for callback in _export_chrome_trace_callbacks:
+                data = callback(data)
+
+            with open(path, "w") as f:
+                json.dump(data, f)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Profiler export callback failed: %s", e
+            )
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
         """Save stack traces to a file

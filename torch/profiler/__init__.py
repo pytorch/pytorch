@@ -19,10 +19,12 @@ from torch.autograd.profiler import KinetoStepTracker, record_function
 from torch.optim.optimizer import Optimizer, register_optimizer_step_post_hook
 
 from .profiler import (
+    _export_chrome_trace_callbacks,
     _KinetoProfile,
     ExecutionTraceObserver,
     profile,
     ProfilerAction,
+    register_export_chrome_trace_callback,
     schedule,
     supported_activities,
     tensorboard_trace_handler,
@@ -40,6 +42,7 @@ __all__ = [
     "DeviceType",
     "record_function",
     "ExecutionTraceObserver",
+    "register_export_chrome_trace_callback",
 ]
 
 from . import itt
