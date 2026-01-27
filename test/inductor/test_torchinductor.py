@@ -10443,7 +10443,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(same(r2, r3))
         self.assertTrue(same(g2, g3))
 
-    @xfail_if_mps
     @config.patch(search_autotune_cache=False)
     @unittest.skipIf(config.triton.native_matmul, "matmul count is different")
     def test_dropout3(self):
