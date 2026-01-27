@@ -16,8 +16,10 @@
 // include only the nvshmem host library headers:
 // #include <nvshmem_host.h>
 // It translates into the following two lines:
+#if !defined(USE_ROCM)
 #include <host/nvshmem_api.h>
 #include <host/nvshmemx_api.h>
+#endif
 // For maximum compatibility, we use the "host/" style for now.
 
 namespace c10d {
@@ -140,12 +142,14 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
         arr_size,
         cudaMemcpyHostToDevice));
 
+#if !defined(USE_ROCM) //Multi-cast is not supported on ROCm yet
     // Initialize multicast address
     // On unsupported platforms, this API returns a nullptr.
     auto device = c10::Device(c10::DeviceType::CUDA, allocation->device_idx);
     auto& team_manager = c10d::nvshmem_extension::TeamManager::get(device);
     auto team = team_manager.get_team(group_name, rank_to_global_rank);
     mc_addr_ = nvshmemx_mc_ptr(team, base_ptr_);
+#endif
   }
 
  private:
@@ -339,9 +343,11 @@ static void initialize_nvshmem_with_store(
   is_initialized = true;
 
   // Print version
+#if !defined(USE_ROCM)
   int major, minor;
   ::nvshmem_info_get_version(&major, &minor);
   LOG(INFO) << "NVSHMEM is available, version: " << major << '.' << minor;
+#endif
 }
 
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
