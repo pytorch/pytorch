@@ -74,7 +74,7 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
             y = x * 2
             lst = [inner(i) for i in range(5)]
             z = x + sum(lst)
-            return z
+            return z, y
 
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
         compiled = torch.compile(fn, backend=backend)
@@ -106,7 +106,7 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
 
         def fn(x):
             a = x + 1
-            list1 = [i for i in range(2)]
+            list1 = [i for i in range(2)]  # noqa: C416
             list2 = [torch._dynamo.graph_break() or i for i in range(2)]
             b = x + 2
             list3 = [i * 2 for i in range(2)]
@@ -126,7 +126,10 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
 
         def fn(x):
             a = x + 1
-            result = [[torch._dynamo.graph_break() or i * j for j in range(2)] for i in range(2)]
+            result = [
+                [torch._dynamo.graph_break() or i * j for j in range(2)]
+                for i in range(2)
+            ]
             b = x + 2
             return a, result, b
 
@@ -144,7 +147,11 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
 
         def fn(x):
             a = x + 1
-            result = [(torch._dynamo.graph_break() or i, j) for i in range(2) for j in range(2)]
+            result = [
+                (torch._dynamo.graph_break() or i, j)
+                for i in range(2)
+                for j in range(2)
+            ]
             b = x + 2
             return a, result, b
 
@@ -197,7 +204,7 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         """Test comprehension returned directly with graph break."""
 
         def fn(x):
-            a = x + 1
+            a = x + 1  # noqa: F841
             return [torch._dynamo.graph_break() or i for i in range(3)]
 
         backend = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -274,7 +281,8 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         def fn(x):
             a = x + 1
             result = [
-                ((y := (torch._dynamo.graph_break() or i * 2)), (z := i * 3)) for i in range(3)
+                ((y := (torch._dynamo.graph_break() or i * 2)), (z := i * 3))
+                for i in range(3)
             ]
             b = x + 2
             return a, result, y, z, b
@@ -433,7 +441,9 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
             def fn(x):
                 a = x + 1
                 result = [
-                    i + closure_val for i in range(3) if torch._dynamo.graph_break() or True
+                    i + closure_val
+                    for i in range(3)
+                    if torch._dynamo.graph_break() or True
                 ]
                 b = x + 2
                 return a, result, b
