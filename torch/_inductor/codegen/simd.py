@@ -1102,109 +1102,26 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def estimate_kernel_num_bytes(self):
         """
-        Estimate the total memory traffic (in bytes) of the kernel's inputs
-        and outputs. This is used for estimating memory throughput to compare
-        against peak memory bandwidth.
+        Estimate the total memory traffic (bytes) for this kernel.
 
-        Uses the actual read_writes from fused nodes to compute bytes, which
-        properly accounts for:
-        - Fused operations where intermediate results stay in registers
+        Delegates to the FusedSchedulerNode which already handles:
         - Buffer elimination through fusion (kernel-local buffers excluded)
-        - Actual read/write patterns from memory expressions
-
-        This avoids overestimating which could give misleading bandwidth numbers
-        larger than theoretical peak.
+        - Proper counting of read/write accesses
         """
         scheduler = V.graph.scheduler
         if not scheduler:
-            return self._estimate_kernel_num_bytes_fallback()
+            return 0
 
-        # Get all fused node names for buffer elimination check
-        fused_node_names = OrderedSet(
-            n.get_name() for n in NodeScheduleMarker.only_nodes(self.features.node_schedule)
-        )
+        # Get any node from the schedule to look up the fused node
+        nodes = list(NodeScheduleMarker.only_nodes(self.features.node_schedule))
+        if not nodes:
+            return 0
 
-        # Collect all reads and writes, tracking which buffers are kernel-local
-        all_reads: dict[str, list] = {}
-        all_writes: dict[str, list] = {}
-
-        for node in NodeScheduleMarker.only_nodes(self.features.node_schedule):
-            for dep in node.read_writes.reads:
-                if dep.name not in all_reads:
-                    all_reads[dep.name] = []
-                all_reads[dep.name].append(dep)
-
-            for dep in node.read_writes.writes:
-                if dep.name not in all_writes:
-                    all_writes[dep.name] = []
-                all_writes[dep.name].append(dep)
-
-        total_bytes = 0
-
-        # Count reads - exclude kernel-local buffers (written but only used within kernel)
-        for buf_name, deps in all_reads.items():
-            # Skip if this is a kernel-local buffer that will be eliminated
-            if buf_name in all_writes and scheduler.can_buffer_be_removed_through_fusion(
-                buf_name, fused_node_names
-            ):
-                continue
-            # Sum bytes for all reads of this buffer
-            for dep in deps:
-                try:
-                    total_bytes += dep.numbytes_hint()
-                except Exception:
-                    pass
-
-        # Count writes - exclude kernel-local buffers
-        for buf_name, deps in all_writes.items():
-            if scheduler.can_buffer_be_removed_through_fusion(buf_name, fused_node_names):
-                continue
-            for dep in deps:
-                try:
-                    total_bytes += dep.numbytes_hint()
-                except Exception:
-                    pass
-
-        return total_bytes
-
-    def _estimate_kernel_num_bytes_fallback(self):
-        """
-        Fallback estimation based on buffer sizes when scheduler is unavailable.
-        """
-        nbytes = []
-        ninplace_args = len(unique(self.args.inplace_buffers.values()))
-        _, call_args, _, _ = self.args.python_argdefs()
-        buf_accesses = self.features.buf_accesses()
-
-        out_numel = V.graph.sizevars.size_hint(
-            sympy_product(self.numels.values()),
-            fallback=config.unbacked_symint_fallback,
-        )
-        for i, arg in enumerate(call_args):
-            if arg not in buf_accesses:
-                nbytes.append(0)
-                continue
-            arg_numel = V.graph.get_numel(arg)
-            buf_size = V.graph.sizevars.size_hint(
-                arg_numel, fallback=config.unbacked_symint_fallback
-            )
-            if buf_size > out_numel:
-                indices = OrderedSet[Any]()
-                no_index_dep_count = 0
-                for dep in buf_accesses[arg]:
-                    if isinstance(dep, (StarDep, WeakDep)):
-                        indices.add(f"no_index_dep_{no_index_dep_count}")
-                        no_index_dep_count += 1
-                    else:
-                        indices.add(dep.index)
-                numel = len(indices) * out_numel
-            else:
-                numel = buf_size
-            dtype = V.graph.get_dtype(arg)
-            dtype_size = get_dtype_size(dtype)
-            # pyrefly: ignore [bad-argument-type]
-            nbytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
-        return sum(nbytes)
+        try:
+            fused_node = scheduler.get_fused_node(nodes[0])
+            return fused_node.get_read_write_buffers_sizes()
+        except (KeyError, AttributeError):
+            return 0
 
     def warn_mix_layout(self, kernel_name):
         """
