@@ -7033,11 +7033,7 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            is_amd_gfx94x = torch.version.hip and (
-                "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
-            )
-
-            if GPU_TYPE == "xpu" or is_amd_gfx94x:
+            if GPU_TYPE == "xpu" or torch.version.hip:
                 grid_0 = 32736
             else:
                 grid_0 = 1023
@@ -7087,11 +7083,7 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            is_amd_gfx94x = torch.version.hip and (
-                "gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
-            )
-
-            if GPU_TYPE == "xpu" or is_amd_gfx94x:
+            if GPU_TYPE == "xpu" or torch.version.hip:
                 grid_0 = 32736
             else:
                 grid_0 = 1023

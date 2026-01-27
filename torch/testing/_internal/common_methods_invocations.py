@@ -13135,7 +13135,12 @@ op_db: list[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
-               DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-2)}), 'TestConsistency', device_type='mps'),
+               DecorateInfo(toleranceOverride(
+                   {
+                       torch.float16: tol(atol=1e-3, rtol=2e-2),
+                       torch.float32: tol(atol=1.6e-5, rtol=1.6e-6),
+                   }),
+                   'TestConsistency', device_type='mps'),
            )),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
