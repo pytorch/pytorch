@@ -143,7 +143,8 @@ class _ReplicateState(_State):
 
         self._ddp.require_backward_grad_sync = not self._no_sync
         results = self._ddp._pre_forward(*args, **kwargs)
-        self._ddp._active_ddp_module = self._ddp
+        if not self._ddp._use_python_reducer:
+            self._ddp._active_ddp_module = self._ddp
         if not should_init:
             return results
 
@@ -165,6 +166,7 @@ class _ReplicateState(_State):
         input: tuple[torch.Tensor],
         output: torch.Tensor,
     ) -> torch.Tensor:
+        self._ddp._active_ddp_module = None
         return self._ddp._post_forward(output)
 
 
