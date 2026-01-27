@@ -118,10 +118,7 @@ def can_benchmark_collective() -> bool:
         return False
 
     pg = c10d.distributed_c10d._get_default_group()
-    if (
-        torch.distributed.distributed_c10d.get_backend(pg)
-        == torch.distributed.distributed_c10d.Backend.FAKE
-    ):
+    if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
         return False
 
     return True
