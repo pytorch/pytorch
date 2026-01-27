@@ -631,6 +631,10 @@ def make_pointwise(
     allow_alpha=False,
     triton_fallback=None,
 ):
+    """
+    Create a pointwise operation wrapper that applies a function element-wise across tensors.
+    """
+
     def inner(*inputs: TensorBox, alpha=None):
         if triton_fallback is not None and any(
             isinstance(inp, IRNode) and is_triton(inp) for inp in inputs
@@ -678,8 +682,16 @@ def make_pointwise(
                     out = load(index)
                     inp_dtype = inputs[inp_index].get_dtype()
                     if emulate_precision_casts and inp_dtype in low_pr_fp:
-                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, inp_dtype)
+                        # Check if this value already has precision emulation applied.
+                        # If so, skip to avoid redundant bf16->fp32->bf16->fp32 chains
+                        # that can crash Triton's PassManager.
+                        already_emulated = getattr(out, "_precision_emulated", False)
+                        if not already_emulated:
+                            downcast = ops.to_dtype(
+                                out, inp_dtype, use_compute_types=False
+                            )
+                            out = ops.to_dtype(downcast, inp_dtype)
+                            out._precision_emulated = True
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
@@ -687,7 +699,10 @@ def make_pointwise(
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
                     # then upcasting again, to emulate casts that eager would do.
                     downcast = ops.to_dtype(out, dtype, use_compute_types=False)
-                    return ops.to_dtype(downcast, dtype)
+                    out = ops.to_dtype(downcast, dtype)
+                    # Mark output as precision-emulated so subsequent operations
+                    # don't add redundant input casts.
+                    out._precision_emulated = True
                 return out
 
         if not override_device:
