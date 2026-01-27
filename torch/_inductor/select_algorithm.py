@@ -622,7 +622,7 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
+            size = V.graph.sizevars.optimization_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
@@ -635,7 +635,7 @@ class TritonTemplateKernel(TritonKernel):
                 if f is not None:
                     if isinstance(f, torch.SymInt):
                         f = f.node.expr
-                    return V.graph.sizevars.size_hint(f, fallback=0)
+                    return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
     def jit_lines(self):
@@ -2078,10 +2078,22 @@ class TritonTemplate(KernelTemplate):
 
         def make_kernel_render(out_node, hint_override: Optional[int] = None):
             assert result is not None
+            # Create a new unique name for the workspace arg buffer for each render
+            # to prevent buffer reuse of the same workspace arg
+            kernel_workspace_arg = workspace_arg
+            if workspace_arg is not None:
+                kernel_workspace_arg = WorkspaceArg(
+                    count=workspace_arg.count,
+                    zero_mode=workspace_arg.zero_mode,
+                    device=workspace_arg.device,
+                    outer_name=WorkspaceArg.unique_name(),
+                    inner_name=workspace_arg.inner_name,
+                    dtype=workspace_arg.dtype,
+                )
             kernel = self.kernel_type(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
-                workspace_arg=workspace_arg,
+                workspace_arg=kernel_workspace_arg,
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,

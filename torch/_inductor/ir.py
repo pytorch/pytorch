@@ -2956,8 +2956,18 @@ class ExpandView(BaseView):
                 # NB: new_size[i] == old_size[i] is expected to already be
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
-                # pyrefly: ignore [unsupported-operation]
-                assert sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0, (
+                v1 = new_size[i]
+                v2 = old_size[i]
+                assert v1 is not None
+                assert v2 is not None
+                diff = v1 - v2
+                assert (
+                    sizevars.optimization_hint(
+                        diff,
+                        fallback=0,
+                    )
+                    == 0
+                ), (
                     f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
                 )
         return new_size
@@ -3790,7 +3800,7 @@ class Layout(OutputSpec):
         non_1_indices = [
             i
             for i, dim in enumerate(self.size)
-            if V.graph.sizevars.size_hint(dim, fallback=2) != 1
+            if V.graph.sizevars.optimization_hint(dim, fallback=2) != 1
         ]
 
         stride = [self.stride[i] for i in non_1_indices]
