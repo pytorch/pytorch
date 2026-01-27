@@ -1559,6 +1559,51 @@ class TestForeach(TestCase):
                 )
                 self.assertEqual(hook_buffer, list(reversed(range(len(inputs)))))
 
+    @onlyCUDA
+    def test_foreach_copy_mixed_dtype_fix(self):
+        """Test fix for _foreach_copy_ with mixed dtypes via (dst, src) pair grouping."""
+
+        def check_copy(dst, src, msg):
+            torch._foreach_copy_(dst, src)
+            for i, (d, s) in enumerate(zip(dst, src)):
+                ref = torch.empty_like(d)
+                ref.copy_(s)
+                self.assertEqual(
+                    d, ref, atol=1e-2, rtol=1e-2, msg=f"{msg}: tensor {i} incorrect"
+                )
+
+        # Test 1: Mixed destinations, uniform sources (original bug case)
+        src1 = [torch.tensor([1.0, 2.0, 3.0, 4.0], device="cuda") for _ in range(3)]
+        dst1 = [
+            torch.empty(4, dtype=dt, device="cuda")
+            for dt in [torch.float32, torch.bfloat16, torch.float32]
+        ]
+        check_copy(dst1, src1, "Mixed dst")
+
+        # Test 2: Uniform destinations, mixed sources
+        src2 = [
+            torch.tensor([10.0, 20.0], dtype=dt, device="cuda")
+            for dt in [torch.float32, torch.bfloat16, torch.float16]
+        ]
+        dst2 = [torch.empty(2, dtype=torch.float32, device="cuda") for _ in range(3)]
+        check_copy(dst2, src2, "Mixed src")
+
+        # Test 3: Both mixed - different (dst, src) dtype pairs
+        src3 = [
+            torch.tensor([100.0, 200.0], dtype=dt, device="cuda")
+            for dt in [torch.float32, torch.bfloat16, torch.float16, torch.float32]
+        ]
+        dst3 = [
+            torch.empty(2, dtype=dt, device="cuda")
+            for dt in [torch.bfloat16, torch.float32, torch.bfloat16, torch.float16]
+        ]
+        check_copy(dst3, src3, "Both mixed")
+
+        # Test 4: Uniform dtypes (original fast path)
+        src4 = [torch.tensor([1000.0, 2000.0], device="cuda") for _ in range(4)]
+        dst4 = [torch.empty(2, dtype=torch.float32, device="cuda") for _ in range(4)]
+        check_copy(dst4, src4, "Uniform")
+
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.
 # would end up adding another layer to `foreach_inputs_sample_func.__call__`

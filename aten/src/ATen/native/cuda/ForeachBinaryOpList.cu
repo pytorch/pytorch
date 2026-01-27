@@ -2,10 +2,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ForeachUtils.h>
+#include <c10/util/hash.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
 #include <functional>
 #include <type_traits>
+#include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -415,17 +417,57 @@ void foreach_tensor_copy_list_kernel_cuda_(
     TensorList src,
     const bool non_blocking) {
   check_foreach_api_restrictions(self, src);
-  if (!(_check_tensors_share_device_and_dtype(
-            {self, src}, /* skip_dtype_check */ true) &&
-        std::all_of(
-            src.cbegin(),
-            src.cend(),
-            [&](const auto& t) -> bool {
-              return t.dtype() == src[0].dtype();
-            }) &&
-        _check_tensors_share_sizes_and_strides({self, src}))) {
-    return at::native::foreach_tensor_copy_list_kernel_slow_(
-        self, src, non_blocking);
+
+  // Check if all tensors share same (dst_dtype, src_dtype) pair
+  bool all_same_dtypes = std::all_of(
+      self.cbegin() + 1,
+      self.cend(),
+      [&, i = size_t{0}](const auto& t) mutable {
+        ++i;
+        return t.dtype() == self[0].dtype() && src[i].dtype() == src[0].dtype();
+      });
+
+  if (all_same_dtypes) {
+    // Fast path: all tensors have same (dst, src) dtype pair.
+    // Check device/sizes/strides compatibility for multi_tensor_apply.
+    if (!(_check_tensors_share_device_and_dtype(
+              {self, src}, /* skip_dtype_check */ true) &&
+          _check_tensors_share_sizes_and_strides({self, src}))) {
+      return at::native::foreach_tensor_copy_list_kernel_slow_(
+          self, src, non_blocking);
+    }
+    // Checks passed - fall through to AT_DISPATCH kernel below.
+  } else {
+    // Mixed dtypes: group by (dst_dtype, src_dtype) pair for optimal
+    // performance
+    using DtypePair = std::pair<ScalarType, ScalarType>;
+    struct PairHash {
+      size_t operator()(const DtypePair& p) const {
+        return c10::hash_combine(
+            static_cast<size_t>(p.first), static_cast<size_t>(p.second));
+      }
+    };
+    std::unordered_map<
+        DtypePair,
+        std::pair<std::vector<Tensor>, std::vector<Tensor>>,
+        PairHash>
+        dtype_groups;
+
+    // Group tensors by (dst_dtype, src_dtype) pair
+    for (size_t i = 0; i < self.size(); ++i) {
+      auto key = std::make_pair(self[i].scalar_type(), src[i].scalar_type());
+      auto& [dst_group, src_group] = dtype_groups[key];
+      dst_group.push_back(self[i]);
+      src_group.push_back(src[i]);
+    }
+
+    // Process each group with fast path (each group has uniform dtypes)
+    for (auto& [dtype_pair, groups] : dtype_groups) {
+      auto& [dst_group, src_group] = groups;
+      foreach_tensor_copy_list_kernel_cuda_(
+          TensorList(dst_group), TensorList(src_group), non_blocking);
+    }
+    return;
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists{src.vec(), self.vec()};
