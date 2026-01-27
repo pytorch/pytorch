@@ -2282,7 +2282,7 @@ class CppBuilder:
                 """
                 find_program(OBJCOPY_EXECUTABLE objcopy)
                 if(NOT OBJCOPY_EXECUTABLE)
-                    message(FATAL_ERROR "objcopy not found. Cannot embed fatbin as object file")
+                    message(FATAL_ERROR "objcopy not found. Cannot embed spv as object file")
                 endif()
 
                 set(KERNEL_TARGETS "")
