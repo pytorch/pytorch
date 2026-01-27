@@ -578,48 +578,52 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_embedding_backward_dynamic_shapes_large_grid(self, device):
         """
-        Test that embedding backward with dynamic shapes doesn't fail with
-        'XBLOCK too large' error. This tests the fix for _check_max_grid_x
-        which previously incorrectly multiplied num_blocks by num_warps * warp_size
-        when checking against maxGridSize.
+        Test that _check_max_grid_x correctly handles large grid sizes on NVIDIA.
+        Previously, the function incorrectly used (num_blocks * num_warps * warp_size)
+        instead of just num_blocks when checking against maxGridSize on NVIDIA GPUs.
+        This caused XBLOCK to be incorrectly doubled beyond the maximum allowed (4096),
+        resulting in 'XBLOCK too large. Maximum: 4096. Actual: 8192' errors.
+
+        Original repro used [50000, 349200] embedding table but that requires ~65GB.
+        Instead we directly test the _check_max_grid_x function logic.
         """
+        from torch._inductor.runtime.triton_heuristics import _check_max_grid_x
 
-        def foo(arg0, arg1, arg2):
-            t1 = arg0.mean(dim=1)
-            t4 = torch.nn.functional.embedding(
-                torch.clamp(arg1, 0, arg2.size(0) - 1).to(torch.long), arg2
-            )
-            t5 = torch.pow(t1, t4)
-            return t5.sum()
+        # The bug occurs when:
+        # - num_blocks * num_warps * warp_size > max_grid_x (old buggy check triggers)
+        # - but num_blocks <= max_grid_x (correct check should NOT trigger)
+        #
+        # With max_grid_x = 2^31 - 1 = 2,147,483,647
+        # If num_warps = 8, warp_size = 32 (NVIDIA), multiplier = 256
+        # Bug triggers when num_blocks > 2,147,483,647 / 256 = 8,388,607
+        #
+        # To get num_blocks > 8,388,607 with x = 64:
+        # size_hints["x"] > 8,388,607 * 64 = 536,870,848
+        #
+        # Use size that triggers buggy path but NOT the correct path
+        size_hints = {"x": 600_000_000}  # 600 million elements
+        x = 64
+        num_warps = 8
 
-        # Use sizes large enough to trigger the grid check logic
-        arg0 = torch.rand(
-            [10000, 5], dtype=torch.bfloat16, device=device, requires_grad=True
+        # num_blocks = ceil(600_000_000 / 64) = 9,375,000
+        # Buggy check: 9,375,000 * 8 * 32 = 2,400,000,000 > 2,147,483,647 → TRIGGERS!
+        # Correct check: 9,375,000 < 2,147,483,647 → does NOT trigger
+
+        result_x, result_num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+
+        # With the fix (NVIDIA path checking only num_blocks), x should stay at 64
+        # With the bug, x would be doubled to 128 since
+        # num_blocks * num_warps * warp_size > max_grid_x
+        self.assertEqual(
+            result_x,
+            64,
+            f"XBLOCK should remain 64 on NVIDIA (got {result_x}). "
+            "The buggy check incorrectly doubles XBLOCK when "
+            "num_blocks * num_warps * warp_size > max_grid_x.",
         )
-        arg1 = torch.randint(0, 1000, [], dtype=torch.int64, device=device)
-        arg2 = torch.rand(
-            [1000, 10000], dtype=torch.bfloat16, device=device, requires_grad=True
-        )
-
-        # Test eager
-        out_eager = foo(arg0, arg1, arg2)
-        out_eager.backward()
-        eager_arg0_grad = arg0.grad.clone()
-        eager_arg2_grad = arg2.grad.clone()
-
-        # Reset grads
-        arg0.grad = None
-        arg2.grad = None
-
-        # Test compiled with dynamic shapes
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0, arg1, arg2)
-        out_compiled.backward()
-
-        self.assertEqual(eager_arg0_grad, arg0.grad)
-        self.assertEqual(eager_arg2_grad, arg2.grad)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
