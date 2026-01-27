@@ -144,7 +144,11 @@ XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
 )
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
+GPU_KERNEL_BIN_EXTS = {
+    "cuda": ".cubin",
+    "hip": ".hsaco",
+    "xpu": f".{XPU_KERNEL_FORMAT}",
+}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -1172,8 +1176,7 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
 
 def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
     return isinstance(a, torch.SymInt) or (
-        isinstance(a, torch.Tensor)
-        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+        isinstance(a, torch.Tensor) and a._has_symbolic_sizes_strides
     )
 
 
