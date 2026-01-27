@@ -65,6 +65,8 @@ elif [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
     if [[ "$ARCH" == "s390x" ]]; then
         LIBGOMP_PATH="/usr/lib/s390x-linux-gnu/libgomp.so.1"
+    elif [[ "$(uname -m)" == "ppc64le" ]]; then
+        LIBGOMP_PATH="/usr/lib64/libgomp.so.1"
     elif [[ "$ARCH" == "aarch64" ]]; then
         LIBGOMP_PATH="/usr/lib/aarch64-linux-gnu/libgomp.so.1"
     else

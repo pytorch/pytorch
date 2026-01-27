@@ -117,6 +117,10 @@ if [[ "$GPU_ARCH_TYPE" =~ .*aarch64.* ]]; then
   USE_GOLD_LINKER="OFF"
 fi
 
+if [[ "$GPU_ARCH_TYPE" =~ .*ppc64le.* ]]; then
+  USE_GOLD_LINKER="OFF"
+fi
+
 cat >"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 export TZ=UTC

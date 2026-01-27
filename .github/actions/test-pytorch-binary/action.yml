@@ -40,9 +40,9 @@ runs:
         docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
 
     - name: Cleanup docker
-      if: always() && (env.BUILD_ENVIRONMENT == 'linux-s390x-binary-manywheel' || env.GPU_ARCH_TYPE == 'xpu')
+      if: always() && (env.BUILD_ENVIRONMENT == 'linux-s390x-binary-manywheel' || env.BUILD_ENVIRONMENT != 'linux-ppc64le-binary-manywheel' || env.GPU_ARCH_TYPE == 'xpu')
       shell: bash
       run: |
-        # on s390x or xpu stop the container for clean worker stop
+        # on s390x or on ppc64leor xpu stop the container for clean worker stop
         # shellcheck disable=SC2046
         docker stop "${{ env.CONTAINER_NAME }}" || true
