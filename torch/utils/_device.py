@@ -103,8 +103,8 @@ class DeviceContext(TorchFunctionMode):
                 raise AssertionError(
                     "Expected a DeviceContext at the bottom of the mode stack"
                 )
-        assert self.prev_mode is not None
-        _push_mode(self.prev_mode)
+        if self.prev_mode is not None:
+            _push_mode(self.prev_mode)
 
         for mode in reversed(cur_stack):
             _push_mode(mode)
