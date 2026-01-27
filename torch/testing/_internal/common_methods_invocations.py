@@ -15070,6 +15070,14 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Tensor-likes are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: 13.361434936523438 at index (3, 1) (up to 1e-05 allowed)
+               # Greatest relative difference: 10.395817756652832 at index (3, 4) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            )),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
@@ -15492,6 +15500,14 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: 13.361434936523438 at index (3, 1) (up to 1e-05 allowed)
+               # Greatest relative difference: 10.395817756652832 at index (3, 4) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            ),
            error_inputs_func=error_inputs_aminmax_amax_amin),
     OpInfo('as_strided',
@@ -15974,6 +15990,13 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=3e-6)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
+            # Some but not all platforms throw:
+            # AssertionError: Scalars are not close!
+            # Expected 2.0743534564971924 but got nan.
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples',
+                device_type='mps', dtypes=(torch.float32,)
+            ),
         ),
     ),
     UnaryUfuncInfo(
@@ -17578,6 +17601,13 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=(torch.cfloat,)),
+            # Some but not all platforms throw:
+            # AssertionError: Scalars are not close!
+            # Expected (0.573072612285614+0.041746772825717926j) but got (nan+nanj)
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_noncontiguous_samples',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
             # FIXME: intentionally misreports dtypes
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
             # FIXME: numpy reference diverges: Comparing (nan+nanj) and (-0+0j)
@@ -19917,6 +19947,14 @@ op_db: list[OpInfo] = [
                             dtypes=[torch.bool], device_type='cuda', active_if=not TEST_WITH_ROCM),
                # AssertionError: Tensor-likes are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: 7951.0 at index (27,) (up to 1e-05 allowed)
+               # Greatest relative difference: inf at index (6312,) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -20885,6 +20923,14 @@ op_db: list[OpInfo] = [
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.float32,)
                ),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: 1.0 at index (1,) (up to 1e-05 allowed)
+               # Greatest relative difference: inf at index (1,) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
@@ -21387,6 +21433,14 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+               # Some but not all platforms throw:
+               # AssertionError: Tensor-likes are not close!
+               # Greatest absolute difference: nan at index (0, 0) (up to 1e-05 allowed)
+               # Greatest relative difference: nan at index (0, 0) (up to 1.3e-06 allowed)
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            ),
            reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
@@ -21662,8 +21716,13 @@ op_db: list[OpInfo] = [
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    skips=(
+                       # Some but not all platforms throw:
                        # AssertionError: Tensor-likes are not close!
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
+                       DecorateInfo(
+                           unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                           device_type='mps', dtypes=(torch.float32,)
+                       ),
+                       # AssertionError: Tensor-likes are not close!
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                    ),
                    promotes_int_to_float=True),
@@ -23426,6 +23485,14 @@ op_db: list[OpInfo] = [
                 unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
                 device_type='mps', dtypes=(torch.bool,)
             ),
+            # Some but not all platforms throw:
+            # AssertionError: Tensor-likes are not close!
+            # Greatest absolute difference: 15.520018577575684 at index (2, 3) (up to 1e-05 allowed)
+            # Greatest relative difference: 20.158464431762695 at index (4, 1) (up to 1.3e-06 allowed)
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_out',
+                device_type='mps', dtypes=(torch.float32,)
+            ),
         ),
     ),
     OpInfo(
@@ -24565,6 +24632,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
         torch_opinfo_name="nan_to_num",
+        skips=(
+            # Some but not all platforms throw:
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float16, torch.bfloat16,)
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
@@ -25115,6 +25190,20 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
             ),
+            # Some but not all platforms throw:
+            # AssertionError: Scalars are not equal!
+            # Expected True but got False.
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.bool,)
+            ),
+            # Some but not all platforms throw:
+            # AssertionError: Scalars are not equal!
+            # Expected 12 but got 0.
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.int8,)
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -25138,6 +25227,16 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
                 torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool
             )),
+            # Some but not all platforms throw:
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float32,)
+            ),
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.float16,)
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -25199,6 +25298,14 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 device_type='mps', dtypes=(torch.bool, torch.int8,)
+            ),
+            # Some but not all platforms throw:
+            # AssertionError: Tensor-likes are not equal!
+            # Greatest absolute difference: 1091567616 at index (0, 25)
+            # Greatest relative difference: 1.0 at index (0, 0)
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.int32,)
             ),
         ),
     ),
@@ -25993,6 +26100,12 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
                 dtypes=(torch.bfloat16, torch.float16,)
             ),
+            # Some but not all platforms throw:
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float32,)
+            ),
         ),
     ),
     PythonRefInfo(
@@ -26020,6 +26133,12 @@ python_ref_db = [
                     torch.uint8, torch.int8, torch.int64, torch.int32,
                     torch.int16, torch.float16, torch.bfloat16,
                 )
+            ),
+            # Some but not all platforms throw:
+            # RuntimeError: Undefined type ComplexDouble
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.complex64,)
             ),
         ),
     ),
@@ -26144,6 +26263,12 @@ python_ref_db = [
             # Tests don't account for complex's type promotion semantics
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
+            # Some but not all platforms throw:
+            # Exception: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.float16,)
+            ),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
