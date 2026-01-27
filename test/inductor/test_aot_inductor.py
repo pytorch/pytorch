@@ -3503,6 +3503,17 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_nonzero_static(self):
+        # make sure aten.nonzero_static.default has c-shim,
+        # see https://github.com/pytorch/pytorch/pull/173229
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask = x > 0
+                return mask.view(-1).nonzero_static(size=x.numel())
+
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
     @skip_if_no_torchvision
     def test_missing_cubin(self):
         from torchvision.models.resnet import Bottleneck, ResNet
