@@ -2877,7 +2877,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: gcd_out
+    CPU, CUDA, MPS: gcd_out
   tags: pointwise
 
 - func: gcd(Tensor self, Tensor other) -> Tensor
