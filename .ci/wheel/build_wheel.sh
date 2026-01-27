@@ -96,7 +96,7 @@ fi
 whl_tmp_dir="${MAC_PACKAGE_WORK_DIR}/dist"
 mkdir -p "$whl_tmp_dir"
 
-mac_version='macosx-11_0-arm64'
+mac_version='macosx-11.0-arm64'
 libtorch_arch='arm64'
 
 # Create a consistent wheel package name to rename the wheel to
