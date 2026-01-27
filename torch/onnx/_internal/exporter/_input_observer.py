@@ -75,7 +75,7 @@ def _infer_dynamic_dimensions(
         shape_list:
             list of shapes, they must all have the same length
         add_batch_dimension:
-            make the first dimension dynamic if it is not
+            forces the first dimension to be treated as dynamic, even if all shapes have the same value for that dimension
 
     Returns:
         list of dynamic dimensions
