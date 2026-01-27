@@ -3,8 +3,13 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import onnxscript
-from onnxscript import ir
+from typing import TYPE_CHECKING
+
+from torch.onnx._internal._lazy_import import onnx_ir as ir
+
+
+if TYPE_CHECKING:
+    import onnxscript
 
 
 class SymbolicTensor(ir.Value):
