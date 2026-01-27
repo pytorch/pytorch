@@ -322,9 +322,9 @@ def aot_dispatch_base_graph(
                 include_stride=True,
                 include_device=True,
                 colored=True,
-                # For more expanded output (but can't default to this because it
-                # affects tests):
-                # expanded_def=True
+                # For more expanded output set this to True (but can't default
+                # to this because it affects tests):
+                expanded_def=False,
             ),
         )
 
