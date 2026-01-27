@@ -1923,14 +1923,17 @@ class OptimizeFlattenedReductionsTest(TestCase):
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
         mesh["A", "B"]._flatten("A_B")
 
+        # we simulate all-gather applied to a DTensor with S0S0 placement in default
+        # left-to-right order.
+        # This means we all-gather in reverse (right-to-left) order.
         transform_infos = [
             _TransformInfo(
-                mesh_dim=0,
+                mesh_dim=1,
                 src_dst_placements=(Shard(0), Replicate()),
                 logical_shape=[8, 8],
             ),
             _TransformInfo(
-                mesh_dim=1,
+                mesh_dim=0,
                 src_dst_placements=(Shard(0), Replicate()),
                 logical_shape=[8, 8],
             ),
