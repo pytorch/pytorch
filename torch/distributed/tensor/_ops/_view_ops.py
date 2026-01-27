@@ -428,15 +428,22 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     return tuple(dimmap)
 
 
-def dim_squeeze(shape: Shape, dim: int | None = None) -> DimMap:
+def dim_squeeze(shape: Shape, dim: DimsType | None = None) -> DimMap:
     # FIXME: this is wrong when dim=None and one of the dimensions
     # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
     # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
     # removal of a dimension that is not actually a singleton.
+    ndim = len(shape)
+    # Normalize dim to set of target dimensions to squeeze
+    if dim is None:
+        target_dims = set(range(ndim))
+    elif isinstance(dim, int):
+        target_dims = {normalize_dim(dim, ndim)}
+    else:
+        target_dims = set(normalize_dims(dim, ndim))
+    # Keep dimensions that are either size > 1, or not targeted for squeeze
     return tuple(
-        InputDim(i)
-        for i, s in enumerate(shape)
-        if s > 1 or (dim is not None and i != normalize_dim(dim, len(shape)))
+        InputDim(i) for i, s in enumerate(shape) if s > 1 or i not in target_dims
     )
 
 
@@ -763,6 +770,9 @@ register_op_strategy_map(
 )
 register_op_strategy_map(
     aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_op_strategy_map(
+    aten.squeeze.dims, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
 )
 register_op_strategy_map(
     aten.view.default,

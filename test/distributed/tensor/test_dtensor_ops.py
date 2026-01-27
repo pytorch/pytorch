@@ -200,6 +200,8 @@ dtensor_fails = {
     xfail("searchsorted"),
     xfail("sparse.sampled_addmm"),
     xfail("sparse.mm", "reduce"),
+    # Test fails due to pre-existing bug where local squeeze removes sharded
+    # dims with local size 1. See FIXME in dim_squeeze and PR #166862.
     xfail("squeeze", "multiple"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
