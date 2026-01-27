@@ -9258,15 +9258,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # no pinned memory allocator is available on this system.
     @requires_gpu()
     @unittest.skipIf(IS_MACOS, "fails on macos")
-    def test_empty_pin_memory(self):
+    @parametrize(
+        "constructor",
+        [torch.empty, torch.ones, torch.zeros, torch.rand, torch.randn],
+        name_fn=lambda constructor: constructor.__name__,
+    )
+    def test_constructors_pin_memory(self, constructor):
         if self.device != "cpu":
             raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
 
+        failing_constructors = [torch.rand, torch.ones, torch.zeros]
+
         def fn():
-            return aten.empty([1, 128, 128], pin_memory=True, device=self.device)
+            return constructor([1, 128, 128], pin_memory=True, device=self.device)
 
         result = torch.compile(fn, backend="inductor")()
-        self.assertTrue(result.is_pinned())
+        if constructor in failing_constructors:
+            # We will get signal when one of the constructor correctly supports `pin_memory=True`.
+            self.assertFalse(result.is_pinned())
+        else:
+            self.assertTrue(result.is_pinned())
         self.assertEqual(result.shape, [1, 128, 128])
 
     def test_new_empty(self):
