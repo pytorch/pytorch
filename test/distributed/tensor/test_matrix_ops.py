@@ -177,15 +177,33 @@ class DistMatrixOpsTest(DTensorTestBase):
             )
             dist_res_local = dist_res.to_local()
 
-            # Relaxed tolerances for large tensors: 512x512x512 = 134M operations
-            # vs 12x8x16 = 1.5K operations in test_mm (87,000x more operations)
-            # Different computation order in distributed setting leads to different
-            # floating-point rounding, requiring looser tolerances
-            self.assertEqual(dist_res_local, local_res, atol=1e-3, rtol=1e-2)
+            # Compute errors relative to float64 reference to verify both computations
+            # have similar accuracy
+            local_abs_err = (local_res - reference_res).abs()
+            dist_abs_err = (dist_res_local - reference_res).abs()
 
-            # Ensure both results are within reasonable bounds of the float64 reference
+            local_max_err = local_abs_err.max().item()
+            dist_max_err = dist_abs_err.max().item()
+            local_mean_err = local_abs_err.mean().item()
+            dist_mean_err = dist_abs_err.mean().item()
+
+            # Verify that local and distributed have comparable errors vs fp64 reference
+            # Both should be within the same order of magnitude
+            # If distributed were systematically worse, we'd see significantly larger errors
+            err_ratio = max(local_max_err, dist_max_err) / (min(local_max_err, dist_max_err) + 1e-10)
+            # Error ratio should be close to 1.0 if both have similar accuracy
+            # Allow up to 5x difference due to different rounding patterns from computation order
+            self.assertLess(err_ratio, 5.0,
+                f"Error ratio {err_ratio:.2f} too large. "
+                f"Local max err: {local_max_err:.2e}, Dist max err: {dist_max_err:.2e}. "
+                f"Local mean err: {local_mean_err:.2e}, Dist mean err: {dist_mean_err:.2e}")
+
+            # Both local and distributed results are compared against float64 reference
+            # Relaxed tolerances needed for large tensors: 512x512x512 = 134M operations
+            # vs 12x8x16 = 1.5K operations in test_mm (87,000x more operations)
             self.assertEqual(local_res, reference_res, atol=1e-3, rtol=1e-2)
             self.assertEqual(dist_res_local, reference_res, atol=1e-3, rtol=1e-2)
+            self.assertEqual(dist_res_local, local_res, atol=1e-3, rtol=1e-2)
 
             # backward
             grad_dist_res = torch.ones_like(dist_res)
