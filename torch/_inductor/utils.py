@@ -1772,6 +1772,7 @@ def use_triton_template(
     enable_int32: bool = False,
     enable_float8: bool = False,
     check_max_autotune: bool = True,
+    backend: str = "TRITON",
 ) -> bool:
     from .codegen.common import BackendFeature, has_backend_feature
 
@@ -1780,6 +1781,13 @@ def use_triton_template(
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
+    backend_upper = backend.upper()
+    if backend_upper == "TRITON":
+        template_feature = BackendFeature.TRITON_TEMPLATES
+    elif backend_upper == "GLUON":
+        template_feature = BackendFeature.GLUON_TEMPLATES
+    else:
+        raise ValueError(f"Unknown template backend: {backend}")
     return (
         (
             (
@@ -1790,9 +1798,12 @@ def use_triton_template(
         )
         # some callers handle max-autotune checking externally
         and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
-        and _use_autotune_backend("TRITON")
-        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+        and _use_autotune_backend(backend_upper)
+        and has_backend_feature(layout.device, template_feature)
     )
+
+
+use_gluon_template = functools.partial(use_triton_template, backend="GLUON")
 
 
 def can_use_tma(
@@ -4238,10 +4249,21 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
 
 
 # Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
-def load_template(name: str, template_dir: Path) -> str:
-    """Load a template file and return its content."""
+def load_template(
+    name: str, template_dir: Path, helpers: list[str] | None = None
+) -> str:
+    """Load a template file and prepend optional helpers."""
+    content_parts = []
+
+    if helpers:
+        for helper_name in helpers:
+            with open(template_dir / f"{helper_name}.py.jinja") as f:
+                content_parts.append(f.read())
+
     with open(template_dir / f"{name}.py.jinja") as f:
-        return f.read()
+        content_parts.append(f.read())
+
+    return "\n".join(content_parts)
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:
