@@ -1388,7 +1388,8 @@ def _all_reduce_meta(self, *args):
 
 
 def _wait_tensor_meta(self, *args):
-    return torch.empty_like(self)
+    # wait_tensor returns the input tensor (it's just a sync primitive)
+    return self
 
 
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):

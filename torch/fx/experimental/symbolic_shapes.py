@@ -2116,6 +2116,8 @@ def _has_uninterpretable_sympy_function(expr: sympy.Basic) -> bool:
         torch.utils._sympy.functions.ToFloat,
         torch.utils._sympy.functions.TruncToInt,
         torch.utils._sympy.functions.CeilToInt,
+        torch.utils._sympy.functions.FloatTrueDiv,
+        torch.utils._sympy.functions.IntTrueDiv,
     )
 
 

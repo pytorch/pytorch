@@ -3987,6 +3987,45 @@ def wrap_to_fake_tensor_and_record(
                     symbolic_context=symbolic_context,
                 )
             )
+
+        # For real tensor propagation, record unbacked symbol values from input tensors.
+        # Directly record values for any unbacked symbols in the tensor's shape.
+        if (
+            tx.fake_mode.propagate_real_tensors
+            and tx.fake_mode.shape_env is not None
+            and isinstance(fake_e, torch.Tensor)
+        ):
+            from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+            shape_env = tx.fake_mode.shape_env
+
+            def record_unbacked_symbol_values(
+                fake_tensor: Any, real_tensor: Any
+            ) -> None:
+                for fake_size, real_size in zip(fake_tensor.size(), real_tensor.size()):
+                    if isinstance(fake_size, torch.SymInt):
+                        sym = fake_size.node.expr
+                        # Only record if it's an unbacked symbol (not in backed_var_to_val)
+                        # and not already recorded
+                        if (
+                            free_unbacked_symbols(fake_size)
+                            and sym not in shape_env.backed_var_to_val
+                            and sym not in shape_env.real_tensor_prop_unbacked_vals
+                        ):
+                            shape_env.set_real_tensor_prop_unbacked_vals(sym, real_size)
+
+            # Record for the tensor itself
+            record_unbacked_symbol_values(fake_e, e)
+
+            # For subclasses like DTensor, also record for inner tensors
+            if is_traceable_wrapper_subclass(fake_e):
+                attrs, _ = fake_e.__tensor_flatten__()
+                for attr in attrs:
+                    fake_inner = getattr(fake_e, attr)
+                    real_inner = getattr(e, attr)
+                    if isinstance(fake_inner, torch.Tensor):
+                        record_unbacked_symbol_values(fake_inner, real_inner)
+
         if (
             source is not None
             and isinstance(fake_e, FakeTensor)
