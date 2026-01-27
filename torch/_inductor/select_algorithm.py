@@ -121,6 +121,8 @@ class KernelNamespace:
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
 
+WORKSPACE_ARG_PLACEHOLDER = "ws_placeholder"
+
 
 @dataclasses.dataclass
 class BenchmarkTensors:
@@ -620,7 +622,7 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
+            size = V.graph.sizevars.optimization_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
@@ -633,7 +635,7 @@ class TritonTemplateKernel(TritonKernel):
                 if f is not None:
                     if isinstance(f, torch.SymInt):
                         f = f.node.expr
-                    return V.graph.sizevars.size_hint(f, fallback=0)
+                    return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
     def jit_lines(self):
@@ -2059,31 +2061,39 @@ class TritonTemplate(KernelTemplate):
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
 
+        # Extract workspace metadata for async autotuning (don't create tensor here
+        # as it can't be pickled for subprocess communication)
+        workspace_size_bytes: Optional[int] = None
+        workspace_zero_fill = False
         workspace_args = []
         if workspace_arg is not None:
-            # Create workspace tensor
-            workspace_size = workspace_arg.count
-            workspace_tensor = torch.empty_strided(
-                (workspace_size,),
-                (1,),
-                dtype=torch.uint8,
-                device=layout.device.type,
+            workspace_size_bytes = workspace_arg.count
+            workspace_zero_fill = (
+                workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED
             )
 
-            # Handle zero initialization if needed
-            if workspace_arg.zero_mode != WorkspaceZeroMode.UNINITIALIZED:
-                workspace_tensor.zero_()
-
-            workspace_args.append(workspace_tensor)
+            workspace_args.append(WORKSPACE_ARG_PLACEHOLDER)
 
         options = result.kernel_options
 
         def make_kernel_render(out_node, hint_override: Optional[int] = None):
             assert result is not None
+            # Create a new unique name for the workspace arg buffer for each render
+            # to prevent buffer reuse of the same workspace arg
+            kernel_workspace_arg = workspace_arg
+            if workspace_arg is not None:
+                kernel_workspace_arg = WorkspaceArg(
+                    count=workspace_arg.count,
+                    zero_mode=workspace_arg.zero_mode,
+                    device=workspace_arg.device,
+                    outer_name=WorkspaceArg.unique_name(),
+                    inner_name=workspace_arg.inner_name,
+                    dtype=workspace_arg.dtype,
+                )
             kernel = self.kernel_type(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
-                workspace_arg=workspace_arg,
+                workspace_arg=kernel_workspace_arg,
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,
@@ -2124,6 +2134,8 @@ class TritonTemplate(KernelTemplate):
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             waves_per_eu=kwargs.get("waves_per_eu", 0),
             kpack=kwargs.get("kpack", 2),
+            workspace_size=workspace_size_bytes,
+            workspace_zero_fill=workspace_zero_fill,
             input_tensor_meta=TensorMeta.from_irnodes(kernel_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
@@ -3962,8 +3974,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         candidates = []
         if (
-            config.cuda.cutlass_prescreening
-            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
+            config.cutlass.cutlass_prescreening
+            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
@@ -4340,21 +4352,9 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            *tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    stride,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for stride in node.get_stride()
-            ),
-            sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
+            *sizevars.optimization_hints(node.get_size()),
+            *V.graph.sizevars.optimization_hints(node.get_stride()),
+            sizevars.optimization_hint(node.get_layout().offset),
         )
 
     def add_feedback_saver(self, fn: FeedbackFunction):
@@ -4501,12 +4501,7 @@ def _autotune_metadata(input_nodes):
         # argument, and extracting those out there directly
         "autotune_strides_hinted": ", ".join(
             [
-                str(
-                    V.graph.sizevars.size_hints(
-                        n.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                    )
-                )
+                str(V.graph.sizevars.optimization_hints(n.get_stride()))
                 for n in input_nodes
             ]
         ),
@@ -4515,10 +4510,7 @@ def _autotune_metadata(input_nodes):
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.size_hints(
-                            n.get_size(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
+                        V.graph.sizevars.optimization_hints(n.get_size()),
                     )
                 )
                 for n in input_nodes
