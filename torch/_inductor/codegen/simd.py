@@ -36,7 +36,7 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash, PyCodeCache
-from ..dependencies import MemoryDep, StarDep, WeakDep
+from ..dependencies import MemoryDep, StarDep
 
 
 if TYPE_CHECKING:
@@ -52,14 +52,12 @@ from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
     expr_fits_within_32bit,
-    get_dtype_size,
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    unique,
 )
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher

@@ -103,9 +103,8 @@ class ProfilerIntegrationBase(TestCase):
     """Base class for profiler integration tests with common setup/teardown."""
 
     def setUp(self):
-        self.trace_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-        self.trace_path = self.trace_file.name
-        self.trace_file.close()
+        fd, self.trace_path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
 
     def tearDown(self):
         if os.path.exists(self.trace_path):
@@ -277,8 +276,10 @@ class TestRooflineMetrics(ProfilerIntegrationBase):
 
         for e in gemm_kernels:
             arith_intensity = e["args"].get("arithmetic_intensity", 0)
-            self.assertGreater(arith_intensity, 50,
-                f"Expected high arithmetic intensity, got {arith_intensity:.1f}")
+            self.assertGreater(
+                arith_intensity, 50,
+                f"Expected high arithmetic intensity, got {arith_intensity:.1f}"
+            )
 
     def test_pointwise_is_memory_bound(self):
         """Test pointwise ops have low arithmetic intensity."""
@@ -301,8 +302,10 @@ class TestRooflineMetrics(ProfilerIntegrationBase):
 
         for e in memory_bound:
             arith_intensity = e["args"].get("arithmetic_intensity", 0)
-            self.assertLess(arith_intensity, 10,
-                f"Expected low arithmetic intensity, got {arith_intensity:.1f}")
+            self.assertLess(
+                arith_intensity, 10,
+                f"Expected low arithmetic intensity, got {arith_intensity:.1f}"
+            )
 
 
 if __name__ == "__main__":
