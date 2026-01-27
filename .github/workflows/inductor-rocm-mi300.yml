@@ -1,9 +1,10 @@
 name: inductor-rocm-mi300
 
 on:
+  schedule:
+    - cron: 0 */3 * * *
   push:
     branches:
-      - main
       - release/*
     tags:
       - ciflow/inductor-rocm-mi300/*
@@ -47,8 +48,8 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1.test" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx950.1.test" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx942.1" },
         ]}
     secrets: inherit
 

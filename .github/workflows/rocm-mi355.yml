@@ -2,11 +2,14 @@ name: rocm-mi355
 
 on:
   push:
+    branches:
+      - main
+      - release/*
     tags:
       - ciflow/rocm-mi355/*
   workflow_dispatch:
   schedule:
-    - cron: 30 11,1 * * *  # about 4:30am PDT and 6:30pm PDT
+    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
