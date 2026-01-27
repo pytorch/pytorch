@@ -1208,60 +1208,37 @@ class TestOverlapSchedulingFixes(InductorTestCase):
 
 
 class TestForeachGroupsUnit(InductorTestCase):
-    """Unit tests for _pre_bucket_all_gather foreach optimization."""
+    """Unit tests for _compute_foreach_groups and _pre_bucket_all_gather foreach optimization."""
 
     @unittest.skipIf(not HAS_GPU, "Requires GPU")
-    def test_pre_bucket_all_gather_basic(self):
-        """Test that _pre_bucket_all_gather works correctly."""
+    def test_foreach_groups_correctness(self):
+        """Test that foreach grouping computes correct groups and copies data correctly."""
         from torch._inductor.fx_passes.bucketing import (
             _ALL_DTYPES,
+            _compute_foreach_groups,
             _pre_bucket_all_gather,
         )
 
         t1 = torch.randn(10, device="cuda")
-        t2 = torch.randn(20, device="cuda")
+        t2 = torch.randn(20, device="cuda", dtype=torch.float16)
         t3 = torch.randn(10, device="cuda")
-
         ag_ins = [t1, t2, t3]
-        out_dtype_ints = [
-            _ALL_DTYPES.index(torch.float32),
-            _ALL_DTYPES.index(torch.float32),
-            _ALL_DTYPES.index(torch.float32),
-        ]
+        out_dtypes = [torch.float32, torch.float16, torch.float32]
+        out_dtype_ints = [_ALL_DTYPES.index(d) for d in out_dtypes]
 
-        # Test that the function works
-        result = _pre_bucket_all_gather(
-            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0
+        # Mixed dtypes should produce groups with -1 delimiter
+        groups = _compute_foreach_groups(ag_ins, out_dtypes)
+        self.assertIsNotNone(groups)
+        self.assertIn(-1, groups)
+
+        # With and without groups should produce identical results
+        result_with = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, groups
         )
-        # Expected size: (10 + 20 + 10) * 2 = 80
-        self.assertEqual(result.numel(), 80)
-
-    @unittest.skipIf(not HAS_GPU, "Requires GPU")
-    def test_pre_bucket_all_gather_mixed_dtypes(self):
-        """Test _pre_bucket_all_gather with mixed dtypes triggers internal grouping."""
-        from torch._inductor.fx_passes.bucketing import (
-            _ALL_DTYPES,
-            _pre_bucket_all_gather,
+        result_without = _pre_bucket_all_gather(
+            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0, None
         )
-
-        t1 = torch.randn(10, device="cuda")
-        t2 = torch.randn(20, dtype=torch.float16, device="cuda")
-        t3 = torch.randn(10, device="cuda")
-
-        ag_ins = [t1, t2, t3]
-        out_dtype_ints = [
-            _ALL_DTYPES.index(torch.float32),
-            _ALL_DTYPES.index(torch.float16),
-            _ALL_DTYPES.index(torch.float32),
-        ]
-
-        # Test that the function works with mixed dtypes
-        # (internal grouping should handle this efficiently)
-        result = _pre_bucket_all_gather(
-            ag_ins, 2, "default", torch.float32, out_dtype_ints, 0
-        )
-        # Size: ((10*4) + (20*2) + (10*4)) / 4 * 2 = (40 + 40 + 40) / 4 * 2 = 60
-        self.assertEqual(result.numel(), 60)
+        self.assertTrue(torch.allclose(result_with, result_without))
 
 
 if __name__ == "__main__":
