@@ -679,7 +679,10 @@ class DTensorRedistributePlanner:
                 mesh_dims_to_update = (transform_info.mesh_dim,)
                 is_flattened = False
 
-            if src_dim_placement.is_shard():
+            # Check for both Shard and _StridedShard (which has is_shard() = False)
+            if src_dim_placement.is_shard() or isinstance(
+                src_dim_placement, _StridedShard
+            ):
                 src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
                 assert (
                     src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
@@ -697,7 +700,10 @@ class DTensorRedistributePlanner:
                     f"expected {mesh_dims_to_update}, but shard_order had {tuple(removed_dims)}"
                 )
 
-            if dst_dim_placement.is_shard():
+            # Check for both Shard and _StridedShard for destination
+            if dst_dim_placement.is_shard() or isinstance(
+                dst_dim_placement, _StridedShard
+            ):
                 dst_dim = dst_dim_placement.dim  # type: ignore[attr-defined]
                 if dst_dim not in shard_order_dict:
                     shard_order_dict[dst_dim] = []
@@ -1437,6 +1443,24 @@ def redistribute_local_tensor(
     )
 
     debug_mode = get_active_debug_mode()
+
+    # For stringify_transform_infos, we need to use the same shard_order that was
+    # used to generate the transforms. When _StridedShard is present, the planner
+    # derives shard_order from placements rather than using the spec's shard_order.
+    # This mirrors the logic in generate_graph_based_transform_infos._try_normalize_spec.
+    stringify_shard_order = current_spec.shard_order
+    if any(isinstance(p, _StridedShard) for p in current_spec.placements):
+        _, derived_shard_order = DTensorSpec._normalize_placements_into_shard_order(
+            current_spec.placements, current_spec.mesh
+        )
+        if derived_shard_order is not None:
+            stringify_shard_order = derived_shard_order
+        else:
+            # Fallback: compute default shard_order (treat _StridedShard as normal shard)
+            stringify_shard_order = DTensorSpec.compute_default_shard_order(
+                current_spec.placements, treat_strided_shard_as_shard=True
+            )
+
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
             local_tensor,
@@ -1446,7 +1470,7 @@ def redistribute_local_tensor(
                 device_mesh,
                 optimized_transform_infos,
                 current_spec.placements,
-                current_spec.shard_order,
+                stringify_shard_order,
             ),
         )
         if debug_mode is not None
