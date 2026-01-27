@@ -59,8 +59,12 @@ class GraphModule(torch.nn.Module):
 
         all_to_all_single: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(primals_3, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_3 = None
 
+        sym_size_int: "Sym(2*((s77//2)))" = torch.ops.aten.sym_size.int(all_to_all_single, 0)
+
         wait_tensor: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
-        return (wait_tensor, primals_1, primals_2, floordiv)
+
+        view: "f32[2*((s77//2)), s27]" = torch.ops.aten.view.default(wait_tensor, [sym_size_int, primals_2]);  wait_tensor = sym_size_int = None
+        return (view, primals_1, primals_2, floordiv)
 """,  # noqa: B950
         )
         self.assertExpectedInline(
@@ -101,8 +105,12 @@ class GraphModule(torch.nn.Module):
 
         all_to_all_single: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(primals_4, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_4 = None
 
+        sym_size_int: "Sym(2*((u0//2)))" = torch.ops.aten.sym_size.int(all_to_all_single, 0)
+
         wait_tensor: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
-        return (wait_tensor, primals_1, primals_2, primals_3, floordiv)
+
+        view: "f32[2*((u0//2)), u1, u2]" = torch.ops.aten.view.default(wait_tensor, [sym_size_int, primals_2, primals_3]);  wait_tensor = sym_size_int = None
+        return (view, primals_1, primals_2, primals_3, floordiv)
 """,  # noqa: B950
         )
         self.assertExpectedInline(
