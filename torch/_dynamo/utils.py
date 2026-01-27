@@ -2875,7 +2875,7 @@ def iter_contains(
     tx: InstructionTranslator,
     check_tensor_identity: bool = False,
 ) -> Any:
-    from .variables import BuiltinVariable, ConstantVariable
+    from .variables import ConstantVariable
 
     if search.is_python_constant():
         found_const = any(
@@ -2900,7 +2900,9 @@ def iter_contains(
         else:
             from torch._dynamo.variables.builder import SourcelessBuilder
 
-            check = SourcelessBuilder.create(tx, operator.eq).call_function(tx, [x, search], {})
+            check = SourcelessBuilder.create(tx, operator.eq).call_function(
+                tx, [x, search], {}
+            )
             if found is None:
                 found = check
             else:
