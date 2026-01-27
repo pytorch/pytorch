@@ -5353,6 +5353,27 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         with self.assertRaises(Unsupported):
             a.call_function(None, [], {})
 
+    def test_unsupported_msg_in_bind_args_error(self):
+        class BadClass:
+            """Class that requires 'cls' argument."""
+
+            def __init__(self, cls):
+                self.cls = cls
+
+        @contextlib.contextmanager
+        def my_context():
+            yield
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            with my_context():
+                # Error: Missing required positional argument 'cls'
+                obj = BadClass()  # This will raise TypeError
+                return obj
+
+        with self.assertRaisesRegex(Unsupported, "obj = BadClass()"):
+            fn()
+
     def test_inspect_method_source(self):
         class Mod(torch.nn.Module):
             def __init__(self):
