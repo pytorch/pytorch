@@ -30,6 +30,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_all_gather,
     foreach_reduce,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_common import (
+    FSDPMeshInfo,
+    ShardPlacementResult,
+)
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -847,6 +851,113 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
             full_param = param.full_tensor()
             self.assertEqual(full_param, ref_param)
+
+    @skip_if_lt_x_gpu(4)
+    def test_shard_placement_fn_mixed_mesh_info(self):
+        """
+        Tests that shard_placement_fn correctly handles mixed mesh_info types
+        and properly separates params into groups across different mesh configs.
+
+        Iterates over 2 global_mesh configurations:
+        1. 1D mesh (FSDP)
+        2. 2D mesh with (dp_replicate, dp_shard) (HSDP)
+
+        For each config, tests that:
+        - Params with custom meshes (mesh_a, mesh_b) are correctly grouped
+        - Params falling back to default mesh use correct mesh_info type
+        """
+        self.run_subtests(
+            {"mesh_type": ["1d", "2d_hsdp"]},
+            self._test_shard_placement_fn_mixed_mesh_info,
+        )
+
+    def _test_shard_placement_fn_mixed_mesh_info(self, mesh_type: str):
+        # Create global_mesh and sub-meshes based on mesh_type
+        if mesh_type == "1d":
+            # 2D mesh used to create two different 1D sub-meshes
+            global_mesh = init_device_mesh(
+                device_type.type,
+                (2, self.world_size // 2),
+                mesh_dim_names=("dim0", "dim1"),
+            )
+            mesh_a = global_mesh["dim1"]
+            mesh_b = global_mesh["dim0"]
+        else:  # 2d_hsdp
+            global_mesh = init_device_mesh(
+                device_type.type,
+                (2, self.world_size // 2),
+                mesh_dim_names=("dp_replicate", "dp_shard"),
+            )
+            mesh_a = global_mesh["dp_shard"]
+            mesh_b = global_mesh["dp_replicate"]
+
+        mesh_info_a = FSDPMeshInfo(mesh=mesh_a, shard_mesh_dim=0)
+        mesh_info_b = FSDPMeshInfo(mesh=mesh_b, shard_mesh_dim=0)
+
+        torch.manual_seed(42)
+        dim = 8
+        model = nn.Sequential(
+            nn.Linear(dim, dim, bias=False),  # linear_a: custom mesh_a
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),  # linear_b: custom mesh_b
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),  # linear_c: fallback to global_mesh
+        )
+
+        linear_a_weight = model[0].weight
+        linear_b_weight = model[2].weight
+
+        def shard_placement_fn(param: nn.Parameter):
+            if param is linear_a_weight:
+                return ShardPlacementResult(placement=Shard(0), mesh_info=mesh_info_a)
+            elif param is linear_b_weight:
+                return ShardPlacementResult(placement=Shard(0), mesh_info=mesh_info_b)
+            # linear_c: return None to fallback to global_mesh
+            return None
+
+        fully_shard(model, mesh=global_mesh, shard_placement_fn=shard_placement_fn)
+
+        state = model._get_fsdp_state()
+
+        # Verify 3 separate param groups with correct mesh_info types
+        self.assertEqual(len(state._fsdp_param_groups), 3)
+
+        # Create reference model for loss comparison
+        # Note: Only first forward loss is compared since mixed mesh sharding
+        # has different gradient reduction semantics than DDP
+        torch.manual_seed(42)
+        ref_model = nn.Sequential(
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),
+        ).to(device_type)
+        replicate(ref_model, device_ids=[self.rank])
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        # Verify loss parity on first forward (same initial params)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn((4, dim), device=device_type.type)
+        ref_loss = ref_model(inp).sum()
+        loss = model(inp).sum()
+        self.assertEqual(ref_loss, loss)
+
+        # Run 5 iterations to verify training works without crashes
+        # Note: We don't compare loss to ref_model in subsequent iterations because:
+        # - ref_model uses DDP which averages gradients across all 8 ranks
+        # - model uses mixed mesh sharding where each param has different reduction:
+        #   * linear_a: gradients averaged within mesh_a (4 ranks from dim1)
+        #   * linear_b: gradients averaged within mesh_b (4 ranks from dim0)
+        #   * linear_c: gradients averaged within global_mesh (8 ranks with HSDP)
+        # After the first backward/step, the models diverge due to different gradient
+        # averaging, which is expected and correct behavior for mixed mesh sharding.
+        for iter_idx in range(5):
+            inp = torch.randn((4, dim), device=device_type.type)
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            optim.zero_grad()
 
 
 class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):

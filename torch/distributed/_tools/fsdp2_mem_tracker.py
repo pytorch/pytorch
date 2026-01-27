@@ -239,7 +239,7 @@ class FSDPMemTracker(MemTracker):
             args, kwargs = orig_fsdp_state_pre_fw(*args, **kwargs)
 
             fsdp_state = fsdp_mod._get_fsdp_state()
-            if fsdp_param_group := fsdp_state._fsdp_param_group:
+            for fsdp_param_group in fsdp_state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     self._update_and_maybe_create_winfos(
                         fsdp_param.unsharded_param,
@@ -331,7 +331,7 @@ class FSDPMemTracker(MemTracker):
         @wraps(orig_fsdp_param_group_post_backward)
         def inner(*args: _P.args, **kwargs: _P.kwargs) -> None:
             fsdp_state = fsdp_mod._get_fsdp_state()
-            if fsdp_param_group := fsdp_state._fsdp_param_group:
+            for fsdp_param_group in fsdp_state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     unsharded_grad = fsdp_param._unsharded_param.grad
                     if unsharded_grad is not None:
@@ -348,7 +348,7 @@ class FSDPMemTracker(MemTracker):
             self._fsdp_state = _FSDPState.POST_BW
             orig_fsdp_param_group_post_backward(*args, **kwargs)
 
-            if fsdp_param_group := fsdp_state._fsdp_param_group:
+            for fsdp_param_group in fsdp_state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     sharded_grad = fsdp_param.sharded_param.grad
                     if sharded_grad is not None:
@@ -377,7 +377,7 @@ class FSDPMemTracker(MemTracker):
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
-                if fsdp_param_group := fsdp_state._fsdp_param_group:
+                if fsdp_state._fsdp_param_groups:
                     if not unique_handlers.get(fsdp_state._pre_forward_hook_handle):
                         unique_handlers[fsdp_state._pre_forward_hook_handle] = True
                     if not unique_handlers.get(fsdp_state._post_forward_hook_handle):
@@ -389,8 +389,9 @@ class FSDPMemTracker(MemTracker):
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
-                if fsdp_param_group := fsdp_state._fsdp_param_group:
-                    self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
+                if fsdp_state._fsdp_param_groups:
+                    for fsdp_param_group in fsdp_state._fsdp_param_groups:
+                        self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
                     fsdp_state._pre_forward_hook_handle = (
                         module.register_forward_pre_hook(
                             self._fsdp_state_pre_forward(
@@ -406,18 +407,24 @@ class FSDPMemTracker(MemTracker):
                         prepend=False,
                         always_call=True,
                     )
-                    self._fsdp_mod_to_saved_methods[module] = _SavedFSDPMethods(
-                        fsdp_param_group.pre_backward,
-                        fsdp_param_group.post_backward,
-                    )
-                    fsdp_param_group.pre_backward = self._fsdp_param_group_pre_backward(  # type: ignore[assignment]
-                        module, fsdp_param_group.pre_backward
-                    )
-                    fsdp_param_group.post_backward = (  # type: ignore[assignment]
-                        self._fsdp_param_group_post_backward(
-                            module, fsdp_param_group.post_backward
+                    # Save original methods for each param group
+                    saved_methods_list: list[_SavedFSDPMethods] = []
+                    for fsdp_param_group in fsdp_state._fsdp_param_groups:
+                        saved_methods_list.append(
+                            _SavedFSDPMethods(
+                                fsdp_param_group.pre_backward,
+                                fsdp_param_group.post_backward,
+                            )
                         )
-                    )
+                        fsdp_param_group.pre_backward = self._fsdp_param_group_pre_backward(  # type: ignore[assignment]
+                            module, fsdp_param_group.pre_backward
+                        )
+                        fsdp_param_group.post_backward = (  # type: ignore[assignment]
+                            self._fsdp_param_group_post_backward(
+                                module, fsdp_param_group.post_backward
+                            )
+                        )
+                    self._fsdp_mod_to_saved_methods[module] = saved_methods_list
 
         for buffer in self._root_mod.buffers():
             self._update_and_maybe_create_winfos(
@@ -455,7 +462,7 @@ class FSDPMemTracker(MemTracker):
     def _deregister_module_and_optimizer_hooks(self) -> None:
         for (
             fsdp_mod,
-            saved_methods,
+            saved_methods_list,
         ) in self._fsdp_mod_to_saved_methods.items():
             fsdp_state = fsdp_mod._get_fsdp_state()
             fsdp_state._pre_forward_hook_handle.remove()
@@ -466,7 +473,9 @@ class FSDPMemTracker(MemTracker):
             fsdp_state._post_forward_hook_handle = fsdp_mod.register_forward_hook(
                 fsdp_state._post_forward, prepend=False
             )
-            if fsdp_param_group := fsdp_state._fsdp_param_group:
+            for fsdp_param_group, saved_methods in zip(
+                fsdp_state._fsdp_param_groups, saved_methods_list
+            ):
                 fsdp_param_group.pre_backward = saved_methods.pre_backward
                 fsdp_param_group.post_backward = saved_methods.post_backward
         self._fsdp_mod_to_saved_methods.clear()

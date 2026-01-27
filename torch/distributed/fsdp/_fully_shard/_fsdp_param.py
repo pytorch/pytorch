@@ -26,6 +26,8 @@ from ._fsdp_common import (
     compiled_autograd_enabled,
     FSDPMeshInfo,
     HSDPMeshInfo,
+    resolve_shard_placement,
+    ShardPlacementFnResult,
 )
 
 
@@ -226,12 +228,11 @@ class FSDPParam:
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None,
+        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
         self._module_info: ParamModuleInfo = module_info
-        self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         # pyrefly: ignore [read-only]
         self.device = device
@@ -241,7 +242,12 @@ class FSDPParam:
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
         self.grad_offload_event: torch.Event | None = None
-        self._init_sharded_param(param, device, shard_placement_fn)
+        # Resolve shard_placement_fn result to get both placement and mesh_info
+        shard_result = resolve_shard_placement(
+            shard_placement_fn(param) if shard_placement_fn else None, mesh_info
+        )
+        self.mesh_info = shard_result.mesh_info
+        self._init_sharded_param(param, device, shard_result.placement)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
@@ -261,7 +267,7 @@ class FSDPParam:
         self,
         param: nn.Parameter,
         device: torch.device,
-        shard_placement_fn: Callable | None,
+        fsdp_placement: Shard | None,
     ):
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
@@ -271,7 +277,6 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
-        fsdp_placement = shard_placement_fn(param) if shard_placement_fn else None
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:

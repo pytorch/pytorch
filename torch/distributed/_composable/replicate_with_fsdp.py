@@ -146,17 +146,18 @@ class _ReplicateState(FSDPState):
             self._state_ctx.all_states.append(state)
             # pyrefly: ignore [bad-argument-type]
             visited_states.add(state)
-        if self._fsdp_param_group and self._auto_reshard_after_forward:
+        if self._fsdp_param_groups and self._auto_reshard_after_forward:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
-            self._fsdp_param_group.post_forward_mesh_info = None
+            for fsdp_param_group in self._fsdp_param_groups:
+                fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
         # Run parameter group lazy inits after initializing FQNs for improved
         # error messages
         for state in self._state_ctx.all_states:  # type: ignore[assignment]
-            if state._fsdp_param_group:  # type: ignore[union-attr]
-                state._fsdp_param_group.lazy_init()  # type: ignore[union-attr]
+            for fsdp_param_group in state._fsdp_param_groups:  # type: ignore[union-attr]
+                fsdp_param_group.lazy_init()
 
 
 def replicate_impl(
