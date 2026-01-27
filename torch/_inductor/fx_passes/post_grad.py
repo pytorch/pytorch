@@ -349,6 +349,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
+
+    GraphTransformObserver(
+        gm, "fix_dtype_view_bases_in_auto_functionalized"
+    ).apply_graph_pass(fix_dtype_view_bases_in_auto_functionalized)
+
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
@@ -1256,6 +1261,93 @@ def decompose_triton_kernel_wrapper_functional(graph):
         target=torch.ops.higher_order.triton_kernel_wrapper_functional,
     ):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
+
+
+def fix_dtype_view_bases_in_auto_functionalized(graph: torch.fx.Graph) -> None:
+    """
+    Fix auto_functionalized_v2 nodes where _all_bases contains dtype views
+    instead of the actual base tensors.
+
+    When a dtype view (e.g., uint8 -> float8_e4m3fn) is passed as a mutable
+    argument to an auto_functionalized op, the view itself gets added to
+    _all_bases instead of the underlying base tensor. This causes unnecessary
+    clones to be inserted later.
+
+    This pass detects such cases and replaces the dtype view in _all_bases
+    with the actual graph input that shares the same storage.
+    """
+    # Build a map of storage _cdata to graph inputs
+    storage_to_input: dict[int, torch.fx.Node] = {}
+    for node in graph.nodes:
+        if node.op == "placeholder":
+            try:
+                storage = node.meta.get("val")
+                if storage is not None and isinstance(storage, torch.Tensor):
+                    storage_cdata = storage.untyped_storage()._cdata
+                    storage_to_input[storage_cdata] = node
+            except (AttributeError, RuntimeError):
+                pass
+
+    # Process all auto_functionalized_v2 nodes
+    for node in graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.higher_order.auto_functionalized_v2
+        ):
+            # Get _all_bases from kwargs
+            all_bases = node.kwargs.get("_all_bases")
+            if all_bases is None or not isinstance(all_bases, (list, tuple)):
+                continue
+
+            # Check each base for dtype views
+            fixed_bases = list(all_bases)
+            modified = False
+
+            for i, base in enumerate(all_bases):
+                if not isinstance(base, torch.fx.Node):
+                    continue
+
+                try:
+                    base_val = base.meta.get("val")
+                    if base_val is None or not isinstance(base_val, torch.Tensor):
+                        continue
+
+                    base_storage_cdata = base_val.untyped_storage()._cdata
+                    base_dtype = base_val.dtype
+
+                    # Check if this base shares storage with a graph input
+                    # but has a different dtype (indicating a dtype view)
+                    if base_storage_cdata in storage_to_input:
+                        actual_input = storage_to_input[base_storage_cdata]
+                        actual_input_val = actual_input.meta.get("val")
+
+                        if (
+                            actual_input_val is not None
+                            and isinstance(actual_input_val, torch.Tensor)
+                            and actual_input_val.dtype != base_dtype
+                        ):
+                            # This is a dtype view! Replace it with the actual input
+                            log.debug(
+                                "Fixing dtype view in auto_functionalized_v2: "
+                                "replacing %s (dtype=%s) with %s (dtype=%s)",
+                                base,
+                                base_dtype,
+                                actual_input,
+                                actual_input_val.dtype,
+                            )
+                            fixed_bases[i] = actual_input
+                            modified = True
+                            counters["inductor"]["fix_dtype_view_bases"] += 1
+
+                except (AttributeError, RuntimeError, KeyError):
+                    # Skip if we can't access storage info
+                    continue
+
+            # Update the node's kwargs if we made changes
+            if modified:
+                new_kwargs = dict(node.kwargs)
+                new_kwargs["_all_bases"] = fixed_bases
+                node.kwargs = new_kwargs
 
 
 def decompose_auto_functionalized(graph):
