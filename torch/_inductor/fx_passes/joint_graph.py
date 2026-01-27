@@ -387,7 +387,9 @@ class UniformValueConstantFolder(ConstantFolder):
         return self.unknown_value
 
 
-def _has_self_referential_shape(shapes: list, node: torch.fx.Node) -> bool:
+def _has_self_referential_shape(
+    shapes: list[int | torch.fx.Node], node: torch.fx.Node
+) -> bool:
     """
     Check if any shape in `shapes` depends on `node`.
 
@@ -437,10 +439,6 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
         for node in cf.node_replacements:
             constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
-
-        if not node_replacements:
-            remove_no_ops(gm, zeros, ones)
-            return
 
         for node, value in node_replacements.items():
             # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
