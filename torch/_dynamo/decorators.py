@@ -198,12 +198,6 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
 
 
 def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> None:
-    """
-    Check that a function is not already decorated with a mutually exclusive decorator.
-
-    This provides a single place to manage decorator compatibility, making it scalable
-    as we add more decorators.
-    """
     mutually_exclusive = {
         "leaf_function": trace_rules.is_leaf_function,
         "nonstrict_trace": trace_rules.is_nonstrict_trace_callable,
@@ -211,7 +205,6 @@ def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> N
 
     for other_name, check_fn in mutually_exclusive.items():
         if other_name != decorator_name and check_fn(fn):
-            # Sort names alphabetically for consistent error messages
             first, second = sorted([decorator_name, other_name])
             raise ValueError(
                 f"Function {fn} cannot be both marked as @{first} and "
@@ -408,15 +401,18 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # BAD: primitive output varies at runtime
             counter = 0
 
+
             @leaf_function
             def count_calls(x):
                 global counter
                 counter += 1
                 return (x, counter)
 
+
             @count_calls.fake_impl
             def count_calls_fake(x):
                 return (x, 999)  # placeholder value
+
 
             # At runtime: real function runs (counter increments to 1, 2, 3, ...)
             # But returned count is always 999 (from fake_impl at compile time)
@@ -634,24 +630,20 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return fn(*args, **kwargs)
 
-    # Add leaf function attributes
-    # fake_fn must be set via .fake_impl decorator
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = None  # type: ignore[attr-defined]
 
-    # Register with trace_rules
+    # Follow nonstrict_trace implementation
     wrapped_id = id(inner)
     trace_rules._allowed_callable_ids.add(wrapped_id)
     trace_rules._leaf_function_ids.add(wrapped_id)
 
-    # Avoid id reuse
     def deregister() -> None:
         trace_rules._allowed_callable_ids.remove(wrapped_id)
         trace_rules._leaf_function_ids.remove(wrapped_id)
 
     weakref.finalize(inner, deregister)
 
-    # Add fake_impl setter method to the function
     def fake_impl_setter(fake_fn: Callable[..., Any]) -> Callable[..., Any]:
         inner._torchdynamo_leaf_fake_fn = fake_fn  # type: ignore[attr-defined]
         return inner
@@ -659,16 +651,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     inner.fake_impl = fake_impl_setter  # type: ignore[attr-defined]
 
     return inner
-
-
-def get_leaf_function_fake_impl(fn: Any) -> Any:
-    """Get the fake_impl associated with a leaf_function decorated callable."""
-    return getattr(fn, "_torchdynamo_leaf_fake_fn", None)
-
-
-def get_leaf_function_real_impl(fn: Any) -> Any:
-    """Get the real_impl associated with a leaf_function decorated callable."""
-    return getattr(fn, "_torchdynamo_leaf_real_fn", None)
 
 
 def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:
@@ -991,6 +973,7 @@ def mark_unbacked(
     hint_override: Optional[int] = None,
     strict: bool = False,
     specialize_on: Optional[list[Any]] = None,
+    shape_id: Optional[str] = None,
 ) -> None:
     """
     Mark a tensor as having an unbacked dimension. This changes the semantics of operations:
@@ -1008,12 +991,16 @@ def mark_unbacked(
             By default (strict=False), specialization is allowed and will proceed without error.
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
             If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
+        shape_id (Optional[str], default=None): An optional identifier to group unbacked dimensions together.
+            All unbacked dimensions with the same shape_id will share the same unbacked symbol. This is useful when multiple tensors
+            are known to have the same batch size at runtime. A runtime assertion is added
+            to ensure this property at runtime.
     """
     if torch.distributed.is_available() and isinstance(
         t, torch.distributed.tensor.DTensor
     ):
         # apply on inner tensor sizes/strides
-        mark_unbacked(t._local_tensor, index)
+        mark_unbacked(t._local_tensor, index, shape_id=shape_id)
     else:
         # You could have copied the mark_dynamic behavior but I'm not convinced
         # it's what you want
@@ -1039,6 +1026,11 @@ def mark_unbacked(
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
 
+        if shape_id is not None:
+            if not hasattr(t, "_dynamo_shape_ids"):
+                t._dynamo_shape_ids = {}
+            t._dynamo_shape_ids[index] = shape_id
+
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
 
@@ -1050,7 +1042,7 @@ def mark_unbacked(
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_unbacked(t, i)
+        mark_unbacked(t, i, shape_id=shape_id)
 
 
 @forbid_in_graph

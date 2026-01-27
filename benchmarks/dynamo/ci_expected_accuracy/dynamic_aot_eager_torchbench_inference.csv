@@ -162,7 +162,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,7
+moco,pass,4
 
 
 
@@ -270,7 +270,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,20
+vision_maskrcnn,pass,21
 
 
 
