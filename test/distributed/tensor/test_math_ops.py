@@ -35,6 +35,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.utils._debug_mode import DebugMode
 
 
 funcol = torch.ops.c10d_functional
@@ -820,6 +821,99 @@ class DistMathOpsTest(DTensorTestBase):
 
             self.assertEqual(sharded_out[0].full_tensor(), expected0)
             self.assertEqual(sharded_out[1].full_tensor(), expected1)
+
+    @with_comms
+    def test_vector_norm_handler_decomposition(self):
+        """Test that p-norms on Shard inputs use the powsum decomposition."""
+        device_mesh = self.build_device_mesh()
+
+        torch.manual_seed(42)
+        grad = torch.randn(12, 8)
+        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+
+        with DebugMode() as debug_mode:
+            result = torch.linalg.vector_norm(sharded_grad, 2)
+
+        # Verify decomposition: powsum -> redistribute -> pow
+        # Skip inline check for local tensor mode since debug output differs
+        if not self.is_local_tensor_enabled:
+            self.assertExpectedInline(
+                debug_mode.debug_string(),
+                """\
+  aten::linalg_vector_norm(dt: f32[12, 8]| S(0))
+  aten::linalg__powsum(dt: f32[12, 8]| S(0))
+    aten::linalg__powsum(t: f32[3, 8])  ->  t: f32[]
+    redistribute_input(t: f32[], trace: P(sum)->R)
+      _c10d_functional::all_reduce(t: f32[], sum, 0)  ->  t: f32[]
+      _c10d_functional::_wrap_tensor_autograd(t: f32[])  ->  t: f32[]
+      _c10d_functional::wait_tensor(t: f32[])  ->  t: f32[]
+  aten::pow.Tensor_Scalar(dt: f32[]| R, 0.5)
+    aten::pow.Tensor_Scalar(t: f32[], 0.5)  ->  t: f32[]""",
+            )
+
+        # Expected: sqrt(sum(|x|^2))
+        expected = (grad.abs() ** 2).sum() ** 0.5
+        self.assertEqual(result.full_tensor(), expected)
+        self.assertTrue(result.placements[0].is_replicate())
+
+    @with_comms
+    def test_vector_norm_preserves_shard_on_other_dim(self):
+        """Test that reducing on a non-sharded dim preserves the Shard placement."""
+        device_mesh = self.build_device_mesh()
+
+        torch.manual_seed(42)
+        # 2D tensor sharded on dim 0
+        grad = torch.randn(12, 8)
+        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+
+        # Reduce on dim 1 (not the sharded dim)
+        result = torch.linalg.vector_norm(sharded_grad, 2, dim=1, keepdim=False)
+
+        # Should preserve Shard(0) placement since we only reduced dim 1
+        self.assertTrue(result.placements[0].is_shard())
+        self.assertEqual(result.placements[0].dim, 0)
+
+        # Verify correctness
+        expected = torch.linalg.vector_norm(grad, 2, dim=1, keepdim=False)
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    def test_vector_norm_special_norms_partial(self):
+        """Test that inf/-inf/0/1 norms produce Partial placements without replication."""
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        torch.manual_seed(42)
+        grad = torch.randn(12, 8).abs() + 0.1  # Positive values for consistent tests
+
+        # Test cases: (norm_type, expected_reduce_op)
+        test_cases = [
+            (float("inf"), "max"),
+            (float("-inf"), "min"),
+            (0, "sum"),
+            (1, "sum"),
+        ]
+
+        for norm_type, expected_reduce_op in test_cases:
+            sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+
+            with comm_mode:
+                result = torch.linalg.vector_norm(sharded_grad, norm_type)
+
+            # Should produce Partial placement (no allgather, just local compute)
+            self.assertTrue(
+                result.placements[0].is_partial(),
+                f"norm_type={norm_type}: expected Partial, got {result.placements[0]}",
+            )
+            self.assertEqual(
+                result.placements[0].reduce_op,
+                expected_reduce_op,
+                f"norm_type={norm_type}: expected reduce_op={expected_reduce_op}",
+            )
+
+            # Verify correctness after full_tensor (which does the reduction)
+            expected = torch.linalg.vector_norm(grad, norm_type)
+            self.assertEqual(result.full_tensor(), expected)
 
     @with_comms
     def test_foreach_norm_different_mesh(self):

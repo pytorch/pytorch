@@ -1,13 +1,10 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import math
 from collections.abc import Sequence
-from dataclasses import dataclass
 from enum import Enum
-from typing import cast, Union
+from typing import cast
 
 import torch
-from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
@@ -44,81 +41,6 @@ class Reduction(Enum):
     NONE = 0
     MEAN = 1
     SUM = 2
-
-
-@dataclass(frozen=True)
-class NormReduction:
-    norm_type: int | float
-
-
-ReductionOpType = Union[NormReduction, str]
-
-
-@dataclass(frozen=True)
-class _NormPartial(Partial):
-    """
-    This placement is used for partial p-norm (p not in {inf, -inf, 0}).
-
-    For p-norms, the p-norm over n elements computes (sum_i x_i^p)^(1/p).
-    For example, consider 2 ranks, a (4,) tensor sharded on dim-0, and 2-norm:
-        Rank 0: [t1, t2] | Rank 1: [t3, t4]
-    After computing 2-norm per gradient (partial placement):
-        Rank 0: [sqrt(t1^2 + t2^2)] | Rank 1: [sqrt(t3^2 + t4^2)]
-    Converting from partial to replicate wants to ultimately get:
-        Rank 0/1: [sqrt(t1^2 + t2^2 + t3^2 + t4^2)]
-    This is achieved by: x^p -> allreduce sum -> x^(1/p).
-    """
-
-    norm_type: int | float = 2
-
-    def __init__(self, norm_type: int | float = 2):
-        super().__init__("sum")
-        object.__setattr__(self, "norm_type", norm_type)
-
-    def _partition_value(
-        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
-    ) -> torch.Tensor:
-        return tensor / math.pow(mesh.size(mesh_dim), 1 / self.norm_type)
-
-    def _reduce_shard_value(
-        self,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int,
-        shard_spec: Placement,
-    ) -> torch.Tensor:
-        if not isinstance(shard_spec, Shard):
-            raise AssertionError(f"Expected Shard, got {type(shard_spec)}")
-        tensor = self._pre_reduce_transform(tensor)
-        reduced_tensor = super()._reduce_shard_value(tensor, mesh, mesh_dim, shard_spec)
-        return self._post_reduce_transform(reduced_tensor)
-
-    def _reduce_value(
-        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
-    ) -> torch.Tensor:
-        tensor = self._pre_reduce_transform(tensor)
-        reduced_tensor = super()._reduce_value(tensor, mesh, mesh_dim)
-        return self._post_reduce_transform(reduced_tensor)
-
-    def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
-        return tensor**self.norm_type
-
-    def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
-        return tensor ** (1.0 / self.norm_type)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _NormPartial):
-            return False
-        return self.norm_type == other.norm_type
-
-    def __hash__(self) -> int:
-        return 1 + hash(self.norm_type)
-
-    def __repr__(self) -> str:
-        return f"_NormPartial({self.norm_type})"
-
-    def __str__(self) -> str:
-        return f"_NormP({self.norm_type})"
 
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> list[int] | None:
@@ -195,7 +117,7 @@ def map_placements_after_reduction(
     placements: tuple[Placement, ...],
     reduction_dims: list[int],
     reduction_dims_map: list[int],
-    reduction_op: ReductionOpType,
+    reduction_op: str,
 ) -> tuple[Placement, ...]:
     """
     Map each placement based on the output shape after reduction.
@@ -214,7 +136,7 @@ def map_placements_after_reduction(
             if new_shard_dim == -1 or shard_dim in reduction_dims:
                 # if new_shard_dim collapsed or its in the reduction dims
                 # (i.e. for the case where keepdims=True), we generate partial
-                new_placements.append(get_placement_from_reduction_op(reduction_op))
+                new_placements.append(Partial(reduction_op))
             else:
                 if isinstance(placement, Shard):
                     new_placements.append(Shard(new_shard_dim))
@@ -227,18 +149,12 @@ def map_placements_after_reduction(
     return tuple(new_placements)
 
 
-def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
-    if isinstance(reduction_op, NormReduction):
-        return _NormPartial(norm_type=reduction_op.norm_type)
-    return Partial(reduction_op)
-
-
 def common_reduction_strategy(
     input_strategy: OpStrategy,
     reduce_dims: list[int],
     keep_dim: bool = False,
     reduction_linear: bool = True,
-    reduction_op: ReductionOpType = "sum",
+    reduction_op: str = "sum",
 ) -> OpStrategy:
     """
     reduction_linear means that the reduction `f` follows this rule:
@@ -399,21 +315,38 @@ def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
-def _get_norm_reduction_op(norm_type: int | float | str) -> ReductionOpType:
+def _get_norm_reduction_op(norm_type: int | float | str) -> str:
     """Get the reduction op for vector/foreach norm based on norm_type.
 
-    For inf/-inf/0 norms, returns simple reduction ops ("max", "min", "sum").
-    For other p-norms, returns NormReduction which produces _NormPartial.
+    For inf/-inf norms, returns "max" or "min".
+    For all other norms (including p-norms), returns "sum".
     """
     if norm_type in (float("inf"), "inf"):
         return "max"
     elif norm_type in (float("-inf"), "-inf"):
         return "min"
-    elif norm_type == 0:
-        return "sum"
     else:
-        assert isinstance(norm_type, (int, float))
-        return NormReduction(norm_type)
+        return "sum"
+
+
+def _get_norm_reduction_params(norm_type: int | float | str) -> tuple[str, bool]:
+    """
+    Get reduction_op and reduction_linear for vector_norm operations.
+
+    Returns:
+        (reduction_op, reduction_linear) tuple
+    """
+    if norm_type in (float("inf"), "inf"):
+        return "max", True
+    elif norm_type in (float("-inf"), "-inf"):
+        return "min", True
+    elif norm_type == 0 or norm_type == 1:
+        return "sum", True
+    else:
+        # For p-norms, force redistribution before the norm.
+        # Shard inputs are handled by the custom handler which decomposes.
+        # Partial inputs need redistribution first.
+        return "sum", False
 
 
 @register_op_strategy(
@@ -432,12 +365,13 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+    reduction_op, reduction_linear = _get_norm_reduction_params(norm_type)
     return common_reduction_strategy(
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
-        reduction_linear=True,
-        reduction_op=_get_norm_reduction_op(norm_type),
+        reduction_linear=reduction_linear,
+        reduction_op=reduction_op,
     )
 
 
@@ -454,6 +388,7 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
+    reduction_op, reduction_linear = _get_norm_reduction_params(norm_type)
     output_tuple_strategy_children: list[OpStrategy] = []
     for op_strategy in input_tuple_strategy.children:
         if not isinstance(op_strategy, OpStrategy):
@@ -462,8 +397,8 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=True,
-            reduction_op=_get_norm_reduction_op(norm_type),
+            reduction_linear=reduction_linear,
+            reduction_op=reduction_op,
         )
         output_tuple_strategy_children.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_children)
