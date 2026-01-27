@@ -30,7 +30,8 @@ Disclose that the PR was authored with Claude.
 Follow these rules for all code changes in this repository:
 
 - Minimize comments; be concise; code should be self-explanatory and self-documenting.
-- Don't make trivial one-off helper functions.
+- Don't make trivial (1-2 LOC) helper functions that are only used once unless
+  it significantly improves code readability.
 - Prefer clear abstractions. State management should be explicit.
   For example, if managing state in a Python class: there should be a clear
   class definition that has all of the members: don't dynamically `setattr`
