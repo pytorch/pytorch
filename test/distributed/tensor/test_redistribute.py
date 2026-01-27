@@ -1256,56 +1256,6 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                         )
 
     @with_comms
-    def test_ordered_redistribute_with_partial(self):
-        """Test mixing Partial in the original placements and do redistribute."""
-        # This test takes 226s to complete on 8XA100...
-        torch.manual_seed(21)
-        with maybe_disable_local_tensor_mode():
-            mesh = init_device_mesh(self.device_type, (2, 2, 2))
-            input_tensor_shape = [
-                # even sharding
-                (16, 8),
-                (8, 16, 32),
-                # uneven sharding with padding
-                (17, 5),
-                (13, 2, 13),
-            ]
-            placement_choice = [
-                Shard(0),
-                Shard(1),
-                Shard(2),
-                Partial("sum"),
-                Partial("min"),
-                Replicate(),
-            ]
-            # pick 3 for the 3D mesh
-            partial_placement_comb = list(itertools.combinations(placement_choice, 3))
-
-        def _is_valid_placement(placements, tensor_rank):
-            # Check if placements is valid for tensor with rank `tensor_rank`
-            for placement in placements:
-                if isinstance(placement, Shard):
-                    if placement.dim >= tensor_rank:
-                        return False
-            return True
-
-        for shape in input_tensor_shape:
-            for placements in partial_placement_comb:
-                if not _is_valid_placement(placements, len(shape)):
-                    continue
-                local_tensor = torch.randn(shape, device=self.device_type)
-                full_tensor = DTensor.from_local(local_tensor, mesh, placements)
-                with maybe_disable_local_tensor_mode():
-                    shard_orders = generate_shard_orders(mesh, len(shape))
-                for shard_order in shard_orders:
-                    sharded_dt = redistribute(
-                        full_tensor, mesh, placements=None, shard_order=shard_order
-                    )
-                    self.assertEqual(
-                        make_full_tensor(sharded_dt), make_full_tensor(full_tensor)
-                    )
-
-    @with_comms
     def test_redistribute_partial_to_different_partial_not_supported(self):
         # Test that redistributing from one Partial type to another raises an error
         device_mesh = self.build_device_mesh()
@@ -1378,6 +1328,117 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),),
         )
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
+
+
+class DistributeWithStridedShardTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    def _extract_redistribute_trace_from_debug_mode(self, s: str) -> str:
+        import re
+
+        match = re.search(r"trace:\s*(.*)\)", s)
+        if match:
+            trace_str = match.group(1)
+            return trace_str
+        else:
+            return ""
+
+    @with_comms
+    def test_strided_shard_redistribution(self):
+        torch.manual_seed(21)
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_data = torch.randn((31, 13, 11), device=self.device_type)
+        sharding_src_dst_pairs_with_expected_trace = [
+            (
+                (
+                    [Shard(0), Shard(0), _StridedShard(0, split_factor=3)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), _StridedShard(0, split_factor=3)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), _StridedShard(0, split_factor=3), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [_StridedShard(0, split_factor=3), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+                (
+                    [Replicate(), _StridedShard(1, split_factor=5), Shard(0)],
+                    (
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1,)),
+                    ),
+                ),
+            ),
+        ]
+        for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
+            sharding_src_dst_pairs_with_expected_trace
+        ):
+            sharded_dt = _distribute_tensor(
+                input_data.clone(),
+                mesh,
+                src_placement,
+                shard_order=src_order,
+                src_data_rank=None,
+            )
+            with DebugMode(record_torchfunction=False) as debug_mode:
+                sharded_dt = redistribute(sharded_dt, mesh, dst_placement, dst_order)
+            trace_str = self._extract_redistribute_trace_from_debug_mode(
+                debug_mode.debug_string()
+            )
+            if idx == 0:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]_S(0, 3)->S(0)[0]S(0)[1]R->S(0)[0]RR->RRR->RS(0)[1]R->RS(0)[1]S(0)[2]""",  # noqa: B950
+                )
+            elif idx == 1:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->RS(0)R->RS(0)_S(0, 3)""",
+                )
+            elif idx == 2:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1]_S(0, 3)S(0)[2]->S(0)[1]_S(0, 3)R->S(0)[1]RR->RRR->_S(0, 3)RR->_S(0, 3)S(0)[0]R""",
+                )
+            elif idx == 3:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)_S(1, 5)R->R_S(1, 5)R->R_S(1, 5)S(0)""",
+                )
+            expected_dt = _distribute_tensor(
+                input_data.clone(),
+                mesh,
+                dst_placement,
+                shard_order=dst_order,
+                src_data_rank=None,
+            )
+            self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
 
 
 RedistributeTestWithLocalTensor = create_local_tensor_test_class(

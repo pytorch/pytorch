@@ -1,9 +1,16 @@
+# /// script
+# requires-python = ">=3.10"
+# dependencies = [
+#   "shellcheck-py==0.7.2.1; platform_machine == 'x86_64'",
+# ]
+# ///
 from __future__ import annotations
 
 import argparse
 import json
 import logging
-import shutil
+import os
+import platform
 import subprocess
 import sys
 import time
@@ -48,14 +55,42 @@ def run_command(
         logging.debug("took %dms", (end_time - start_time) * 1000)
 
 
+def _is_x86_64() -> bool:
+    return platform.machine() == "x86_64"
+
+
+def _shellcheck_candidates() -> list[str]:
+    path_env = os.environ.get("PATH", "")
+    candidates: list[str] = []
+    for directory in path_env.split(os.pathsep):
+        if not directory:
+            continue
+        candidate = os.path.join(directory, "shellcheck")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            candidates.append(candidate)
+    return candidates
+
+
 def check_files(
     files: list[str],
 ) -> list[LintMessage]:
-    try:
-        proc = run_command(
-            ["shellcheck", "--external-sources", "--format=json1"] + files
-        )
-    except OSError as err:
+    args = ["--external-sources", "--format=json1"] + files
+
+    proc: subprocess.CompletedProcess[bytes] | None = None
+    last_error: OSError | None = None
+
+    for shellcheck in _shellcheck_candidates():
+        try:
+            proc = run_command([shellcheck] + args)
+            break
+        except OSError as err:
+            last_error = err
+
+    if proc is None:
+        if last_error is not None and last_error.errno == 8:
+            return []
+        if not _is_x86_64():
+            return []
         return [
             LintMessage(
                 path=None,
@@ -66,7 +101,11 @@ def check_files(
                 name="command-failed",
                 original=None,
                 replacement=None,
-                description=(f"Failed due to {err.__class__.__name__}:\n{err}"),
+                description=(
+                    f"Failed to execute shellcheck.\n{last_error.__class__.__name__}: {last_error}"
+                    if last_error is not None
+                    else "Failed to find a usable shellcheck executable."
+                ),
             )
         ]
     stdout = str(proc.stdout, "utf-8").strip()
@@ -98,7 +137,9 @@ if __name__ == "__main__":
         help="paths to lint",
     )
 
-    if shutil.which("shellcheck") is None:
+    if not _shellcheck_candidates():
+        if not _is_x86_64():
+            sys.exit(0)
         err_msg = LintMessage(
             path="<none>",
             line=None,

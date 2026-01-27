@@ -65,7 +65,7 @@ jobs:
       - name: Build PyTorch
         shell: bash
         env:
-          BUILD_ADDITIONAL_PACKAGES: 'vision audio'
+          BUILD_ADDITIONAL_PACKAGES: 'vision audio torchao'
         run: |
           set -eux
           bash .ci/pytorch/build.sh
@@ -98,6 +98,18 @@ jobs:
         run: |
           mkdir -p dist/vllm
           mv vllm-project/vllm/dist/*.whl dist/vllm
+
+      - name: Build DeepGEMM
+        working-directory: vllm-project/vllm
+        shell: bash
+        run: |
+          set -eux
+
+          # The install_deepgemm script from vLLM only works with abs path
+          DEEPGEMM_WHEEL_DIR=$(realpath ../../dist/deepgemm)
+          mkdir -p "${DEEPGEMM_WHEEL_DIR}"
+
+          bash tools/install_deepgemm.sh --wheel-dir "${DEEPGEMM_WHEEL_DIR}"
 
       - name: Archive artifacts into zip
         run: |
