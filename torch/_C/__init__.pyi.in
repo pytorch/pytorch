@@ -940,7 +940,7 @@ class Argument:
         name: str,
         type: JitType,
         N: _int | None,
-        defualt_value: Any | None,
+        default_value: Any | None,
         kwarg_only: _bool,
         alias_info: AliasInfo | None,
     ) -> None: ...
@@ -1197,6 +1197,8 @@ def _get_cudnn_enabled() -> _bool: ...  # THPModule_userEnabledCuDNN
 def _set_cudnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledCuDNN
 def _get_flash_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFusedSDP
 def _set_sdp_use_flash(arg: _bool) -> None: ...  # THPModule_setSDPUseFlash
+def _get_fa3_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFA3SDP
+def _set_sdp_use_fa3(arg: _bool) -> None: ...  # THPModule_setSDPUseFA3
 def _get_mem_efficient_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_mem_efficient(
     arg: _bool,
@@ -2451,6 +2453,13 @@ def _xpu_recordMemoryHistory(
     clear_history: _bool,
     skip_actions: list[str] | None,
 ) -> None: ...
+def _xpu_beginAllocateToPool(device: _int, mempool_id: tuple[_int, _int]) -> None: ...
+def _xpu_beginAllocateCurrentThreadToPool(
+    device: _int,
+    mempool_id: tuple[_int, _int],
+) -> None: ...
+def _xpu_endAllocateToPool(device: _int, mempool_id: tuple[_int, _int]) -> None: ...
+def _xpu_releasePool(device: _int, mempool_id: tuple[_int, _int]) -> None: ...
 
 class _XpuDeviceProperties:
     name: str
@@ -2516,6 +2525,20 @@ class _XpuEventBase:
     def query(self) -> _bool: ...
     def elapsed_time(self, other: _XpuEventBase) -> _float: ...
     def synchronize(self) -> None: ...
+
+# Defined in torch/csrc/xpu/MemPool.cpp
+class _XPUMemPool:
+    def __init__(
+        self,
+        allocator: _xpu_XPUAllocator | None = None,
+        is_user_created: _bool = True,
+        use_on_oom: _bool = False,
+    ) -> None: ...
+    @property
+    def id(self) -> tuple[_int, _int]: ...
+    @property
+    def allocator(self) -> _xpu_XPUAllocator | None: ...
+    def use_count(self) -> _int: ...
 
 # Defined in torch/csrc/DataLoader.cpp
 def _set_worker_signal_handlers(
@@ -2839,7 +2862,7 @@ class _NodeIter(Iterator[FxNode]):
     def __iter__(self) -> Self: ...
     def __next__(self) -> FxNode: ...
 
-# Defined in torch/csrc/inductor/static_cuda_launcher.cpp
+# Defined in torch/csrc/inductor/static_launcher/cuda.cpp
 class _StaticCudaLauncher:
     @staticmethod
     def _load_kernel(
@@ -2860,6 +2883,9 @@ class _StaticCudaLauncher:
         args: tuple[Any, ...],
         stream: _int,
     ) -> None: ...
+
+# Defined in torch/csrc/inductor/static_launcher/xpu.cpp
+class _StaticXpuLauncher(_StaticCudaLauncher): ...
 
 # Defined in torch/csrc/cuda/GreenContext.cpp
 class GreenContext:
