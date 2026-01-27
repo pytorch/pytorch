@@ -100,7 +100,7 @@ mac_version='macosx-11.0-arm64'
 libtorch_arch='arm64'
 
 # Create a consistent wheel package name to rename the wheel to
-wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-cp${python_nodot}-none-${mac_version//[-,]/_}.whl"
+wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-cp${python_nodot}-none-${mac_version//[-,.]/_}.whl"
 
 ###########################################################
 
@@ -132,19 +132,16 @@ RENAME_WHEEL=true
 case $desired_python in
     3.14t)
         echo "Using 3.14 deps"
-        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
         RENAME_WHEEL=false
         ;;
     3.14)
         echo "Using 3.14t deps"
-        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
         RENAME_WHEEL=false
         ;;
     3.13t)
         echo "Using 3.13t deps"
-        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
         RENAME_WHEEL=false
         ;;
