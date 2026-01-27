@@ -84,9 +84,10 @@ from .ctx_manager import (
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
-from .distributed import DistributedVariable, ProcessGroupVariable
+from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
+from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -1228,6 +1229,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
+                get_rank,
+                get_world_size,
             )
             from torch.distributed.tensor import DTensor
 
@@ -1237,20 +1240,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 get_process_group_ranks,
                 _resolve_group_name_by_ranks_and_tag,
+                get_rank,
+                get_world_size,
             )
             def handle_constant_processgroup_functions(
                 self, tx: "InstructionTranslator", *args: VariableTracker
             ) -> VariableTracker:
-                # because the input is a "ProcessGroupVariable", we'll be guarding on its
-                # ID_MATCH based on how it was constructed.
-
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
-                if len(args) == 1:
+                if len(args) == 0:
+                    # get_rank() or get_world_size() with no args (uses default group)
+                    pass
+                elif len(args) == 1:
                     # group or group name
-                    assert (
-                        isinstance(args[0], ProcessGroupVariable)
-                        or args[0].is_python_constant()
+                    assert args[0].is_python_constant() or (
+                        isinstance(args[0], TorchScriptObjectVariable)
+                        and args[  # pyrefly: ignore[missing-attribute]
+                            0
+                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
+                        == "torch.distributed.distributed_c10d.ProcessGroup"
                     )
                 elif len(args) == 2:
                     # ranks + tag
@@ -1263,7 +1271,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"Invalid group value ({args}) for constant pg "
                         f"function {self.value}"
                     )
-                args_as_value = [arg.as_python_constant() for arg in args]
+
+                def get_arg_value(arg: VariableTracker) -> Any:
+                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # as_python_constant(), so extract real_obj directly
+                    if isinstance(arg, TorchScriptObjectVariable):
+                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
+                    return arg.as_python_constant()
+
+                args_as_value = [get_arg_value(arg) for arg in args]
                 invocation_result = self.value(*args_as_value)
 
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
@@ -2426,14 +2442,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
+        kwargs: "dict[str, VariableTracker]",
     ) -> VariableTracker:
-        """
-        Handle calls to @nonstrict_trace decorated functions.
-
-        Flattens arguments to graphable types, invokes the function with
-        fake tensors (allowing non-fake inputs), and wraps the outputs.
-        """
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
             func_to_graphable,
@@ -2663,7 +2673,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ) -> TypeIs[Union["NNModuleVariable", "UnspecializedNNModuleVariable"]]:
             return isinstance(var, (NNModuleVariable, UnspecializedNNModuleVariable))
 
-        # First, flatten args/kwargs to find nn.Module variables and register them
         flat_args_var, tree_spec_var = _make_inlined(tx, pytree.tree_flatten)(
             VariableTracker.build(tx, (args, kwargs))
         ).unpack_var_sequence(tx)
@@ -2692,13 +2701,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     arg.value, arg.source
                 )
 
-        # if no nn.Module arguments, return original args/kwargs unchanged
         if not module_to_index:
             args_var = VariableTracker.build(tx, tuple(args))
             kwargs_var = VariableTracker.build(tx, kwargs)
             return args_var, kwargs_var
 
-        # transform nn.Modules to LeafModuleState.
+        # transform nn.Modules to LeafModuleState. and build variable trackers
         def convert_modules_to_states(
             values: Any, module_to_index: dict[int, int]
         ) -> Any:
@@ -2726,27 +2734,16 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        """
-        Handle calls to @leaf_function decorated functions.
-
-        Extracts real and fake implementations from the decorator, processes
-        arguments (including nn.Module state extraction), registers function
-        specs as static attributes, and creates the invoke_leaf_function proxy.
-        """
         import torch.utils._pytree as pytree
         from torch._higher_order_ops.flat_apply import func_to_graphable
         from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
 
-        from ..decorators import (
-            get_leaf_function_fake_impl,
-            get_leaf_function_real_impl,
-        )
         from .builder import wrap_fx_proxy
         from .higher_order_ops import _make_inlined
 
         decorated_fn = self.value
-        real_impl = get_leaf_function_real_impl(decorated_fn)
-        fake_impl = get_leaf_function_fake_impl(decorated_fn)
+        real_impl = decorated_fn._torchdynamo_leaf_real_fn
+        fake_impl = decorated_fn._torchdynamo_leaf_fake_fn
 
         # fake_impl must be provided by the user via @fn.fake_impl decorator
         if fake_impl is None:
