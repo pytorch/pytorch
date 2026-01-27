@@ -225,6 +225,12 @@ if TEST_WITH_ROCM:
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
+    # https://github.com/pytorch/pytorch/issues/140383
+    inductor_skips["cuda"]["nn.functional.glu"] = {f16}
+    # https://github.com/pytorch/pytorch/issues/147058
+    inductor_skips["cuda"]["nn.functional.interpolate.linear"] = {f16}
+    # https://github.com/pytorch/pytorch/issues/147047
+    inductor_skips["cuda"]["sub"] = {f16}
 
 inductor_skips["xpu"] = {}
 
