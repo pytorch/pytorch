@@ -1,5 +1,6 @@
 import collections
 import logging
+import math
 import operator
 from collections import defaultdict
 from collections.abc import Callable
@@ -523,9 +524,11 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
     if torch._inductor.config.bucket_ops_ag_use_pg_alloc:
         pg = _resolve_process_group(group_name)
         backend = pg._get_backend(device)
-        size = new_rs_in.shape
+        size = list(new_rs_in.shape)
         size[0] //= group_size
-        new_rs_out = backend.allocate_tensor(size, dtype=dtype, device=device)
+        new_rs_out = backend.allocate_tensor(
+            math.prod(size), dtype=dtype, device=device
+        ).view(size)
         torch.ops.c10d_functional.wait_tensor(
             torch.ops._c10d_functional.reduce_scatter_tensor_out.default(
                 new_rs_in, reduce_op, group_size, group_name, out=new_rs_out
