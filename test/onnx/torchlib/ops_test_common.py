@@ -19,12 +19,12 @@ import error_reproduction
 import numpy as np
 
 import onnx
+import onnx_ir as ir
 import onnxruntime as ort
 import onnxruntime.capi.onnxruntime_pybind11_state
 import onnxscript
 import onnxscript.evaluator
 import pytest
-from onnxscript import ir
 
 import torch
 from torch.onnx._internal.exporter import _building, _ir_passes, _tensors
@@ -592,7 +592,6 @@ def graph_executor(
                 proto = onnxscript_function.to_function_proto()
                 ir_function = ir.serde.deserialize_function(proto)
             onnx_model.functions[identifier] = ir_function
-        _ir_passes.add_torchlib_common_imports(onnx_model, opset_version=opset_version)
         _ir_passes.add_opset_imports(onnx_model)
         # Make sure the model is valid
         model_proto = ir.to_proto(onnx_model)

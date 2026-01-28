@@ -129,6 +129,9 @@ Error.__qualname__ = "Error"
 def annotate(the_type, the_value):
     """Use to give type of `the_value` in TorchScript compiler.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     This method is a pass-through function that returns `the_value`, used to hint TorchScript
     compiler the type of `the_value`. It is a no-op when running outside of TorchScript.
 
@@ -178,6 +181,9 @@ def script_if_tracing(fn):
     """
     Compiles ``fn`` when it is first called during tracing.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     ``torch.jit.script`` has a non-negligible start up time when it is first called due to
     lazy-initializations of many compiler builtins. Therefore you should not use
     it in library code. However, you may want to have parts of your library work
@@ -199,6 +205,9 @@ def script_if_tracing(fn):
 def isinstance(obj, target_type):
     """
     Provide container type refinement in TorchScript.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     It can refine parameterized containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
     ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also
@@ -243,6 +252,9 @@ class strict_fusion:
     """
     Give errors if not all nodes have been fused in inference, or symbolically differentiated in training.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     Example:
     Forcing fusion of additions.
 
@@ -257,7 +269,7 @@ class strict_fusion:
 
     def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
-            warnings.warn("Only works in script mode")
+            warnings.warn("Only works in script mode", stacklevel=2)
 
     def __enter__(self):
         pass
@@ -279,13 +291,21 @@ def _hide_source_ranges() -> Iterator[None]:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
 
-def enable_onednn_fusion(enabled: bool):
-    """Enable or disables onednn JIT fusion based on the parameter `enabled`."""
+def enable_onednn_fusion(enabled: bool) -> None:
+    """Enable or disables onednn JIT fusion based on the parameter `enabled`.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+    """
     torch._C._jit_set_llga_enabled(enabled)
 
 
 def onednn_fusion_enabled():
-    """Return whether onednn JIT fusion is enabled."""
+    """Return whether onednn JIT fusion is enabled.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+    """
     return torch._C._jit_llga_enabled()
 
 

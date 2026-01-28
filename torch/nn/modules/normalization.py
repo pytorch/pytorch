@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import numbers
-from typing import Optional, Union
+from typing import Union
 
 import torch
 from torch import Size, Tensor
@@ -119,7 +119,7 @@ class LayerNorm(Module):
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     .. note::
         Unlike Batch Normalization and Instance Normalization, which applies
@@ -253,7 +253,7 @@ class GroupNorm(Module):
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     This layer uses statistics computed from input data in both training and
     evaluation modes.
@@ -301,7 +301,9 @@ class GroupNorm(Module):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         if num_channels % num_groups != 0:
-            raise ValueError("num_channels must be divisible by num_groups")
+            raise ValueError(
+                f"num_channels ({num_channels}) must be divisible by num_groups ({num_groups})"
+            )
 
         self.num_groups = num_groups
         self.num_channels = num_channels
@@ -355,7 +357,10 @@ class RMSNorm(Module):
 
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension which is expected to be of that specific size.
-        eps: a value added to the denominator for numerical stability. Default: ``torch.finfo(x.dtype).eps``
+        eps: a value added to the denominator for numerical stability. If not specified,
+            uses the machine epsilon of the computation (opmath) type: fp16/bf16 and
+            fp32 inputs use ``torch.finfo(torch.float32).eps``, while fp64 inputs use
+            ``torch.finfo(torch.float64).eps``.
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
 
@@ -373,13 +378,13 @@ class RMSNorm(Module):
 
     __constants__ = ["normalized_shape", "eps", "elementwise_affine"]
     normalized_shape: tuple[int, ...]
-    eps: Optional[float]
+    eps: float | None
     elementwise_affine: bool
 
     def __init__(
         self,
         normalized_shape: _shape_t,
-        eps: Optional[float] = None,
+        eps: float | None = None,
         elementwise_affine: bool = True,
         device=None,
         dtype=None,

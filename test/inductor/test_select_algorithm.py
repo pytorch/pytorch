@@ -3,6 +3,7 @@ import contextlib
 import functools
 import unittest.mock
 from collections.abc import Callable
+from typing import Any, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -13,17 +14,31 @@ import torch.nn.functional as F
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.autotune_process import TritonBenchmarkRequest
+from torch._inductor.autotune_process import (
+    ExternKernelGPUBenchmarkRequest,
+    TensorMeta,
+    TritonBenchmarkRequest,
+)
+from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import FixedLayout
+from torch._inductor.kernel_inputs import KernelInputs
 from torch._inductor.select_algorithm import (
     autotune_select_algorithm,
+    ExternKernelChoice,
     TritonTemplate,
     TritonTemplateKernel,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_kernels
+from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import (
+    IS_LINUX,
+    MI200_ARCH,
+    skipIfRocm,
+    skipIfRocmArch,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -174,7 +189,6 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
-    @skipIfXpu(msg="Double datatype matmul is not supported in oneDNN")
     def test_mm_skip(self):
         @torch.compile
         def foo(a, b):
@@ -243,7 +257,6 @@ class TestSelectAlgorithm(TestCase):
 
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
-    @skipIfXpu
     @patches
     def test_mm_plus_mm2(self):
         @torch.compile
@@ -394,6 +407,68 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
+    @torch._inductor.config.patch(
+        {"conv_1x1_as_mm": True, "max_autotune_gemm_backends": "TRITON"}
+    )
+    def test_convolution_as_mm_triton_only(self):
+        # To convert the 1x1 conv to matmul, x is converted to a channels last
+        # tensor and the channels dimension is permuted to be innermost. This
+        # prologue should not be fused with the matmul since the prologue writes
+        # discontiguously, whilst the mm template currently only supports reading
+        # the input contiguously.
+        #
+        # Before the change associated with this PR, fusion would occur because the actual kernel
+        # input nodes (which don't include views e.g. permute) would be passed to the
+        # `TritonTemplateCaller` rather than the input nodes that include views.
+        # For example after x is converted to channels last, its layout is shape @ stride
+        # [2, 33, 16, 16] @ [8432, 1, 528, 33], or [2, 33, 256] @ [8432, 1, 33], and the
+        # prologue writes this value discontiguously.
+        # After the permute, the mm template fixes the layout to [512, 33] @ [33, 1] and
+        # reads the input contiguously. If the kernel input node for x is passed to the
+        # `TritonTemplateCaller`, then the scheduler will fuse the prologue since the
+        # write is compatible with the read. If however the viewed input is passed
+        # to `TritonTemplateCaller`, then the write won't be compatible with the read,
+        # and the prologue won't be fused.
+        def foo(x, w, b):
+            return aten.convolution(
+                x + 1,
+                w,
+                b,
+                stride=(1, 1),
+                padding=(0, 0),
+                dilation=(1, 1),
+                transposed=False,
+                output_padding=(0, 0),
+                groups=1,
+            )
+
+        x = torch.randn(2, 33, 16, 16, device=GPU_TYPE)
+        w = torch.randn(34, 33, 1, 1, device=GPU_TYPE)
+        b = torch.randn(34, device=GPU_TYPE)
+
+        class SingleMMConfigChoice(InductorChoices):
+            def get_template_configs(
+                self,
+                kernel_inputs: KernelInputs,
+                templates: list[Union[KernelTemplate, ExternKernelChoice]],
+                op_name: str,
+                kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
+            ):
+                return super().get_template_configs(
+                    kernel_inputs, templates, op_name, kwarg_overrides
+                )[:1]
+
+        with V.set_choices_handler(SingleMMConfigChoice()):
+            result_compile = torch.compile(foo)(x, w, b)
+        result_eager = foo(x, w, b)
+
+        # If the prologue has been fused this should fail
+        torch.testing.assert_close(result_compile, result_eager)
+
+        # There should not be any autotuning
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+
+    @patches
     @torch._inductor.config.patch(conv_1x1_as_mm=False)
     def test_convolution2_group(self):
         @torch.compile
@@ -440,6 +515,191 @@ class TestSelectAlgorithm(TestCase):
         )
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
+
+
+class TestExternKernelCaller(TestCase):
+    @requires_gpu()
+    @patches
+    @torch._inductor.config.patch(max_autotune_gemm_backends="ATEN")
+    def test_extern_kernel_tensor_meta_failure(self):
+        """
+        Test that when TensorMeta.from_irnodes fails during ExternKernelCaller
+        initialization, a warning is logged with the correct message.
+        """
+        from unittest.mock import patch
+
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+
+        with patch.object(
+            TensorMeta, "from_irnodes", side_effect=ValueError("Mocked failure")
+        ):
+            with self.assertLogs(
+                "torch._inductor.select_algorithm", level="WARNING"
+            ) as log_context:
+                compiled_fn = torch.compile(fn)
+                result = compiled_fn(a, b)
+
+        self.assertTrue(
+            any(
+                "Constructing input/output tensor meta failed for Extern Choice"
+                in message
+                for message in log_context.output
+            ),
+            f"Expected warning message not found in logs: {log_context.output}",
+        )
+
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+
+    @patches
+    def test_extern_kernel_caller_hash_key_deduplication(self):
+        def fn(a, b, c, d):
+            # Two identical matmuls with same shapes
+            result1 = torch.mm(a, b)
+            result2 = torch.mm(c, d)
+            return result1 + result2
+
+        # Use identical shapes for all tensors
+        shape = (64, 64)
+        a = torch.randn(*shape, device=GPU_TYPE)
+        b = torch.randn(*shape, device=GPU_TYPE)
+        c = torch.randn(*shape, device=GPU_TYPE)
+        d = torch.randn(*shape, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(fn)
+        result = compiled_fn(a, b, c, d)
+
+        # Verify correctness
+        expected = torch.mm(a, b) + torch.mm(c, d)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+
+        # Only autotune once, cache hit
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @skipIfRocmArch(MI200_ARCH)
+    @patches
+    def test_extern_kernel_benchmark_valid_timing(self):
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        # Use larger matrices to ensure measurable timing
+        a = torch.randn(256, 256, device=GPU_TYPE)
+        b = torch.randn(256, 256, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(fn, mode="max-autotune-no-cudagraphs")
+        result = compiled_fn(a, b)
+
+        # Verify correctness
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @requires_gpu()
+    def test_extern_kernel_benchmark_request_variations(self):
+        """
+        Test that ExternKernelBenchmarkRequest.benchmark behaves correctly across
+        different configurations:
+        - With has_out_variant=True
+        - When out is None (tensors created from metadata)
+        - With profile_bandwidth_with_do_bench_using_profiling enabled
+        - When len(args) is 0
+        """
+
+        input_meta = [
+            TensorMeta(
+                device=torch.device(GPU_TYPE),
+                dtype=torch.float32,
+                sizes=(64, 64),
+                strides=(64, 1),
+                offset=0,
+            ),
+            TensorMeta(
+                device=torch.device(GPU_TYPE),
+                dtype=torch.float32,
+                sizes=(64, 64),
+                strides=(64, 1),
+                offset=0,
+            ),
+        ]
+        output_meta = TensorMeta(
+            device=torch.device(GPU_TYPE),
+            dtype=torch.float32,
+            sizes=(64, 64),
+            strides=(64, 1),
+            offset=0,
+        )
+
+        # Test 1: has_out_variant=True with out=None and len(args)==0
+        # This should call super().benchmark() which creates tensors from metadata
+        request_out_variant = ExternKernelGPUBenchmarkRequest(
+            kernel_name="mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[],
+            callable_path="extern_kernels.mm",
+            has_out_variant=True,
+        )
+        timing = request_out_variant.benchmark(out=None)
+        self.assertIsInstance(timing, float)
+        self.assertGreaterEqual(timing, 0.0)
+
+        # Test 2: has_out_variant=False with out=None and len(args)==0
+        # When has_out_variant=False but len(args)==0, it should still call super().benchmark()
+        request_no_out_variant = ExternKernelGPUBenchmarkRequest(
+            kernel_name="mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[],
+            callable_path="extern_kernels.mm",
+            has_out_variant=False,
+        )
+        timing = request_no_out_variant.benchmark(out=None)
+        self.assertIsInstance(timing, float)
+        self.assertGreaterEqual(timing, 0.0)
+
+        # Test 3: has_out_variant=False with args provided
+        # This should execute the non-out-variant path: call algo(*args) and copy result
+        a = torch.randn(64, 64, device=GPU_TYPE)
+        b = torch.randn(64, 64, device=GPU_TYPE)
+        out = torch.empty(64, 64, device=GPU_TYPE)
+
+        request_with_args = ExternKernelGPUBenchmarkRequest(
+            kernel_name="mm",
+            input_tensor_meta=input_meta,
+            output_tensor_meta=output_meta,
+            extra_args=[],
+            callable_path="extern_kernels.mm",
+            has_out_variant=False,
+        )
+        timing = request_with_args.benchmark(a, b, out=out)
+        self.assertIsInstance(timing, float)
+        self.assertGreaterEqual(timing, 0.0)
+        # Verify that the output was copied correctly
+        expected = torch.mm(a, b)
+        torch.testing.assert_close(out, expected, atol=1e-4, rtol=1e-4)
+
+        # Test 4: profile_bandwidth_with_do_bench_using_profiling enabled
+        # with has_out_variant=False and len(args) > 0
+        with config.patch(profile_bandwidth_with_do_bench_using_profiling=True):
+            a = torch.randn(64, 64, device=GPU_TYPE)
+            b = torch.randn(64, 64, device=GPU_TYPE)
+            out = torch.empty(64, 64, device=GPU_TYPE)
+
+            request_profiling = ExternKernelGPUBenchmarkRequest(
+                kernel_name="mm",
+                input_tensor_meta=input_meta,
+                output_tensor_meta=output_meta,
+                extra_args=[],
+                callable_path="extern_kernels.mm",
+                has_out_variant=False,
+            )
+            timing = request_profiling.benchmark(a, b, out=out)
+            self.assertIsInstance(timing, float)
+            self.assertGreaterEqual(timing, 0.0)
 
 
 @contextlib.contextmanager

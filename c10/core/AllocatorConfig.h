@@ -12,8 +12,16 @@
 
 namespace c10::CachingAllocator {
 
-// "large" allocations may be packed in 20 MiB blocks
-const size_t kLargeBuffer = 20971520;
+// "small" allocations are packed in 2 MiB blocks
+constexpr size_t kSmallBuffer = 2097152;
+// all sizes are rounded to at least 512 bytes
+constexpr size_t kMinBlockSize = 512;
+// largest "small" allocation is 1 MiB
+constexpr size_t kSmallSize = 1048576;
+// allocations between 1 and 10 MiB may use kLargeBuffer
+constexpr size_t kMinLargeAlloc = 10485760;
+// round up large allocations to 2 MiB
+constexpr size_t kRoundLarge = 2097152;
 
 // A utility class for tokenizing allocator configuration strings into discrete
 // parts. For example, the config string:
@@ -76,7 +84,7 @@ class ConfigTokenizer {
     } else if (token == "False") {
       return false;
     } else {
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           false,
           "Expected 'True' or 'False' at index ",
           i,
@@ -162,6 +170,10 @@ class C10_API AcceleratorAllocatorConfig {
 
   /* Device allocator settings */
 
+  static size_t large_segment_size() {
+    return instance().large_segment_size_;
+  }
+
   // Returns the maximum block size (in MB) that is allowed to be split. The
   // default is unlimited (all blocks can be split).
   static size_t max_split_size() {
@@ -224,6 +236,7 @@ class C10_API AcceleratorAllocatorConfig {
   // issue.
   static std::unordered_set<std::string>& getMutableKeys() {
     static std::unordered_set<std::string> keys{
+        "large_segment_size_mb",
         "max_split_size_mb",
         "max_non_split_rounding_mb",
         "garbage_collection_threshold",
@@ -253,7 +266,7 @@ class C10_API AcceleratorAllocatorConfig {
     device_config_parser_hook_ = std::move(hook);
     auto& mutable_keys = getMutableKeys();
     for (auto& key : keys) {
-      TORCH_CHECK(
+      TORCH_CHECK_VALUE(
           mutable_keys.insert(key).second,
           "Duplicated key '",
           key,
@@ -284,6 +297,8 @@ class C10_API AcceleratorAllocatorConfig {
 
   /* Internal functions for device allocator */
 
+  // Parse `large_segment_size_mb` from environment variable.
+  size_t parseLargeSegmentSize(const ConfigTokenizer& tokenizer, size_t i);
   // Parse `max_split_size_mb` from environment variable.
   size_t parseMaxSplitSize(const ConfigTokenizer& tokenizer, size_t i);
   // Parse `max_non_split_rounding_mb` from environment variable.
@@ -310,11 +325,13 @@ class C10_API AcceleratorAllocatorConfig {
 
   /* The following members are specifically used for the device allocator. */
 
+  // "large" allocations may be packed in blocks of this size
+  std::atomic<size_t> large_segment_size_{20971520}; // 20 MB by default
   // The maximum block size that is allowed to be split.
   std::atomic<size_t> max_split_size_{std::numeric_limits<size_t>::max()};
   // The maximum allowable extra size of a memory block without requiring
   // splitting when searching for a free block.
-  std::atomic<size_t> max_non_split_rounding_size_{kLargeBuffer};
+  std::atomic<size_t> max_non_split_rounding_size_;
   // Used to store how memory allocations of different sizes should be rounded
   // up to the nearest power of 2 divisions.
   std::vector<size_t> roundup_power2_divisions_;

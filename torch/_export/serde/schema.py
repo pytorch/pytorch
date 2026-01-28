@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 14)
+SCHEMA_VERSION = (8, 16)
 TREESPEC_VERSION = 1
 
 
@@ -156,7 +156,7 @@ class TokenArgument:
 
 # This is use for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
-# type List[OptionalTensorArgument], with tensor values seiralized to the
+# type List[OptionalTensorArgument], with tensor values serialized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.
 @_union_dataclass
 class OptionalTensorArgument(_Union):
@@ -212,6 +212,8 @@ class Argument(_Union):
     as_sym_floats: Annotated[list[SymFloatArgument], 240]
     as_optional_tensor: Annotated[OptionalTensorArgument, 250]
     as_complex: Annotated[ComplexValue, 260]
+    as_int_lists: Annotated[list[list[int]], 280]
+    as_string_to_argument: Annotated[dict[str, "Argument"], 290]
 
 
 class ArgumentKind(IntEnum):
@@ -235,6 +237,8 @@ class Node:
     outputs: Annotated[list[Argument], 30]
     metadata: Annotated[dict[str, str], 40]
     is_hop_single_tensor_return: Annotated[Optional[bool], 50] = None
+    # For BC, default is None so older serialized models without 'name' can be loaded.
+    name: Annotated[Optional[str], 60] = None
 
 
 @dataclass

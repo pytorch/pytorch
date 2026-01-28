@@ -15,6 +15,7 @@ import functools
 import inspect
 import os
 import re
+import sys
 import warnings
 from collections.abc import Callable
 from enum import Enum
@@ -169,7 +170,7 @@ def _clone_inputs(args):
         else:
             return a.clone(memory_format=torch.preserve_format)
 
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return function._nested_map(
         lambda x: isinstance(x, torch.Tensor), clone_input, condition_msg="tensors"
     )(args)
@@ -336,7 +337,7 @@ def _check_trace(
 
         if is_trace_module:
             copied_dict = {}
-            # pyrefly: ignore  # missing-attribute
+
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
@@ -651,7 +652,7 @@ def analyze_ts_result_with_export_result(export, trace):
         # mkldnn is not supported for torch.allclose
         if orig.layout == torch._mkldnn:  # type: ignore[attr-defined]
             return True
-        if type(orig) != type(loaded):
+        if type(orig) is not type(loaded):
             return False
 
         if isinstance(orig, torch._subclasses.FakeTensor):
@@ -686,7 +687,8 @@ def _trace_impl(
         # it is hard to trace it because the forward method on ScriptModule is already defined, so it
         # would result in an error.
         warnings.warn(
-            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is."
+            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.",
+            stacklevel=2,
         )
         return func
 
@@ -741,7 +743,7 @@ def _trace_impl(
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
     elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         example_inputs = tuple(example_inputs)
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
@@ -768,7 +770,7 @@ def _trace_impl(
         traced = torch._C._create_function_from_trace(
             name,
             func,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             example_inputs,
             var_lookup_fn,
             strict,
@@ -988,6 +990,17 @@ def trace(
         module = torch.jit.trace(n, example_forward_input)
 
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.trace` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.trace` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
     if not _enabled:
         return func
     if optimize is not None:
@@ -1116,6 +1129,17 @@ def trace_module(
         module = torch.jit.trace_module(n, inputs)
 
     """
+    if sys.version_info >= (3, 14):
+        warnings.warn(
+            "`torch.jit.trace_method` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
+    else:
+        warnings.warn(
+            "`torch.jit.trace_method` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            DeprecationWarning,
+        )
     if not _enabled:
         return mod
     if optimize is not None:

@@ -5,6 +5,7 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
+import warnings
 from typing import Optional
 
 import torch
@@ -15,6 +16,9 @@ def freeze(
     mod, preserved_attrs: Optional[list[str]] = None, optimize_numerics: bool = True
 ):
     r"""Freeze ScriptModule, inline submodules, and attributes as constants.
+
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
 
     Freezing a :class:`ScriptModule` will clone it and attempt to inline the cloned
     module's submodules, parameters, and attributes as constants in the TorchScript IR Graph.
@@ -100,6 +104,10 @@ def freeze(
         You can remap devices by specifying `map_location` in `torch.jit.load`, however
         device-specific logic may have been baked into the model.
     """
+    warnings.warn(
+        "`torch.jit.freeze` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
             "Freezing expects a ScriptModule as input. "
@@ -125,7 +133,7 @@ def freeze(
 
 def run_frozen_optimizations(
     mod, optimize_numerics: bool = True, preserved_methods: Optional[list[str]] = None
-):
+) -> None:
     r"""
     Run a series of optimizations looking for patterns that occur in frozen graphs.
 
@@ -188,6 +196,9 @@ def optimize_for_inference(
     """
     Perform a set of optimization passes to optimize a model for the purposes of inference.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     If the model is not already frozen, optimize_for_inference
     will invoke `torch.jit.freeze` automatically.
 
@@ -217,6 +228,10 @@ def optimize_for_inference(
         # if built with MKLDNN, convolution will be run with MKLDNN weights
         assert "MKLDNN" in frozen_mod.graph
     """
+    warnings.warn(
+        "`torch.jit.optimize_for_inference` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
             "optimize_for_inference expects a ScriptModule as input. "

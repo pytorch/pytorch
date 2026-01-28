@@ -55,7 +55,7 @@ jobs:
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
-            rocm_version: "7.0"
+            rocm_version: "7.1"
             runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
           - device: "cuda"
             rocm_version: ""
@@ -85,6 +85,9 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
 
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
@@ -159,12 +162,7 @@ jobs:
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
 
-          if [[ "${BUILD_DEVICE}" == xpu ]]; then
-            docker exec -t "${container_name}" bash -c "dnf install -y gcc-toolset-13-gcc-c++"
-            docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
-          else
-            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
-          fi
+          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
             docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
@@ -176,7 +174,7 @@ jobs:
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
+          name: triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheelhouse/*
 
@@ -263,7 +261,7 @@ jobs:
           mv ./*.whl "${RUNNER_TEMP}/artifacts/"
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
+          name: triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
 
@@ -307,7 +305,7 @@ jobs:
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}

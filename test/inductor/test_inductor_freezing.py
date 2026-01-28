@@ -19,7 +19,6 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, tf32_on_and_off
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
-    skipIfRocm,
     skipIfXpu,
     TEST_WITH_SLOW_GRADCHECK,
 )
@@ -835,7 +834,7 @@ class OptimizeForInferenceTemplate(TestCase):
             mod_eager = mod(x)
             self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfRocm
+    @torch._inductor.config.patch(layout_optimization=True)
     def test_conv_weight_layout_convert(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -926,8 +925,8 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = func1(x.clone())
             self.assertEqual(out_eager, out_compiled)
 
-    @skipIfRocm
     @tf32_on_and_off(0.001)
+    @torch._inductor.config.patch(layout_optimization=True)
     def test_redundant_clone_for_layout_convert(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -970,9 +969,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
         self.assertEqual(len(actual_outputs), len(expected_outputs))
         self.assertEqual(2, len(actual_outputs))
-        for i, actual, expected in zip(
-            itertools.count(), actual_outputs, expected_outputs
-        ):
+        for actual, expected in zip(actual_outputs, expected_outputs):
             self.assertEqual(expected, actual)
 
         if self.device == "cpu":

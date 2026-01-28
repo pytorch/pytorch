@@ -13,6 +13,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/tunable/TunableOp.h>
+#include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/StringUtil.h>
@@ -29,7 +30,7 @@
 
 namespace at::cuda::tunable {
 
-using at::cuda::blas::ScalingType;
+using at::blas::ScalingType;
 
 enum class BlasOp {
   N = 0,
@@ -150,6 +151,7 @@ inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
       BLASType = "unknown";
   }
   return BLASType;
+
 }
 
 // Similar to Compute Type in GemmRocblas.h
@@ -244,33 +246,25 @@ inline std::string to_string_epilogue(const at::cuda::blas::GEMMAndBiasActivatio
 
 namespace detail {
 
-static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size) {
+static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t size, const NumericalCheckConfig& config) {
+
+  if (!config.enabled) {
+    return true; // skip when disabled
+  }
+
   auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA);
-  // comparison done as 1D tensor
   at::Tensor ref = at::from_blob(c,       {size}, options);
   at::Tensor oth = at::from_blob(other_c, {size}, options);
   at::Tensor ref_float = ref.to(at::kFloat);
   at::Tensor oth_float = oth.to(at::kFloat);
-  std::vector<double> atols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-  std::vector<double> rtols{1e-1, 1e-2, 1e-3, 1e-4, 1e-5};
-  double last_succeed_atol = 1;
-  double last_succeed_rtol = 1;
-  for (auto& atol : atols) {
-    for (auto& rtol : rtols) {
-      if (at::allclose(ref_float, oth_float, rtol, atol)) {
-        last_succeed_atol = atol;
-        last_succeed_rtol = rtol;
-      }
-    }
-  }
-  if (last_succeed_atol == 1) {
-    return false;
-  }
-  else {
-    TUNABLE_LOG3("├──verify numerics: atol=", last_succeed_atol, ", rtol=", last_succeed_rtol);
-  }
 
-  return true;
+  const bool ok = at::allclose(ref_float, oth_float, config.rtol, config.atol);
+  if (ok) {
+    TUNABLE_LOG3("├──verify numerics: PASSED with atol=", config.atol, ", rtol=", config.rtol);
+  } else {
+    TUNABLE_LOG3("├──verify numerics: FAILED with atol=", config.atol, ", rtol=", config.rtol);
+  }
+  return ok;
 }
 
 }
@@ -283,6 +277,9 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
 template <typename T>
 struct GemmParams : OpParams {
   GemmParams() = default;
+  GemmParams(const GemmParams&) = default;
+  GemmParams& operator=(const GemmParams&) = default;
+  ~GemmParams() override = default;
 
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
@@ -325,8 +322,7 @@ struct GemmParams : OpParams {
   }
 
   GemmParams* DeepCopy(bool duplicate_inputs) const {
-    GemmParams* copy = new GemmParams;
-    *copy = *this;
+    GemmParams* copy = new GemmParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -355,8 +351,10 @@ struct GemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -378,6 +376,13 @@ private:
 
 template <typename T>
 struct GemmAndBiasParams : OpParams {
+  GemmAndBiasParams() = default;
+  GemmAndBiasParams(const GemmAndBiasParams&) = default;
+  GemmAndBiasParams(GemmAndBiasParams&&) noexcept = default;
+  GemmAndBiasParams& operator=(const GemmAndBiasParams&) = default;
+  GemmAndBiasParams& operator=(GemmAndBiasParams&&) noexcept = default;
+  ~GemmAndBiasParams() override = default;
+
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string activation_str = to_string_epilogue(activation);
@@ -419,8 +424,7 @@ struct GemmAndBiasParams : OpParams {
   }
 
   GemmAndBiasParams* DeepCopy(bool duplicate_inputs) const {
-    GemmAndBiasParams* copy = new GemmAndBiasParams;
-    *copy = *this;
+    GemmAndBiasParams* copy = new GemmAndBiasParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -449,8 +453,10 @@ struct GemmAndBiasParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmAndBiasParams<T> *other) {
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -473,6 +479,13 @@ private:
 
 template <typename T, typename C_Dtype = T>
 struct GemmStridedBatchedParams : OpParams {
+  GemmStridedBatchedParams() = default;
+  GemmStridedBatchedParams(const GemmStridedBatchedParams&) = default;
+  GemmStridedBatchedParams(GemmStridedBatchedParams&&) noexcept = default;
+  GemmStridedBatchedParams& operator=(const GemmStridedBatchedParams&) = default;
+  GemmStridedBatchedParams& operator=(GemmStridedBatchedParams&&) noexcept = default;
+  ~GemmStridedBatchedParams() override = default;
+
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string beta_str = to_string_opmath<T>(beta);
@@ -514,8 +527,7 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   GemmStridedBatchedParams* DeepCopy(bool duplicate_inputs) const {
-    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams;
-    *copy = *this;
+    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -546,8 +558,10 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
     auto c_dtype = c10::CppTypeToScalarType<C_Dtype>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};
@@ -574,6 +588,11 @@ private:
 template <typename T>
 struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
+  ScaledGemmParams(const ScaledGemmParams&) = default;
+  ScaledGemmParams(ScaledGemmParams&&) noexcept = default;
+  ScaledGemmParams& operator=(const ScaledGemmParams&) = default;
+  ScaledGemmParams& operator=(ScaledGemmParams&&) noexcept = default;
+  ~ScaledGemmParams() override = default;
 
   std::string BLASSignature() const override {
     // Excluding use_fast_accum and use_rowise booleans for now
@@ -633,8 +652,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   ScaledGemmParams* DeepCopy(bool duplicate_inputs) const {
-    ScaledGemmParams* copy = new ScaledGemmParams;
-    *copy = *this;
+    ScaledGemmParams* copy = new ScaledGemmParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -663,7 +681,9 @@ struct ScaledGemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
+    auto* ctx = getTuningContext();
+    auto cfg = ctx->GetNumericalCheckConfig();
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T), cfg) ? OK : FAIL;
   }
 
   char transa{};

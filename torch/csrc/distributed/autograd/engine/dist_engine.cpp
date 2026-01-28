@@ -98,7 +98,12 @@ void DistEngine::globalCpuThread(
                     InputBuffer::variables(std::move(task.inputs_))]() mutable {
       InputBuffer inputs(variables.size());
       for (const auto i : c10::irange(variables.size())) {
-        inputs.add(i, std::move(variables[i]), std::nullopt, std::nullopt);
+        inputs.add(
+            i,
+            std::move(variables[i]),
+            std::nullopt,
+            std::nullopt,
+            graphRoot.get());
       }
       execute_graph_task_until_ready_queue_empty(
           /*node_task*/ NodeTask(graphTask, graphRoot, std::move(inputs)),
@@ -443,7 +448,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::
       const variable_list& grads = futureGrads.constValue().toTensorVector();
       TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
       accumulateGradFuture->markCompleted(c10::IValue());
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       accumulateGradFuture->setErrorIfNeeded(std::current_exception());
     }
   });
@@ -522,7 +527,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
                 // Perform cleanup at the end of the backward pass (before
                 // we mark the future as completed).
                 DistEngine::getInstance().cleanupBackwardPass(autogradContext);
-              } catch (std::exception& e) {
+              } catch (std::exception&) {
                 callbackFuture->setErrorIfNeeded(std::current_exception());
                 return;
               }
@@ -534,7 +539,7 @@ c10::intrusive_ptr<c10::ivalue::Future> DistEngine::executeSendFunctionAsync(
                 callbackFuture->setError(rpcFuture.exception_ptr());
               }
             });
-          } catch (std::exception& e) {
+          } catch (std::exception&) {
             callbackFuture->setErrorIfNeeded(std::current_exception());
           }
         });

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -45,6 +44,7 @@ class Binomial(Distribution):
         logits (Tensor): Event log-odds
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {
         "total_count": constraints.nonnegative_integer,
         "probs": constraints.unit_interval,
@@ -54,10 +54,10 @@ class Binomial(Distribution):
 
     def __init__(
         self,
-        total_count: Union[Tensor, int] = 1,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        total_count: Tensor | int = 1,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
@@ -66,13 +66,16 @@ class Binomial(Distribution):
         if probs is not None:
             (
                 self.total_count,
+                # pyrefly: ignore [read-only]
                 self.probs,
             ) = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
-            assert logits is not None  # helps mypy
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
             (
                 self.total_count,
+                # pyrefly: ignore [read-only]
                 self.logits,
             ) = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
@@ -99,6 +102,7 @@ class Binomial(Distribution):
         return self._param.new(*args, **kwargs)
 
     @constraints.dependent_property(is_discrete=True, event_dim=0)
+    # pyrefly: ignore [bad-override]
     def support(self):
         return constraints.integer_interval(0, self.total_count)
 

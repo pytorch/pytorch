@@ -1,9 +1,6 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 
-#include <ATen/FunctionalInverses.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <c10/util/Exception.h>
@@ -122,7 +119,7 @@ void FunctionalTensorWrapper::freeze_storage() const {
 //          |   have their own storages, but backends like functorch      |
 //         \/   are allowed to re-alias underneath the pass               \/
 // . - - - - - - - - - - - - - .                             . - - - - - - - - - - - - - - - .
-// |    underyling_storage     |                             |      underyling_storage       |
+// |    underlying_storage     |                             |      underlying_storage       |
 // . - - - - - - - - - - - - - .                             . - - - - - - - - - - - - - - - .
 //
 // This constructor is only used by view ops.

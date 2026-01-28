@@ -97,7 +97,6 @@ from torchgen.yaml_utils import YamlDumper, YamlLoader
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from typing import Optional
 
 
 T = TypeVar("T")
@@ -2218,7 +2217,7 @@ def gen_source_files(
     per_operator_headers: bool,
     skip_dispatcher_op_registration: bool,
     update_aoti_c_shim: bool,
-    aoti_backends: set[Optional[DispatchKey]],
+    aoti_backends: set[DispatchKey | None],
     extend_aoti_c_shim: bool,
 ) -> None:
     extra_cuda_headers = """\

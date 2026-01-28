@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 
 number = Union[int, float]
@@ -561,7 +562,6 @@ def cat(tensors: list[list[int]], dim: int):
     for i in range(len(tensors)):
         tensor = tensors[i]
         if not should_skip(tensor):
-            # pyrefly: ignore  # bad-argument-type
             check_cat_shape_except_dim(not_skipped_tensor, tensor, dim, i)
             cat_dim_size = cat_dim_size + tensor[dim]
 

@@ -186,7 +186,6 @@ import multiprocessing as mp
 import os
 import shutil
 import warnings
-from typing import Optional
 
 import torch
 
@@ -206,13 +205,12 @@ __all__ = [
     "get_filename",
     "get_results",
     "get_validators",
-    "write_file_on_exit",
-    "write_file",
     "read_file",
     "tune_gemm_in_file",
     "mgpu_tune_gemm_in_file",
     "set_rotating_buffer_size",
     "get_rotating_buffer_size",
+    "set_numerical_check_tolerances",
 ]
 
 
@@ -306,26 +304,7 @@ def get_validators() -> tuple[str, str]:
     return torch._C._cuda_tunableop_get_validators()  # type: ignore[attr-defined]
 
 
-def write_file_on_exit(val: bool) -> None:
-    r"""During Tuning Context destruction, write file to disk.
-
-    This is useful as a final flush of your results to disk if your application
-    terminates as result of normal operation or an error. Manual flushing of
-    your results can be achieved by manually calling ``write_file()``."""
-    torch._C._cuda_tunableop_write_file_on_exit(val)  # type: ignore[attr-defined]
-
-
-def write_file(filename: Optional[str] = None) -> bool:
-    r"""Write results to a CSV file.
-
-    If :attr:`filename` is not given, ``get_filename()`` is called.
-    """
-    if filename is None:
-        filename = get_filename()
-    return torch._C._cuda_tunableop_write_file(filename)  # type: ignore[attr-defined]
-
-
-def read_file(filename: Optional[str] = None) -> bool:
+def read_file(filename: str | None = None) -> bool:
     r"""Read results from a TunableOp CSV file.
 
     If :attr:`filename` is not given, ``get_filename()`` is called.
@@ -348,11 +327,20 @@ def get_rotating_buffer_size() -> int:
     return torch._C._cuda_tunableop_get_rotating_buffer_size()  # type: ignore[attr-defined]
 
 
+def set_numerical_check_tolerances(
+    enable: bool, atol: float = 1e-5, rtol: float = 1e-5
+) -> None:
+    r"""Set the atol and rtol values in numeric check"""
+    return torch._C._cuda_tunableop_set_numerical_check_tolerances(enable, atol, rtol)  # type: ignore[attr-defined]
+
+
 def tune_gemm_in_file(filename: str) -> None:
     r"""tune GEMM in file."""
 
-    assert is_enabled()
-    assert tuning_is_enabled()
+    if not is_enabled():
+        raise AssertionError("TunableOp is not enabled")
+    if not tuning_is_enabled():
+        raise AssertionError("Tuning is not enabled")
 
     deviceid = torch.cuda.current_device()
 
@@ -407,7 +395,10 @@ def _gather_tunableop_results() -> None:
         else:
             filename_pattern = results_filename_env.replace(".", "?.")
 
-    assert "?" in filename_pattern
+    if "?" not in filename_pattern:
+        raise AssertionError(
+            f"filename_pattern must contain '?', got {filename_pattern!r}"
+        )
 
     FirstFile = False
     matching_files = glob.glob(filename_pattern)
@@ -449,7 +440,7 @@ def _create_matrices(
     transB: bool,
     dtypeA: torch.dtype,
     deviceid: str,
-    dtypeB: Optional[torch.dtype] = None,
+    dtypeB: torch.dtype | None = None,
     randn: bool = True,
     subMatrix: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -597,7 +588,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     else:  # ScaledGEMM
         count = untuned_gemm[0].count("_")
-        assert count in [6, 7]
+        if count not in [6, 7]:
+            raise AssertionError(f"count must be 6 or 7, got {count}")
         untuned_gemm_temp = untuned_gemm[0].split("_")
         # dtypeC = might not be FP8 type, keep track
         # of the number of underscores
@@ -617,10 +609,16 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     untuned_gemm_temp = untuned_gemm[1].split("_")
     [n, m, k] = [int(g) for g in untuned_gemm_temp[1:4]]
     if op_sig == "GemmStridedBatchedTunableOp":
-        assert untuned_gemm_temp[6] == "ld"
+        if untuned_gemm_temp[6] != "ld":
+            raise AssertionError(
+                f"expected 'ld' at index 6, got {untuned_gemm_temp[6]!r}"
+            )
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[7:10]]
     else:
-        assert untuned_gemm_temp[4] == "ld"
+        if untuned_gemm_temp[4] != "ld":
+            raise AssertionError(
+                f"expected 'ld' at index 4, got {untuned_gemm_temp[4]!r}"
+            )
         [ldb, lda, ldc] = [int(g) for g in untuned_gemm_temp[5:8]]
 
     # Detect subMatrix case
@@ -639,7 +637,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             else:
                 warnings.warn(
                     "Offline tuning is not supported for this GEMM. Use online tuning instead. "
-                    + f"Skipped tuning for: {untuned_gemm[1]}"
+                    + f"Skipped tuning for: {untuned_gemm[1]}",
+                    stacklevel=2,
                 )
                 return
 
@@ -657,7 +656,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         if m == 1 or n == 1 or k == 1:
             warnings.warn(
                 "Offline tuning is not support for this GEMM. Use online tuning instead. "
-                + f"Skipped tuning for: {untuned_gemm[1]}"
+                + f"Skipped tuning for: {untuned_gemm[1]}",
+                stacklevel=2,
             )
             return
 
@@ -684,8 +684,14 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         torch.bmm(matA, matB)
     elif op_sig == "ScaledGemmTunableOp":
         # Only combination supported by PyTorch
-        assert transB is True
-        assert transA is False
+        if transB is not True:
+            raise AssertionError(
+                f"transB must be True for ScaledGemmTunableOp, got {transB}"
+            )
+        if transA is not False:
+            raise AssertionError(
+                f"transA must be False for ScaledGemmTunableOp, got {transA}"
+            )
 
         # Resolve linter issue
         if dtypeA is None or not isinstance(dtypeA, torch.dtype):
@@ -707,7 +713,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             subMatrix=subMatrix,
         )
 
-        assert untuned_gemm_temp[8] == "rw"
+        if untuned_gemm_temp[8] != "rw":
+            raise AssertionError(
+                f"expected 'rw' at index 8, got {untuned_gemm_temp[8]!r}"
+            )
         if untuned_gemm_temp[9] == "1":
             rowwise = True
         else:
@@ -727,7 +736,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             scaleA = torch.tensor(0.8, device=deviceid)
             scaleB = torch.tensor(0.9, device=deviceid)
 
-        assert untuned_gemm_temp[10] == "bias"
+        if untuned_gemm_temp[10] != "bias":
+            raise AssertionError(
+                f"expected 'bias' at index 10, got {untuned_gemm_temp[10]!r}"
+            )
         if untuned_gemm_temp[11] == "None":  # no bias vector
             torch._scaled_mm(
                 matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC
@@ -746,7 +758,10 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
     elif op_sig == "GemmAndBiasTunableOp":
         # y = x*A^T + b
-        assert transA != transB
+        if transA == transB:
+            raise AssertionError(
+                f"transA and transB must differ for GemmAndBiasTunableOp, got transA={transA}, transB={transB}"
+            )
 
         # Resolve linter issue
         if dtype is None or not isinstance(dtype, torch.dtype):
@@ -760,7 +775,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         matA = matA.t()
         torch.nn.functional.linear(X, matA, bias)
     else:
-        warnings.warn(f"error: unknown op {op_sig}")
+        warnings.warn(f"error: unknown op {op_sig}", stacklevel=2)
 
 
 def _check_tuning_assertions() -> None:
@@ -769,11 +784,14 @@ def _check_tuning_assertions() -> None:
     """
 
     if is_enabled() is False:
-        warnings.warn("TunableOp was disabled. Trying to enable now.")
+        warnings.warn("TunableOp was disabled. Trying to enable now.", stacklevel=2)
         enable(True)
-    assert is_enabled() is True
-    assert tuning_is_enabled() is True
-    assert record_untuned_is_enabled() is False
+    if is_enabled() is not True:
+        raise AssertionError("is_enabled() must be True")
+    if tuning_is_enabled() is not True:
+        raise AssertionError("tuning_is_enabled() must be True")
+    if record_untuned_is_enabled() is not False:
+        raise AssertionError("record_untuned_is_enabled() must be False")
 
 
 def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
@@ -782,12 +800,14 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     total_gpus = torch.cuda.device_count()
 
-    assert 1 <= num_gpus <= total_gpus
+    if not (1 <= num_gpus <= total_gpus):
+        raise AssertionError(
+            f"num_gpus must be between 1 and {total_gpus}, got {num_gpus}"
+        )
 
     mp_context = mp.get_context("spawn")
 
     futures = []  # empty list to hold futures
-    flush_results = []  # empty list to hold futures
 
     # GEMM are assigned to GPUs in a round robin manner
     h = 0
@@ -808,13 +828,6 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
         for future in concurrent.futures.as_completed(futures):
             future.result()
-
-        for g in range(num_gpus):
-            flush_result = executor.submit(write_file)
-            flush_results.append(flush_result)
-
-        for flush_result in concurrent.futures.as_completed(flush_results):
-            flush_result.result()
 
     torch.cuda.synchronize()
 

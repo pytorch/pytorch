@@ -62,11 +62,17 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
 class LoweringException(OperatorIssue):
     def __init__(
-        self, exc: Exception, target: Any, args: list[Any], kwargs: dict[str, Any]
+        self,
+        exc: Exception,
+        target: Any,
+        args: list[Any],
+        kwargs: dict[str, Any],
+        stack_trace: Optional[str] = None,
     ) -> None:
-        super().__init__(
-            f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
-        )
+        msg = f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
+        if stack_trace:
+            msg += f"{msg}\nFound from : \n {stack_trace}"
+        super().__init__(msg)
 
 
 class SubgraphLoweringException(RuntimeError):
@@ -132,6 +138,7 @@ class TritonMissing(ShortenTraceback):
 class GPUTooOldForTriton(ShortenTraceback):
     def __init__(
         self,
+        # pyrefly: ignore [not-a-type]
         device_props: _CudaDeviceProperties,
         first_useful_frame: Optional[types.FrameType],
     ) -> None:

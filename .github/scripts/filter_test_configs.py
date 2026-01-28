@@ -8,10 +8,11 @@ import re
 import subprocess
 import sys
 import warnings
+from collections.abc import Callable
 from enum import Enum
 from functools import cache
 from logging import info
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from urllib.request import Request, urlopen
 
 import yaml
@@ -512,6 +513,8 @@ def perform_misc_tasks(
         "keep-going",
         branch == MAIN_BRANCH
         or bool(tag and re.match(r"^trunk/[a-f0-9]{40}$", tag))
+        # Pattern for tags created via manual run on HUD
+        or bool(tag and re.match(r"^ciflow/[^/]+/[a-f0-9]{40}$", tag))
         or check_for_setting(labels, pr_body, "keep-going"),
     )
     set_output(
@@ -647,6 +650,9 @@ def main() -> None:
     # and also put a flag if the test matrix is empty, so subsequent jobs can
     # quickly check it without the need to parse the JSON string
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
+
+    # Save the labels from the PR, so that we can use it later
+    set_output("labels", json.dumps(list(labels)))
 
 
 if __name__ == "__main__":

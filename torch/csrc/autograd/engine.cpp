@@ -272,8 +272,7 @@ bool ReadyQueue::empty() const {
   return heap_.empty();
 }
 
-Engine::Engine()
-    : max_recursion_depth_(MAX_DEPTH), non_reentrant_device_thread_count_(0) {}
+Engine::Engine() : non_reentrant_device_thread_count_(0) {}
 
 Engine::~Engine() {
   stop();
@@ -664,7 +663,7 @@ GraphTask::GraphTask(
     bool exit_on_error)
     : keep_graph_(keep_graph),
       graph_roots_(std::move(graph_roots)),
-      owner_(NO_DEVICE),
+
       reentrant_depth_(reentrant_depth),
       exit_on_error_(exit_on_error),
       cpu_ready_queue_(std::move(cpu_ready_queue)),
@@ -948,15 +947,17 @@ static void validate_outputs_impl(
     TORCH_CHECK(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
-    if (c10::typeMetaToScalarType(metadata.options().dtype()) !=
-        grad.scalar_type()) {
-      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
-    }
-    if (grad.dtype() != metadata.dtype()) {
-      std::stringstream ss;
-      ss << "invalid gradient at index " << i << " - expected dtype ";
-      ss << metadata.dtype() << " but got " << grad.dtype();
-      TORCH_CHECK(false, format_error(ss.str()));
+
+    if (metadata.grad_dtype().has_value()) {
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        grad = grad.to(metadata.grad_dtype().value());
+      }
+      if (grad.scalar_type() != metadata.grad_dtype().value()) {
+        std::stringstream ss;
+        ss << "invalid gradient at index " << i << " - expected dtype ";
+        ss << metadata.grad_dtype().value() << " but got " << grad.dtype();
+        TORCH_CHECK(false, format_error(ss.str()));
+      }
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
@@ -1102,7 +1103,6 @@ void Engine::evaluate_function(
           *func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
-      auto opt_parent_stream = (*func).stream();
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
@@ -1197,7 +1197,11 @@ void Engine::evaluate_function(
       // Accumulates into buffer
       auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
+          next.input_nr,
+          std::move(output),
+          opt_parent_stream,
+          opt_next_stream,
+          next.function.get());
 
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
@@ -1213,7 +1217,11 @@ void Engine::evaluate_function(
       // Accumulates into buffer
       auto opt_next_stream = next.function->stream();
       input_buffer.add(
-          next.input_nr, std::move(output), opt_parent_stream, opt_next_stream);
+          next.input_nr,
+          std::move(output),
+          opt_parent_stream,
+          opt_next_stream,
+          next.function.get());
       if (is_ready) {
         auto queue = ready_queue(cpu_ready_queue, next.function->device());
         queue->push(
@@ -1366,7 +1374,8 @@ auto Engine::execute(
         root_edges.at(0).input_nr,
         std::move(input),
         input_stream,
-        opt_next_stream);
+        opt_next_stream,
+        root_edges.at(0).function.get());
 
     execute_with_graph_task(
         graph_task, std::move(graph_root), std::move(input_buffer));

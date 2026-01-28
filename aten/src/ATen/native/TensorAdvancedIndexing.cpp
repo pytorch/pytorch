@@ -1087,7 +1087,8 @@ TORCH_IMPL_FUNC(index_copy_out)
     result.copy_(self);
 
   // See Note [Enabling Deterministic Operations]
-  if (result.is_cuda() && globalContext().deterministicAlgorithms()) {
+  if ((result.is_cuda() || result.is_xpu()) &&
+      globalContext().deterministicAlgorithms()) {
     torch::List<std::optional<Tensor>> indices;
     indices.resize(dim + 1);
     indices.set(dim, index);
@@ -1701,13 +1702,13 @@ Tensor& index_select_out_cpu_(
                   TORCH_CHECK_INDEX(
                       (self_i >= 0) && (self_i < self_dim_size),
                       "index out of range in self");
-                  auto self_data = static_cast<const char*>(selfSlice_data) +
+                  auto self_data = const_cast<char*>(static_cast<const char*>(
+                                       selfSlice_data)) +
                       self_i * self_stride_bytes;
                   auto result_data = static_cast<char*>(resultSlice_data) +
                       i * result_stride_bytes;
                   sub_iter.unsafe_replace_operand(0, result_data);
-                  sub_iter.unsafe_replace_operand(
-                      1, const_cast<char*>(self_data));
+                  sub_iter.unsafe_replace_operand(1, self_data);
                   copy_stub(sub_iter.device_type(), sub_iter, false);
                 };
               });
@@ -1906,11 +1907,9 @@ Tensor& index_fill_(
         "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
 
-  if (!self.is_complex() && source.isComplex()) {
-    TORCH_CHECK(
-        false,
-        "index_fill_(): Converting complex Scalar to non-complex type is not supported");
-  }
+  TORCH_CHECK(
+      self.is_complex() || !source.isComplex(),
+      "index_fill_(): Converting complex Scalar to non-complex type is not supported");
 
   // Handle the case when `self` is 0-dim
   Tensor self_nonzero_dim = (self.dim() == 0) ? self.unsqueeze(-1) : self;
@@ -2234,8 +2233,12 @@ static void scatter_impl(
       scatter_reduce_exclude_self_helper(mut_out, dim, index, op);
     }
     // _scatter_via_index_put can only handle sum and mean reduction type
+    // we don't need to go index_put route if our inputs are integral
+    // we check in the meta function that self and src dtypes match,
+    // so here we need to check just one of them
     deterministic = deterministic &&
-        (op == ReductionType::SUM || op == ReductionType::MEAN);
+        (op == ReductionType::SUM || op == ReductionType::MEAN) &&
+        !at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
   }
 
   // Scalar src should already be deterministic
@@ -2327,9 +2330,13 @@ TORCH_IMPL_FUNC(scatter_add)
 
   // See Note [Enabling Deterministic Operations]
   // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  // we don't need to go index_put route if our inputs are integral
+  // we check in the meta function that self and src dtypes match,
+  // so here we need to check just one of them
   if (globalContext().deterministicAlgorithms() &&
       (self.device().type() == DeviceType::CUDA ||
-       self.device().type() == DeviceType::XPU)) {
+       self.device().type() == DeviceType::XPU) &&
+      !at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/ true);
   } else {
     if (can_use_expanded_index_path(
@@ -2670,13 +2677,16 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
   auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
+  // Wrap negative indices to positive (Python-style)
+  indices_broadcasted =
+      indices_broadcasted.remainder(self_broadcasted.size(dim));
   return std::make_tuple(
       std::move(self_broadcasted),
       std::move(indices_broadcasted),
       std::move(dim));
 }
 
-static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
+inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
   TORCH_CHECK(
       !t.defined() || t.device() == device,
       "Expected tensor to have ",
@@ -2689,7 +2699,7 @@ static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
       ")");
 }
 
-static inline void checkDevice(
+inline void checkDevice(
     CheckedFrom c,
     at::ArrayRef<Tensor> tensors,
     Device device) {

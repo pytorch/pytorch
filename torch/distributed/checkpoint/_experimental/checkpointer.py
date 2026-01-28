@@ -1,7 +1,7 @@
 import abc
 import logging
 from concurrent.futures import Future
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from .checkpoint_process import CheckpointProcess
 from .checkpoint_reader import CheckpointReader
@@ -38,7 +38,7 @@ class Checkpointer(abc.ABC):
         path: str,
         state_dict: STATE_DICT,
         **kwargs: dict[str, Any],
-    ) -> Optional[tuple[Future, Future]]:
+    ) -> tuple[Future, Future] | None:
         """
         Save a state dictionary to storage.
 
@@ -57,7 +57,7 @@ class Checkpointer(abc.ABC):
     def load(
         self,
         path: str,
-        state_dict: Optional[STATE_DICT] = None,
+        state_dict: STATE_DICT | None = None,
         *,
         default_map_location: Any = None,
         strict: bool = False,
@@ -126,7 +126,7 @@ class SyncCheckpointer(Checkpointer):
         path: str,
         state_dict: STATE_DICT,
         **kwargs: dict[str, Any],
-    ) -> Optional[tuple[Future, Future]]:
+    ) -> tuple[Future, Future] | None:
         """
         Save a state dictionary to storage synchronously.
 
@@ -148,7 +148,7 @@ class SyncCheckpointer(Checkpointer):
     def load(
         self,
         path: str,
-        state_dict: Optional[STATE_DICT] = None,
+        state_dict: STATE_DICT | None = None,
         *,
         default_map_location: Any = None,
         strict: bool = False,
@@ -237,14 +237,14 @@ class AsyncCheckpointer(Checkpointer):
         self._reader = reader
         self._checkpoint_stager = checkpoint_stager
         self._checkpoint_process = checkpoint_process
-        self._write_future: Optional[Future[Any]] = None
+        self._write_future: Future[Any] | None = None
 
     def save(
         self,
         path: str,
         state_dict: STATE_DICT,
         **kwargs: Any,
-    ) -> Optional[tuple[Future, Future]]:
+    ) -> tuple[Future, Future] | None:
         """
         Save a state dictionary to storage asynchronously.
 
@@ -291,7 +291,7 @@ class AsyncCheckpointer(Checkpointer):
     def load(
         self,
         path: str,
-        state_dict: Optional[STATE_DICT] = None,
+        state_dict: STATE_DICT | None = None,
         *,
         default_map_location: Any = None,
         strict: bool = False,

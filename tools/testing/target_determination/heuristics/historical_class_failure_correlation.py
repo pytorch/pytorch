@@ -29,6 +29,7 @@ class HistoricalClassFailurCorrelation(HeuristicInterface):
     """
 
     def __init__(self, **kwargs: Any) -> None:
+        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:
@@ -83,7 +84,9 @@ def _rank_correlated_tests(
 ) -> list[str]:
     # Find the tests failures that are correlated with the edited files.
     # Filter the list to only include tests we want to run.
+    # pyrefly: ignore [bad-assignment]
     tests_to_run = set(tests_to_run)
+    # pyrefly: ignore [bad-argument-type]
     ratings = _get_ratings_for_tests(tests_to_run)
     prioritize = sorted(ratings, key=lambda x: -ratings[x])
     return prioritize

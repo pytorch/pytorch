@@ -190,7 +190,7 @@ class CapabilityBasedPartitioner:
                 # Iterate through all the users of this node and update the partition map to indicate
                 # that there is a path from the partition id of this node to the target partition id.
                 for user_node in node.users:
-                    target_id = assignment.get(user_node, None)
+                    target_id = assignment.get(user_node)
                     if target_id is not None:
                         partition_map[id].add(target_id)
                         partition_map[id].update(partition_map[target_id])
@@ -253,26 +253,34 @@ class CapabilityBasedPartitioner:
             )
 
         # post processing to re-assign "getitem" nodes into upstream partition
+        # Run iteratively until no more changes, to handle nested getitem chains
+        # (e.g., getitem_619 = getitem_618[0] where getitem_618 = with_effects_167[1])
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
-        nodes_reassignment: dict[Node, int] = {}
-        for node in self.graph_module.graph.nodes:
-            is_tuple_output = True
-            for user in node.users:
-                if (
-                    user.op != "call_function"
-                    or _get_qualified_name(user.target) != "_operator.getitem"
-                ):  # type: ignore[arg-type]
-                    is_tuple_output = False
-                    break
-
-            # node has tuple outputs, re-assign all following getitem node into node's partition
-            if is_tuple_output:
-                id = assignment.get(node, None)  # type: ignore[arg-type]
+        while True:
+            nodes_reassignment: dict[Node, int] = {}
+            for node in self.graph_module.graph.nodes:
+                is_tuple_output = True
                 for user in node.users:
-                    if assignment.get(user, None) != id:  # type: ignore[arg-type]
-                        nodes_reassignment[user] = id  # type: ignore[assignment]
-        for node, id in nodes_reassignment.items():
-            merge_single_node(node, None, id)
+                    if (
+                        user.op != "call_function"
+                        or _get_qualified_name(user.target) != "_operator.getitem"
+                    ):  # type: ignore[arg-type]
+                        is_tuple_output = False
+                        break
+
+                # node has tuple outputs, re-assign all following getitem node into node's partition
+                if is_tuple_output:
+                    id = assignment.get(node)  # type: ignore[arg-type]
+                    for user in node.users:
+                        if assignment.get(user) != id:  # type: ignore[arg-type]
+                            nodes_reassignment[user] = id  # type: ignore[assignment]
+
+            # no more re-assignments
+            if not nodes_reassignment:
+                break
+
+            for node, id in nodes_reassignment.items():
+                merge_single_node(node, None, id)
 
         # filter out single node partitions
         if not self.allows_single_node_partition:

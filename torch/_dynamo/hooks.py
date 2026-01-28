@@ -10,7 +10,7 @@ These hooks enable customization of guard export and failure handling behaviors.
 """
 
 import dataclasses
-from typing import Callable, Optional
+from collections.abc import Callable, Sequence
 
 from torch._guards import GuardsSet
 
@@ -19,6 +19,8 @@ from .types import GuardFail, GuardFilterEntry
 
 @dataclasses.dataclass
 class Hooks:
-    guard_export_fn: Optional[Callable[[GuardsSet], None]] = None
-    guard_fail_fn: Optional[Callable[[GuardFail], None]] = None
-    guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None
+    guard_export_fn: Callable[[GuardsSet], None] | None = None
+    guard_fail_fn: Callable[[GuardFail], None] | None = None
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None = (
+        None
+    )

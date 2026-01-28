@@ -3,8 +3,13 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import onnxscript
-from onnxscript import ir
+from typing import TYPE_CHECKING
+
+from torch.onnx._internal._lazy_import import onnx_ir as ir
+
+
+if TYPE_CHECKING:
+    import onnxscript
 
 
 class SymbolicTensor(ir.Value):
@@ -18,7 +23,7 @@ class SymbolicTensor(ir.Value):
         type: ir.TypeProtocol | None = None,
         doc_string: str | None = None,
         const_value: ir.TensorProtocol | None = None,
-    ):
+    ) -> None:
         super().__init__(
             name=name,
             shape=shape,
@@ -30,13 +35,16 @@ class SymbolicTensor(ir.Value):
 
     @property
     def rank(self) -> int | None:
+        # pyrefly: ignore [missing-attribute]
         if self.shape is None:
             return None
+        # pyrefly: ignore [bad-argument-type]
         return len(self.shape)
 
     # TODO: Implement indexing
 
     def __mod__(self, other):
+        # pyrefly: ignore [missing-attribute]
         if self.dtype in {
             ir.DataType.FLOAT,
             ir.DataType.DOUBLE,

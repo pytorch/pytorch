@@ -788,7 +788,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
+`torch.compile documentation <https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler.html>`__
 
 Operator Tags
 ------------------------------------
@@ -815,6 +815,10 @@ Operator Tags
 .. py:module:: torch.torch_version
 .. py:module:: torch.types
 .. py:module:: torch.version
+
+.. Compiler configuration module - documented in torch.compiler.config.md
+.. py:module:: torch.compiler.config
+   :noindex:
 
 .. Hidden aliases (e.g. torch.functional.broadcast_tensors()). We want `torch.broadcast_tensors()` to
    be visible only.

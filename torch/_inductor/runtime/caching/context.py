@@ -7,9 +7,9 @@ information used in caching decisions for PyTorch's Inductor runtime.
 import json
 from abc import ABC, abstractmethod
 from base64 import b64encode
+from collections.abc import Sequence
 from functools import cache
 from hashlib import sha256
-from typing import Any, Optional, Sequence
 from typing_extensions import override, TypedDict
 
 import torch
@@ -58,7 +58,7 @@ class _RuntimeContext(_Context):
         )
 
     @staticmethod
-    def inductor_configs() -> dict[str, Any]:
+    def inductor_configs() -> dict[str, object]:
         """Get portable Inductor configuration settings.
 
         Returns:
@@ -70,7 +70,7 @@ class _RuntimeContext(_Context):
         return config.save_config_portable(ignore_private_configs=False)
 
     @staticmethod
-    def torch_determinism_configs() -> dict[str, Any]:
+    def torch_determinism_configs() -> dict[str, object]:
         """Get PyTorch deterministic algorithm configuration settings.
 
         Returns:
@@ -84,13 +84,13 @@ class _RuntimeContext(_Context):
             "torch.is_deterministic_algorithms_warn_only_enabled": (
                 torch.is_deterministic_algorithms_warn_only_enabled()
             ),
-            "torch.utils.deterministic.fill_uninitialized_memory": (
-                torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+            "torch.utils.deterministic.fill_uninitialized_memory": getattr(
+                torch.utils.deterministic, "fill_uninitialized_memory", None
             ),
         }
 
     @staticmethod
-    def cuda_matmul_precision_configs() -> dict[str, Any]:
+    def cuda_matmul_precision_configs() -> dict[str, object]:
         """Get CUDA matrix multiplication precision configuration settings.
 
         Returns:
@@ -152,7 +152,7 @@ class _CompileContext(_Context):
 
     @cache
     @staticmethod
-    def triton_version_hash() -> Optional[str]:
+    def triton_version_hash() -> str | None:
         """Get Triton version key if Triton is available.
 
         Returns:
@@ -164,7 +164,7 @@ class _CompileContext(_Context):
 
     @cache
     @staticmethod
-    def runtime() -> Optional[str]:
+    def runtime() -> str | None:
         """Determine the runtime type based on available backends.
 
         Returns:
@@ -174,7 +174,7 @@ class _CompileContext(_Context):
 
     @cache
     @staticmethod
-    def runtime_version() -> Optional[str]:
+    def runtime_version() -> str | None:
         """Get the version string for the detected runtime.
 
         Returns:
@@ -184,11 +184,12 @@ class _CompileContext(_Context):
         return {
             "CUDA": torch.version.cuda,
             "HIP": torch.version.hip,
-        }.get(_CompileContext.runtime())  # type: ignore[arg-type]
+            "None": None,
+        }.get(_CompileContext.runtime() or "None")
 
     @cache
     @staticmethod
-    def accelerator_properties() -> Optional[str]:
+    def accelerator_properties() -> str | None:
         """Get string representation of CUDA device properties.
 
         Returns:
@@ -197,7 +198,7 @@ class _CompileContext(_Context):
         """
         return (
             repr(torch.cuda.get_device_properties())
-            if _CompileContext.runtime()
+            if _CompileContext.runtime() and torch.cuda.is_available()
             else None
         )
 
@@ -235,9 +236,47 @@ _DEFAULT_ISOLATION_SCHEMA: IsolationSchema = IsolationSchema(
 )
 
 
+def _collect_runtime_context(
+    selection: SelectedRuntimeContext | bool,
+) -> dict[str, object] | None:
+    """Collect runtime context based on selection.
+
+    Args:
+        selection: True to include all, False to exclude all, or a dict
+                  specifying which forms to include.
+
+    Returns:
+        Dictionary of selected context data, or None if excluded.
+    """
+    return {
+        form: getattr(_RuntimeContext, form)()
+        for form in _RuntimeContext.forms_of_context()
+        if selection is True or (selection and selection.get(form, False))
+    } or None
+
+
+def _collect_compile_context(
+    selection: SelectedCompileContext | bool,
+) -> dict[str, object] | None:
+    """Collect compile context based on selection.
+
+    Args:
+        selection: True to include all, False to exclude all, or a dict
+                  specifying which forms to include.
+
+    Returns:
+        Dictionary of selected context data, or None if excluded.
+    """
+    return {
+        form: getattr(_CompileContext, form)()
+        for form in _CompileContext.forms_of_context()
+        if selection is True or (selection and selection.get(form, False))
+    } or None
+
+
 def _isolation_context(
     ischema: IsolationSchema = _DEFAULT_ISOLATION_SCHEMA,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Generate context data based on the isolation schema.
 
     Args:
@@ -249,30 +288,10 @@ def _isolation_context(
         "runtime_context" and "compile_context", where each value is
         either None (if excluded) or a dict of context form data.
     """
-    isolation_context: dict[str, Any] = {}
-    for context_name, context_cls in (
-        ("runtime_context", _RuntimeContext),
-        ("compile_context", _CompileContext),
-    ):
-        selected_context: Optional[dict[str, Any]] = None
-        if ischema[context_name] is True:  # type: ignore[literal-required]
-            selected_context = {
-                form_of_context: getattr(context_cls, form_of_context)()
-                for form_of_context in context_cls.forms_of_context()
-            }
-        elif ischema[context_name] is False:  # type: ignore[literal-required]
-            selected_context = None
-        else:
-            selected_context = {}
-            for form_of_context in ischema[context_name]:  # type: ignore[literal-required]
-                selected = ischema[context_name][form_of_context]  # type: ignore[literal-required]
-                if selected:
-                    selected_context[form_of_context] = getattr(
-                        context_cls, form_of_context
-                    )()
-            selected_context = selected_context or None
-        isolation_context[context_name] = selected_context
-    return isolation_context
+    return {
+        "runtime_context": _collect_runtime_context(ischema["runtime_context"]),
+        "compile_context": _collect_compile_context(ischema["compile_context"]),
+    }
 
 
 def _isolation_key(ischema: IsolationSchema = _DEFAULT_ISOLATION_SCHEMA) -> str:

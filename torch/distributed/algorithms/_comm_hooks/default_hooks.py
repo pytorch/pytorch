@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -136,7 +135,7 @@ def _low_precision_hook(
     prec: torch.dtype,
     state: LowPrecisionState,
     grad: torch.Tensor,
-    output: Optional[torch.Tensor],
+    output: torch.Tensor | None,
 ):
     if grad.dtype != prec:
         grad.data = grad.data.to(prec)
@@ -151,7 +150,7 @@ def _low_precision_hook(
 
 
 def fp16_compress_hook(
-    state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None
+    state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor | None = None
 ):
     r"""
     Implement FSDP communication hook for a simple gradient compression approach.
@@ -172,7 +171,7 @@ def fp16_compress_hook(
 
 
 def bf16_compress_hook(
-    state: LowPrecisionState, grad: torch.Tensor, output: Optional[torch.Tensor] = None
+    state: LowPrecisionState, grad: torch.Tensor, output: torch.Tensor | None = None
 ):
     r"""
     Implement FSDP communication hook for a simple gradient compression approach .

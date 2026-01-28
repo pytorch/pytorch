@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
 from types import FrameType
-from typing import Any, Optional, Union
+from typing import Any, TextIO, Union
 
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure, record
@@ -38,7 +38,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
-from torch.numa.binding import NumaOptions
+from torch.numa.binding import _maybe_wrap_with_numa_binding, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -73,7 +73,7 @@ class SignalException(Exception):
         self.sigval = sigval
 
 
-def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
+def _terminate_process_handler(signum: int, frame: FrameType | None) -> None:
     """Termination handler that raises exceptions on the main process.
 
     When the process receives death signal(SIGTERM, SIGINT), this termination handler will
@@ -156,9 +156,7 @@ class Std(IntFlag):
             )
 
 
-def to_map(
-    val_or_map: Union[Std, dict[int, Std]], local_world_size: int
-) -> dict[int, Std]:
+def to_map(val_or_map: Std | dict[int, Std], local_world_size: int) -> dict[int, Std]:
     """
     Certain APIs take redirect settings either as a single value (e.g. apply to all
     local ranks) or as an explicit user-provided mapping. This method is a convenience
@@ -193,6 +191,8 @@ class LogsDest:
     tee_stdouts: dict[int, str] = field(default_factory=dict)
     tee_stderrs: dict[int, str] = field(default_factory=dict)
     error_files: dict[int, str] = field(default_factory=dict)
+    filtered_stdout: str = field(default_factory=str)
+    filtered_stderr: str = field(default_factory=str)
 
 
 class LogsSpecs(ABC):
@@ -214,10 +214,10 @@ class LogsSpecs(ABC):
 
     def __init__(
         self,
-        log_dir: Optional[str] = None,
-        redirects: Union[Std, dict[int, Std]] = Std.NONE,
-        tee: Union[Std, dict[int, Std]] = Std.NONE,
-        local_ranks_filter: Optional[set[int]] = None,
+        log_dir: str | None = None,
+        redirects: Std | dict[int, Std] = Std.NONE,
+        tee: Std | dict[int, Std] = Std.NONE,
+        local_ranks_filter: set[int] | None = None,
     ) -> None:
         self._root_log_dir = log_dir
         self._redirects = redirects
@@ -252,10 +252,10 @@ class DefaultLogsSpecs(LogsSpecs):
 
     def __init__(
         self,
-        log_dir: Optional[str] = None,
-        redirects: Union[Std, dict[int, Std]] = Std.NONE,
-        tee: Union[Std, dict[int, Std]] = Std.NONE,
-        local_ranks_filter: Optional[set[int]] = None,
+        log_dir: str | None = None,
+        redirects: Std | dict[int, Std] = Std.NONE,
+        tee: Std | dict[int, Std] = Std.NONE,
+        local_ranks_filter: set[int] | None = None,
     ) -> None:
         if log_dir != os.devnull:
             if not log_dir:
@@ -273,7 +273,7 @@ class DefaultLogsSpecs(LogsSpecs):
     def root_log_dir(self) -> str:
         return str(self._root_log_dir)
 
-    def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
+    def _make_log_dir(self, log_dir: str | None, rdzv_run_id: str):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
         os.makedirs(base_log_dir, exist_ok=True)
         dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
@@ -290,6 +290,8 @@ class DefaultLogsSpecs(LogsSpecs):
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stdout.log`
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stderr.log`
         - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
+        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/filtered_stdout.log`
+        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/filtered_stderr.log`
         """
         nprocs = len(envs)
         global_env = {}  # use only to query properties that are not dependent on a rank
@@ -386,7 +388,15 @@ class DefaultLogsSpecs(LogsSpecs):
                 )
                 envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
-        return LogsDest(stdouts, stderrs, tee_stdouts, tee_stderrs, error_files)
+        return LogsDest(
+            stdouts,
+            stderrs,
+            tee_stdouts,
+            tee_stderrs,
+            error_files,
+            os.path.join(attempt_log_dir, "filtered_stdout.log"),
+            os.path.join(attempt_log_dir, "filtered_stderr.log"),
+        )
 
     def __repr__(self) -> str:
         return (
@@ -438,16 +448,28 @@ class PContext(abc.ABC):
     .. warning:: stdouts and stderrs should ALWAYS be a superset of
                  tee_stdouts and tee_stderrs (respectively) this is b/c
                  tee is implemented as a redirect + tail -f <stdout/stderr.log>
+
+    Args:
+        duplicate_stdout_filters:
+            If non-empty, duplicates stdouts specified in ``logs_specs``'s ``tee``
+            to a file containing only lines that match _any_ of the filter strings.
+            The log file is aggregated across all ranks selected by ``tee``.
+        duplicate_stderr_filters:
+            If non-empty, duplicates stderrs specified in ``logs_specs``'s ``tee``
+            to a file containing only lines that match _any_ of the filter strings.
+            The log file is aggregated across all ranks selected by ``tee``.
     """
 
     def __init__(
         self,
         name: str,
-        entrypoint: Union[Callable, str],
+        entrypoint: Callable | str,
         args: dict[int, tuple],
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[dict[int, str]] = None,
+        log_line_prefixes: dict[int, str] | None = None,
+        duplicate_stdout_filters: list[str] | None = None,
+        duplicate_stderr_filters: list[str] | None = None,
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
@@ -467,13 +489,45 @@ class PContext(abc.ABC):
         self.stderrs = logs_dest.stderrs
         self.error_files = logs_dest.error_files
         self.nprocs = nprocs
+        self.filtered_stdout: TextIO | None = None
+        self.filtered_stderr: TextIO | None = None
 
-        self._stdout_tail = TailLog(
-            name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes
-        )
-        self._stderr_tail = TailLog(
-            name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes
-        )
+        self._tail_logs = [
+            TailLog(name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes),
+            TailLog(name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes),
+        ]
+
+        if duplicate_stdout_filters:
+            self.filtered_stdout = open(  # noqa: SIM115
+                logs_dest.filtered_stdout, mode="w", errors="replace", buffering=1
+            )
+            self._tail_logs.append(
+                TailLog(
+                    name,
+                    logs_dest.tee_stdouts,
+                    self.filtered_stdout,
+                    log_line_prefixes,
+                    log_line_filter=lambda line: any(
+                        needle in line for needle in duplicate_stdout_filters
+                    ),
+                )
+            )
+
+        if duplicate_stderr_filters:
+            self.filtered_stderr = open(  # noqa: SIM115
+                logs_dest.filtered_stderr, mode="w", errors="replace", buffering=1
+            )
+            self._tail_logs.append(
+                TailLog(
+                    name,
+                    logs_dest.tee_stderrs,
+                    self.filtered_stderr,
+                    log_line_prefixes,
+                    log_line_filter=lambda line: any(
+                        needle in line for needle in duplicate_stderr_filters
+                    ),
+                )
+            )
 
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
@@ -489,11 +543,13 @@ class PContext(abc.ABC):
                     sig = getattr(signal, sig_name.strip())
                     signal.signal(sig, _terminate_process_handler)
                     logger.info("Registered signal handler for %s", sig_name)
-                except (AttributeError, ValueError) as e:
+                except (AttributeError, ValueError):
                     logger.warning(
-                        "Failed to register signal handler for %s: %s", sig_name, e
+                        "Failed to register signal handler for %s",
+                        sig_name,
+                        exc_info=True,
                     )
-                except RuntimeError as e:
+                except RuntimeError:
                     if IS_WINDOWS and sig_name.strip() in [
                         "SIGHUP",
                         "SIGQUIT",
@@ -505,7 +561,9 @@ class PContext(abc.ABC):
                         )
                     else:
                         logger.warning(
-                            "Failed to register signal handler for %s: %s", sig_name, e
+                            "Failed to register signal handler for %s",
+                            sig_name,
+                            exc_info=True,
                         )
         else:
             logger.warning(
@@ -513,8 +571,8 @@ class PContext(abc.ABC):
                 "This could lead to orphaned worker processes if the torchrun is terminated."
             )
         self._start()
-        self._stdout_tail.start()
-        self._stderr_tail.start()
+        for tail_log in self._tail_logs:
+            tail_log.start()
 
     @abc.abstractmethod
     def _start(self) -> None:
@@ -522,7 +580,7 @@ class PContext(abc.ABC):
         raise NotImplementedError
 
     @abc.abstractmethod
-    def _poll(self) -> Optional[RunProcsResult]:
+    def _poll(self) -> RunProcsResult | None:
         """
         Poll the run status of the processes running under this context.
         This method follows an "all-or-nothing" policy and returns
@@ -532,7 +590,7 @@ class PContext(abc.ABC):
         """
         raise NotImplementedError
 
-    def wait(self, timeout: float = -1, period: float = 1) -> Optional[RunProcsResult]:
+    def wait(self, timeout: float = -1, period: float = 1) -> RunProcsResult | None:
         """
         Wait for the specified ``timeout`` seconds, polling every ``period`` seconds
         for the processes to be done. Returns ``None`` if the processes are still running
@@ -586,9 +644,7 @@ class PContext(abc.ABC):
         """
         raise NotImplementedError
 
-    def close(
-        self, death_sig: Optional[signal.Signals] = None, timeout: int = 30
-    ) -> None:
+    def close(self, death_sig: signal.Signals | None = None, timeout: int = 30) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
@@ -601,10 +657,12 @@ class PContext(abc.ABC):
         if not death_sig:
             death_sig = _get_default_signal()
         self._close(death_sig=death_sig, timeout=timeout)
-        if self._stdout_tail:
-            self._stdout_tail.stop()
-        if self._stderr_tail:
-            self._stderr_tail.stop()
+        for tail_log in self._tail_logs:
+            tail_log.stop()
+        if self.filtered_stdout:
+            self.filtered_stdout.close()
+        if self.filtered_stderr:
+            self.filtered_stderr.close()
 
 
 def get_std_cm(std_rd: str, redirect_fn):
@@ -623,6 +681,7 @@ def _wrap(
     stderr_redirects: dict[int, str],  # redirect file for stderr (to console if None)
     ret_vals: dict[int, mp.SimpleQueue],
     queue_finished_reading_event: synchronize.Event,
+    numa_options: NumaOptions | None,
 ) -> None:
     # get the per-rank params up front so we fail fast if no mapping is found
     args_ = args[local_rank]
@@ -639,6 +698,9 @@ def _wrap(
         os.environ[k] = v
 
     with stdout_cm, stderr_cm:
+        fn = _maybe_wrap_with_numa_binding(
+            fn, gpu_index=local_rank, numa_options=numa_options
+        )
         ret = record(fn)(*args_)
     ret_val_.put(ret)
     queue_finished_reading_event.wait()
@@ -655,8 +717,10 @@ class MultiprocessContext(PContext):
         envs: dict[int, dict[str, str]],
         start_method: str,
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[dict[int, str]] = None,
-        numa_options: Optional[NumaOptions] = None,
+        log_line_prefixes: dict[int, str] | None = None,
+        numa_options: NumaOptions | None = None,
+        duplicate_stdout_filters: list[str] | None = None,
+        duplicate_stderr_filters: list[str] | None = None,
     ):
         super().__init__(
             name,
@@ -665,6 +729,8 @@ class MultiprocessContext(PContext):
             envs,
             logs_specs,
             log_line_prefixes,
+            duplicate_stdout_filters,
+            duplicate_stderr_filters,
         )
 
         self.start_method = start_method
@@ -676,12 +742,12 @@ class MultiprocessContext(PContext):
 
         # see comments in ``join()`` for what this is
         self._return_values: dict[int, Any] = {}
-        self._pc: Optional[mp.ProcessContext] = None
+        self._pc: mp.ProcessContext | None = None
         # Note: set method should ONLY be invoked for the use case when all processes finished
         # successfully. If any process died on event.wait() calling set() method will deadlock.
         self._worker_finished_event = mp.get_context(self.start_method).Event()
 
-        self._numa_options: Optional[NumaOptions] = numa_options
+        self._numa_options: NumaOptions | None = numa_options
 
     def _start(self):
         if self._pc:
@@ -699,18 +765,18 @@ class MultiprocessContext(PContext):
                 self.stderrs,
                 self._ret_vals,
                 self._worker_finished_event,
+                self._numa_options,
             ),
             nprocs=self.nprocs,
             join=False,
             daemon=False,
             start_method=self.start_method,
-            numa_options=self._numa_options,
         )
 
     def _is_done(self) -> bool:
         return len(self._return_values) == self.nprocs
 
-    def _poll(self) -> Optional[RunProcsResult]:
+    def _poll(self) -> RunProcsResult | None:
         assert self._pc is not None  # assertion for mypy type checker
 
         try:
@@ -727,7 +793,7 @@ class MultiprocessContext(PContext):
             # pipe. Hence to prevent deadlocks on large return values,
             # we opportunistically try queue.get on each join call
             # See: https://docs.python.org/2/library/multiprocessing.html#all-platforms
-            for local_rank in range(0, self.nprocs):
+            for local_rank in range(self.nprocs):
                 return_queue = self._ret_vals[local_rank]
                 if not return_queue.empty():
                     # save the return values temporarily into a member var
@@ -770,7 +836,7 @@ class MultiprocessContext(PContext):
                 " of fn: %s (start_method: %s)",
                 failed_proc.exitcode,
                 failed_local_rank,
-                e.pid,
+                e.error_pid,
                 fn_name,
                 self.start_method,
             )
@@ -780,7 +846,7 @@ class MultiprocessContext(PContext):
                 failures={
                     failed_local_rank: ProcessFailure(
                         local_rank=failed_local_rank,
-                        pid=e.pid,
+                        pid=e.error_pid,
                         exitcode=failed_proc.exitcode,
                         error_file=error_filepath,
                     )
@@ -840,8 +906,10 @@ class SubprocessContext(PContext):
         args: dict[int, tuple],
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,
-        log_line_prefixes: Optional[dict[int, str]] = None,
-        numa_options: Optional[NumaOptions] = None,
+        log_line_prefixes: dict[int, str] | None = None,
+        numa_options: NumaOptions | None = None,
+        duplicate_stdout_filters: list[str] | None = None,
+        duplicate_stderr_filters: list[str] | None = None,
     ):
         super().__init__(
             name,
@@ -850,13 +918,15 @@ class SubprocessContext(PContext):
             envs,
             logs_specs,
             log_line_prefixes,
+            duplicate_stdout_filters,
+            duplicate_stderr_filters,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not
         self._running_local_ranks: set[int] = set(range(self.nprocs))
         self._failures: dict[int, ProcessFailure] = {}
         self.subprocess_handlers: dict[int, SubprocessHandler] = {}
-        self._numa_options: Optional[NumaOptions] = numa_options
+        self._numa_options: NumaOptions | None = numa_options
 
     def _start(self):
         if self.subprocess_handlers:
@@ -891,7 +961,7 @@ class SubprocessContext(PContext):
                     )
                 # else: --> succeeded; nothing to do
 
-    def _poll(self) -> Optional[RunProcsResult]:
+    def _poll(self) -> RunProcsResult | None:
         done_local_ranks: set[int] = set()
         self._capture_process_failures(done_local_ranks)
 

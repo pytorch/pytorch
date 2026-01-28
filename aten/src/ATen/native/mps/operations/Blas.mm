@@ -10,6 +10,7 @@
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/mm.h>
+#include <ATen/ops/vdot_native.h>
 #endif
 
 #ifdef __OBJC__
@@ -53,6 +54,10 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 Tensor dot_mps(const Tensor& self, const Tensor& other) {
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
+
+  if (self.numel() == 0 & other.numel() == 0) {
+    return zeros({}, self.options());
+  }
 
   dot_check(self, other);
 
@@ -113,6 +118,15 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
   return output;
 }
 
+Tensor vdot_mps(const Tensor& self, const Tensor& other) {
+  // For real dtypes, vdot is identical to dot
+  if (!self.is_complex()) {
+    return dot_mps(self, other);
+  }
+
+  return dot_mps(self.conj(), other);
+}
+
 static Tensor& addmv_out_mps_impl(const Tensor& self,
                                   const Tensor& mat,
                                   const Tensor& vec,
@@ -137,6 +151,9 @@ static Tensor& addmv_out_mps_impl(const Tensor& self,
   };
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
+  if (result.numel() == 0) {
+    return result;
+  }
   Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
 
   @autoreleasepool {

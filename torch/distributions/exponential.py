@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -27,6 +26,7 @@ class Exponential(ExponentialFamily):
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"rate": constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
@@ -50,8 +50,8 @@ class Exponential(ExponentialFamily):
 
     def __init__(
         self,
-        rate: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        rate: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         (self.rate,) = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, _Number) else self.rate.size()
@@ -89,5 +89,6 @@ class Exponential(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (-self.rate,)
 
+    # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x):
         return -torch.log(-x)

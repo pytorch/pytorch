@@ -1,4 +1,4 @@
-![PyTorch Logo](https://github.com/pytorch/pytorch/blob/9708fcf92db88b80b9010c68662d634434da3106/docs/source/_static/img/pytorch-logo-dark.png)
+![PyTorch Logo](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
 
@@ -72,7 +72,7 @@ Elaborating Further:
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
-![Tensor illustration](https://github.com/pytorch/pytorch/blob/9708fcf92db88b80b9010c68662d634434da3106/docs/source/_static/img/tensor_illustration.png)
+![Tensor illustration](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
 computation by a huge amount.
@@ -99,7 +99,7 @@ from several research papers on this topic, as well as current and past work suc
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
 
-![Dynamic graph](https://github.com/pytorch/pytorch/blob/9708fcf92db88b80b9010c68662d634434da3106/docs/source/_static/img/dynamic_graph.gif)
+![Dynamic graph](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/dynamic_graph.gif)
 
 ### Python First
 
@@ -221,7 +221,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 
 ##### Intel GPU Support
 If you want to compile with Intel GPU support, follow these
-- [PyTorch Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html) instructions.
+- [PyTorch Prerequisites for Intel GPUs](https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu.html) instructions.
 - Intel GPU is supported for Linux and Windows.
 
 If you want to disable Intel GPU support, export the environment variable `USE_XPU=0`.
@@ -292,8 +292,13 @@ python tools/amd_build/build_amd.py
 Install PyTorch
 
 ```bash
+# the CMake prefix for conda environment
 export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python -m pip install --no-build-isolation -v -e .
+
+# the CMake prefix for non-conda environment, e.g. Python venv
+# call following after activating the venv
+export CMAKE_PREFIX_PATH="${VIRTUAL_ENV}:${CMAKE_PREFIX_PATH}"
 ```
 
 **On macOS**
@@ -320,7 +325,7 @@ Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In ord
 
 In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
 
-[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
+[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build PyTorch with CUDA.
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Make sure that CUDA with Nsight Compute is installed after Visual Studio.
 
@@ -553,7 +558,7 @@ We appreciate all contributions. If you are planning to contribute back bug-fixe
 If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
+To learn more about making a contribution to PyTorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
 
 ## The Team
 

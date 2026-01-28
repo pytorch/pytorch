@@ -70,7 +70,7 @@ def _set_strategy(_strategy: str) -> None:
 
 
 def _get_strategy() -> str:
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return strategy
 
 
@@ -101,9 +101,6 @@ def flags(enabled=None, strategy=None):
 
 
 class OptEinsumModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     global enabled
     enabled = ContextProp(_get_enabled, _set_enabled)
     global strategy

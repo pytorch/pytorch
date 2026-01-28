@@ -50,7 +50,9 @@ class ProfileMetrics:
             other = ProfileMetrics(other, other, other)
         return ProfileMetrics(
             self.microseconds / max(1, other.microseconds),
+            # pyrefly: ignore [bad-argument-type]
             self.operators / max(1, other.operators),
+            # pyrefly: ignore [bad-argument-type]
             self.fusions / max(1, other.fusions),
         )
 

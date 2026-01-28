@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -68,6 +68,7 @@ def promote_types(
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
+        # pyrefly: ignore [missing-attribute]
         dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(
@@ -247,6 +248,15 @@ class DtypePropagationOpsHandler:
         return None
 
     @staticmethod
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: DTypeArg,
+        extra_meta: dict[str, Any],
+    ) -> None:
+        return None
+
+    @staticmethod
     def load(name: str, index) -> torch.dtype:
         return upcast_compute_type(V.graph.get_dtype(name))
 
@@ -348,6 +358,11 @@ class DtypePropagationOpsHandler:
         return torch.int32
 
     @staticmethod
+    def dot(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        # triton tl.dot out_dtype is tl.float32 by default.
+        return torch.float32
+
+    @staticmethod
     def inline_asm_elementwise(
         *inputs, asm, constraints=None, dtype=torch.float32, is_pure=True, pack=1
     ):
@@ -379,6 +394,6 @@ class DtypePropagationOpsHandler:
 
 
 if TYPE_CHECKING:
-
+    # pyrefly: ignore [inconsistent-inheritance]
     class _typecheck_DtypePropagation(DtypePropagationOpsHandler, OpsHandler[Any]):
         pass  # mypy will error if we got any of the signatures wrong

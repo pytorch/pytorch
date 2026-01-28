@@ -36,8 +36,8 @@ of lexicographic instead of co-lexicographic as implemented in the original layo
 """
 
 from itertools import chain
-from typing import Optional, TypeAlias, Union
-from typing_extensions import TypeIs
+from typing import TypeAlias
+from typing_extensions import Self, TypeIs
 
 from .int_tuple import (
     crd2idx,
@@ -53,12 +53,9 @@ from .int_tuple import (
 
 
 # Type aliases
-LayoutOrIntTuple: TypeAlias = Union["Layout", IntTuple]
-LayoutProfile: TypeAlias = Optional[Union[tuple[object, ...], "Layout"]]
-LayoutInput: TypeAlias = Optional[Union["Layout", IntTuple, tuple[object, ...]]]
-CoordinateType: TypeAlias = Optional[
-    Union[int, IntTuple, tuple[object, ...]]
-]  # Input for slice_ and crd2idx functions
+CoordinateType: TypeAlias = (
+    int | IntTuple | tuple[object, ...] | None
+)  # Input for slice_ and crd2idx functions
 
 
 class LayoutBase:
@@ -70,7 +67,7 @@ def is_layout(x: object) -> TypeIs["Layout"]:
 
 
 class Layout(LayoutBase):
-    def __init__(self, _shape: IntTuple, _stride: Optional[IntTuple] = None) -> None:
+    def __init__(self, _shape: IntTuple, _stride: IntTuple | None = None) -> None:
         self.shape = _shape
         if _stride is None:
             self.stride = suffix_product(self.shape)
@@ -91,7 +88,7 @@ class Layout(LayoutBase):
             return 1
 
     # operator ()    (map coord to idx)
-    def __call__(self, *args: CoordinateType) -> Union["Layout", int]:
+    def __call__(self, *args: CoordinateType) -> Self | int:
         """
         Map a logical coordinate to a linear index (Coord has no Underscore slice operators)
         OR
@@ -111,7 +108,7 @@ class Layout(LayoutBase):
                 return crd2idx(args, self.shape, self.stride)  # type: ignore[arg-type]
 
     # operator []    (get-i like tuples)
-    def __getitem__(self, i: int) -> "Layout":
+    def __getitem__(self, i: int) -> Self:
         if is_tuple(self.shape):
             return Layout(self.shape[i], self.stride[i])  # type: ignore[index]
         else:
@@ -135,8 +132,14 @@ class Layout(LayoutBase):
         return f"Layout({self.shape},{self.stride})"
 
 
+# Type aliases
+LayoutOrIntTuple: TypeAlias = Layout | IntTuple
+LayoutProfile: TypeAlias = tuple[object, ...] | Layout | None
+LayoutInput: TypeAlias = Layout | IntTuple | tuple[object, ...] | None
+
+
 # Make Layout from a list of layouts (each layout it's own mode in the result)
-def make_layout(*layouts: Union[Layout, tuple[Layout, ...]]) -> Layout:
+def make_layout(*layouts: Layout | tuple[Layout, ...]) -> Layout:
     if len(layouts) == 1 and not is_layout(layouts[0]):
         layouts = layouts[0]
 
@@ -161,8 +164,9 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
     if is_tuple(profile):
         assert len(layout) >= len(profile)
         return make_layout(
+            # pyrefly: ignore [bad-argument-type]
             chain(
-                (coalesce(layout[i], profile[i]) for i in range(0, len(profile))),  # type: ignore[arg-type]
+                (coalesce(layout[i], profile[i]) for i in range(len(profile))),  # type: ignore[arg-type]
                 (layout[i] for i in range(len(profile), len(layout))),
             )
         )
@@ -202,8 +206,9 @@ def filter(layout: Layout, profile: LayoutProfile = None) -> Layout:
     if is_tuple(profile):
         assert len(layout) >= len(profile)
         return make_layout(
+            # pyrefly: ignore [bad-argument-type]
             chain(
-                (filter(layout[i], profile[i]) for i in range(0, len(profile))),  # type: ignore[arg-type]
+                (filter(layout[i], profile[i]) for i in range(len(profile))),  # type: ignore[arg-type]
                 (layout[i] for i in range(len(profile), len(layout))),
             )
         )
@@ -232,8 +237,9 @@ def composition(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
+            # pyrefly: ignore [bad-argument-type]
             chain(
-                (composition(layoutA[i], layoutB[i]) for i in range(0, len(layoutB))),  # type: ignore[arg-type]
+                (composition(layoutA[i], layoutB[i]) for i in range(len(layoutB))),  # type: ignore[arg-type]
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
         )
@@ -321,7 +327,7 @@ def complement(layout: LayoutOrIntTuple, max_idx: int = 1) -> Layout:
 
 
 # Layout right inverse
-def right_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
+def right_inverse(layout: LayoutOrIntTuple | None) -> Layout | None:
     if layout is None:
         return None
     elif is_int(layout):
@@ -350,7 +356,7 @@ def right_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
 
 
 # Layout left inverse
-def left_inverse(layout: Optional[LayoutOrIntTuple]) -> Optional[Layout]:
+def left_inverse(layout: LayoutOrIntTuple | None) -> Layout | None:
     if layout is None:
         return None
     elif is_int(layout):
@@ -368,10 +374,11 @@ def logical_divide(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
+            # pyrefly: ignore [bad-argument-type]
             chain(
                 (
                     logical_divide(layoutA[i], layoutB[i])  # type: ignore[arg-type]
-                    for i in range(0, len(layoutB))
+                    for i in range(len(layoutB))
                 ),
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
@@ -393,10 +400,11 @@ def logical_product(layoutA: Layout, layoutB: LayoutInput) -> Layout:
     elif is_tuple(layoutB):
         assert len(layoutA) >= len(layoutB)
         return make_layout(
+            # pyrefly: ignore [bad-argument-type]
             chain(
                 (
                     logical_product(layoutA[i], layoutB[i])  # type: ignore[arg-type]
-                    for i in range(0, len(layoutB))
+                    for i in range(len(layoutB))
                 ),
                 (layoutA[i] for i in range(len(layoutB), len(layoutA))),
             )
@@ -421,14 +429,14 @@ def hier_unzip(
         # A layout with shape ((A,a),(B,b),(C,c))
         split = make_layout(
             hier_unzip(splitter, layoutA[i], layoutB[i])  # type: ignore[arg-type]
-            for i in range(0, len(layoutB))
+            for i in range(len(layoutB))
         )
         # Gather to shape ((A,B,C,...),(a,b,c,...,y,z))
         return make_layout(
-            make_layout(split[i][0] for i in range(0, len(layoutB))),  # type: ignore[arg-type]
+            make_layout(split[i][0] for i in range(len(layoutB))),  # type: ignore[arg-type]
             make_layout(
                 chain(  # type: ignore[arg-type]
-                    (split[i][1] for i in range(0, len(layoutB))),
+                    (split[i][1] for i in range(len(layoutB))),
                     (layoutA[i] for i in range(len(layoutB), len(layoutA))),
                 )
             ),

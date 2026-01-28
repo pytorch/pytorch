@@ -1,7 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <c10/util/CallOnce.h>
-
 #include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
@@ -9,9 +7,6 @@
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 
 namespace at::mps {
-
-static std::unique_ptr<MPSDevice> mps_device;
-static c10::once_flag mpsdev_init;
 
 static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
   // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
@@ -21,8 +16,8 @@ static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& de
 }
 
 MPSDevice* MPSDevice::getInstance() {
-  c10::call_once(mpsdev_init, [] { mps_device = std::unique_ptr<MPSDevice>(new MPSDevice()); });
-  return mps_device.get();
+  static MPSDevice mps_device;
+  return &mps_device;
 }
 
 MPSDevice::~MPSDevice() {
@@ -70,6 +65,7 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   static bool _macos_15_0_plus = is_os_version_at_least(15, 0);
   static bool _macos_15_1_plus = is_os_version_at_least(15, 1);
   static bool _macos_15_2_plus = is_os_version_at_least(15, 2);
+  static bool _macos_26_0_plus = is_os_version_at_least(26, 0);
 
   switch (version) {
     case MacOSVersion::MACOS_VER_14_4_PLUS:
@@ -80,6 +76,8 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
       return _macos_15_1_plus;
     case MacOSVersion::MACOS_VER_15_2_PLUS:
       return _macos_15_2_plus;
+    case MacOSVersion::MACOS_VER_26_0_PLUS:
+      return _macos_26_0_plus;
     default:
       return false;
   }

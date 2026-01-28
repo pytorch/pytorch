@@ -83,7 +83,7 @@ class HopPartitionedGraph:
             val1: Union[torch.SymInt, torch.Tensor],
             val2: Union[torch.SymInt, torch.Tensor],
         ) -> bool:
-            if type(val1) != type(val2):
+            if type(val1) is not type(val2):
                 return False
 
             if isinstance(val1, torch.SymInt) and isinstance(val2, torch.SymInt):
@@ -325,6 +325,7 @@ def create_hop_joint_graph(
         # Need to first trace out the joint_fn with autograd info on
         # then functionalize the graph otherwise the grad information is lost
         joint_gm = materialize_as_graph(
+            # pyrefly: ignore [bad-argument-type]
             torch.func.functionalize(joint_gm, remove="mutations_and_views"),
             fw_args + example_grads,
         )

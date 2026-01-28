@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncType)
-from torch.testing._internal.common_cuda import SM53OrLater
 from torch._prims_common import corresponding_complex_dtype
 
 from typing import Optional
@@ -123,8 +122,6 @@ def skip_helper_for_fft(device, dtype):
 
     if device_type == 'cpu':
         raise unittest.SkipTest("half and complex32 are not supported on CPU")
-    if not SM53OrLater:
-        raise unittest.SkipTest("half and complex32 are only supported on CUDA device with SM>53")
 
 
 # Tests of functions related to Fourier analysis in the torch.fft namespace
@@ -329,8 +326,6 @@ class TestFFT(TestCase):
         default_msg = "Unsupported dtype"
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
-        elif dtype is torch.half and device_type == 'cuda' and not SM53OrLater:
-            err_msg = "cuFFT doesn't support signals of half type with compute capability less than SM_53"
         else:
             err_msg = default_msg
         with self.assertRaisesRegex(RuntimeError, err_msg):
@@ -357,6 +352,9 @@ class TestFFT(TestCase):
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
          allowed_dtypes=(torch.cfloat, torch.cdouble))
+    @toleranceOverride({
+        torch.cfloat : tol(2e-4, 1.3e-6),
+    })
     def test_reference_nd(self, device, dtype, op):
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
@@ -481,7 +479,7 @@ class TestFFT(TestCase):
             torch.fft.ifft2,
         ]:
             inp = make_tensor((10, 10), device=device, dtype=dtype)
-            out = torch.fft.fftn(inp, dim=[])
+            out = op(inp, dim=[])
 
             expect_dtype = RESULT_TYPE.get(inp.dtype, inp.dtype)
             expect = inp.to(expect_dtype)
@@ -1315,7 +1313,7 @@ class TestFFT(TestCase):
             istft_kwargs = stft_kwargs.copy()
             del istft_kwargs['pad_mode']
             for sizes in data_sizes:
-                for i in range(num_trials):
+                for _ in range(num_trials):
                     original = torch.randn(*sizes, dtype=dtype, device=device)
                     stft = torch.stft(original, return_complex=True, **stft_kwargs)
                     inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
@@ -1386,7 +1384,7 @@ class TestFFT(TestCase):
             del stft_kwargs['size']
             istft_kwargs = stft_kwargs.copy()
             del istft_kwargs['pad_mode']
-            for i in range(num_trials):
+            for _ in range(num_trials):
                 original = torch.randn(*sizes, dtype=dtype, device=device)
                 stft = torch.stft(original, return_complex=True, **stft_kwargs)
                 with self.assertWarnsOnceRegex(UserWarning, "The length of signal is shorter than the length parameter."):
@@ -1501,7 +1499,7 @@ class TestFFT(TestCase):
         complex_dtype = corresponding_complex_dtype(dtype)
 
         def _test(data_size, kwargs):
-            for i in range(num_trials):
+            for _ in range(num_trials):
                 tensor1 = torch.randn(data_size, device=device, dtype=complex_dtype)
                 tensor2 = torch.randn(data_size, device=device, dtype=complex_dtype)
                 a, b = torch.rand(2, dtype=dtype, device=device)

@@ -3,7 +3,7 @@
 import functools
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 import torch.nn as nn
@@ -17,7 +17,6 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
-from torch.utils._pytree import tree_flatten
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
@@ -35,24 +34,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
+_StateType = TypeVar("_StateType", bound="FSDPState")
 
-class FSDPStateContext:
+
+class FSDPStateContext(Generic[_StateType]):
     """This has state shared across FSDP states."""
 
     def __init__(self) -> None:
         # All FSDP states in the root state's module tree
-        self.all_states: list[FSDPState] = []
+        self.all_states: list[_StateType] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
-        self.iter_forward_root: Optional[FSDPState] = None
+        self.iter_forward_root: _StateType | None = None
         # Final callback should only be queued once per backward
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
-        self.post_optim_event: Optional[torch.Event] = None
+        self.post_optim_event: torch.Event | None = None
 
 
 def disable_if_config_true(func):
@@ -71,10 +72,13 @@ def disable_if_config_true(func):
 
 
 class FSDPState(_State):
+    # Name used in error messages; subclasses can override
+    _state_name: str = "FSDP"
+
     def __init__(self) -> None:
         super().__init__()
-        self._fsdp_param_group: Optional[FSDPParamGroup] = None
-        self._is_root: Optional[bool] = None  # root set during lazy init
+        self._fsdp_param_group: FSDPParamGroup | None = None
+        self._is_root: bool | None = None  # root set during lazy init
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
@@ -83,7 +87,11 @@ class FSDPState(_State):
         self._modules_to_run_forward: set[nn.Module] = set()
         # ``False`` when user set reshard_after_forward
         # through ``fully_shard`` or ``set_reshard_after_forward``
-        self._auto_reshard_after_forward: Optional[bool] = True
+        self._auto_reshard_after_forward: bool | None = True
+
+    def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
+        """Get the state for a module. Subclasses can override to use different state getters."""
+        return _get_module_fsdp_state(module)
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -96,6 +104,7 @@ class FSDPState(_State):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
+        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
@@ -162,19 +171,19 @@ class FSDPState(_State):
         self._is_root = True
         if len(self._modules) > 1:
             raise RuntimeError(
-                f"FSDP requires a single root module but got {self._modules}"
+                f"{self._state_name} requires a single root module but got {self._modules}"
             )
         detect_compiled_autograd()
         root_module = self._modules[0]
         visited_states: set[FSDPState] = set()
         for module_name, module in root_module.named_modules():
-            if (state := _get_module_fsdp_state(module)) is None:
+            if (state := self._get_state_for_module(module)) is None:
                 continue
             if module is not root_module:
                 if state not in visited_states and state._is_root is not None:
                     raise RuntimeError(
-                        "FSDP state has already been lazily initialized for "
-                        f"{module_name}\nFSDP requires running forward through "
+                        f"{self._state_name} state has already been lazily initialized for "
+                        f"{module_name}\n{self._state_name} requires running forward through "
                         "the root module first"
                     )
                 state._is_root = False
@@ -202,7 +211,8 @@ class FSDPState(_State):
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
-        assert self._is_root
+        if not self._is_root:
+            raise AssertionError("Expected _is_root to be True")
         root_module = self._modules[0]
         param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
         module_to_fsdp_param_group: dict[nn.Module, FSDPParamGroup] = {}
@@ -221,7 +231,10 @@ class FSDPState(_State):
                 if module_fqn is None:
                     module_to_fsdp_param_group[module]._module_fqn = module_name
                 else:
-                    assert isinstance(module_fqn, str), f"{module_fqn}"
+                    if not isinstance(module_fqn, str):
+                        raise AssertionError(
+                            f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}"
+                        )
                     module_fqn += f", {module_name}"
                     module_to_fsdp_param_group[module]._module_fqn = module_fqn
 
@@ -336,10 +349,10 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-        flat_outputs, _ = tree_flatten(output)
-        for t in flat_outputs:
-            if torch.is_tensor(t) and t.requires_grad:
-                t.register_hook(self._pre_backward)
+        _apply_to_tensors(
+            lambda x: x.register_hook(self._pre_backward) if x.requires_grad else x,
+            output,
+        )
         return output
 
     def _register_root_post_backward_final_callback(self):
@@ -351,7 +364,7 @@ class FSDPState(_State):
         )
 
 
-def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
+def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:
     state = _get_module_state(module)
     if isinstance(state, FSDPState):
         return state

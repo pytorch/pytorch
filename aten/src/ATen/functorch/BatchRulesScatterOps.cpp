@@ -8,17 +8,17 @@
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
-#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <torch/library.h>
+#include <c10/util/Exception.h>
 
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 namespace {
-static bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
+bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
   for (const auto& bdim : bdims) {
     if (bdim.has_value()) {
       return true;
@@ -27,7 +27,7 @@ static bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
   return false;
 }
 
-static int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
+int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
   int64_t result = 0;
   for (const auto& idx : indices) {
     if (!idx.has_value() || !idx->defined()) {
@@ -39,7 +39,7 @@ static int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
   return result;
 }
 
-static int64_t get_max_index_logical_dim(
+int64_t get_max_index_logical_dim(
     ArrayRef<std::optional<Tensor>> indices,
     ArrayRef<std::optional<int64_t>> indices_bdims) {
   int64_t max_logical_dim = -1;
@@ -56,7 +56,7 @@ static int64_t get_max_index_logical_dim(
   return max_logical_dim;
 }
 
-static std::vector<std::optional<Tensor>> batchIndices(
+std::vector<std::optional<Tensor>> batchIndices(
   at::TensorOptions options,
   ArrayRef<std::optional<Tensor>> indices,
   ArrayRef<std::optional<int64_t>> indices_bdims,
@@ -94,9 +94,10 @@ static std::vector<std::optional<Tensor>> batchIndices(
     if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
       indices_.emplace_back(maybePadToLogicalRank(moveBatchDimToFront(index.value(), idx_bdim), idx_bdim, maxLogicalRank));
-      if (index.value().dtype() == kBool && indices_bdims[i].has_value()) {
-        throw std::runtime_error("vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask.");
-      }
+      TORCH_CHECK(
+        !(index.value().dtype() == kBool) || !indices_bdims[i].has_value(),
+        "vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask."
+      );
     } else {
       indices_.push_back(index);
     }
@@ -124,7 +125,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
 
 // Define an "advanced index" to be a selection object that is
 // a non-trivial Tensor (i.e. it does not represent :).
-static bool is_advanced_index(const std::optional<Tensor>& idx) {
+bool is_advanced_index(const std::optional<Tensor>& idx) {
   if (!idx.has_value()) {
     return false;
   }
@@ -135,7 +136,7 @@ static bool is_advanced_index(const std::optional<Tensor>& idx) {
 }
 
 // See NOTE: [advanced indices adjacent] for definition
-static bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indices) {
+bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indices) {
   int64_t num_advanced_indices_regions = 0;
   bool in_advanced_indices_region = false;
   for (const auto& idx : indices) {
@@ -163,7 +164,7 @@ static bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indice
 // - result: Tensor[B, 4, 5, 6, 2, 3, 7, 8]
 //                     -------  ----
 //                     region2  region1
-static Tensor swap_regions(const Tensor& tensor, int64_t first_region_size, int64_t second_region_size) {
+Tensor swap_regions(const Tensor& tensor, int64_t first_region_size, int64_t second_region_size) {
   VmapDimVector permutation(tensor.dim(), 0);
   std::iota(permutation.begin(), permutation.end(), 0);
   std::rotate(
@@ -430,7 +431,7 @@ namespace {
     // Eg. Given `indexed_shape.size()` is 5 and
     // shape of `values` is (N, 2, 3), then following block
     // will reshape `values` to (N, 1, 1, 2, 3).
-    if ( (int64_t) indexed_shape.size() > values_.dim()) {
+    if ( static_cast<int64_t>(indexed_shape.size()) > values_.dim()) {
       auto values_sizes = values_.sym_sizes();
 
       // number of unit dims (for broadcasting value to indexed_shape)
@@ -551,7 +552,7 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<std::optional<Tensor>
   return self;
 }
 
-static Tensor maybe_permute_values(
+Tensor maybe_permute_values(
     const Tensor& values,
     ArrayRef<std::optional<Tensor>> orig_indices,
     ArrayRef<std::optional<int64_t>> orig_indices_bdims) {
@@ -1050,7 +1051,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_add_batch_rule(
                                    other, other_bdim, alpha, false);
 }
 
-static std::tuple<Tensor,Tensor> binary_pointwise_align(
+std::tuple<Tensor,Tensor> binary_pointwise_align(
     const Tensor & self,
     std::optional<int64_t> self_bdim,
     const Tensor & mask,

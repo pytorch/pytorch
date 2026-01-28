@@ -58,7 +58,6 @@
 #include <ATen/ops/view_as_complex.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <algorithm>
@@ -847,7 +846,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.toString() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << '{' << window.sizes() << '}'; \
     } else { \
       SS << "None"; \
     } \
@@ -1046,7 +1045,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.toString() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << '{' << window.sizes() << '}'; \
     } else { \
       SS << "None"; \
     } \

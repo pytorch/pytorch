@@ -32,7 +32,7 @@ from torch.testing._internal.common_distributed import (
     sm_is_or_higher_than,
 )
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -133,7 +133,11 @@ class TestFullyShardCompile(FSDPTest):
             device_type.type,
             self.rank % torch.get_device_module(device_type).device_count(),
         )
-        if device_type.type == "cuda" and not sm_is_or_higher_than(device, 8, 0):
+        if (
+            device_type.type == "cuda"
+            and not torch.version.hip
+            and not sm_is_or_higher_than(device, 8, 0)
+        ):
             self.skipTest("bf16 requires sm >= 8.0")
 
     def test_dynamo_trace_use_training_state(self):
@@ -478,13 +482,14 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_compiled_autograd_ctx(self):
         self.skipTestForOldSm()
         with (
             torch._dynamo.config.patch(skip_fsdp_hooks=False),
-            torch._functorch.config.patch(recompute_views=True),
+            torch._functorch.config.patch(
+                recompute_views=True,
+            ),
         ):
             inputs = torch.randn(8, 8)
             model = torch.nn.Linear(8, 8)
@@ -559,15 +564,18 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
                 if fwd_fullgraph:
                     self.assertEqual(len(counters["graph_break"]), 1)
                     self.assertExpectedInline(
-                        next(iter(counters["graph_break"].keys())),
+                        next(iter(counters["graph_break"].keys())).split(
+                            "\n For more details"
+                        )[0],
                         """\
-Unsupported Tensor.backward() call
-  Explanation: Dynamo currently does not support tracing `Tensor.backward()`.
-  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+autograd.grad with compiled autograd
+  Explanation: torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.
+  Hint: Disable compiled autograd by removing the compiled_autograd context manager.
+  Hint: Or move the autograd.grad() call outside the torch.compile region.
+  Hint: Or restructure your code so autograd.grad() and compiled_autograd don't overlap.
 
-  Developer debug context: call_method TensorVariable() backward () {}
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
+  Developer debug context: compiled_autograd is currently enabled
+""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
@@ -590,6 +598,7 @@ Unsupported Tensor.backward() call
                 },
                 inline_inbuilt_nn_modules=True,
                 skip_fsdp_hooks=False,
+                trace_autograd_ops=True,
             ),
             torch._functorch.config.patch(
                 enable_autograd_cache=False,
@@ -643,14 +652,12 @@ Unsupported Tensor.backward() call
 
         return model_init_fn, input_creation_fn
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fwd_fullgraph=True
         )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
@@ -659,7 +666,6 @@ Unsupported Tensor.backward() call
             fwd_fullgraph=True,
         )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self.skipTestForOldSm()
@@ -731,7 +737,6 @@ Unsupported Tensor.backward() call
 
         return model_init_fn, input_creation_fn
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
         # TODO: fix fwd_fullgraph=False case
@@ -744,7 +749,6 @@ Unsupported Tensor.backward() call
                 fwd_fullgraph=fwd_fullgraph,
             )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
         # TODO: fix fwd_fullgraph=False case
@@ -866,19 +870,16 @@ Unsupported Tensor.backward() call
                     pass
                 file_check.run(bwd_code)
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
         self._test_nested_fully_shard_backend_inductor_fullgraph_True()
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch("graph_partition", True)
     def test_nested_fully_shard_backend_inductor_fullgraph_True_graph_partition(self):
         self._test_nested_fully_shard_backend_inductor_fullgraph_True()
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
         self.skipTestForOldSm()
@@ -956,7 +957,6 @@ Unsupported Tensor.backward() call
         else:
             return contextlib.nullcontext()
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
         # TODO: fix fwd_fullgraph=False case
@@ -975,7 +975,6 @@ Unsupported Tensor.backward() call
                     fwd_fullgraph=fwd_fullgraph,
                 )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
@@ -1111,7 +1110,6 @@ Unsupported Tensor.backward() call
                 file_check.run(bwd_code)
 
     @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
@@ -1119,7 +1117,6 @@ Unsupported Tensor.backward() call
         self._test_transformer_backend_inductor_fullgraph_True()
 
     @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
@@ -1128,7 +1125,6 @@ Unsupported Tensor.backward() call
         self._test_transformer_backend_inductor_fullgraph_True()
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)

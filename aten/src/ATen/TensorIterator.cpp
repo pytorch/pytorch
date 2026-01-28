@@ -56,7 +56,7 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
   }
 }
 
-static OptionalTensorRef make_otr(const TensorBase &tensor) {
+OptionalTensorRef make_otr(const TensorBase &tensor) {
   if (tensor.defined()) {
     return OptionalTensorRef(tensor);
   } else {
@@ -572,20 +572,20 @@ DimVector TensorIteratorBase::invert_perm(IntArrayRef input) const {
 }
 
 void TensorIteratorBase::allocate_or_resize_outputs() {
+  // check if permutation is just an inverted order
+  bool inverted = true;
+  for (const auto j : c10::irange(ndim())) {
+    if (perm_[j] != ndim() - j - 1) {
+      inverted = false;
+      break;
+    }
+  }
   for (const auto i : c10::irange(num_outputs_)) {
     auto& op = operands_[i];
     if (!op.tensor_base().defined() || op.will_resize) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       auto element_size = elementSize(op.target_dtype);
       op.stride_bytes = compatible_stride(static_cast<int64_t>(element_size));
-      // check if permutation is just an inverted order
-      bool inverted = true;
-      for (const auto j : c10::irange(ndim())) {
-        if (perm_[j] != ndim() - j - 1) {
-          inverted = false;
-          break;
-        }
-      }
       auto tensor_shape = invert_perm(shape_);
       if (inverted) {
         // can just return contiguous output
@@ -765,7 +765,8 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   if (numel == 0) {
     return;
   } else if (numel < grain_size || at::get_num_threads() == 1) {
-    return serial_for_each(loop, {0, numel});
+    serial_for_each(loop, {0, numel});
+    return;
   } else {
     at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
       serial_for_each(loop, {begin, end});
@@ -861,7 +862,7 @@ void TensorIteratorBase::narrow(int dim, int64_t start, int64_t size) {
   shape_[dim] = size;
   view_offsets_[dim] += start;
   for (auto& op : operands_) {
-    op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
+    op.data = (static_cast<char*>(op.data)) + op.stride_bytes[dim] * start;
   }
   if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
@@ -872,7 +873,7 @@ void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indic
   TORCH_INTERNAL_ASSERT(start_dim <= ndim());
   for (const auto i : c10::irange(start_dim, ndim())) {
     for (auto& op : operands_) {
-      op.data = ((char*)op.data) + op.stride_bytes[i] * indices[i - start_dim];
+      op.data = (static_cast<char*>(op.data)) + op.stride_bytes[i] * indices[i - start_dim];
     }
     shape_[i] = 1;
   }
@@ -1533,7 +1534,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
-  // Extend the condition to MAIA tesnors as MAIA tensors also don't have storage.
+  // Extend the condition to MAIA tensors as MAIA tensors also don't have storage.
   if (privateuse1_without_storage  ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||

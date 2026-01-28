@@ -18,9 +18,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
+from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
@@ -86,10 +88,10 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 
     memory_format = MemoryFormatMeta.from_tensor(out)
 
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     if memory_format.memory_format is not None:
         was = out
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         out = out.contiguous(memory_format=memory_format.memory_format)
         updated = was is not out
 
@@ -119,7 +121,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
         out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
 
     if is_subclass:
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         attrs = out.__tensor_flatten__()[0]
 
         for attr in attrs:
@@ -129,7 +131,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
                 new_elem_memory_format,
                 elem_updated,
             ) = coerce_tangent_and_suggest_memory_format(elem)
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             out_memory_format.append(new_elem_memory_format)
             if elem_updated:
                 setattr(out, attr, new_elem)
@@ -166,9 +168,6 @@ def run_functionalized_fw_and_collect_metadata(
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[list[int]] = None,
     pre_dispatch: bool = False,
-    # is_export is technically only needed to avoid using functionalization V2
-    # during analysis
-    is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
 
@@ -185,7 +184,10 @@ def run_functionalized_fw_and_collect_metadata(
     @simple_wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
+        assert all(
+            isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
+            for a in flat_args
+        )
 
         input_info: list[InputAliasInfo] = []
         output_info: list[OutputAliasInfo] = []
@@ -200,12 +202,12 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        mode = FunctionalTensorMode(_allow_token_discovery=True, export=is_export)
+        mode = FunctionalTensorMode(_allow_token_discovery=True)
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending:
+        with disable_above, mode, suppress_pending, disable_autocast_cache():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
@@ -243,7 +245,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
-        for i, (arg, f_arg) in enumerate(zip(flat_args, flat_f_args)):
+        for arg, f_arg in zip(flat_args, flat_f_args):
             # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
             # strides between the functionalized arg inner tensors and non-functionalized arg inner
             # tensors. This is a problem as the inner tensor stride change may not be reflected
@@ -496,7 +498,7 @@ def run_functionalized_fw_and_collect_metadata(
                 curr_storage in inp_storage_refs
                 and not functional_tensor_storage_changed
             ):
-                # pyrefly: ignore  # index-error
+                # pyrefly: ignore [bad-index, index-error]
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]
@@ -576,7 +578,7 @@ from a multi-output view call"
                     base_idx = None
                 else:
                     # First, check if o's ._base is an existing output
-                    maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
+                    maybe_existing_out_idx = out_tensor_ids.get(id(o._base))
                     if maybe_existing_out_idx is not None:
                         # Special case where the output is an alias of a graph intermediate, but that intermediate
                         # is itself also a user output.
@@ -587,9 +589,7 @@ from a multi-output view call"
                     else:
                         # Next, check if o's ._base is an intermediate base that we already returned
                         maybe_existing_base_output_idx = (
-                            intermediate_base_tensor_id_to_output_idx.get(
-                                id(o._base), None
-                            )
+                            intermediate_base_tensor_id_to_output_idx.get(id(o._base))
                         )
                         if maybe_existing_base_output_idx is not None:
                             output_type = OutputType.alias_of_intermediate
@@ -704,7 +704,7 @@ from a multi-output view call"
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
         def _plain_fake_tensor_like_subclass(x):
-            # pyrefly: ignore  # bad-context-manager
+            # pyrefly: ignore [bad-context-manager]
             with detect_fake_mode():
                 return torch.empty(
                     x.shape, dtype=x.dtype, device=x.device, layout=x.layout

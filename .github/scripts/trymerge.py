@@ -17,12 +17,12 @@ import re
 import time
 import urllib.parse
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from re import Pattern
-from typing import Any, Callable, cast, NamedTuple, Optional
+from typing import Any, cast, NamedTuple, Optional
 from warnings import warn
 
 import yaml
@@ -234,6 +234,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
           createdAt
           author {
             login
+            url
           }
           authorAssociation
           editor {
@@ -723,7 +724,10 @@ def get_ghstack_prs(
         )
         return True
 
-    assert pr.is_ghstack_pr()
+    if not pr.is_ghstack_pr():
+        raise AssertionError(
+            f"Expected PR #{pr.pr_num} to be a ghstack PR, but head_ref is {pr.head_ref()}"
+        )
     entire_stack = _revlist_to_prs(repo, pr, reversed(rev_list), skip_func)
     print(
         f"Found {len(entire_stack)} PRs in the stack for {pr.pr_num}: {[x[0].pr_num for x in entire_stack]}"
@@ -749,7 +753,10 @@ def get_ghstack_prs(
 
 class GitHubPR:
     def __init__(self, org: str, project: str, pr_num: int) -> None:
-        assert isinstance(pr_num, int)
+        if not isinstance(pr_num, int):
+            raise AssertionError(
+                f"pr_num must be an int, got {type(pr_num).__name__}: {pr_num}"
+            )
         self.org = org
         self.project = project
         self.pr_num = pr_num
@@ -782,7 +789,10 @@ class GitHubPR:
         return RE_GHSTACK_HEAD_REF.match(self.head_ref()) is not None
 
     def get_ghstack_orig_ref(self) -> str:
-        assert self.is_ghstack_pr()
+        if not self.is_ghstack_pr():
+            raise AssertionError(
+                f"get_ghstack_orig_ref called on non-ghstack PR #{self.pr_num}"
+            )
         return re.sub(r"/head$", "/orig", self.head_ref())
 
     def is_base_repo_private(self) -> bool:
@@ -1091,8 +1101,9 @@ class GitHubPR:
         editor = node["editor"]
         return GitHubComment(
             body_text=node["bodyText"],
-            created_at=node["createdAt"] if "createdAt" in node else "",
+            created_at=node.get("createdAt", ""),
             author_login=node["author"]["login"],
+            author_url=node["author"].get("url", None),
             author_association=node["authorAssociation"],
             editor_login=editor["login"] if editor else None,
             database_id=node["databaseId"],
@@ -1174,7 +1185,10 @@ class GitHubPR:
         comment_id: Optional[int] = None,
         skip_all_rule_checks: bool = False,
     ) -> list["GitHubPR"]:
-        assert self.is_ghstack_pr()
+        if not self.is_ghstack_pr():
+            raise AssertionError(
+                f"merge_ghstack_into called on non-ghstack PR #{self.pr_num}"
+            )
         ghstack_prs = get_ghstack_prs(
             repo, self, open_only=False
         )  # raises error if out of sync
@@ -1787,6 +1801,7 @@ def get_drci_classifications(pr_num: int, project: str = "pytorch") -> Any:
         headers={
             "Authorization": os.getenv("DRCI_BOT_KEY", ""),
             "Accept": "application/vnd.github.v3+json",
+            "x-hud-internal-bot": os.getenv("HUD_API_TOKEN", ""),
         },
         method="POST",
         reader=json.load,
@@ -2029,16 +2044,17 @@ def validate_revert(
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     if pr.is_base_repo_private():
         allowed_reverters.append("CONTRIBUTOR")
+    # Special case the pytorch-auto-revert app, whose does not have association
+    # But should be able to issue revert command
+    if comment.author_url == "https://github.com/apps/pytorch-auto-revert":
+        allowed_reverters.append("NONE")
+
     if author_association not in allowed_reverters:
         raise PostCommentError(
             f"Will not revert as @{author_login} is not one of "
             f"[{', '.join(allowed_reverters)}], but instead is {author_association}."
         )
 
-    # Raises exception if matching rule is not found, but ignores all status checks
-    find_matching_merge_rule(
-        pr, repo, skip_mandatory_checks=True, skip_internal_checks=True
-    )
     commit_sha = get_pr_commit_sha(repo, pr)
     return (author_login, commit_sha)
 
@@ -2050,7 +2066,10 @@ def get_ghstack_dependent_prs(
     Get the PRs in the stack that are above this PR (inclusive).
     Throws error if stack have branched or original branches are gone
     """
-    assert pr.is_ghstack_pr()
+    if not pr.is_ghstack_pr():
+        raise AssertionError(
+            f"get_ghstack_dependent_prs called on non-ghstack PR #{pr.pr_num}"
+        )
     orig_ref = f"{repo.remote}/{pr.get_ghstack_orig_ref()}"
     rev_list = repo.revlist(f"{pr.default_branch()}..{orig_ref}")
     if len(rev_list) == 0:
@@ -2229,12 +2248,12 @@ def categorize_checks(
     # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
         name
-        for name in check_runs.keys()
+        for name in check_runs
         if not required_checks or any(x in name for x in required_checks)
     ]
 
     for checkname in required_checks:
-        if all(checkname not in x for x in check_runs.keys()):
+        if all(checkname not in x for x in check_runs):
             pending_checks.append((checkname, None, None))
 
     for checkname in relevant_checknames:
@@ -2395,8 +2414,7 @@ def merge(
             )
             pending, failing, _ = categorize_checks(
                 checks,
-                required_checks
-                + [x for x in checks.keys() if x not in required_checks],
+                required_checks + [x for x in checks if x not in required_checks],
                 ok_failed_checks_threshold=IGNORABLE_FAILED_CHECKS_THESHOLD
                 if ignore_flaky_failures
                 else 0,

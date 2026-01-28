@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import warnings
 
 import torch
 
@@ -83,7 +84,7 @@ def fuser(name):
 last_executed_optimized_graph = torch._C._last_executed_optimized_graph
 
 
-def _get_differentiable_graph_node(node, diff_node):
+def _get_differentiable_graph_node(node, diff_node) -> None:
     if node.kind() == "prim::DifferentiableGraph":
         diff_node.append(node)
     else:
@@ -130,6 +131,9 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
 def set_fusion_strategy(strategy: list[tuple[str, int]]):
     """Set the type and number of specializations that can occur during fusion.
 
+    .. deprecated:: 2.5
+        TorchScript is deprecated, please use ``torch.compile`` instead.
+
     Usage: provide a list of pairs (type, depth) where type is one of "STATIC" or "DYNAMIC"
     and depth is an integer.
 
@@ -157,4 +161,8 @@ def set_fusion_strategy(strategy: list[tuple[str, int]]):
     NB: in the future, if more as more fusion backends are added there may be more granular
     apis for specific fusers.
     """
+    warnings.warn(
+        "`torch.jit.set_fusion_strategy` is deprecated. Please use `torch.compile` instead.",
+        DeprecationWarning,
+    )
     return torch._C._jit_set_fusion_strategy(strategy)

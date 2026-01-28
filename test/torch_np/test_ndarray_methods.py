@@ -399,7 +399,7 @@ class TestArgmax(TestCase):
                     ([np.nan, 0, 1, 2, 3], 0),
                     ([np.nan, 0, np.nan, 2, 3], 0),
                     # To hit the tail of SIMD multi-level(x4, x1) inner loops
-                    # on variant SIMD widthes
+                    # on variant SIMD widths
                     ([1] * (2 * 5 - 1) + [np.nan], 2 * 5 - 1),
                     ([1] * (4 * 5 - 1) + [np.nan], 4 * 5 - 1),
                     ([1] * (8 * 5 - 1) + [np.nan], 8 * 5 - 1),
@@ -480,8 +480,8 @@ class TestArgmax(TestCase):
         assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
 
-        padd = np.repeat(np.min(arr), 513)
-        rarr = np.concatenate((arr, padd))
+        padding = np.repeat(np.min(arr), 513)
+        rarr = np.concatenate((arr, padding))
         rpos = pos
         assert_equal(np.argmax(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmax(rarr)], val, err_msg=f"{rarr!r}")
@@ -534,7 +534,7 @@ class TestArgmin(TestCase):
                     ([np.nan, 0, 1, 2, 3], 0),
                     ([np.nan, 0, np.nan, 2, 3], 0),
                     # To hit the tail of SIMD multi-level(x4, x1) inner loops
-                    # on variant SIMD widthes
+                    # on variant SIMD widths
                     ([1] * (2 * 5 - 1) + [np.nan], 2 * 5 - 1),
                     ([1] * (4 * 5 - 1) + [np.nan], 4 * 5 - 1),
                     ([1] * (8 * 5 - 1) + [np.nan], 8 * 5 - 1),
@@ -577,7 +577,7 @@ class TestArgmin(TestCase):
     def test_combinations(self, data):
         arr, pos = data
 
-        if np.asarray(arr).dtype.kind in "c":
+        if np.asarray(arr).dtype.kind == "c":
             pytest.xfail(reason="'min_values_cpu' not implemented for 'ComplexDouble'")
 
         #        with suppress_warnings() as sup:
@@ -593,8 +593,8 @@ class TestArgmin(TestCase):
         assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
 
-        padd = np.repeat(np.max(arr), 513)
-        rarr = np.concatenate((arr, padd))
+        padding = np.repeat(np.max(arr), 513)
+        rarr = np.concatenate((arr, padding))
         rpos = pos
         assert_equal(np.argmin(rarr), rpos, err_msg=f"{rarr!r}")
         assert_equal(rarr[np.argmin(rarr)], min_val, err_msg=f"{rarr!r}")
@@ -661,7 +661,7 @@ class TestIter(TestCase):
         # numpy generates array scalars, we do 0D arrays
         a = np.arange(5)
         lst = list(a)
-        assert all(type(x) == np.ndarray for x in lst), f"{[type(x) for x in lst]}"
+        assert all(type(x) is np.ndarray for x in lst), f"{[type(x) for x in lst]}"
         assert all(x.ndim == 0 for x in lst)
 
     def test_iter_2d(self):
@@ -669,7 +669,8 @@ class TestIter(TestCase):
         a = np.arange(5)[None, :]
         lst = list(a)
         assert len(lst) == 1
-        assert type(lst[0]) == np.ndarray
+        # FIXME: "is" cannot be used here because dynamo fails
+        assert type(lst[0]) == np.ndarray  # noqa: E721
         assert_equal(lst[0], np.arange(5))
 
 

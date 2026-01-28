@@ -193,6 +193,7 @@ def modules_to_mkldnn(nodes: list[fx.Node], modules: dict[str, nn.Module]):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in mkldnn_map:
+                # pyrefly: ignore [bad-index, index-error]
                 new_module = mkldnn_map[type(cur_module)](cur_module, torch.float)
                 assert isinstance(new_module, nn.Module)
                 old_modules[new_module] = copy.deepcopy(cur_module)
@@ -263,7 +264,10 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
         )
 
         reset_modules(
-            submodule.graph.nodes, dict(submodule.named_modules()), old_modules
+            submodule.graph.nodes,
+            dict(submodule.named_modules()),
+            # pyrefly: ignore [bad-argument-type]
+            old_modules,
         )
         no_mkl_time = benchmark(lambda: submodule(*sample_inputs))
         return mkl_time < no_mkl_time

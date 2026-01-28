@@ -201,18 +201,61 @@ for hip_platform_file in hip_platform_files:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
 
+# NOTE: MSLK sources needing hipify
+# MSLK is its own project with its own build system. pytorch uses mslk as
+# a submodule to acquire some gpu source files but compiles only those sources
+# instead of using mslk's own build system. One of the source files refers
+# to a header file that is the result of running hipify, but mslk uses
+# slightly different hipify settings than pytorch. mslk normally hipifies
+# and renames tuning_cache.cuh to tuning_cache_hip.cuh, but pytorch's settings
+# for hipify puts it into its own 'hip' directory. After hipify runs below with
+# the added mslk file, we move it to its expected location.
+# NOTE: Internal meta builds (using buck) don't need this step, so conditionally disable it
+buck_build = os.environ.get("FBCODE_BUILD_TOOL", "") == "buck"
+
+extra_files = [
+    "torch/_inductor/codegen/cuda/device_op_overrides.py",
+    "torch/_inductor/codegen/cpp_wrapper_cpu.py",
+    "torch/_inductor/codegen/cpp_wrapper_gpu.py",
+    "torch/_inductor/codegen/wrapper.py",
+]
+
+mslk_dir = REPO_ROOT / "third_party/mslk/include/mslk/utils/"
+
+
+if not buck_build:
+    mslk_original = mslk_dir / "tuning_cache.cuh"
+
+    extra_files.append(mslk_original.as_posix())
 
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,
     includes=includes,
     ignores=ignores,
-    extra_files=[
-        "torch/_inductor/codegen/cuda/device_op_overrides.py",
-        "torch/_inductor/codegen/cpp_wrapper_cpu.py",
-        "torch/_inductor/codegen/cpp_wrapper_gpu.py",
-        "torch/_inductor/codegen/wrapper.py",
-    ],
+    extra_files=extra_files,
     out_of_place_only=args.out_of_place_only,
     hip_clang_launch=is_hip_clang(),
 )
+
+if not buck_build:
+    mslk_move_src = mslk_dir / "hip/tuning_cache.cuh"
+    mslk_move_dst = mslk_dir / "tuning_cache_hip.cuh"
+
+    # only update the file if it changes or doesn't exist
+    do_write = True
+    src_lines = None
+    with open(mslk_move_src) as src:
+        src_lines = src.readlines()
+    if os.path.exists(mslk_move_dst):
+        dst_lines = None
+        with open(mslk_move_dst) as dst:
+            dst_lines = dst.readlines()
+        if src_lines == dst_lines:
+            print(f"{mslk_move_dst} skipped")
+            do_write = False
+    if do_write:
+        with open(mslk_move_dst, "w") as dst:
+            for line in src_lines:
+                dst.write(line)
+        print(f"{mslk_move_dst} updated")

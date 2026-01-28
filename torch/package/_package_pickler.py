@@ -1,9 +1,8 @@
-# mypy: allow-untyped-defs
-# pyrefly: ignore  # missing-module-attribute
-from pickle import (  # type: ignore[attr-defined]
-    _compat_pickle,
-    _extension_registry,
-    _getattribute,
+import sys
+from pickle import (
+    _compat_pickle,  # pyrefly: ignore [missing-module-attribute]
+    _extension_registry,  # pyrefly: ignore [missing-module-attribute]
+    _getattribute,  # pyrefly: ignore [missing-module-attribute]
     _Pickler,
     EXT1,
     EXT2,
@@ -64,13 +63,28 @@ class PackagePickler(_PyTorchLegacyPickler):
             raise PicklingError(f"Can't pickle {obj}: {str(err)}") from err
 
         module = self.importer.import_module(module_name)
-        _, parent = _getattribute(module, name)
+        if sys.version_info >= (3, 14):
+            # pickle._getattribute signature changes in 3.14
+            # to take iterable and return just the object (not tuple)
+            # We need to get the parent object that contains the attribute
+            name_parts = name.split(".")
+            if "<locals>" in name_parts:
+                raise PicklingError(f"Can't pickle local object {obj!r}")
+            if len(name_parts) == 1:
+                parent = module
+            else:
+                parent = _getattribute(module, name_parts[:-1])
+        else:
+            _, parent = _getattribute(module, name)
         # END CHANGED
 
         if self.proto >= 2:  # type: ignore[attr-defined]
             code = _extension_registry.get((module_name, name))
             if code:
-                assert code > 0
+                if code <= 0:
+                    raise AssertionError(
+                        f"expected positive extension code, got {code}"
+                    )
                 if code <= 0xFF:
                     write(EXT1 + pack("<B", code))
                 elif code <= 0xFFFF:

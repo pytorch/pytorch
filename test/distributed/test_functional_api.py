@@ -421,7 +421,7 @@ class TestGradCollectives(MultiThreadedTestCase):
         y = torch.rand([4], requires_grad=True)
         out = ft_c.all_reduce(x, "sum", dist.group.WORLD)
         (out + y).sum().backward()
-        self.assertIsNone(x.grad)
+        self.assertIsNotNone(x.grad)
 
 
 class TestMakeFx(TestCase):
@@ -485,7 +485,7 @@ elif TEST_XPU:
 def exit_if_lt_x_accelerators(x):
     if torch.accelerator.is_available():
         if torch.accelerator.device_count() < x:
-            sys.exit(TEST_SKIPS[f"multi-accelerator-{x}"].exit_code)
+            sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
 
 def with_comms(func=None):
