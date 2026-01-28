@@ -515,14 +515,15 @@ class _NodePickleData:
         # self.sort_key = node._sort_key
         # self.repr_fn = node._repr_fn
         # self.meta = node.meta
-        self.meta = {
-            k: v
-            for k, v in node.meta.items()
-            if (
-                not options.node_metadata_key_filter
-                or options.node_metadata_key_filter(k)
-            )
-        }
+        self.meta = {}
+        # self.meta = {
+        #     k: v
+        #     for k, v in node.meta.items()
+        #     if (
+        #         not options.node_metadata_key_filter
+        #         or options.node_metadata_key_filter(k)
+        #     )
+        # }
 
     def unpickle(
         self,
