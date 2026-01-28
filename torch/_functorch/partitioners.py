@@ -26,6 +26,10 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
 from torch._inductor import config as inductor_config
+from torch._inductor.custom_graph_pass import (
+    CustomKnapsackSolver,
+    CustomRuntimeEstimator,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import is_builtin
 from torch._logging import LazyString, trace_structured
@@ -2748,7 +2752,7 @@ def _optimize_runtime_with_given_memory(
                 max_mem_budget=max_memory,
             ),
         )
-    elif callable(SOLVER):
+    elif isinstance(SOLVER, CustomKnapsackSolver):
         saved_node_idx, recomp_node_idx = SOLVER(
             memory, joint_graph, max_memory, node_info, all_recomputable_banned_nodes
         )
@@ -2808,7 +2812,7 @@ def estimate_runtime(node):
         counted_flops = mode.get_total_flops()
         return max(counted_flops, 1)
 
-    elif callable(RUNTIME_MODE):
+    elif isinstance(RUNTIME_MODE, CustomRuntimeEstimator):
         return RUNTIME_MODE(node)
 
     else:
