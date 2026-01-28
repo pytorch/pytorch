@@ -39,7 +39,14 @@ TensorBase empty_mps(
 
     check_size_nonnegative(size);
 
+#if defined(MPS_SUPPORT_TENSORS_UNIFIED_MEMORY) && MPS_SUPPORT_TENSORS_UNIFIED_MEMORY
+    // APPLE TODO: this should check if device supports unified memory
+    auto* allocator = at::mps::GetMPSAllocator(/* useSharedAllocator = */ true);
+#else
     auto* allocator = at::mps::GetMPSAllocator();
+#endif
+
+    TORCH_INTERNAL_ASSERT(allocator != nullptr);
     int64_t nelements = c10::multiply_integers(size);
     auto dtype = dtype_or_default(dtype_opt);
     TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
