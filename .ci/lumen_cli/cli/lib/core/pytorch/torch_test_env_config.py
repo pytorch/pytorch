@@ -29,6 +29,8 @@ Usage:
 
 import logging
 import os
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -110,12 +112,15 @@ class PytorchTestEnvironment:
 
         # Compute derived environment variables
         self._setup_base_env()
+        self._setup_build_dirs()
+        self._setup_torch_install_dirs()
         self._setup_device_visibility()
         self._setup_test_flags()
         self._setup_valgrind()
         self._setup_sanitizers()
         self._setup_cpu_capability()
         self._setup_legacy_driver()
+        self._setup_cuda_arch()
 
         logger.debug(
             "TestEnvironment initialized: build_environment=%s, test_config=%s, "
@@ -172,6 +177,37 @@ class PytorchTestEnvironment:
 
         # Enable debug asserts in serialization
         self._env_updates["TORCH_SERIALIZATION_DEBUG"] = "1"
+
+    def _setup_build_dirs(self) -> None:
+        """Configure build directory paths."""
+        build_dir = "build"
+        self._env_updates["BUILD_DIR"] = build_dir
+        self._env_updates["BUILD_RENAMED_DIR"] = "build_renamed"
+        self._env_updates["BUILD_BIN_DIR"] = f"{build_dir}/bin"
+
+    def _setup_torch_install_dirs(self) -> None:
+        """
+        Configure Torch installation directory paths.
+
+        Determines the torch install location by querying Python's site-packages,
+        then sets paths for bin, lib, and test directories.
+        """
+        try:
+            result = subprocess.run(
+                ["python", "-c", "import site; print(site.getsitepackages()[0])"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            site_packages = result.stdout.strip()
+            torch_install_dir = f"{site_packages}/torch"
+
+            self._env_updates["TORCH_INSTALL_DIR"] = torch_install_dir
+            self._env_updates["TORCH_BIN_DIR"] = f"{torch_install_dir}/bin"
+            self._env_updates["TORCH_LIB_DIR"] = f"{torch_install_dir}/lib"
+            self._env_updates["TORCH_TEST_DIR"] = f"{torch_install_dir}/test"
+        except subprocess.CalledProcessError:
+            logger.warning("Failed to determine torch install directory from Python")
 
     def _setup_device_visibility(self) -> None:
         """Configure GPU device visibility based on test config."""
@@ -258,6 +294,21 @@ class PytorchTestEnvironment:
         )
         self._env_updates["TORCH_USE_RTLD_GLOBAL"] = "1"
 
+        # Set LD_PRELOAD to the ASAN runtime library
+        if shutil.which("clang"):
+            try:
+                result = subprocess.run(
+                    ["clang", "--print-file-name=libclang_rt.asan-x86_64.so"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                ld_preload = result.stdout.strip()
+                if ld_preload:
+                    self._env_updates["LD_PRELOAD"] = ld_preload
+            except subprocess.CalledProcessError:
+                logger.warning("Failed to get ASAN runtime library path from clang")
+
         # Disable valgrind for ASAN builds
         self._env_updates["VALGRIND"] = "OFF"
 
@@ -272,6 +323,35 @@ class PytorchTestEnvironment:
         """Configure legacy NVIDIA driver settings."""
         if self.test_config == "legacy_nvidia_driver":
             self._env_updates["USE_LEGACY_DRIVER"] = "1"
+
+    def _setup_cuda_arch(self) -> None:
+        """
+        Detect and configure CUDA architecture.
+
+        Sets TORCH_CUDA_ARCH_LIST based on:
+        - nvidia-smi query if available (gets actual GPU compute capability)
+        - Default value of 8.0 for nogpu tests where nvidia-smi isn't available
+        """
+        if not self.is_cuda:
+            return
+
+        if shutil.which("nvidia-smi"):
+            try:
+                result = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                lines = result.stdout.strip().splitlines()
+                if len(lines) >= 2:
+                    cuda_arch = lines[-1].strip()
+                    self._env_updates["TORCH_CUDA_ARCH_LIST"] = cuda_arch
+            except subprocess.CalledProcessError:
+                logger.warning("Failed to query CUDA architecture from nvidia-smi")
+        elif "nogpu" in self.test_config:
+            # There won't be nvidia-smi in nogpu tests, so set to default minimum supported value
+            self._env_updates["TORCH_CUDA_ARCH_LIST"] = "8.0"
 
     # =========================================================================
     # Build Environment Property Checks
@@ -363,6 +443,191 @@ class PytorchTestEnvironment:
         os.environ.update(self._env_updates)
         logger.info("Applied %d environment variables", len(self._env_updates))
 
+    def verify_build_configuration(self, test_dir: str = "test") -> None:
+        """
+        Verify that the build configuration is correct by running diagnostic tests.
+
+        This runs PyTorch's built-in test functions that verify:
+        - ASAN/UBSAN sanitizers are working (for ASAN builds)
+        - Debug assertions are working (for debug builds)
+        - Debug assertions are disabled (for non-debug, non-bazel builds)
+
+        Args:
+            test_dir: Directory to run the tests from (default: "test")
+
+        Raises:
+            RuntimeError: If build configuration is incorrect
+        """
+        env = self.as_dict()
+
+        # Skip bazel builds entirely - torch isn't available there yet
+        if self.is_bazel:
+            logger.debug("Skipping build verification (bazel build - torch not available)")
+            return
+
+        # First, verify PyTorch is importable and print version
+        logger.info("Verifying PyTorch installation...")
+        try:
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    "import torch; print(torch.__version__, torch.version.git_version)",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd=test_dir,
+                env=env,
+            )
+            logger.info("PyTorch version: %s", result.stdout.strip())
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to import PyTorch: {e.stderr}") from e
+
+        # Verify ASAN/UBSAN configuration
+        if self.is_asan:
+            self._verify_sanitizer_configuration(test_dir, env)
+
+        # Verify debug configuration
+        self._verify_debug_configuration(test_dir, env)
+
+        # Verify CUDA can be initialized for legacy_nvidia_driver
+        if self.test_config == "legacy_nvidia_driver":
+            self._verify_cuda_can_be_initialized(test_dir, env)
+
+    def _verify_cuda_can_be_initialized(self, test_dir: str, env: dict[str, str]) -> None:
+        """
+        Verify that CUDA can be initialized successfully.
+
+        This creates a simple CUDA tensor to ensure the CUDA runtime
+        is properly configured and the GPU is accessible.
+
+        Only runs for CUDA builds (not ROCm, XPU, or CPU-only).
+        """
+        if not self.is_cuda:
+            logger.debug("Skipping CUDA initialization check (not a CUDA build)")
+            return
+
+        logger.info("Verifying CUDA can be initialized...")
+        test_code = "torch.rand(2, 2, device='cuda')"
+        result = subprocess.run(
+            ["python", "-c", f"import torch; {test_code}"],
+            capture_output=True,
+            text=True,
+            cwd=test_dir,
+            env=env,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"CUDA initialization failed. Unable to create tensor on CUDA device.\n"
+                f"stderr: {result.stderr}"
+            )
+
+        logger.info("✓ CUDA initialized successfully")
+
+
+
+
+
+
+
+    def _verify_sanitizer_configuration(
+        self, test_dir: str, env: dict[str, str]
+    ) -> None:
+        """
+        Verify that ASAN/UBSAN are properly configured by running intentional crash tests.
+
+        These tests intentionally trigger memory bugs. If the sanitizers are working
+        correctly, these should crash. If they don't crash, ASAN/UBSAN is misconfigured.
+        """
+        crash_tests = [
+            (
+                "torch._C._crash_if_csrc_asan(3)",
+                "ASAN crash test (csrc)",
+            ),
+            (
+                "torch._C._crash_if_vptr_ubsan()",
+                "UBSAN vptr crash test",
+            ),
+            (
+                "torch._C._crash_if_aten_asan(3)",
+                "ASAN crash test (aten)",
+            ),
+        ]
+
+        logger.info(
+            "Running sanitizer verification tests "
+            "(these are expected to crash if ASAN/UBSAN is configured correctly)..."
+        )
+
+        for crash_code, description in crash_tests:
+            result = subprocess.run(
+                ["python", "-c", f"import torch; {crash_code}"],
+                capture_output=True,
+                cwd=test_dir,
+                env=env,
+            )
+
+            if result.returncode == 0:
+                raise RuntimeError(
+                    f"ASAN/UBSAN misconfigured: {description} did not crash. "
+                    "The sanitizer should have detected this intentional bug."
+                )
+
+            logger.info(
+                "✓ %s: crashed as expected (exit code %d)",
+                description,
+                result.returncode,
+            )
+
+        logger.info("Sanitizer configuration verified successfully")
+
+    def _verify_debug_configuration(self, test_dir: str, env: dict[str, str]) -> None:
+        """
+        Verify that debug assertions are correctly enabled/disabled.
+
+        - In debug mode: _crash_if_debug_asserts_fail should crash
+        - In non-debug mode: _crash_if_debug_asserts_fail should pass (noop)
+        """
+        debug_test_code = "torch._C._crash_if_debug_asserts_fail(424242)"
+
+        result = subprocess.run(
+            ["python", "-c", f"import torch; {debug_test_code}"],
+            capture_output=True,
+            cwd=test_dir,
+            env=env,
+        )
+
+        if self.is_debug:
+            # Debug mode: expect the assertion to fail (crash)
+            logger.info(
+                "Debug mode detected (%s). Verifying debug assertions are enabled...",
+                self.build_environment,
+            )
+            if result.returncode == 0:
+                raise RuntimeError(
+                    "Debug build misconfigured: _crash_if_debug_asserts_fail did not crash. "
+                    "Debug assertions should be enabled in debug builds."
+                )
+            logger.info(
+                "✓ Debug assertion test: crashed as expected (exit code %d)",
+                result.returncode,
+            )
+        else:
+            # Non-debug mode: expect the assertion to pass (noop)
+            logger.info(
+                "Non-debug mode detected (%s). Verifying debug assertions are disabled...",
+                self.build_environment,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "Non-debug build misconfigured: _crash_if_debug_asserts_fail crashed. "
+                    "Debug assertions should be disabled in non-debug builds. "
+                    f"stderr: {result.stderr.decode() if result.stderr else 'N/A'}"
+                )
+            logger.info("✓ Debug assertion test: passed as expected (noop)")
+
     def as_dict(self) -> dict[str, str]:
         """
         Return a complete environment dict for passing to subprocess.
@@ -374,6 +639,38 @@ class PytorchTestEnvironment:
     def get_updates(self) -> dict[str, str]:
         """Return only the computed environment variable updates."""
         return self._env_updates.copy()
+
+    def get_categorized_updates(self) -> dict[str, dict[str, str]]:
+        """
+        Return environment variables grouped by category for display purposes.
+
+        Returns:
+            A dictionary with category names as keys and dicts of env vars as values.
+        """
+        # Define which keys belong to directory-related variables
+        directory_keys = {
+            "BUILD_DIR",
+            "BUILD_RENAMED_DIR",
+            "BUILD_BIN_DIR",
+            "TORCH_INSTALL_DIR",
+            "TORCH_BIN_DIR",
+            "TORCH_LIB_DIR",
+            "TORCH_TEST_DIR",
+        }
+
+        directory_vars = {}
+        other_vars = {}
+
+        for key, value in self._env_updates.items():
+            if key in directory_keys:
+                directory_vars[key] = value
+            else:
+                other_vars[key] = value
+
+        return {
+            "Directory Environment Variables": directory_vars,
+            "Compute Environment Variables": other_vars,
+        }
 
     def set(self, key: str, value: str) -> None:
         """Set an additional environment variable."""

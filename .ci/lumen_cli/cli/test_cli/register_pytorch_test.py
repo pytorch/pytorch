@@ -26,7 +26,7 @@ class PytorchTestEnvRunner(BaseRunner):
         """Initialize and display PyTorch test environment configuration."""
         env = PytorchTestEnvironment.from_args(self.args)
 
-        # Export mode: output shell export statements only
+        # Export mode: output shell export statements only (all variables)
         if self.args.export:
             for key, value in sorted(env.get_updates().items()):
                 # Escape single quotes in values for shell safety
@@ -54,10 +54,14 @@ class PytorchTestEnvRunner(BaseRunner):
         print(f"  is_dynamo_test: {env.is_dynamo_test}")
         print()
 
-        updates = env.get_updates()
-        print(f"Computed Environment Variables ({len(updates)}):")
-        for key, value in sorted(updates.items()):
-            print(f"  {key}={value}")
+        # Display environment variables by category
+        categorized = env.get_categorized_updates()
+        for category, vars_dict in categorized.items():
+            if vars_dict:
+                print(f"{category} ({len(vars_dict)}):")
+                for key, value in sorted(vars_dict.items()):
+                    print(f"  {key}={value}")
+                print()
 
 
 def add_pytorch_env_args(parser: argparse.ArgumentParser) -> None:

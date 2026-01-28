@@ -9,6 +9,9 @@ dependencies = [
     "uv==0.9.6"
 ]
 
+[project.scripts]
+lumen = "cli.run:main"
+
 [tool.setuptools]
 packages = ["cli"]
 
