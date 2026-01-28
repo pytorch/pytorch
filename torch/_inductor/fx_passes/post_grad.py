@@ -350,9 +350,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
 
-    GraphTransformObserver(
-        gm, "fix_dtype_view_bases_in_auto_functionalized"
-    ).apply_graph_pass(fix_dtype_view_bases_in_auto_functionalized)
+    GraphTransformObserver(gm, "fix_auto_functionalized_aliasing").apply_graph_pass(
+        fix_auto_functionalized_aliasing
+    )
 
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
@@ -1263,18 +1263,16 @@ def decompose_triton_kernel_wrapper_functional(graph):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
-def fix_dtype_view_bases_in_auto_functionalized(graph: torch.fx.Graph) -> None:
+def fix_auto_functionalized_aliasing(graph: torch.fx.Graph) -> None:
     """
-    Fix auto_functionalized_v2 nodes where _all_bases contains dtype views
-    instead of the actual base tensors.
+    Fix aliasing detection for dtype views in auto_functionalized_v2.
 
     When a dtype view (e.g., uint8 -> float8_e4m3fn) is passed as a mutable
-    argument to an auto_functionalized op, the view itself gets added to
-    _all_bases instead of the underlying base tensor. This causes unnecessary
-    clones to be inserted later.
+    argument, the view itself incorrectly appears in _all_bases instead of
+    the true base tensor, causing unnecessary clones.
 
-    This pass detects such cases and replaces the dtype view in _all_bases
-    with the actual graph input that shares the same storage.
+    This pass corrects _all_bases by comparing storage identity with graph
+    inputs, ensuring proper aliasing analysis for subsequent passes.
     """
     # Build a map of storage _cdata to graph inputs
     storage_to_input: dict[int, torch.fx.Node] = {}
