@@ -828,7 +828,7 @@ def node_inline_(call_mod_node: torch.fx.Node) -> Optional[torch.fx.GraphModule]
 
     for ph, arg in zip(phs, call_mod_node.args):
         if not isinstance(arg, torch.fx.Node):
-            raise AssertionError(f"expected fx.Node, got {type(arg).__name__}")
+            raise AssertionError(f"expected fx.Node, got {type(arg)}")
         node_replace_(ph, arg)
 
     with gm.graph.inserting_before(call_mod_node):
