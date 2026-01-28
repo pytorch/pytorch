@@ -33,6 +33,10 @@ class PytorchTestEnvRunner(BaseRunner):
                 escaped_value = value.replace("'", "'\\''")
                 print(f"export {key}='{escaped_value}'")
             return
+        if self.args.verify_build_env:
+            env.apply()
+            env.verify_build_configuration()
+
 
         # Display mode: show detailed information
         print(f"Build Environment: {env.build_environment}")
@@ -92,6 +96,11 @@ def add_pytorch_env_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--export",
+        action="store_true",
+        help="Output shell export statements (use with eval)",
+    )
+    parser.add_argument(
+        "--verify-build-env",
         action="store_true",
         help="Output shell export statements (use with eval)",
     )

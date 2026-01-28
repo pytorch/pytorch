@@ -22,6 +22,7 @@ Usage:
     )
 
     env.apply()  # Apply to current process
+    env.verify_build_configuration()  # Verify build environment
 
     # Or pass to subprocess
     run_command("python test/run_test.py ...", env=env.as_dict())
@@ -33,6 +34,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from typing import Optional
+
+from cli.lib.common.utils import run_python_code
 
 
 logger = logging.getLogger(__name__)
@@ -79,6 +82,9 @@ class PytorchTestEnvironment:
             shard_number=1,
             num_test_shards=4,
         )
+
+        env.apply()  # Apply to current process
+        env.
     """
 
     # These can be passed directly or read from environment variables.
@@ -193,11 +199,9 @@ class PytorchTestEnvironment:
         then sets paths for bin, lib, and test directories.
         """
         try:
-            result = subprocess.run(
-                ["python", "-c", "import site; print(site.getsitepackages()[0])"],
+            result = run_python_code(
+                "import site; print(site.getsitepackages()[0])",
                 capture_output=True,
-                text=True,
-                check=True,
             )
             site_packages = result.stdout.strip()
             torch_install_dir = f"{site_packages}/torch"
@@ -469,17 +473,11 @@ class PytorchTestEnvironment:
         # First, verify PyTorch is importable and print version
         logger.info("Verifying PyTorch installation...")
         try:
-            result = subprocess.run(
-                [
-                    "python",
-                    "-c",
-                    "import torch; print(torch.__version__, torch.version.git_version)",
-                ],
-                capture_output=True,
-                text=True,
-                check=True,
+            result = run_python_code(
+                "import torch; print(torch.__version__, torch.version.git_version)",
                 cwd=test_dir,
                 env=env,
+                capture_output=True,
             )
             logger.info("PyTorch version: %s", result.stdout.strip())
         except subprocess.CalledProcessError as e:
@@ -512,13 +510,13 @@ class PytorchTestEnvironment:
             return
 
         logger.info("Verifying CUDA can be initialized...")
-        test_code = "torch.rand(2, 2, device='cuda')"
-        result = subprocess.run(
-            ["python", "-c", f"import torch; {test_code}"],
-            capture_output=True,
-            text=True,
+        test_code = "import torch; torch.rand(2, 2, device='cuda')"
+        result = run_python_code(
+            test_code,
             cwd=test_dir,
             env=env,
+            check=False,
+            capture_output=True,
         )
 
         if result.returncode != 0:
@@ -559,11 +557,12 @@ class PytorchTestEnvironment:
         )
 
         for crash_code, description in crash_tests:
-            result = subprocess.run(
-                ["python", "-c", f"import torch; {crash_code}"],
-                capture_output=True,
+            result = run_python_code(
+                f"import torch; {crash_code}",
                 cwd=test_dir,
                 env=env,
+                check=False,
+                capture_output=True,
             )
 
             if result.returncode == 0:
@@ -587,13 +586,14 @@ class PytorchTestEnvironment:
         - In debug mode: _crash_if_debug_asserts_fail should crash
         - In non-debug mode: _crash_if_debug_asserts_fail should pass (noop)
         """
-        debug_test_code = "torch._C._crash_if_debug_asserts_fail(424242)"
+        debug_test_code = "import torch; torch._C._crash_if_debug_asserts_fail(424242)"
 
-        result = subprocess.run(
-            ["python", "-c", f"import torch; {debug_test_code}"],
-            capture_output=True,
+        result = run_python_code(
+            debug_test_code,
             cwd=test_dir,
             env=env,
+            check=False,
+            capture_output=True,
         )
 
         if self.is_debug:
