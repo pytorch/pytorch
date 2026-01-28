@@ -26,6 +26,69 @@ from torch.distributed.tensor.placement_types import (
 logger = logging.getLogger(__name__)
 
 
+def get_logical_shape(
+    placements: tuple[Placement, ...],
+    shard_order: tuple[tuple[int, tuple[int, ...]], ...],
+    mesh: DeviceMesh,
+    full_tensor_shape: tuple[int, ...],
+    target_mesh_dim: int,
+) -> list[int]:
+    """
+    Compute the logical tensor shape visible at a specific mesh dimension.
+
+    The logical shape represents how the tensor dimensions appear after accounting
+    for sharding on mesh dimensions that precede (in shard order) the target mesh
+    dimension. This is essential for correctly handling uneven sharding during
+    redistribution operations.
+
+    Args:
+        placements: Tuple of Placement objects for each mesh dimension.
+        shard_order: Tuple of (tensor_dim, mesh_dims) entries describing the order
+            in which tensor dimensions are sharded across mesh dimensions. Each entry
+            maps a tensor dimension to a tuple of mesh dimensions in device order.
+            The type is ShardOrder from _dtensor_spec.py.
+        mesh: The DeviceMesh over which the tensor is distributed.
+        full_tensor_shape: The global shape of the tensor before any sharding.
+        target_mesh_dim: The mesh dimension for which to compute the logical shape.
+
+    Returns:
+        A list[int] representing the logical shape at the target mesh dimension.
+        For sharded dimensions, this accounts for the local shard size on preceding
+        mesh dimensions.
+
+    Example:
+        Consider a tensor of shape [16, 16] distributed on a 2D mesh with
+        placements (Shard(0), Shard(0)) and shard_order ((0, (0, 1)),).
+        - At mesh_dim=0: logical_shape = [16, 16] (no prior sharding)
+        - At mesh_dim=1: logical_shape = [8, 16] (dim 0 is halved by mesh_dim 0)
+    """
+    new_logical_shape = list(full_tensor_shape)
+    for entry in shard_order:
+        tensor_dim = entry[0]
+        mesh_dims = entry[1]
+        assert len(mesh_dims) > 0
+        for mdim in mesh_dims:
+            if mdim == target_mesh_dim:
+                continue
+            placement = placements[mdim]
+            if isinstance(placement, Shard):
+                new_size, _ = placement.local_shard_size_and_offset(
+                    new_logical_shape[tensor_dim],
+                    mesh.size(mesh_dim=mdim),
+                    mesh._sym_get_coordinate(mdim),
+                )
+            elif isinstance(placement, _StridedShard):
+                new_size, _ = placement.local_shard_size_and_offset(
+                    new_logical_shape[tensor_dim],
+                    mesh.size(mesh_dim=mdim),
+                    mesh._sym_get_coordinate(mdim),
+                )
+            else:
+                raise ValueError(f"Unsupported placement type: {placement}")
+            new_logical_shape[tensor_dim] = new_size
+    return new_logical_shape
+
+
 def _format_implicit_redistribution_msg(schema: OpSchema) -> str:
     return f"Implicit redistribution occurred for {schema} while ExplicitRedistributionContext was active"
 

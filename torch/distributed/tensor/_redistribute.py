@@ -21,7 +21,10 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
-from torch.distributed.tensor._utils import assert_no_mixed_partial_types
+from torch.distributed.tensor._utils import (
+    assert_no_mixed_partial_types,
+    get_logical_shape,
+)
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -106,14 +109,88 @@ def use_min_cost_redistribution_plan(enabled: bool = True):
 class _TransformInfo(NamedTuple):
     mesh_dim: int
     src_dst_placements: tuple[Placement, Placement]
-    # logical_shape on this mesh dimension
-    logical_shape: list[int]
+    # logical_shape on this mesh dimension (optional, can be filled later by
+    # calling `fill_transform_infos_logical_shape`)
+    logical_shape: list[int] = []
 
     def __post_init__(self):
         assert self.mesh_dim >= 0
         assert self.src_dst_placements[0] != self.src_dst_placements[1], (
             "TransformInfo should only be created if it is an op with some effect, not a no-op"
         )
+
+
+def fill_transform_infos_logical_shape(
+    transform_infos: Sequence[_TransformInfo],
+    mesh: DeviceMesh,
+    full_tensor_shape: tuple[int, ...],
+    src_placements: tuple[Placement, ...],
+    src_shard_order: ShardOrder | None = None,
+) -> list[_TransformInfo]:
+    """
+    Fill in the logical_shape for each _TransformInfo in the sequence.
+
+    This function computes the logical shape for each transform step, accounting
+    for the cumulative effect of preceding transformations on the tensor shape.
+
+    Args:
+        transform_infos: Sequence of _TransformInfo objects to fill.
+        mesh: The DeviceMesh over which the tensor is distributed.
+        full_tensor_shape: The global shape of the tensor before any sharding.
+        src_placements: The source placements before any transformation.
+        src_shard_order: Optional shard order. If None, computed from src_placements.
+
+    Returns:
+        A new list of _TransformInfo objects with logical_shape filled in.
+    """
+    if not transform_infos:
+        return []
+
+    if src_shard_order is None:
+        src_shard_order = DTensorSpec.compute_default_shard_order(src_placements)
+
+    result: list[_TransformInfo] = []
+    current_placements = list(src_placements)
+    current_shard_order_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
+        src_shard_order
+    )
+
+    for info in transform_infos:
+        # Compute logical shape for this transform
+        cur_shard_order = DTensorRedistributePlanner._dict_to_ShardOrder(
+            current_shard_order_dict
+        )
+        logical_shape = get_logical_shape(
+            tuple(current_placements),
+            cur_shard_order,
+            mesh,
+            full_tensor_shape,
+            info.mesh_dim,
+        )
+
+        # Create new _TransformInfo with logical_shape filled
+        result.append(
+            _TransformInfo(
+                mesh_dim=info.mesh_dim,
+                src_dst_placements=info.src_dst_placements,
+                logical_shape=logical_shape,
+            )
+        )
+
+        # Update state for next iteration
+        src_placement, dst_placement = info.src_dst_placements
+        if src_placement.is_shard():
+            src_dim = src_placement.dim  # type: ignore[attr-defined]
+            if current_shard_order_dict.get(src_dim):
+                current_shard_order_dict[src_dim].pop()
+        if dst_placement.is_shard():
+            dst_dim = dst_placement.dim  # type: ignore[attr-defined]
+            if dst_dim not in current_shard_order_dict:
+                current_shard_order_dict[dst_dim] = []
+            current_shard_order_dict[dst_dim].append(info.mesh_dim)
+        current_placements[info.mesh_dim] = dst_placement
+
+    return result
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -672,43 +749,10 @@ class DTensorRedistributePlanner:
             f"No path found from src_state {src_state} to dst_state {dst_state}"
         )
 
-    def get_logical_shape(
-        self,
-        src_state: "DTensorRedistributePlanner.DistState",
-        mesh_dim: int,
-        full_tensor_shape: tuple[int, ...],
-    ) -> list[int]:
-        new_logical_shape = list(full_tensor_shape)
-        for entry in src_state.tensor_dim_to_mesh_dim:
-            tensor_dim = entry.tensor_dim
-            mesh_dims = entry.mesh_dims
-            assert len(mesh_dims) > 0
-            for mdim in mesh_dims:
-                if mdim == mesh_dim:
-                    continue
-                placement = src_state.placements[mdim]
-                if isinstance(placement, Shard):
-                    new_size, _ = placement.local_shard_size_and_offset(
-                        new_logical_shape[tensor_dim],
-                        self.device_mesh.size(mesh_dim=mdim),
-                        self.device_mesh._sym_get_coordinate(mdim),
-                    )
-                elif isinstance(placement, _StridedShard):
-                    new_size, _ = placement.local_shard_size_and_offset(
-                        new_logical_shape[tensor_dim],
-                        self.device_mesh.size(mesh_dim=mdim),
-                        self.device_mesh._sym_get_coordinate(mdim),
-                    )
-                else:
-                    raise ValueError(f"Unsupported placement type: {placement}")
-                new_logical_shape[tensor_dim] = new_size
-        return new_logical_shape
-
     def generate_graph_based_transform_infos(
         self,
         src_spec: DTensorSpec,
         dst_spec: DTensorSpec,
-        full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
         # In case _StridedShard exists in placements, we let _StridedShard have
         # higher priority to express shard_order.
@@ -779,14 +823,10 @@ class DTensorRedistributePlanner:
                                 "Multiple mesh_dims are different between cur_state and nxt_state"
                             )
                         update_mesh_dim = mesh_dim
-                        logical_shape = self.get_logical_shape(
-                            cur_state, mesh_dim, full_tensor_shape
-                        )
                         transform_infos.append(
                             _TransformInfo(
                                 mesh_dim=update_mesh_dim,
                                 src_dst_placements=(cur_placement, nxt_placement),
-                                logical_shape=logical_shape,
                             )
                         )
 
@@ -808,10 +848,6 @@ class DTensorRedistributePlanner:
         the former is a nested-sharding of a tensor already already sharded dimension 0, whereas
         the latter is the first sharding on tensor dimension 0.
         """
-        # logical shape records the logic tensor shape on the mesh dimension
-        # this is useful to ensure uneven sharding gets correct output shape
-        initial_logical_shape = list(src_spec.shape)
-        mesh_dims_to_logical_shape = [initial_logical_shape]
         transform_infos: list[_TransformInfo] = []
         if self.device_mesh.ndim == 1:
             # if device_mesh is 1D, redistribute is a simple direct
@@ -824,30 +860,9 @@ class DTensorRedistributePlanner:
                             src_spec.placements[0],
                             dst_spec.placements[0],
                         ),
-                        logical_shape=initial_logical_shape,
                     )
                 )
             return transform_infos
-
-        # Handle multi-dim device mesh placement redistribution First, we need
-        # to build the logical shape for each mesh dim for correct allgather
-        # uneven shards on each mesh dim (with dynamic padding)
-        for i, src in enumerate(src_spec.placements):
-            current_logical_shape = mesh_dims_to_logical_shape[i]
-            if isinstance(src, Shard):
-                if i < self.device_mesh.ndim - 1:
-                    # calculate and save the logical shape for this sharding
-                    mesh_dim_size = self.device_mesh.size(mesh_dim=i)
-                    local_shard_size, _ = src._local_shard_size_and_offset(
-                        current_logical_shape[src.dim],
-                        mesh_dim_size,
-                        self.device_mesh._sym_get_coordinate(i),
-                    )
-                    new_logical_shape = list(current_logical_shape)
-                    new_logical_shape[src.dim] = local_shard_size
-                    mesh_dims_to_logical_shape.append(new_logical_shape)
-            else:
-                mesh_dims_to_logical_shape.append(current_logical_shape)
 
         # Next, we need to derive the transform infos from src to dst
         # placements, here we use a greedy search with step by step state
@@ -893,7 +908,6 @@ class DTensorRedistributePlanner:
                         _TransformInfo(
                             mesh_dim=mesh_dim,
                             src_dst_placements=(current, target),
-                            logical_shape=mesh_dims_to_logical_shape[mesh_dim],
                         )
                     )
                     current_placements[mesh_dim] = target
@@ -909,7 +923,6 @@ class DTensorRedistributePlanner:
                     _TransformInfo(
                         mesh_dim=mesh_dim,
                         src_dst_placements=(current, target),
-                        logical_shape=mesh_dims_to_logical_shape[mesh_dim],
                     )
                 )
                 current_placements[mesh_dim] = target
@@ -951,9 +964,7 @@ def _gen_transform_infos_non_cached(
         src_spec.tensor_meta,
     )
     if use_graph_based_transform:
-        transform_infos = drp.generate_graph_based_transform_infos(
-            src_spec, dst_spec, src_spec.shape
-        )
+        transform_infos = drp.generate_graph_based_transform_infos(src_spec, dst_spec)
     else:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
     return transform_infos
@@ -1010,6 +1021,15 @@ def redistribute_local_tensor(
         transform_infos = _gen_transform_infos(
             current_spec, target_spec, use_graph_based_transform
         )
+
+    # Fill in logical_shape for each transform info
+    transform_infos = fill_transform_infos_logical_shape(
+        transform_infos,
+        device_mesh,
+        current_spec.shape,
+        current_spec.placements,
+        current_spec.shard_order,
+    )
 
     debug_mode = get_active_debug_mode()
     redistribute_context = (
