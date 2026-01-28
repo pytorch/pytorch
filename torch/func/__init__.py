@@ -12,7 +12,7 @@ from torch._functorch.eager_transforms import (
 )
 from torch._functorch.functional_call import functional_call, stack_module_state
 
-from functorch.einops import rearrange
+from torch._functorch.einops import rearrange
 
 
 __all__ = [
