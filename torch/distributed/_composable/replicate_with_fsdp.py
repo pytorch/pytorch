@@ -35,8 +35,6 @@ if TYPE_CHECKING:
 
 cls_to_replicate_cls: dict[type, type] = {}
 
-_ROOT_MODULE_PREFIX = ""
-
 logger = logging.getLogger("torch.distributed._composable.replicate_with_fsdp")
 
 
@@ -140,8 +138,6 @@ def replicate(
     mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
 
-    post_forward_mesh_info = None
-
     arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
         module,
         device,
@@ -149,7 +145,6 @@ def replicate(
         is_composable_fn=is_composable_with_replicate,
         get_state_fn=_get_module_replicate_state,
     )
-
     state = replicate.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy)
 
@@ -158,7 +153,7 @@ def replicate(
         params,
         modules,
         mesh_info,
-        post_forward_mesh_info,
+        None,  # post_forward_mesh_info
         device,
         None,  # shard_placement_fn
         mp_policy,
