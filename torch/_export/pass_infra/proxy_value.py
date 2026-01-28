@@ -19,7 +19,10 @@ class ProxyValue(Generic[_T]):
     def node(self) -> torch.fx.Node:
         if isinstance(self.proxy_or_node, torch.fx.Node):
             return self.proxy_or_node
-        assert isinstance(self.proxy_or_node, torch.fx.Proxy)
+        if not isinstance(self.proxy_or_node, torch.fx.Proxy):
+            raise AssertionError(
+                f"expected Node or Proxy, got {type(self.proxy_or_node)}"
+            )
         return self.proxy_or_node.node
 
     @property
@@ -31,7 +34,8 @@ class ProxyValue(Generic[_T]):
         return self.proxy_or_node
 
     def to_tensor(self) -> torch.Tensor:
-        assert isinstance(self.data, torch.Tensor)
+        if not isinstance(self.data, torch.Tensor):
+            raise AssertionError(f"expected Tensor, got {type(self.data)}")
         return self.data
 
     def is_tensor(self) -> bool:
