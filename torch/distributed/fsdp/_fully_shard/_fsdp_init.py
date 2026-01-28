@@ -205,9 +205,9 @@ def _get_managed_modules(
     Args:
         root_modules: The root modules to start the search from.
         ignored_params: Parameters to ignore.
-        is_composable_fn: Optional callable to check if a module is composable.
+        is_composable_fn: Callable to check if a module is composable.
             Defaults to ``_is_composable_with_fsdp``.
-        get_state_fn: Optional callable to get the state of a module.
+        get_state_fn: Callable to get the state of a module.
             Defaults to ``_get_module_fsdp_state``.
     """
     if is_composable_fn is None:
@@ -409,10 +409,7 @@ def _get_modules_and_states(
     )
 
     managed_modules = _get_managed_modules(
-        modules,
-        ignored_params,
-        is_composable_fn=is_composable_fn,
-        get_state_fn=get_state_fn,
+        modules, ignored_params, is_composable_fn, get_state_fn
     )
     params, buffers = _get_managed_states(managed_modules, ignored_params)
 

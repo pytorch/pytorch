@@ -149,6 +149,7 @@ def replicate(
         is_composable_fn=is_composable_with_replicate,
         get_state_fn=_get_module_replicate_state,
     )
+
     state = replicate.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy)
 
