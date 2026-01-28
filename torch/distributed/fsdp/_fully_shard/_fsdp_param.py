@@ -245,7 +245,8 @@ class FSDPParam:
         self.grad_offload_event: torch.Event | None = None
         # Resolve shard_placement_fn result to get both placement and mesh_info
         shard_result = resolve_shard_placement(
-            shard_placement_fn(param) if shard_placement_fn else None, mesh_info
+            shard_placement_fn(param) if shard_placement_fn else None,
+            cast(FSDPMeshInfo, mesh_info),
         )
         self.mesh_info = shard_result.mesh_info
         self._init_sharded_param(param, device, shard_result.placement)

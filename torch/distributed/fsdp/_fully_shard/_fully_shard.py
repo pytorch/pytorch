@@ -28,10 +28,10 @@ from ._fsdp_init import (
     _get_modules_and_states,
     _get_post_forward_mesh_info,
     _init_default_mesh,
-    _init_param_group,
     _validate_mesh,
     _validate_module,
 )
+from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
@@ -39,8 +39,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh
-
-    from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
     "fully_shard",
@@ -447,7 +445,7 @@ class FSDPModule:
                     fsdp_param_group.post_forward_mesh_info = (
                         _get_post_forward_mesh_info(
                             reshard_after_forward,
-                            fsdp_param_group.mesh_info,
+                            cast(FSDPMeshInfo, fsdp_param_group.mesh_info),
                         )
                     )
 

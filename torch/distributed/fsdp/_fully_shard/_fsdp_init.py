@@ -370,15 +370,17 @@ def _init_param_group(
     from ._fsdp_param_group import FSDPParamGroup
 
     if params:
-        state._fsdp_param_group = FSDPParamGroup(
-            params,
-            modules,
-            mesh_info,
-            post_forward_mesh_info,
-            device,
-            shard_placement_fn,
-            mp_policy,
-            offload_policy,
+        state._fsdp_param_groups.append(
+            FSDPParamGroup(
+                params,
+                modules,
+                mesh_info,
+                post_forward_mesh_info,
+                device,
+                shard_placement_fn,
+                mp_policy,
+                offload_policy,
+            )
         )
 
 
