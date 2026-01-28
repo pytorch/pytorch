@@ -690,6 +690,33 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    @unittest.expectedFailure
+    def test_triton_pow_type_mismatch(self, device):
+        """
+        Test that libdevice.pow handles mixed float32/float64 types correctly.
+
+        Reproducer: sqrt returns float32, but exponent is float64 from sympy.
+        This caused: KeyError: (triton.language.float32, triton.language.float64)
+
+        Note: We use exponent 10 instead of larger values (e.g., 70) to avoid
+        a separate overflow issue in TruncToInt which converts to int32.
+        The type mismatch fix is validated regardless of exponent size.
+        """
+        import math
+
+        def fn(x):
+            r = math.sqrt(x.size(0))
+            r = r**10
+            return torch.tensor(math.trunc(r), dtype=torch.float64, device=device)
+
+        example_inputs = (torch.randn(4, device=device),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
