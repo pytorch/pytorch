@@ -16,6 +16,14 @@ from torch.library import Library  # noqa: TOR901
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+# Import to trigger symm_mem args registration
+# This needs to happen at module level so registrations are available for tests
+try:
+    import torch.distributed._symmetric_memory  # noqa: F401
+except ImportError:
+    pass  # Module may not be available in all builds
+
+
 def register_symm_mem_args(op, arg_names, validate=True):
     """Helper function for tests to register symm_mem args."""
     from torch._ops import OpOverload
@@ -41,14 +49,19 @@ class TestSymmMemRegistry(TestCase):
     """Test suite for SymmMemArgsHolder core functionality."""
 
     def setUp(self):
-        """Clear registry before each test."""
+        """Clear test entries from registry before each test."""
         super().setUp()
-        # Clear the registry data
-        singleton._data.clear()
+        # Only clear test entries, preserve real registrations (e.g., symm_mem::*)
+        test_keys = [k for k in singleton._data if k.startswith("test_")]
+        for key in test_keys:
+            del singleton._data[key]
 
     def tearDown(self):
-        """Clear registry after each test."""
-        singleton._data.clear()
+        """Clear test entries from registry after each test."""
+        # Only clear test entries, preserve real registrations (e.g., symm_mem::*)
+        test_keys = [k for k in singleton._data if k.startswith("test_")]
+        for key in test_keys:
+            del singleton._data[key]
         super().tearDown()
 
     def test_basic_registration_with_string(self):
@@ -165,13 +178,18 @@ class TestLibraryIntegration(TestCase):
     """Test suite for Library.register_symm_mem_args integration."""
 
     def setUp(self):
-        """Clear registry before each test."""
+        """Clear test entries from registry before each test."""
         super().setUp()
-        singleton._data.clear()
+        # Only clear test entries, preserve real registrations (e.g., symm_mem::*)
+        test_keys = [k for k in singleton._data if k.startswith("test_")]
+        for key in test_keys:
+            del singleton._data[key]
 
     def tearDown(self):
-        """Clear registry after each test."""
-        singleton._data.clear()
+        """Clear test entries from registry after each test."""
+        test_keys = [k for k in singleton._data if k.startswith("test_")]
+        for key in test_keys:
+            del singleton._data[key]
         super().tearDown()
 
     def test_library_def_registration(self):
@@ -228,47 +246,88 @@ class TestLibraryIntegration(TestCase):
 class TestSymmMemOpsRegistration(TestCase):
     """Test suite for registering actual symm_mem operations."""
 
-    def setUp(self):
-        """Clear registry before each test."""
-        super().setUp()
-        singleton._data.clear()
+    def test_symm_mem_registrations_loaded(self):
+        """Test that all symm_mem operations are properly registered."""
+        try:
+            import torch.distributed._symmetric_memory  # noqa: F401
+        except ImportError:
+            self.skipTest("torch.distributed._symmetric_memory not available")
 
-    def tearDown(self):
-        """Clear registry after each test."""
-        singleton._data.clear()
-        super().tearDown()
+        # Expected operations that should be registered
+        expected_ops = [
+            "symm_mem::one_shot_all_reduce",
+            "symm_mem::one_shot_all_reduce_out",
+            "symm_mem::one_shot_all_reduce_copy",
+            "symm_mem::one_shot_all_reduce_copy_out",
+            "symm_mem::two_shot_all_reduce_",
+            "symm_mem::two_shot_all_reduce_out",
+            "symm_mem::multimem_all_reduce_",
+            "symm_mem::multimem_one_shot_all_reduce",
+            "symm_mem::multimem_one_shot_all_reduce_out",
+            "symm_mem::multimem_one_shot_reduce_out",
+            "symm_mem::multimem_all_gather_out",
+            "symm_mem::reduce_scatter_out",
+            "symm_mem::all_to_all_vdev",
+            "symm_mem::all_to_all_vdev_2d",
+            "symm_mem::all_to_all_vdev_2d_offset",
+            "symm_mem::tile_reduce",
+            "symm_mem::multi_root_tile_reduce",
+        ]
 
-    def test_register_one_shot_all_reduce(self):
-        """Test registering one_shot_all_reduce operation."""
+        for qualname in expected_ops:
+            entry = singleton.find(qualname)
+            self.assertTrue(
+                entry.symm_mem_args.is_registered(),
+                f"{qualname} does not have symm_mem_args registered",
+            )
+
+    def test_lowering_auto_registration(self):
+        """Test that lowerings are auto-registered from registry metadata."""
+        try:
+            import torch.distributed._symmetric_memory  # noqa: F401
+        except ImportError:
+            self.skipTest("torch.distributed._symmetric_memory not available")
+
         try:
             _ = torch.ops.symm_mem.one_shot_all_reduce
         except AttributeError:
-            self.skipTest("symm_mem.one_shot_all_reduce not available")
+            self.skipTest("symm_mem ops not available")
 
-        lib = Library("symm_mem", "FRAGMENT")
-        lib.register_symm_mem_args("one_shot_all_reduce", ["input"])
+        from torch._inductor import comm_lowering
 
-        qualname = "symm_mem::one_shot_all_reduce"
+        try:
+            comm_lowering.register_symm_mem_lowerings()
+        except Exception as e:
+            self.fail(f"Lowering registration failed: {e}")
+
+        symm_mem_count = sum(
+            1
+            for qualname, entry in singleton._data.items()
+            if qualname.startswith("symm_mem::") and entry.symm_mem_args.is_registered()
+        )
+        self.assertGreater(
+            symm_mem_count, 0, "Expected at least some symm_mem operations registered"
+        )
+
+    def test_custom_operator_with_symm_mem(self):
+        """Test that custom operators can register and use symm_mem args."""
+        lib = Library("test_custom_symm", "DEF")
+        lib.define("my_collective(Tensor input, str group_name) -> Tensor")
+
+        # Register symm_mem args
+        lib.register_symm_mem_args("my_collective", ["input"])
+
+        # Verify registration
+        qualname = "test_custom_symm::my_collective"
         entry = singleton.find(qualname)
+
         self.assertTrue(entry.symm_mem_args.is_registered())
         self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
-        self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("reduce_op"))
+        self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("group_name"))
 
-    def test_register_one_shot_all_reduce_out(self):
-        """Test registering one_shot_all_reduce_out operation."""
-        try:
-            _ = torch.ops.symm_mem.one_shot_all_reduce_out
-        except AttributeError:
-            self.skipTest("symm_mem.one_shot_all_reduce_out not available")
-
-        lib = Library("symm_mem", "FRAGMENT")
-        lib.register_symm_mem_args("one_shot_all_reduce_out", ["input", "out"])
-
-        qualname = "symm_mem::one_shot_all_reduce_out"
-        entry = singleton.find(qualname)
-        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("input"))
-        self.assertTrue(entry.symm_mem_args.is_symm_mem_arg("out"))
-        self.assertFalse(entry.symm_mem_args.is_symm_mem_arg("reduce_op"))
+        # Verify we can query the registered args
+        symm_mem_args = entry.symm_mem_args.get()
+        self.assertEqual(list(symm_mem_args), ["input"])
 
 
 if __name__ == "__main__":
