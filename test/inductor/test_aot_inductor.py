@@ -327,10 +327,6 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "different # of input/output/constants in native matmul",
-    )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2547,10 +2543,6 @@ class AOTInductorTestsTemplate:
 
     # mps doesn't support float64
     @skipIfMPS
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "FIXME: cannot do get_size on FakeTensor during lowering.",
-    )
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(
@@ -3096,18 +3088,15 @@ class AOTInductorTestsTemplate:
                 result_package = model_package(*inputs_on_device)
             self.assertTrue(same(result_ref.cpu(), result_package.cpu()))
 
-    @unittest.skipIf(
-        config.triton.native_matmul, "sin and mm are fused in native matmul"
-    )
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
 
             def forward(self, x, y):
-                a = torch.sin(x)
+                a = torch.tanh(x)
                 b = torch.mm(a, y)
-                c = torch.sin(b)
+                c = torch.tanh(b)
                 d = torch.mm(b, c)
                 return d
 
@@ -3125,9 +3114,14 @@ class AOTInductorTestsTemplate:
                 model, example_inputs, "aoti_torch_mps_get_kernel_function(", 1
             )
         elif self.device == GPU_TYPE:
-            self.code_check_count(
-                model, example_inputs, "triton_poi_fused_sin_0 = loadKernel(", 1
-            )
+            if config.triton.native_matmul:
+                self.code_check_count(
+                    model, example_inputs, "triton_red_fused_mm_tanh_0(in_ptr0", 1
+                )
+            else:
+                self.code_check_count(
+                    model, example_inputs, "triton_poi_fused_tanh_0 = loadKernel(", 1
+                )
 
     def test_reuse_kernel_dynamic(self):
         class Model(torch.nn.Module):
@@ -7512,7 +7506,6 @@ class AOTInductorTestsTemplate:
 
         self.assertEqual(outputs, outputs_aoti)
 
-    @unittest.skipIf(config.triton.native_matmul, "different code generated")
     def test_pad_non_zero_memory_leak(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("test is only for GPU_TYPE")
