@@ -129,7 +129,8 @@ export MACOSX_DEPLOYMENT_TARGET=11.0
 
 EXTRA_CONDA_INSTALL_FLAGS=""
 CONDA_ENV_CREATE_FLAGS=""
-RENAME_WHEEL=true
+RENAME_WHEEL=false
+VERIFY_WHEELNAME=true
 case $desired_python in
     3.14t)
         echo "Using 3.14 deps"
@@ -171,7 +172,25 @@ PINNED_PACKAGES=(
 python -mvenv ~/${desired_python}-build
 source ~/${desired_python}-build/bin/activate
 retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements.txt"
-retry brew install libomp
+
+# Use openmp from conda which supports 11.0. Otherwise we'll end up with
+# whatever version comes with homebrew which only supports the build machine's
+# OS version or higher
+export OMP_PREFIX=/opt/llvm-openmp
+mkdir -p ${OMP_PREFIX}
+# need zstd to extract
+retry brew install zstd
+pushd ${OMP_PREFIX}
+  llvm_openmp_version="21.1.8-h4a912ad_0"
+  retry curl -OLs https://conda.anaconda.org/conda-forge/osx-arm64/llvm-openmp-${llvm_openmp_version}.conda
+  tar -xvf llvm-openmp-${llvm_openmp_version}.conda
+  rm llvm-openmp-${llvm_openmp_version}.conda
+  tar -xvf pkg-llvm-openmp-${llvm_openmp_version}.tar.zst
+  rm pkg-llvm-openmp-${llvm_openmp_version}.tar.zst
+  rm info-llvm-openmp-${llvm_openmp_version}.tar.zst
+  rm lib/libiomp5.dylib
+  install_name_tool -id ${OMP_PREFIX}/lib/libomp.dylib lib/libomp.dylib
+popd
 
 # For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
@@ -211,6 +230,10 @@ if [[ -z "$BUILD_PYTHONLESS" && $RENAME_WHEEL == true  ]]; then
 elif [[ $RENAME_WHEEL == false ]]; then
     echo "Copying Wheel file: $wheel_filename_gen to $PYTORCH_FINAL_PACKAGE_DIR"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_gen"
+    if [[ "$VERIFY_WHEELNAME" == "true" && "$wheel_filename_gen" != "$wheel_filename_new" ]]; then
+        echo "Got wheelname: $wheel_filename_gen. Expected: $wheel_filename_new"
+	exit 1
+    fi
 else
     pushd "$pytorch_rootdir"
 
