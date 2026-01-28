@@ -1,5 +1,5 @@
-#include <vector>
 #include <limits>
+#include <vector>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
@@ -475,7 +475,7 @@ std::vector<Tensor> foreach_tensor_norm_slow(
     const Scalar& ord,
     std::optional<ScalarType> dtype) {
   check_foreach_api_restrictions(tensors);
-  
+
   // Extract ord value to check for infinity
   const auto p = [&]() -> double {
     if (ord.isIntegral(false)) {
@@ -487,7 +487,7 @@ std::vector<Tensor> foreach_tensor_norm_slow(
           false, "foreach_tensor_norm_slow expects ord to be integer or float");
     }
   }();
-  
+
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
