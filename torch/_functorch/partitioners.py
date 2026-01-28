@@ -190,6 +190,20 @@ class PartitionedGraphSignature:
                 saved_descs.append(SavedForBackwardsAOTOutput(i))
         return self.fwd_outputs_descs + saved_descs
 
+    def insert_rng_states_into_fwd_outputs(
+        self, fw_outputs: tuple[fx.Node, ...], rng_states: list[fx.Node]
+    ) -> tuple[fx.Node, ...]:
+        # This step happens after functionalization on partitioned graphs
+        if not rng_states:
+            return fw_outputs
+        sym_node_start_idx = len(fw_outputs) - len(self.saved_sym_nodes)
+        return (
+            fw_outputs[:sym_node_start_idx]
+            + tuple(rng_states)
+            + fw_outputs[sym_node_start_idx:]
+        )
+
+
     def bwd_graph_inputs(self) -> list[fx.Node]:
         return (
             self.saved_sym_nodes
@@ -1169,7 +1183,7 @@ def _extract_fwd_bwd_modules(
     *,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
-) -> tuple[fx.GraphModule, fx.GraphModule, int]:
+) -> tuple[fx.GraphModule, fx.GraphModule, PartitionedGraphSignature]:
     """
     Extract separate forward and backward graph modules from a joint fwd+bwd graph.
 
@@ -1186,9 +1200,10 @@ def _extract_fwd_bwd_modules(
             (e.g., parameters) for activation quantization.
 
     Returns:
-        A tuple of (forward_module, backward_module, num_saved_sym_nodes).
-        The num_saved_sym_nodes is the actual count after symbol binding resolution,
-        which may differ from len(saved_sym_nodes) if additional symbols were discovered.
+        A tuple of (forward_module, backward_module, partition_signature).
+        The partition_signature contains the actual counts after symbol binding
+        resolution, which may differ from the input lists if additional symbols
+        were discovered.
 
     Note:
         The ordering of inputs/outputs is encapsulated in PartitionedGraphSignature, which can
@@ -1222,7 +1237,7 @@ def _extract_fwd_bwd_modules(
         bwd_module,
         static_lifetime_input_nodes,
     )
-    return fwd_module, bwd_module, len(partition_inputs.saved_sym_nodes)
+    return fwd_module, bwd_module, partition_inputs
 
 
 def _extract_graphs_from_partition_inputs(
@@ -1442,7 +1457,7 @@ def default_partition(
 
     if static_lifetime_input_nodes is None:
         static_lifetime_input_nodes = node_info.static_lifetime_input_nodes
-    fw_module, bw_module, num_sym_nodes = _extract_fwd_bwd_modules(
+    fw_module, bw_module, partition_signature = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
@@ -1457,7 +1472,7 @@ def default_partition(
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(
-                joint_module, fw_module, bw_module, num_sym_nodes
+                joint_module, fw_module, bw_module, partition_signature
             )
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
@@ -1732,7 +1747,7 @@ def functionalize_rng_ops(
     joint_module: fx.GraphModule,
     fw_module: fx.GraphModule,
     bw_module: fx.GraphModule,
-    num_sym_nodes: int,
+    partition_signature: PartitionedGraphSignature,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     # During user-driven activation checkpointing, we have to ensure that a rng
     # op in fwd yields the same output as the recomputed rng op in the bwd.  To
@@ -1927,17 +1942,13 @@ def functionalize_rng_ops(
                 bw_node.replace_all_uses_with(rng_output)
                 bw_graph.erase_node(bw_node)
 
-    # Add the rng states in the output of the fwd graph. AOT Autograd assumes
-    # that symints are at the end of forward graph outputs. So, insert the new
-    # rng states accordingly.
+    # Add the rng states in the output of the fwd graph. The signature handles
+    # inserting them before symints (which must always be at the very end).
     if fw_rng_state_outputs:
         fw_output_node = next(iter(fw_module.graph.find_nodes(op="output")))
         fw_outputs = fw_output_node.args[0]
-        sym_node_start_idx = len(fw_outputs) - num_sym_nodes
-        outputs = (
-            fw_outputs[:sym_node_start_idx]
-            + tuple(fw_rng_state_outputs)
-            + fw_outputs[sym_node_start_idx:]
+        outputs = partition_signature.insert_rng_states_into_fwd_outputs(
+            fw_outputs, fw_rng_state_outputs
         )
         fw_module.graph.output(outputs)
         fw_module.graph.erase_node(fw_output_node)
@@ -3594,7 +3605,7 @@ def min_cut_rematerialization_partition(
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
-    fw_module, bw_module, num_sym_nodes = _extract_fwd_bwd_modules(
+    fw_module, bw_module, partition_signature = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
         # pyrefly: ignore [bad-argument-type]
@@ -3605,7 +3616,7 @@ def min_cut_rematerialization_partition(
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(
-                joint_module, fw_module, bw_module, num_sym_nodes
+                joint_module, fw_module, bw_module, partition_signature
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
