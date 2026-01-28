@@ -1,14 +1,11 @@
-# mypy: allow-untyped-defs
 import importlib
 import logging
 import sys
 from abc import ABC, abstractmethod
-
-# pyrefly: ignore [missing-module-attribute]
-from pickle import (  # type: ignore[attr-defined]
-    _getattribute,
+from pickle import (
+    _getattribute,  # pyrefly: ignore [missing-module-attribute]
     _Pickler,
-    whichmodule as _pickle_whichmodule,  # pyrefly: ignore  # missing-module-attribute
+    whichmodule as _pickle_whichmodule,  # pyrefly: ignore [missing-module-attribute]
 )
 from types import ModuleType
 from typing import Any
@@ -118,7 +115,8 @@ class Importer(ABC):
             return module_name, name
 
         def get_obj_info(obj):
-            assert name is not None
+            if name is None:
+                raise AssertionError("name must not be None")
             module_name = self.whichmodule(obj, name)
             is_mangled_ = is_mangled(module_name)
             location = (

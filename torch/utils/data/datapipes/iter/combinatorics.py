@@ -43,7 +43,7 @@ class SamplerIterDataPipe(IterDataPipe[_T_co]):
                 "Sampler class requires input datapipe implemented `__len__`"
             )
         super().__init__()
-        # pyrefly: ignore [bad-assignment]
+
         self.datapipe = datapipe
         self.sampler_args = () if sampler_args is None else sampler_args
         self.sampler_kwargs = {} if sampler_kwargs is None else sampler_kwargs

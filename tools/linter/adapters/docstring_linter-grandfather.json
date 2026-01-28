@@ -1,267 +1,226 @@
 {
   "torch/_inductor/autoheuristic/artifacts/_MMRankingA100.py": {
-    "class MMRankingA100": 279,
+    "class MMRankingA100": 280,
     "def MMRankingA100.fill_choices()": 199
   },
   "torch/_inductor/autoheuristic/artifacts/_MMRankingH100.py": {
-    "class MMRankingH100": 304,
+    "class MMRankingH100": 305,
     "def MMRankingH100.fill_choices()": 203
   },
   "torch/_inductor/autoheuristic/artifacts/_MixedMMA100.py": {
-    "class MixedMMA100": 133,
-    "def MixedMMA100.get_best_choices()": 85
+    "class MixedMMA100": 134,
+    "def MixedMMA100.get_best_choices()": 86
   },
   "torch/_inductor/autoheuristic/artifacts/_MixedMMH100.py": {
-    "class MixedMMH100": 132,
-    "def MixedMMH100.get_best_choices()": 85
+    "class MixedMMH100": 133,
+    "def MixedMMH100.get_best_choices()": 86
   },
   "torch/_inductor/bounds.py": {
-    "class ValueRangeAnalysis": 107
+    "class ValueRangeAnalysis": 108
   },
   "torch/_inductor/codecache.py": {
-    "class CppPythonBindingsCodeCache": 179,
-    "class HalideCodeCache": 357,
-    "class PyCodeCache": 102
+    "class CppPythonBindingsCodeCache": 191,
+    "class HalideCodeCache": 358,
+    "class PyCodeCache": 101
   },
   "torch/_inductor/codegen/common.py": {
-    "class CSE": 167,
-    "class CSEProxy": 316,
-    "class Kernel": 286,
-    "class KernelArgs": 332,
-    "class OpOverrides": 198
+    "class CSE": 173,
+    "class Kernel": 305,
+    "class KernelArgs": 345,
+    "class OpOverrides": 208
   },
   "torch/_inductor/codegen/cpp.py": {
-    "class CppKernelProxy": 617,
-    "class CppOverrides": 429,
-    "class CppScheduling": 786,
-    "class CppVecKernel": 865,
+    "class CppKernelProxy": 616,
+    "class CppOverrides": 437,
+    "class CppScheduling": 819,
+    "class CppVecKernel": 867,
     "class OuterLoopFusedSchedulerNode": 159,
     "def CppKernel.codegen_loops_impl()": 144,
-    "def CppKernelProxy.codegen_functions()": 183,
-    "def CppKernelProxy.legalize_lowp_fp_dtype_loopbody()": 224,
+    "def CppKernelProxy.codegen_functions()": 179,
+    "def CppKernelProxy.legalize_lowp_fp_dtype_loopbody()": 228,
     "def CppScheduling.fuse()": 81,
-    "def CppVecKernel.reduction_combine_vec()": 100,
+    "def CppVecKernel.reduction_combine_vec()": 103,
     "def OuterLoopFusedSchedulerNode.check_outer_fusion_loop_level_attr()": 85,
     "def TilingSelect.select_tiling()": 170
   },
   "torch/_inductor/codegen/cpp_flex_attention_template.py": {
-    "class CppFlexAttentionTemplate": 403,
+    "class CppFlexAttentionTemplate": 404,
     "def CppFlexAttentionTemplate.modification()": 102
   },
   "torch/_inductor/codegen/cpp_gemm_template.py": {
-    "def CppGemmTemplate.get_options()": 249
+    "def CppGemmTemplate.get_options()": 255
   },
   "torch/_inductor/codegen/cpp_grouped_gemm_template.py": {
-    "def CppGroupedGemmTemplate.add_choices()": 154,
-    "def CppGroupedGemmTemplate.render()": 153
+    "def CppGroupedGemmTemplate.render()": 157
   },
   "torch/_inductor/codegen/cpp_template.py": {
-    "class CppTemplate": 114
+    "class CppTemplate": 117
   },
   "torch/_inductor/codegen/cpp_template_kernel.py": {
-    "class CppTemplateKernel": 499,
-    "def CppTemplateKernel.store_outputs()": 111
+    "class CppTemplateKernel": 504
   },
   "torch/_inductor/codegen/cpp_utils.py": {
-    "def create_epilogue_with_attr()": 165
+    "def create_epilogue_with_attr()": 164
+  },
+  "torch/_inductor/codegen/cpp_wrapper_cpu.py": {
+    "def CppWrapperCpu.generate_py_arg()": 96,
+    "def CppWrapperCpu.val_to_arg_str()": 88,
+    "def CppWrapperCpu.write_wrapper_decl()": 142
   },
   "torch/_inductor/codegen/cpp_wrapper_cpu_array_ref.py": {
     "def CppWrapperCpuArrayRef.generate_return()": 128,
     "def CppWrapperCpuArrayRef.write_wrapper_decl()": 208
   },
   "torch/_inductor/codegen/cuda/gemm_template.py": {
-    "class CUTLASS2xGemmTemplate": 267
+    "class CUTLASS2xGemmTemplate": 268
   },
   "torch/_inductor/codegen/debug_utils.py": {
-    "class DebugPrinterManager": 229
+    "class DebugPrinterManager": 232
   },
   "torch/_inductor/codegen/halide.py": {
-    "class HalideKernel": 984,
-    "class HalideOverrides": 325,
-    "class HalidePrinter": 129,
-    "def HalideKernel.halide_kernel_meta()": 82,
-    "def HalideKernel.scan()": 82
+    "class HalideKernel": 999,
+    "class HalideOverrides": 339,
+    "class HalidePrinter": 128,
+    "def HalideKernel.halide_kernel_meta()": 82
   },
   "torch/_inductor/codegen/rocm/ck_conv_template.py": {
-    "class CKGroupedConvFwdTemplate": 544,
+    "class CKGroupedConvFwdTemplate": 547,
     "def CKGroupedConvFwdTemplate.globals()": 145
   },
   "torch/_inductor/codegen/rocm/ck_universal_gemm_template.py": {
-    "class CKGemmTemplate": 950
+    "class CKGemmTemplate": 954
   },
   "torch/_inductor/codegen/rocm/rocm_benchmark_request.py": {
-    "class ROCmBenchmarkRequest": 117
+    "class ROCmBenchmarkRequest": 118
   },
   "torch/_inductor/codegen/simd.py": {
     "def SIMDScheduling.candidate_tilings()": 126,
     "def SIMDScheduling.generate_node_schedule()": 95
   },
   "torch/_inductor/codegen/triton.py": {
-    "class TritonKernel": 2562,
-    "class TritonOverrides": 469,
-    "class TritonPrinter": 172,
-    "class TritonScheduling": 396,
-    "def TritonKernel.codegen_kernel()": 233,
-    "def TritonKernel.codegen_kernel_benchmark()": 89,
-    "def TritonKernel.load()": 145,
-    "def TritonKernel.reduction()": 396,
-    "def TritonKernel.scan()": 110,
-    "def TritonScheduling.benchmark_codegened_module()": 85,
-    "def TritonScheduling.benchmark_combo_kernel()": 91
+    "class TritonPrinter": 179,
+    "class TritonScheduling": 413,
+    "def TritonScheduling.benchmark_codegened_module()": 88,
+    "def TritonScheduling.benchmark_combo_kernel()": 93
   },
   "torch/_inductor/codegen/triton_combo_kernel.py": {
-    "class ComboKernel": 808,
-    "def ComboKernel.codegen_kernel_benchmark()": 89
-  },
-  "torch/_inductor/codegen/triton_split_scan.py": {
-    "def TritonSplitScanKernel.scan()": 114
+    "class ComboKernel": 871
   },
   "torch/_inductor/codegen/wrapper.py": {
-    "def PythonWrapperCodegen.benchmark_compiled_module()": 92,
-    "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 266,
+    "def PythonWrapperCodegen.benchmark_compiled_module()": 96,
+    "def PythonWrapperCodegen.define_user_defined_triton_kernel()": 269,
     "def PythonWrapperCodegen.generate_example_arg_value()": 84,
-    "def user_defined_kernel_grid_fn_code()": 102
-  },
-  "torch/_inductor/comm_lowering.py": {
-    "def register_comm_lowerings()": 192
+    "def user_defined_kernel_grid_fn_code()": 108
   },
   "torch/_inductor/comms.py": {
-    "def enforce_comm_ordering_for_fsdp()": 174,
-    "def reinplace_fsdp_all_gather()": 106
-  },
-  "torch/_inductor/compile_fx.py": {
-    "def fw_compiler_freezing()": 101
+    "def enforce_comm_ordering_for_fsdp()": 175,
+    "def reinplace_fsdp_all_gather()": 107
   },
   "torch/_inductor/constant_folding.py": {
-    "class ConstantFolder": 226,
+    "class ConstantFolder": 225,
     "def ConstantFolder.run_node()": 94
   },
   "torch/_inductor/cpu_vec_isa.py": {
-    "class VecISA": 125
+    "class VecISA": 119
   },
   "torch/_inductor/debug.py": {
-    "class DebugContext": 155,
-    "class DebugFormatter": 172,
-    "def DebugFormatter.log_autotuning_results()": 90,
-    "def aot_inductor_minifier_wrapper()": 81
+    "class DebugContext": 154,
+    "class DebugFormatter": 171,
+    "def DebugFormatter.log_autotuning_results()": 89
   },
   "torch/_inductor/dependencies.py": {
-    "class MemoryDep": 234
+    "class MemoryDep": 241
   },
   "torch/_inductor/fx_passes/b2b_gemm.py": {
-    "def b2b_gemm_handler()": 182
+    "def b2b_gemm_handler()": 192
   },
   "torch/_inductor/fx_passes/binary_folding.py": {
-    "def binary_folding_init()": 416
+    "def binary_folding_init()": 417
   },
   "torch/_inductor/fx_passes/group_batch_fusion.py": {
-    "def BatchLayernormFusion.fuse()": 131,
-    "def PostGradBatchLinearFusion.fuse()": 83,
-    "def PreGradBatchLinearFusion.fuse()": 87
+    "def BatchLayernormFusion.fuse()": 136,
+    "def PostGradBatchLinearFusion.fuse()": 82,
+    "def PreGradBatchLinearFusion.fuse()": 86
   },
   "torch/_inductor/fx_passes/joint_graph.py": {
-    "def constant_fold_uniform_value()": 109,
-    "def remove_no_ops()": 97
+    "def constant_fold_uniform_value()": 108,
+    "def remove_no_ops()": 96
   },
   "torch/_inductor/fx_passes/micro_pipeline_tp.py": {
-    "def find_all_gather_patterns()": 116,
-    "def find_reduce_scatter_patterns()": 125
+    "def find_all_gather_patterns()": 115,
+    "def find_reduce_scatter_patterns()": 124
   },
   "torch/_inductor/fx_passes/split_cat.py": {
-    "def SplitCatSimplifier.replace_cat()": 152,
-    "def merge_getitem_cat()": 97,
-    "def merge_split_cat_aten()": 91,
-    "def move_reshape_out_of_split_stack()": 110
+    "def SplitCatSimplifier.replace_cat()": 160,
+    "def merge_split_cat_aten()": 90,
+    "def move_reshape_out_of_split_stack()": 109
   },
   "torch/_inductor/graph.py": {
-    "class GraphLowering": 2144,
-    "def GraphLowering.call_function()": 112,
+    "class GraphLowering": 2224,
+    "def GraphLowering.call_function()": 119,
     "def GraphLowering.create_deferred_runtime_asserts()": 84,
-    "def GraphLowering.extract_autotune_inputs()": 93,
+    "def GraphLowering.extract_autotune_inputs()": 94,
     "def GraphLowering.output()": 92,
-    "def GraphLowering.placeholder()": 102,
-    "def GraphLowering.run_node()": 361
+    "def GraphLowering.placeholder()": 103,
+    "def GraphLowering.run_node()": 364
   },
   "torch/_inductor/ir.py": {
-    "class Buffer": 131,
-    "class ComputedBuffer": 350,
-    "class Conditional": 144,
-    "class ExternKernel": 866,
-    "class Layout": 214,
-    "class Loops": 130,
-    "class Reduction": 745,
+    "class Buffer": 134,
+    "class Loops": 125,
+    "class Reduction": 803,
     "class Scan": 199,
     "class Sort": 151,
-    "class UserDefinedTritonKernel": 198,
+    "class UserDefinedTritonKernel": 204,
     "class View": 180,
-    "class WelfordReduction": 221,
-    "class WhileLoop": 212,
-    "def ConcatKernel.create()": 101,
-    "def ExternKernel.process_kernel()": 120,
+    "class WelfordReduction": 220,
+    "def ExternKernel.process_kernel()": 125,
     "def ExternKernel.require_strides()": 162,
-    "def Reduction.create()": 159,
-    "def Reduction.num_splits()": 161,
-    "def Scan.create()": 96,
-    "def WelfordReduction.create()": 119,
-    "def WhileLoop.create()": 174
+    "def Reduction.num_splits()": 168
   },
   "torch/_inductor/jagged_lowerings.py": {
-    "def register_jagged_ops()": 160
+    "def register_jagged_ops()": 161
   },
   "torch/_inductor/kernel/conv.py": {
     "def convolution()": 239
   },
-  "torch/_inductor/kernel/mm.py": {
-    "def tuned_addmm()": 151
+  "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py": {
+    "def create_tensors_for_all_groups()": 95
   },
   "torch/_inductor/loop_body.py": {
-    "class CaptureIndexing": 174
+    "class CaptureIndexing": 175
   },
   "torch/_inductor/lowering.py": {
-    "def avg_pool2d_backward()": 164,
-    "def avg_pool3d_backward()": 198,
-    "def cat()": 123,
-    "def index_put_impl_()": 127,
-    "def make_pointwise()": 85,
-    "def max_pool2d_with_indices_backward()": 144,
+    "def avg_pool2d_backward()": 163,
+    "def avg_pool3d_backward()": 197,
+    "def cat()": 122,
+    "def index_put_impl_()": 117,
+    "def make_pointwise()": 88,
+    "def max_pool2d_with_indices_backward()": 143,
     "def scatter_reduce_()": 114,
     "def sdpa_constraint()": 135,
-    "def searchsorted()": 96
+    "def searchsorted()": 95
   },
   "torch/_inductor/mkldnn_ir.py": {
-    "class MkldnnRnnLayer": 116,
-    "def MkldnnRnnLayer.create()": 94,
-    "def QConvPointWiseBinaryPT2E.create()": 81
+    "class MkldnnRnnLayer": 121,
+    "def MkldnnRnnLayer.create()": 101
   },
   "torch/_inductor/mkldnn_lowerings.py": {
-    "def register_onednn_fusion_ops()": 1156
+    "def register_onednn_fusion_ops()": 1207
   },
   "torch/_inductor/mock_cache.py": {
-    "class PatchCaches": 108
-  },
-  "torch/_inductor/pattern_matcher.py": {
-    "class ReplacementPatternEntry": 202,
-    "def ReplacementPatternEntry.replace_with_graph()": 188
+    "class PatchCaches": 109
   },
   "torch/_inductor/quantized_lowerings.py": {
-    "def register_woq_mm_ops()": 116
+    "def register_woq_mm_ops()": 118
   },
   "torch/_inductor/runtime/autotune_cache.py": {
-    "class AutotuneCache": 201
-  },
-  "torch/_inductor/runtime/benchmarking.py": {
-    "class InductorBenchmarker": 111
+    "class AutotuneCache": 199
   },
   "torch/_inductor/scheduler.py": {
-    "class BaseSchedulerNode": 695,
-    "class BaseScheduling": 142,
-    "class SchedulerBuffer": 106,
-    "class SchedulerNode": 268
-  },
-  "torch/_inductor/select_algorithm.py": {
-    "def AlgorithmSelectorCache.log_results()": 108
+    "class BaseSchedulerNode": 754,
+    "class SchedulerBuffer": 105
   },
   "torch/_inductor/utils.py": {
-    "class IndentedBuffer": 145
+    "class IndentedBuffer": 148
   }
 }

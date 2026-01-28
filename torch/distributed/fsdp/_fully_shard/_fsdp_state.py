@@ -3,7 +3,7 @@
 import functools
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -17,7 +17,6 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
-from torch.utils._pytree import tree_flatten
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
@@ -45,14 +44,14 @@ class FSDPStateContext:
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
-        self.iter_forward_root: Optional[FSDPState] = None
+        self.iter_forward_root: FSDPState | None = None
         # Final callback should only be queued once per backward
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
-        self.post_optim_event: Optional[torch.Event] = None
+        self.post_optim_event: torch.Event | None = None
 
 
 def disable_if_config_true(func):
@@ -73,8 +72,8 @@ def disable_if_config_true(func):
 class FSDPState(_State):
     def __init__(self) -> None:
         super().__init__()
-        self._fsdp_param_group: Optional[FSDPParamGroup] = None
-        self._is_root: Optional[bool] = None  # root set during lazy init
+        self._fsdp_param_group: FSDPParamGroup | None = None
+        self._is_root: bool | None = None  # root set during lazy init
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
@@ -83,7 +82,7 @@ class FSDPState(_State):
         self._modules_to_run_forward: set[nn.Module] = set()
         # ``False`` when user set reshard_after_forward
         # through ``fully_shard`` or ``set_reshard_after_forward``
-        self._auto_reshard_after_forward: Optional[bool] = True
+        self._auto_reshard_after_forward: bool | None = True
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -341,10 +340,10 @@ class FSDPState(_State):
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-        flat_outputs, _ = tree_flatten(output)
-        for t in flat_outputs:
-            if torch.is_tensor(t) and t.requires_grad:
-                t.register_hook(self._pre_backward)
+        _apply_to_tensors(
+            lambda x: x.register_hook(self._pre_backward) if x.requires_grad else x,
+            output,
+        )
         return output
 
     def _register_root_post_backward_final_callback(self):
@@ -356,7 +355,7 @@ class FSDPState(_State):
         )
 
 
-def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
+def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:
     state = _get_module_state(module)
     if isinstance(state, FSDPState):
         return state

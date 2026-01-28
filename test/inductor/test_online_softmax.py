@@ -7,6 +7,7 @@ import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._dynamo.utils import rmse, same
+from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
@@ -14,7 +15,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_TRITON
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -138,8 +139,19 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(same(ref, act, tol=1e-2))
 
         if nrow == 2048 and dim == 0:
-            # split reduction is triggered. We have multiple kernels
-            self.assertTrue(code.count("def triton") >= 2)
+            num_kernels = 2
+            # split reduction may be triggered depending on the device's SM/CU count.
+            # The heuristic in num_splits() in ir.py returns split=1 (no split) when:
+            #   numel_hint >= num_sm * 2 * 32
+            # When dim=0, numel_hint (output size) = ncol (2048)
+            # split is expected only when num_sm > 32
+            props = DeviceProperties.create(torch.device(GPU_TYPE))
+            num_sm = props.multi_processor_count
+            split_not_expected = 2048 >= num_sm * 2 * 32
+            if split_not_expected:
+                num_kernels = 1
+
+            self.assertTrue(code.count("def triton") >= num_kernels)
         else:
             if nrow == 2 and dim == 0:
                 # persistent reduction triggered
@@ -310,5 +322,5 @@ class TestOnlineSoftmax(TestCase):
 instantiate_parametrized_tests(TestOnlineSoftmax)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX and HAS_GPU and HAS_TRITON:
         run_tests()

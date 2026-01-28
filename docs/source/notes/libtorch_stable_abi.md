@@ -32,6 +32,8 @@ It consists of
 
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 
+For complete API documentation of the stable operators, see the [Torch Stable API cpp documentation](https://docs.pytorch.org/cppdocs/stable.html). <!-- @lint-ignore: URL won't exist till stable.rst cpp docs are published in 2.10 -->
+
 ### Stable C headers
 
 The stable C headers started by AOTInductor form the foundation of the stable ABI. Presently, the available C headers include:
@@ -50,7 +52,7 @@ which will handle all the rough edges of the C API for the user.
 
 If you'd like your kernel to be ABI stable with LibTorch, meaning you'd the ability to build for one version and run on another, your kernel must only use the limited stable ABI. This following section goes through some steps of migrating an existing kernel and APIs we imagine you would need to swap over.
 
-Firstly, instead of registering kernels through `TORCH_LIBRARY`, LibTorch ABI stable kernels must be registered via `STABLE_TORCH_LIBRARY`. Note that, for the time being, implementations registered via `STABLE_TORCH_LIBRARY` must be boxed unlike `TORCH_LIBRARY`. See the simple example below or our docs on [Stack-based APIs](stack-based-apis) for more details. For kernels that are registered via `pybind`, before using the stable ABI, it would be useful to migrate to register them via `TORCH_LIBRARY`.
+Firstly, instead of registering kernels through `TORCH_LIBRARY`, LibTorch ABI stable kernels must be registered via `STABLE_TORCH_LIBRARY`. Note that implementations registered via `STABLE_TORCH_LIBRARY` must be boxed unlike `TORCH_LIBRARY`. The `TORCH_BOX` macro handles this automatically for most use cases. See the simple example below or our docs on [Stack-based APIs](stack-based-apis) for more details. For kernels that are registered via `pybind`, before using the stable ABI, it would be useful to migrate to register them via `TORCH_LIBRARY`.
 
 While previously your kernels might have included APIs from `<torch/*.h>` (for example, `<torch/all.h>`), they are now limited to including from the 3 categories of headers mentioned above (`torch/csrc/stable/*.h`, `torch/headeronly/*.h` and the stable C headers). This means that your extension should no longer use any utilities from the `at::` or `c10::` namespaces but instead use their replacements in `torch::stable` and `torch::headeronly`. To provide a couple examples of the necessary migrations:
 - all uses of `at::Tensor` must be replaced with `torch::stable::Tensor`
@@ -82,7 +84,7 @@ at::Tensor add_scalar(const at::Tensor& input, double scalar) {
 
 // Register the operator
 TORCH_LIBRARY(myops, m) {
-  m.def("add_scalar(Tensor input, float scalar) -> Tensor", &add_scalar);
+  m.def("add_scalar(Tensor input, float scalar) -> Tensor");
 }
 
 // Register the implementation
@@ -103,7 +105,6 @@ TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/csrc/stable/ops.h>
-#include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 
@@ -121,28 +122,15 @@ torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scal
   return torch::stable::add(input, scalar);
 }
 
-// (5) Add Boxed wrapper required for STABLE_TORCH_LIBRARY
-void boxed_add_scalar(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-  // Extract arguments from stack using `to<T>`
-  auto input = to<torch::stable::Tensor>(stack[0]);
-  auto scalar = to<double>(stack[1]);
-
-  // Call the actual kernel
-  auto result = add_scalar(input, scalar);
-
-  // Put result back on stack using `from()`
-  // Stack slot 0 now holds the return value
-  stack[0] = from(result);
-}
-
-// (6) Register the operator using STABLE_TORCH_LIBRARY
+// (5) Register the operator using STABLE_TORCH_LIBRARY
 STABLE_TORCH_LIBRARY(myops, m) {
-  m.def("add_scalar(Tensor input, float scalar) -> Tensor", &boxed_add_scalar);
+  m.def("add_scalar(Tensor input, float scalar) -> Tensor");
 }
 
-// (7) Register the implementation using STABLE_TORCH_LIBRARY_IMPL
+// (6) Register the implementation using STABLE_TORCH_LIBRARY_IMPL
+//     Use TORCH_BOX to automatically handle boxing/unboxing
 STABLE_TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
-  m.impl("add_scalar", &boxed_add_scalar);
+  m.impl("add_scalar", TORCH_BOX(&add_scalar));
 }
 
 } // namespace myops
@@ -177,21 +165,20 @@ You can always work with StableIValue abstractions in your custom kernel for typ
 | -------- | ------- | ------- | ------- |
 | std::optional\<S> | if there is a value, raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue representing S. if there is no value, nullptr. | std::optional\<T> | Type? |
 | torch::stable::Tensor | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
-| RAIIATH (outdated) | raw bitwise copy of underlying AtenTensorHandle into leading bytes of uint64_t | at::Tensor |  Tensor |
 | torch::headeronly::ScalarType | raw bitwise copy of the translated underlying enum into leading bytes of uint64_t | torch::headeronly::ScalarType | ScalarType |
-| int32_t | raw bitwise copy into leading bytes of uint64_t | at::Layout | Layout |
-| int32_t | raw bitwise copy into leading bytes of uint64_t | at::MemoryFormat | MemoryFormat |
+| torch::headeronly::Layout | raw bitwise copy of the translated underlying enum into leading bytes of uint64_t | at::Layout | Layout |
+| torch::headeronly::MemoryFormat | raw bitwise copy of the translated underlying enum into leading bytes of uint64_t | at::MemoryFormat | MemoryFormat |
 | bool | raw bitwise copy into leading bytes of uint64_t | bool | bool |
 | int64_t | raw bitwise copy into leading bytes of uint64_t | int64_t | int |
 | double | raw bitwise copy into leading bytes of uint64_t | double | float |
-| ? | ? | c10::Device | Device |
+| torch::stable::Device | raw bitwise copy of index and type into leading bytes of uint64_t | c10::Device | Device |
 | ? | ? | c10::Stream | Stream |
 | ? | ? | c10::complex<double> | complex |
 | ? | ? | at::Scalar | Scalar |
-| ? | ? | std::string/const char*/ivalue::ConstantString | str |
+| std::string/std::string_view | raw bitwise copy of underlying StringHandle into leading bytes of uint64_t | std::string/const char*/ivalue::ConstantString | str |
 | ? | ? | at::Storage | Storage |
 | ? | ? | at::Generator | Generator |
-| ? | ? | c10::List\<T> | Type[] |
+| std::vector<T>/torch::headeronly::HeaderOnlyArrayRef<T> | raw bitwise copy into leading bytes of uint64_t of pointer to a new StableIValue pointing to a list of StableIValues recursively representing the underlying elements. | c10::List\<T> | Type[] |
 | ? | ? | ivalue::Tuple\<T> | (Type, ...) |
 | ? | ? | c10::SymInt | SymInt |
 | ? | ? | c10::SymFloat | SymFloat |
@@ -217,7 +204,7 @@ There are two invariants for the stack:
 The above is relevant in two places:
 
 1. `STABLE_TORCH_LIBRARY`
-    Unlike `TORCH_LIBRARY`, the dispatcher expects kernels registered via `STABLE_TORCH_LIBRARY` to be boxed. This means they must have the signature `(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) -> void`.We plan to eventually abstract away the need for manual boxing, but, for the time being, please use `from` and `to`.
+    Unlike `TORCH_LIBRARY`, the dispatcher expects kernels registered via `STABLE_TORCH_LIBRARY` to be boxed. The `TORCH_BOX` macro automatically handles this boxing for you:
 
     ```cpp
     Tensor my_amax_vec(Tensor t) {
@@ -225,9 +212,9 @@ The above is relevant in two places:
         return amax(t, v, false);
     }
 
-    void boxed_my_amax_vec(StableIValue* stack, uint64_t num_args, uint64_t num_outputs) {
-        auto res = my_amax_vec(to<Tensor>(stack[0]));
-        stack[0] = from(res);
+    // Use TORCH_BOX to automatically generate the boxed wrapper
+    STABLE_TORCH_LIBRARY(myops, m) {
+        m.def("my_amax_vec(Tensor t) -> Tensor", TORCH_BOX(&my_amax_vec));
     }
     ```
 
@@ -266,3 +253,5 @@ Extensions can select the minimum abi version to be compatible with using:
 before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
 
 The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_ABI_VERSION they are exposed in and forward compatible with newer libtorch binaries.
+
+C++ APIs in ``torch/csrc/stable`` or ``torch/headeronly`` are subject to the same FC/BC policy as the rest of PyTorch (see [policy](https://github.com/pytorch/pytorch/wiki/PyTorch's-Python-Frontend-Backward-and-Forward-Compatibility-Policy)). LibTorch ABI stable C shim APIs are guaranteed to have at least a two year compatibility window.

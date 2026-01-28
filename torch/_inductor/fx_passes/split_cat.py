@@ -290,7 +290,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
         log.debug("example value absent for node: %s", input)
         return
     ndim = input.meta["example_value"].ndim
-    # pyrefly: ignore [unsupported-operation]
+
     if dim < 0:  # Normalize unbind dim
         dim += ndim
     with graph.inserting_after(node):
@@ -340,7 +340,6 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
     )
 
-    # pyrefly: ignore [unsupported-operation]
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
@@ -776,6 +775,7 @@ class SplitCatSimplifier:
         """
         merged_ranges = []
         cur_range = None
+        # pyrefly: ignore [bad-assignment]
         for input_ in inputs:
             if isinstance(input_, int):
                 if not cur_range:
@@ -869,6 +869,7 @@ class SplitCatSimplifier:
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
                     subset_split_sections = split_sections[  # type: ignore[index]
+                        # pyrefly: ignore [bad-index]
                         user_input[0] : user_input[1]
                         + 1  # type: ignore[index]
                     ]
@@ -994,6 +995,7 @@ class SplitCatSimplifier:
             to_stack, to_stack_meta = [], []
             stack_dim = None
             with graph.inserting_before(user_node):
+                # pyrefly: ignore [bad-assignment]
                 for user_input_new, transform_param in zip(
                     user_inputs_new, transform_params
                 ):
@@ -1424,7 +1426,7 @@ def simplify_split_cat(match: Match, split_sections: list[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
         return
     split_node = next(node for node in match.nodes if node.target is torch.split)
-    # pyrefly: ignore [bad-argument-type]
+
     SplitCatSimplifier().simplify(match.graph, split_node, split_sections)
 
 
@@ -1970,7 +1972,6 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
 
     assert all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors)
 
-    # pyrefly: ignore [unsupported-operation]
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
