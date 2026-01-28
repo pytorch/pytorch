@@ -1,10 +1,6 @@
 # Torch Distributed Elastic
 
-Torch Distributed Elastic (also known as PyTorch Elastic) is a framework that enables fault-tolerant and elastic distributed training for PyTorch applications. It extends PyTorch's distributed training capabilities to handle real-world production scenarios where worker nodes may fail, be preempted, or need to be dynamically scaled.
-
-## What is PyTorch Elastic?
-
-PyTorch Elastic provides two key capabilities that make distributed training more robust and flexible:
+Torch Distributed Elastic is a framework that enables fault-tolerant and elastic distributed training for PyTorch applications. It extends PyTorch's distributed training capabilities to handle real-world production scenarios where worker nodes may fail, be preempted, or need to be dynamically scaled by providing two key capabilities that make distributed training more robust and flexible:
 
 ### Fault Tolerance
 
