@@ -208,6 +208,17 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
 }
 
 Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
+  // Check for dtype compatibility: if output is integral, inputs must not be floating point
+  // to avoid undefined behavior when converting float to int with non-integer values
+  if (at::isIntegralType(result.scalar_type(), /*includeBool=*/false)) {
+    TORCH_CHECK(
+        !start.isFloatingPoint() && !end.isFloatingPoint() && !step.isFloatingPoint(),
+        "torch.arange received floating-point inputs (start=", start,
+        ", end=", end, ", step=", step,
+        ") but the output tensor has integral dtype ", result.scalar_type(),
+        ". This is not supported because it can produce undefined behavior. "
+        "Please use a floating-point output tensor or integer inputs.");
+  }
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
