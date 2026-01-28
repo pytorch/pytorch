@@ -15,7 +15,6 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout="10" && \
     apt-get -y install --no-install-recommends \
     build-essential \
     curl \
-    sudo \
     jq \
     gnupg-agent \
     iptables \
@@ -52,14 +51,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Setup user and permissions
 RUN useradd -c "Action Runner" -m runner && \
-    usermod -L runner && \
-    echo "runner ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/runner && \
     groupadd podman || true && \
     usermod -aG podman runner
 
 # Configure Podman cgroup manager
 RUN mkdir -p /etc/containers && \
-    echo "[engine]\ncgroup_manager = \"cgroupfs\"" | sudo tee /etc/containers/containers.conf
+    echo "[engine]\ncgroup_manager = \"cgroupfs\"" > /etc/containers/containers.conf
 
 # Add and configure GitHub Actions runner
 ARG RUNNERREPO="https://github.com/actions/runner"

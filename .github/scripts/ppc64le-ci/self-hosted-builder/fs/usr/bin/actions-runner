@@ -30,9 +30,6 @@ curl \
  
 unset ACCESS_TOKEN
 
-sudo umount /run/runner_secret
-sudo rm -f /run/runner_secret
-
 # register runner as ephemeral runner
 # it does one job, stops and unregisters
 registration_token=$(jq --raw-output .token "$token_file")
