@@ -10,7 +10,7 @@ retry () {
 # OS version or higher
 OMP_PREFIX=/opt/llvm-openmp
 sudo mkdir -p ${OMP_PREFIX}
-sudo chown -R $USER:$USER ${OMP_PREFIX}
+sudo chown -R $USER: ${OMP_PREFIX}
 # need zstd to extract
 retry brew install zstd
 pushd ${OMP_PREFIX}
