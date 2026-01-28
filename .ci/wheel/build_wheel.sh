@@ -232,7 +232,7 @@ elif [[ $RENAME_WHEEL == false ]]; then
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_gen"
     if [[ "$VERIFY_WHEELNAME" == "true" && "$wheel_filename_gen" != "$wheel_filename_new" ]]; then
         echo "Got wheelname: $wheel_filename_gen. Expected: $wheel_filename_new"
-	exit 1
+        exit 1
     fi
 else
     pushd "$pytorch_rootdir"
