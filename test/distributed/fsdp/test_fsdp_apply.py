@@ -11,7 +11,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     get_devtype,
     NestedWrappedModule,
     TransformerWithSharedParams,
@@ -33,7 +33,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 device_type = torch.device(get_devtype())
 
 
-class TestApply(FSDPTest):
+class TestApply(FSDPTestContinuous):
     @property
     def world_size(self):
         if torch.accelerator.is_available():
