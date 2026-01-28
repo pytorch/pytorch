@@ -26,6 +26,10 @@ from torch.distributed.tensor.placement_types import (
 logger = logging.getLogger(__name__)
 
 
+class ImplicitRedistributionError(Exception):
+    """Raised when implicit redistribution occurs within ExplicitRedistributionContext."""
+
+
 def _format_implicit_redistribution_msg(schema: OpSchema) -> str:
     return f"Implicit redistribution occurred for {schema} while ExplicitRedistributionContext was active"
 
@@ -75,7 +79,7 @@ class ExplicitRedistributionContext:
                     allowed = redistribute_cost(src_spec, dst_spec) <= 0
             if not allowed:
                 if instance._raise_on_redistribution:
-                    raise RuntimeError(redistribution_msg)
+                    raise ImplicitRedistributionError(redistribution_msg)
                 else:
                     logger.warning(redistribution_msg)
 
