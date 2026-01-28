@@ -109,6 +109,12 @@ class _TransformInfo(NamedTuple):
     # logical_shape on this mesh dimension
     logical_shape: list[int]
 
+    def __post_init__(self):
+        assert self.mesh_dim >= 0
+        assert self.src_dst_placements[0] != self.src_dst_placements[1], (
+            "TransformInfo should only be created if it is an op with some effect, not a no-op"
+        )
+
 
 # Global cache for DTensorRedistributePlanner instances
 _planner_cache: dict[
@@ -305,6 +311,7 @@ class DTensorRedistributePlanner:
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
         self.strided_shard_placements_in_target: set[_StridedShard] = set()
+        self.partial_reduce_ops_in_target: set[str] = set()
         self.setup_cost_callbacks()
 
     def setup_cost_callbacks(
@@ -528,19 +535,30 @@ class DTensorRedistributePlanner:
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
-        # handle case 6: Replicate() -> Partial(), default to partial(sum)
+        # handle case 6: Replicate() -> Partial()
+        # Generate transitions only for reduce_ops that are present in the src/dst
+        # placements for this redistribution, avoiding unnecessary graph expansion.
         for mesh_dim, placement in enumerate(placements):
             if not isinstance(placement, Replicate):
                 continue
-            new_placements = list(placements)
-            new_placements[mesh_dim] = Partial()
-            dist_state = self.DistState(
-                self._to_tuple(new_placements), tensor_mesh_dim_tuple
-            )
-            all_next_state[dist_state] = self.cost_function(
-                cur_dist_state,
-                dist_state,
-            )
+            for reduce_op in self.partial_reduce_ops_in_target:
+                new_placements = list(placements)
+                new_placements[mesh_dim] = Partial(reduce_op)
+
+                # Skip if this would create mixed partial types (except sum+avg which commute)
+                partial_reduce_ops = {
+                    p.reduce_op for p in new_placements if isinstance(p, Partial)
+                }
+                if len(partial_reduce_ops) > 1 and partial_reduce_ops != {"sum", "avg"}:
+                    continue
+
+                dist_state = self.DistState(
+                    self._to_tuple(new_placements), tensor_mesh_dim_tuple
+                )
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
 
         # Additional cases handling for _StridedShard
 
@@ -737,6 +755,13 @@ class DTensorRedistributePlanner:
             if isinstance(placement, _StridedShard):
                 self.strided_shard_placements_in_target.add(placement)
 
+        # Collect Partial reduce ops from src and dst placements. These are used
+        # to generate R->P transitions only for reduce ops that are actually
+        # present in the redistribution, avoiding unnecessary graph expansion.
+        for placement in itertools.chain(src_placements, dst_placements):
+            if isinstance(placement, Partial):
+                self.partial_reduce_ops_in_target.add(placement.reduce_op)
+
         src_state = self.DistState(src_placements, src_shard_order)
         dst_state = self.DistState(dst_placements, dst_shard_order)
         transform_infos: list[_TransformInfo] = []
@@ -790,14 +815,18 @@ class DTensorRedistributePlanner:
         transform_infos: list[_TransformInfo] = []
         if self.device_mesh.ndim == 1:
             # if device_mesh is 1D, redistribute is a simple direct
-            # transformation
-            transform_infos.append(
-                _TransformInfo(
-                    mesh_dim=0,
-                    src_dst_placements=(src_spec.placements[0], dst_spec.placements[0]),
-                    logical_shape=initial_logical_shape,
+            # transformation (skip if src == dst)
+            if src_spec.placements[0] != dst_spec.placements[0]:
+                transform_infos.append(
+                    _TransformInfo(
+                        mesh_dim=0,
+                        src_dst_placements=(
+                            src_spec.placements[0],
+                            dst_spec.placements[0],
+                        ),
+                        logical_shape=initial_logical_shape,
+                    )
                 )
-            )
             return transform_infos
 
         # Handle multi-dim device mesh placement redistribution First, we need
