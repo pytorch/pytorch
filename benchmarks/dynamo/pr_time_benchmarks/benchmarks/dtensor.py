@@ -5,7 +5,7 @@ from benchmark_base import BenchmarkBase
 import torch
 from torch.distributed._tensor import DTensor, Partial, Replicate, Shard
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.distributed.tensor._utils import ExplicitRedistributionContext
+
 
 class BenchmarkDTensorDispatch(BenchmarkBase):
     def __init__(self, operator, world_size) -> None:

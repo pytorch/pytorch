@@ -295,8 +295,8 @@ def _optimize_transform_infos(
     - all_to_all operations are excluded from merging, but it may be possible to merge them in some cases.
 
     """
-    if not transform_infos:
-        return []
+    if len(transform_infos) < 2:
+        return transform_infos
 
     # Comm types that are safe to merge (all_to_all excluded for now)
     MERGEABLE_COMM_TYPES = frozenset({"all_gather", "all_reduce", "reduce_scatter"})
