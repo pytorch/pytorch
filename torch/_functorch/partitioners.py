@@ -1,4 +1,5 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import copy
 import functools
 import hashlib
@@ -14,7 +15,7 @@ import warnings
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._inductor.inductor_prims
@@ -71,6 +72,7 @@ from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
 
 
 if TYPE_CHECKING:
+    import networkx as nx
     import sympy
 
 
@@ -91,19 +93,19 @@ class OpTypes:
     view_ops: OrderedSet[Callable]
     recomputable_ops: OrderedSet[Callable]
 
-    def is_fusible(self, node: fx.Node):
+    def is_fusible(self, node: fx.Node) -> bool:
         return get_aten_target(node) in self.fusible_ops
 
-    def is_compute_intensive(self, node: fx.Node):
+    def is_compute_intensive(self, node: fx.Node) -> bool:
         return get_aten_target(node) in self.compute_intensive_ops
 
-    def is_random(self, node: fx.Node):
+    def is_random(self, node: fx.Node) -> bool:
         return get_aten_target(node) in self.random_ops
 
-    def is_view(self, node: fx.Node):
+    def is_view(self, node: fx.Node) -> bool:
         return get_aten_target(node) in self.view_ops
 
-    def is_recomputable(self, node: fx.Node):
+    def is_recomputable(self, node: fx.Node) -> bool:
         return get_aten_target(node) in self.recomputable_ops
 
 
@@ -182,12 +184,12 @@ def sym_node_size(node: fx.Node) -> int:
 
 
 class InvalidNodeBase:
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "Invalid Node"
 
 
 # Run DCE while overriding the definition of is_impure_node
-def is_not_collective(node):
+def is_not_collective(node: fx.Node) -> bool:
     return getattr(node.target, "namespace", None) != "_c10d_functional"
 
 
@@ -199,7 +201,7 @@ def _extract_graph_with_inputs_outputs(
     inputs: list[fx.Node],
     outputs: list[fx.Node],
     outputs_descs: list[AOTOutput],
-    subgraph: Optional[str] = None,
+    subgraph: str | None = None,
     ignore_must_be_in_fw_bw: bool = False,
 ) -> fx.Graph:
     """
@@ -362,7 +364,7 @@ def _must_be_in_backward(node: fx.Node) -> bool:
 
 
 def _extract_fwd_bwd_outputs(
-    joint_module: fx.GraphModule, *, num_fwd_outputs
+    joint_module: fx.GraphModule, *, num_fwd_outputs: int
 ) -> tuple[list[fx.Node], list[fx.Node], list[AOTOutput], list[AOTOutput]]:
     outputs = pytree.arg_tree_leaves(
         *(node.args for node in joint_module.graph.find_nodes(op="output"))
@@ -379,7 +381,7 @@ def _extract_fwd_bwd_outputs(
     return fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs
 
 
-def _remove_by_name(saved_values: list[fx.Node], name: str):
+def _remove_by_name(saved_values: list[fx.Node], name: str) -> None:
     for saved_value in saved_values:
         if saved_value.name == name:
             saved_values.remove(saved_value)
@@ -387,7 +389,7 @@ def _remove_by_name(saved_values: list[fx.Node], name: str):
 
 
 def find_first_sym_node(
-    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node, ...]],
+    fwd_module_outputs: list[fx.Node] | tuple[fx.Node, ...],
 ) -> int:
     idx = len(fwd_module_outputs)
     for i in range(len(fwd_module_outputs) - 1, -1, -1):
@@ -403,7 +405,7 @@ def calculate_quantization_scaling(
     max: float = 57344.0,
     min: float = 1e-12,
     position: int = 0,
-):
+) -> torch.fx.Node:
     with graph.inserting_after(node):
         abs_node = graph.call_function(
             torch.ops.aten.abs.default,
@@ -856,7 +858,7 @@ def enable_activation_quantization(
     saved_values: list[fx.Node],
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
-    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+    static_lifetime_input_nodes: OrderedSet[fx.Node] | None = None,
 ) -> None:
     if (
         inductor_config.post_grad_fusion_options.get(
@@ -905,7 +907,7 @@ def _extract_fwd_bwd_modules(
     saved_sym_nodes: list[fx.Node],
     *,
     num_fwd_outputs: int,
-    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+    static_lifetime_input_nodes: OrderedSet[fx.Node] | None = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
@@ -1062,11 +1064,11 @@ def _extract_fwd_bwd_modules(
 
 def default_partition(
     joint_module: fx.GraphModule,
-    _joint_inputs,
+    _joint_inputs: Any,
     *,
-    num_fwd_outputs,
-    static_lifetime_input_indices: Optional[list[int]] = None,
-    static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+    num_fwd_outputs: int,
+    static_lifetime_input_indices: list[int] | None = None,
+    static_lifetime_input_nodes: OrderedSet[fx.Node] | None = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -1141,18 +1143,18 @@ def default_partition(
 
     distributed_enabled = torch.distributed.is_available()
 
-    def is_tensor(node):
+    def is_tensor(node: fx.Node) -> bool:
         return "tensor_meta" in node.meta or isinstance(
             node.meta.get("val"), torch._subclasses.FakeTensor
         )
 
-    def is_multi_output(node):
+    def is_multi_output(node: fx.Node) -> bool:
         return (
             all(user.target == operator.getitem for user in node.users)
             and len(node.users) > 0
         )
 
-    def is_impure(node):
+    def is_impure(node: fx.Node) -> bool:
         # wait tensor is an "impure" op according to DCE's definition of impure
         # (see is_impure in torch/fx/node.py), but it survives past
         # functionalization and can be safely dup'd and reordered under the
@@ -1280,12 +1282,12 @@ def default_partition(
 INT_INF = int(1e6)
 
 
-def _tensor_nbytes(numel: int, dtype) -> int:
+def _tensor_nbytes(numel: int, dtype: torch.dtype) -> int:
     return numel * dtype.itemsize
 
 
 def _size_of(node: fx.Node) -> int:
-    def object_nbytes(x) -> int:
+    def object_nbytes(x: object) -> int:
         if not isinstance(x, torch.Tensor):
             return 0
         return _tensor_nbytes(size_hint(x.numel(), fallback=4096), x.dtype)
@@ -1313,7 +1315,7 @@ def _size_of(node: fx.Node) -> int:
 
 
 # Used for some investigative purposes
-def _count_ops(graph: fx.Graph):
+def _count_ops(graph: fx.Graph) -> None:
     from collections import defaultdict
 
     cnt: dict[str, int] = defaultdict(int)
@@ -1324,8 +1326,8 @@ def _count_ops(graph: fx.Graph):
 
 
 @functools.cache
-def pointwise_ops():
-    ops = []
+def pointwise_ops() -> list[torch._ops.OpOverloadPacket]:
+    ops: list[torch._ops.OpOverloadPacket] = []
     for attr_name in dir(torch.ops.aten):
         opoverloadpacket = getattr(torch.ops.aten, attr_name)
         if not isinstance(opoverloadpacket, torch._ops.OpOverloadPacket):
@@ -1341,7 +1343,9 @@ def pointwise_ops():
     return ops
 
 
-def sort_depths(args, depth_map: dict[fx.Node, int]) -> list[tuple[fx.Node, int]]:
+def sort_depths(
+    args: tuple[Any, ...], depth_map: dict[fx.Node, int]
+) -> list[tuple[fx.Node, int]]:
     arg_depths = {
         arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
     }
@@ -1380,7 +1384,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
 
     order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
-    def insert_node_in_graph(node):
+    def insert_node_in_graph(node: fx.Node) -> None:
         cur_nodes = [node]
         insertable_nodes: OrderedSet[fx.Node] = OrderedSet()
         while len(cur_nodes) > 0:
@@ -1435,7 +1439,7 @@ def apply_graphsafe_rng_functionalization(
     rng_count: int,
     last_fwd_input: torch.fx.Node,
     last_bwd_input: torch.fx.Node,
-):
+) -> tuple[torch.fx.Node, torch.fx.Node]:
     """
     Note [CUDA Graph Safe RNG Functionalization]
 
@@ -1546,8 +1550,8 @@ def functionalize_rng_ops(
     # Unique id to generate name
     uid = itertools.count()
 
-    def get_rng_ops(gmod):
-        random_nodes = {}
+    def get_rng_ops(gmod: fx.GraphModule) -> dict[str, fx.Node]:
+        random_nodes: dict[str, fx.Node] = {}
         for node in gmod.graph.nodes:
             if (
                 node.op == "call_function"
@@ -1557,7 +1561,7 @@ def functionalize_rng_ops(
                 random_nodes[node.name] = node
         return random_nodes
 
-    def get_device(node) -> Optional[torch.device]:
+    def get_device(node: fx.Node) -> torch.device | None:
         """
         Check the example value of the node outputs to find the device type.
         """
@@ -1575,7 +1579,7 @@ def functionalize_rng_ops(
 
         return torch.device("cpu")
 
-    def get_sample_rng_state(device: Optional[torch.device]):
+    def get_sample_rng_state(device: torch.device | None) -> torch.Tensor:
         from torch._guards import detect_fake_mode  # noqa: F401
 
         fake_mode = detect_fake_mode()
@@ -1775,10 +1779,11 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             break
 
 
-def is_getitem_of_multi_output(node):
+def is_getitem_of_multi_output(node: fx.Node) -> bool:
     if node.target != operator.getitem:
         return False
     parent = node.args[0]
+    assert type(parent) is fx.Node
     return "tensor_meta" not in parent.meta and node.op == "call_function"
 
 
@@ -1842,8 +1847,8 @@ def solve_min_cut(
     joint_graph: fx.Graph,
     node_info: NodeInfo,
     min_cut_options: MinCutOptions,
-    dont_ban: Optional[OrderedSet[fx.Node]] = None,
-):
+    dont_ban: OrderedSet[fx.Node] | None = None,
+) -> tuple[list[fx.Node], OrderedSet[fx.Node]]:
     if dont_ban is None:
         dont_ban = OrderedSet()
     op_types = get_default_op_list()
@@ -1859,15 +1864,18 @@ def solve_min_cut(
         )
         log.info("Ops banned from re-materialization: %s", ops_ignored)
 
-    def can_fuse_into_auto_functionalized(a, b):
+    def can_fuse_into_auto_functionalized(a: fx.Node, b: fx.Node) -> bool:
         if b.target != torch.ops.higher_order.auto_functionalized:
             return False
         mutable_op = b.args[0]
         (
             mutable_arg_names,
             _,
-        ) = torch._higher_order_ops.auto_functionalize.get_mutable_args(mutable_op)
-        for name in mutable_arg_names:
+        ) = torch._higher_order_ops.auto_functionalize.get_mutable_args(
+            # pyrefly: ignore[bad-argument-type]
+            mutable_op
+        )
+        for name in mutable_arg_names:  # pyrefly: ignore [not-iterable]
             arg = b.kwargs[name]
             if a is arg:
                 return True
@@ -1876,17 +1884,19 @@ def solve_min_cut(
                     return True
         return False
 
-    def can_fuse_into_triton_kernel_wrapper_functional(a, b):
+    def can_fuse_into_triton_kernel_wrapper_functional(a: fx.Node, b: fx.Node) -> bool:
         if b.target != torch.ops.higher_order.triton_kernel_wrapper_functional:
             return False
         mutable_arg_names = b.kwargs["tensors_to_clone"]
-        for name in mutable_arg_names:
-            arg = b.kwargs["kwargs"][name]
+        for name in mutable_arg_names:  # pyrefly: ignore [not-iterable]
+            kwargs: Any = b.kwargs["kwargs"]
+            assert kwargs is not None
+            arg = kwargs[name]
             if a is arg:
                 return True
         return False
 
-    def is_fusible(a, b):
+    def is_fusible(a: fx.Node, b: fx.Node) -> bool:
         # We can perform "memory fusion" into a cat, but cat cannot be a
         # producer to a fusion
         if get_aten_target(b) == aten.cat:
@@ -1897,7 +1907,7 @@ def solve_min_cut(
             return True
         if (
             a.target is operator.getitem
-            and a.args[0].target
+            and a.args[0].target  # pyrefly: ignore [missing-attribute]
             is torch.ops.higher_order.triton_kernel_wrapper_functional
         ):
             # if a is the output of a user triton kernel,
@@ -1912,7 +1922,7 @@ def solve_min_cut(
             "Need networkx installed to perform smart recomputation heuristics"
         ) from e
 
-    def is_materialized_backwards(node):
+    def is_materialized_backwards(node: fx.Node) -> bool:
         if op_types.is_view(node):
             return False
         cur_nodes = OrderedSet([node])
@@ -1926,7 +1936,7 @@ def solve_min_cut(
 
         return False
 
-    def should_ban_recomputation(node) -> Optional[str]:
+    def should_ban_recomputation(node: fx.Node) -> str | None:
         """Returns reason string if node should be banned from recomputation, None otherwise."""
         if node.op != "call_function":
             return None
@@ -1965,7 +1975,10 @@ def solve_min_cut(
         # modification appears to have made this heuristic a lot less critical
         # for performance.
         # NB: As of PR #121692, this hack no longer seems necessary.
-        if node.dist_from_bw < 1000 and node.dist_from_bw > config.max_dist_from_bw:
+        if (
+            # pyrefly: ignore [missing-attribute]
+            node.dist_from_bw < 1000 and node.dist_from_bw > config.max_dist_from_bw
+        ):
             return "too far from backward"
 
         # If the output of an op is 4x smaller (arbitrary choice),
@@ -1982,15 +1995,15 @@ def solve_min_cut(
                 return "reduction op"
         return None
 
-    def is_materialized(node):
+    def is_materialized(node: fx.Node) -> bool:
         if node.op == "placeholder":
             return True
 
         return not all(is_fusible(node, user) for user in node.users)
 
     def get_node_weight(
-        node, static_lifetime_input_nodes
-    ) -> tuple[float, Optional[str]]:
+        node: fx.Node, static_lifetime_input_nodes: OrderedSet[fx.Node]
+    ) -> tuple[float, str | None]:
         """Returns (weight, cannot_save_reason).
 
         cannot_save_reason is None for finite weights, or a string explaining
@@ -2019,7 +2032,10 @@ def solve_min_cut(
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
-        mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
+        mem_sz = int(
+            # pyrefly: ignore [missing-attribute]
+            mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1))
+        )
         if is_materialized(node):
             return mem_sz, None
         else:
@@ -2028,7 +2044,7 @@ def solve_min_cut(
     nx_graph = nx.DiGraph()
     banned_nodes: OrderedSet[fx.Node] = OrderedSet()
 
-    def ban_recomputation_if_allowed(node, reason: str = ""):
+    def ban_recomputation_if_allowed(node: fx.Node, reason: str = "") -> bool:
         if op_types.is_view(node):
             return False
         if node in dont_ban:
@@ -2276,8 +2292,8 @@ def solve_min_cut(
         structured_tracing_enabled = bool(trace_log.handlers)
 
         # Dump the FX graph for debugging
-        fx_graph_file: Optional[str] = None
-        fx_graph_str: Optional[str] = None
+        fx_graph_file: str | None = None
+        fx_graph_str: str | None = None
         joint_module = joint_graph.owning_module
         try:
             fx_graph_str = (
@@ -2454,8 +2470,8 @@ def solve_min_cut(
 
 
 def _find_infinite_capacity_path(
-    nx_graph,
-) -> Optional[list[tuple[str, str, str]]]:
+    nx_graph: nx.DiGraph[str, dict[str, Any]],
+) -> list[tuple[str, str, str]] | None:
     """BFS from source to sink following only infinite-capacity edges.
 
     Returns a list of (from_node, to_node, reason) tuples representing the path,
@@ -2501,7 +2517,9 @@ def _get_unique_path(base_name: str, extension: str) -> str:
     return f"{base_name}_{counter}{extension}"
 
 
-def visualize_min_cut_graph(nx_graph) -> tuple[Optional[str], Optional[str]]:
+def visualize_min_cut_graph(
+    nx_graph: nx.DiGraph[str, dict[str, Any]],
+) -> tuple[str | None, str | None]:
     """Visualize the min-cut graph to an SVG file.
 
     Returns (path_to_svg, svg_content) tuple. Both are None if pydot is unavailable.
@@ -2706,8 +2724,8 @@ def get_default_op_list() -> OpTypes:
     )
 
 
-def get_name_to_node(graph: fx.Graph):
-    name_to_node = {}
+def get_name_to_node(graph: fx.Graph) -> dict[str, fx.Node]:
+    name_to_node: dict[str, fx.Node] = {}
     for node in graph.nodes:
         name_to_node[node.name] = node
     return name_to_node
@@ -2768,7 +2786,7 @@ from torch.utils._mode_utils import no_dispatch
 def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Tensor:
     shape = list(x.shape)
 
-    def realize_symbol(d):
+    def realize_symbol(d: torch.SymInt | int) -> int:
         return size_hint(d, fallback=fallback)
 
     shape = [realize_symbol(s) for s in shape]
@@ -2776,10 +2794,10 @@ def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Te
     return x.new_empty_strided(shape, stride=stride)
 
 
-def estimate_runtime(node):
+def estimate_runtime(node: fx.Node) -> float:
     RUNTIME_MODE = config.activation_memory_budget_runtime_estimator
 
-    def materialize_arg(x):
+    def materialize_arg(x: Any) -> Any:
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
             return _remove_symbols_without_guarding(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
@@ -2799,6 +2817,7 @@ def estimate_runtime(node):
             from torch._inductor.runtime.benchmarking import benchmarker
 
             args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
+            # pyrefly: ignore[not-callable]
             ms = benchmarker.benchmark_gpu(lambda: node.target(*args, **kwargs))
             return ms
 
@@ -2808,6 +2827,7 @@ def estimate_runtime(node):
 
         args, kwargs = pytree.tree_map(materialize_arg, (node.args, node.kwargs))
         with FlopCounterMode(display=False) as mode:
+            # pyrefly: ignore[not-callable]
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()
         return max(counted_flops, 1)
@@ -2822,7 +2842,7 @@ def estimate_runtime(node):
 def choose_saved_values_set(
     joint_graph: fx.Graph,
     node_info: NodeInfo,
-    memory_budget=1,
+    memory_budget: float = 1,
 ) -> list[fx.Node]:
     if memory_budget > 1 or memory_budget < 0:
         raise RuntimeError(
@@ -2865,10 +2885,10 @@ def choose_saved_values_set(
     if max_act_size <= min_act_size:
         return runtime_optimized_saved_values
 
-    def get_normalized_size(sz):
+    def get_normalized_size(sz: float) -> float:
         return (sz / 1e9) / (max_act_size - min_act_size)
 
-    def get_mem_ratio(activations: list[fx.Node]):
+    def get_mem_ratio(activations: list[fx.Node]) -> float:
         return (estimate_activations_size(activations) - min_act_size) / (
             max_act_size - min_act_size
         )
@@ -2943,7 +2963,9 @@ def choose_saved_values_set(
     ]
     from torch.utils._mode_utils import no_dispatch
 
-    def get_saved_values_knapsack(memory_budget, node_info, joint_graph):
+    def get_saved_values_knapsack(
+        memory_budget: float, node_info: NodeInfo, joint_graph: fx.Graph
+    ) -> tuple[list[fx.Node], float]:
         with no_dispatch():
             (
                 expected_runtime,
@@ -2991,7 +3013,7 @@ def choose_saved_values_set(
 
     if config.visualize_memory_budget_pareto:
 
-        def estimate_for_budget(b):
+        def estimate_for_budget(b: float) -> tuple[float, float, float]:
             saved_values, expected_runtime = get_saved_values_knapsack(
                 b, node_info=node_info, joint_graph=joint_graph
             )
@@ -3069,11 +3091,11 @@ def choose_saved_values_set(
 
 def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
-):
+) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
     from torch._subclasses.fake_tensor import unset_fake_temporarily
 
-    def has_collectives(joint_graph):
+    def has_collectives(joint_graph: torch.fx.Graph) -> bool:
         for node in joint_graph.nodes:
             if isinstance(
                 node.target, torch._ops.OpOverload
@@ -3081,7 +3103,7 @@ def _sync_decision_cross_ranks(
                 return True
         return False
 
-    def has_same_nodes(joint_graph):
+    def has_same_nodes(joint_graph: torch.fx.Graph) -> bool:
         # proxy to check if the graph is the same across different GPUs.
         # We only consider the name and order of nodes. A more robust way
         # would be to check the hash of the whole graph (disregarding input shapes),
@@ -3148,7 +3170,9 @@ def _sync_decision_cross_ranks(
     return saved_values
 
 
-def thread_graphsafe_rng_from_hops(module, is_backward):
+def thread_graphsafe_rng_from_hops(
+    module: fx.GraphModule, is_backward: bool
+) -> fx.GraphModule:
     """
     Graph-safe RNG lets torch.compile use CUDA Graphs for graphs with RNG ops.
     For graphs without HOPs, the partitioner adds placeholder nodes
@@ -3228,7 +3252,11 @@ def thread_graphsafe_rng_from_hops(module, is_backward):
     return module
 
 
-def classify_nodes(joint_module, static_lifetime_input_indices, num_fwd_outputs):
+def classify_nodes(
+    joint_module: fx.GraphModule,
+    static_lifetime_input_indices: list[int],
+    num_fwd_outputs: int,
+) -> NodeInfo:
     name_to_node = get_name_to_node(joint_module.graph)
     required_bw_nodes: OrderedSet[fx.Node] = OrderedSet()
     for node in joint_module.graph.nodes:
@@ -3291,11 +3319,11 @@ def classify_nodes(joint_module, static_lifetime_input_indices, num_fwd_outputs)
 
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule,
-    _joint_inputs,
-    compiler="inductor",
+    _joint_inputs: Any,
+    compiler: str = "inductor",
     *,
-    num_fwd_outputs,
-    static_lifetime_input_indices: Optional[list[int]] = None,
+    num_fwd_outputs: int,
+    static_lifetime_input_indices: list[int] | None = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -3464,9 +3492,9 @@ def draw_graph(
     fname: str,
     figname: str = "fx_graph",
     clear_meta: bool = True,
-    prog: Optional[Union[str, list[str]]] = None,
+    prog: str | list[str] | None = None,
     parse_stack_trace: bool = False,
-    dot_graph_shape: Optional[str] = None,
+    dot_graph_shape: str | None = None,
 ) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)

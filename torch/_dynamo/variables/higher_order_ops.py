@@ -4387,12 +4387,13 @@ class AutogradFunctionApplyVariable(VariableTracker):
         with enable_python_dispatcher():
             with tx.output.fake_mode:
                 fwd_freevars_args = [_get_fake_value(arg) for arg in fwd_freevars]
-                fake_args = (
+
+                example_value = autograd_function_apply(
                     tx.output.nn_modules[fwd_node.node.name],
                     tx.output.nn_modules[bwd_node.node.name],
                     *fwd_freevars_args,
+                    **kwargs_for_fn,
                 )
-                example_value = autograd_function_apply(*fake_args, **kwargs_for_fn)
 
         flat_variable = add_call_function(
             tx, autograd_function_apply, p_args, kwargs_for_fn, example_value

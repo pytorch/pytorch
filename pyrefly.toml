@@ -145,7 +145,7 @@ implicit-import = false
 implicit-any = true
 
 [[sub-config]]
-matches = "torch/_functorch/compilers.py"
+matches = "torch/_functorch/autograd_function.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
