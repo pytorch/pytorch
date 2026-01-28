@@ -2866,7 +2866,7 @@ class TestFxGraphCacheHashing(TestCase):
 
     def test_non_pybind11_runtime_error_propagates(self):
         """
-        Test that non-pybind11 RuntimeErrors are NOT caught and propagate up.
+        Test that RuntimeErrors not matching pybind11 pickle pattern propagate up.
         """
 
         class OtherRuntimeErrorObject:
