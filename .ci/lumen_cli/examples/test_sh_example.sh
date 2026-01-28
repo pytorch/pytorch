@@ -15,6 +15,9 @@
 
 set -ex -o pipefail
 
+# Install lumen_cli
+pip install -e .ci/lumen_cli
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
@@ -85,8 +88,6 @@ eval "$(lumen test pytorch env \
 
 echo "Environment variables:"
 env
-
-pip install -e .ci/lumen_cli
 
 lumen test pytorch env \
     --build-environment "$BUILD_ENVIRONMENT" \
