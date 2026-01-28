@@ -14,6 +14,8 @@ typedef id<MTLDevice> MTLDevice_t;
 typedef void* MTLDevice_t;
 #endif
 
+#define MPS_SUPPORT_TENSORS_UNIFIED_MEMORY 1
+
 namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version
