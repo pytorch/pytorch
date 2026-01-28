@@ -4810,7 +4810,7 @@ std::vector<Tensor> unflatten_dense_tensors(
     // This can avoid the unflattened empty tensor to share the same storage
     // with other unflatten tensors.
     if (numel == 0) {
-      outputs.push_back(at::empty({0}, flat.options()));
+      outputs.push_back(at::empty(tensor.sizes(), flat.options()));
     } else {
       outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
       offset += numel;
@@ -4842,7 +4842,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
   if (at::has_internal_overlap(self) == at::MemOverlap::Yes) {
     return self.clone();
   }
-  auto dtype_size = self.dtype().itemsize();
+  auto dtype_size = c10::SymInt(self.dtype().itemsize());
   auto nbytes = self.storage().sym_nbytes();
   TORCH_INTERNAL_ASSERT(nbytes % dtype_size == 0);
   auto numel = nbytes / dtype_size;

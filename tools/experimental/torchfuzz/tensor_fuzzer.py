@@ -52,6 +52,12 @@ def fuzz_torch_tensor_type(template: str = "default") -> torch.dtype:
 
         fuzz_template = DTensorFuzzTemplate()
         tensor_dtypes = fuzz_template.supported_dtypes()
+    elif template == "dtensor_placements":
+        # Import here to avoid circular imports
+        from torchfuzz.codegen import DTensorFuzzPlacementsTemplate
+
+        fuzz_template = DTensorFuzzPlacementsTemplate()
+        tensor_dtypes = fuzz_template.supported_dtypes()
     elif template == "unbacked":
         # Import here to avoid circular imports
         from torchfuzz.codegen import UnbackedFuzzTemplate

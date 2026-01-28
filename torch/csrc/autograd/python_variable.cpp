@@ -903,9 +903,26 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_op_schema")
         .attr("OutputSharding"))
 
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_op_strategy_class,
+    py::module::import("torch.distributed.tensor")
+        .attr("_op_schema")
+        .attr("OpStrategy"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_tuple_strategy_class,
+    py::module::import("torch.distributed.tensor")
+        .attr("_op_schema")
+        .attr("TupleStrategy"))
+
 static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   const auto dtensor_spec_class = get_dtensor_spec_class();
-  if (py::isinstance(arg, dtensor_spec_class)) {
+  const auto op_strategy_class = get_op_strategy_class();
+  const auto tuple_strategy_class = get_tuple_strategy_class();
+
+  if (py::isinstance(arg, dtensor_spec_class) ||
+      py::isinstance(arg, op_strategy_class) ||
+      py::isinstance(arg, tuple_strategy_class)) {
     return true;
   }
   if (!PyList_Check(arg.ptr())) {
@@ -913,7 +930,9 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   }
   py::list arg_list = py::reinterpret_borrow<py::list>(arg);
   for (const auto e : arg_list) {
-    if (!e.is_none() && !py::isinstance(e, dtensor_spec_class)) {
+    if (!e.is_none() && !py::isinstance(e, dtensor_spec_class) &&
+        !py::isinstance(e, op_strategy_class) &&
+        !py::isinstance(e, tuple_strategy_class)) {
       return false;
     }
   }
@@ -1101,7 +1120,7 @@ class NativeOpSchema {
         comparison_key_ == rhs.comparison_key_;
   }
 
-  std::size_t hash() const {
+  std::size_t hash() const noexcept {
     return hash_;
   }
 
@@ -1131,7 +1150,7 @@ class NativeOpSchema {
 namespace std {
 template <>
 struct hash<NativeOpSchema> {
-  std::size_t operator()(const NativeOpSchema& schema) const {
+  std::size_t operator()(const NativeOpSchema& schema) const noexcept {
     return schema.hash();
   }
 };
@@ -1355,11 +1374,11 @@ static bool get_local_results(
             " in DTensor op is not supported");
         result.push_back(default_tensor(item));
       }
-      stack->push_back(std::move(result));
+      stack->emplace_back(std::move(result));
     };
 
     if (py::isinstance(spec, get_dtensor_spec_class())) {
-      stack->push_back(default_tensor(spec));
+      stack->emplace_back(default_tensor(spec));
     } else if (PyList_Check(spec.ptr())) {
       handle_sequence(py::reinterpret_borrow<py::list>(spec));
     } else if (PyTuple_Check(spec.ptr())) {
@@ -1863,9 +1882,9 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     // to say that nearly all our remaining time spent is spent
     // calling back into Python.
     const auto& cpp_placement = placement.cast<const distributed::Placement&>();
-    if (const auto* cpp_shard =
-            dynamic_cast<const distributed::Shard*>(&cpp_placement)) {
-      const auto shard_dim = cpp_shard->dim;
+    if (typeid(cpp_placement) == typeid(distributed::Shard) ||
+        typeid(cpp_placement) == typeid(distributed::StridedShard)) {
+      const auto shard_dim = py::cast<int64_t>(placement.attr("dim"));
       TORCH_CHECK(
           shard_dim >= 0,
           "Shard placements should have negative dims normalized in the user-facing APIs: ",

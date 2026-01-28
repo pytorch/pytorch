@@ -671,10 +671,10 @@ class {module_name}(torch.nn.Module):
                 blobified_modules.append(module_name)
                 module_repr = module.__repr__().replace("\r", " ").replace("\n", " ")
                 # weights_only=False as this is legacy code that saves the model
-                module_str = (
-                    f"torch.load(r'{module_file}', weights_only=False) # {module_repr}"
-                )
-            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
+                module_load_str = f"torch.load(r'{module_file}', weights_only=False)"
+                model_str += f"{tab * 2}setattr(self, '{module_name}', {module_load_str}) # {module_repr}\n"
+            else:
+                model_str += f"{tab * 2}setattr(self, '{module_name}', {module_str})\n"
 
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
@@ -684,7 +684,7 @@ class {module_name}(torch.nn.Module):
         for param_name, param in self._parameters.items():
             if param is None:
                 continue
-            model_str += f"{tab * 2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"  # noqa: B950
+            model_str += f"{tab * 2}setattr(self, '{param_name}', torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype})))\n"  # noqa: B950
 
         model_str += (
             f"{tab * 2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"

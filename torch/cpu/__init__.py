@@ -5,7 +5,7 @@ to facilitate writing device-agnostic code.
 """
 
 from contextlib import AbstractContextManager
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 
@@ -138,7 +138,7 @@ class StreamContext(AbstractContextManager):
 
     """
 
-    cur_stream: Optional[Stream]
+    cur_stream: Stream | None
 
     def __init__(self, stream):
         self.stream = stream

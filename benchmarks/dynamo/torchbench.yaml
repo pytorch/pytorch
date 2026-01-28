@@ -52,6 +52,7 @@ tolerance:
   # These models need higher tolerance for xpu devices with bf16
   higher_bf16_xpu:
     - squeezenet1_1
+    - phlippe_resnet
 
   freezing:
     # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
@@ -62,6 +63,26 @@ tolerance:
       - mobilenet_v2
 
   cosine: []
+
+  # Models with boolean mask outputs that should use IoU (Intersection over Union)
+  # for accuracy checking instead of exact boolean matching. This is useful for
+  # segmentation models where small floating-point differences get thresholded
+  # into boolean masks.
+  use_iou_for_bool_masks:
+    - sam
+    - sam_fast
+    - vision_maskrcnn
+
+  # Custom IoU thresholds per model (default is 0.99)
+  iou_thresholds:
+    sam: 0.95
+    sam_fast: 0.95
+
+  # Number of accuracy check runs for flaky models (default is 1)
+  # Model passes if majority of runs pass
+  accuracy_check_runs:
+    sam: 5
+    sam_fast: 5
 
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
@@ -88,7 +109,6 @@ slow:
 non_deterministic:
   # https://github.com/pytorch/pytorch/issues/98355
   - mobilenet_v3_large
-  - sam_fast
 
 
 disable_cudagraph:
@@ -196,6 +216,9 @@ skip:
     - stable_diffusion
     - stable_diffusion_text_encoder
     - stable_diffusion_unet
+    # Has never been working correctly
+    # https://github.com/pytorch/pytorch/issues/172015#issuecomment-3730509098
+    - modded_nanogpt
 
   device:
     cpu:
