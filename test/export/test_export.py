@@ -3172,7 +3172,10 @@ def forward(self, add):
         def foo_fake_impl(a):
             return a
 
-        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+        with torch._functorch.config.patch(
+            fake_tensor_propagate_real_tensors=True,
+            fake_tensor_prop_check_meta_aliasing=True,
+        ):
             with self.assertRaisesRegex(
                 error_type,
                 r"Real tensor propagation found an aliasing mismatch between fake output (.*\n)*.* "
@@ -3194,7 +3197,10 @@ def forward(self, add):
             m, n = a.shape
             return torch.empty([m, n], dtype=torch.int32)
 
-        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+        with torch._functorch.config.patch(
+            fake_tensor_propagate_real_tensors=True,
+            fake_tensor_prop_check_meta_aliasing=True,
+        ):
             with self.assertRaisesRegex(
                 error_type,
                 r"Real tensor propagation found a metadata mismatch between fake tensor (.*\n)*.* "

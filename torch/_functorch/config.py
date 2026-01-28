@@ -93,6 +93,13 @@ autograd_cache_normalize_inputs = not is_fbcode()
 check_custom_op_aliasing = bool(os.getenv("CI"))
 error_on_custom_op_aliasing = bool(os.getenv("CI"))
 
+# Controls whether real-tensor propagation checks meta kernel aliasing correctness.
+# When False (default): Skip aliasing checks between fake and real tensor outputs.
+#   This allows meta kernels with incorrect aliasing behavior to work.
+# When True: Check that meta kernel aliasing matches real kernel aliasing.
+#   This is needed for draft export where aliasing information is relied upon.
+fake_tensor_prop_check_meta_aliasing = False
+
 
 def remote_autograd_cache_default() -> Optional[bool]:
     if os.environ.get("TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE") == "1":

@@ -1443,6 +1443,48 @@ class outer_fn(torch.nn.Module):
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
 
+    def test_dtensor_unbacked_matmul_real_tensor_prop(self):
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        mesh = init_device_mesh(self.device_type, (2, 2))
+
+        def create_dt(placements):
+            local_shape = [32, 32]
+            for p in placements:
+                if isinstance(p, Shard):
+                    local_shape[p.dim] //= 2
+            dt = DTensor.from_local(torch.randn(local_shape), mesh, placements)
+            torch._dynamo.decorators.mark_unbacked(dt, 0)
+            torch._dynamo.decorators.mark_unbacked(dt, 1)
+            return dt
+
+        def test(x_p, y_p):
+            torch._dynamo.reset()
+            fn = torch.compile(torch.mm, backend="aot_eager", fullgraph=True)
+            return fn(create_dt(x_p), create_dt(y_p))
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # basic
+            test((Replicate(), Replicate()), (Replicate(), Replicate()))
+            test((Replicate(), Shard(1)), (Replicate(), Shard(0)))
+            test((Replicate(), Shard(0)), (Replicate(), Replicate()))
+            # shard x shard
+            test((Shard(0), Shard(1)), (Shard(1), Shard(0)))
+            test((Shard(1), Shard(0)), (Shard(0), Shard(1)))
+            # partial x shard
+            test((Partial(), Partial()), (Shard(0), Replicate()))
+            test((Partial(), Partial()), (Shard(0), Shard(1)))
+            test((Partial(), Partial()), (Replicate(), Shard(0)))
+            test((Partial(), Shard(0)), (Shard(0), Partial()))
+            test((Partial(), Shard(1)), (Shard(1), Partial()))
+            # partial x partial
+            test((Partial(), Partial()), (Partial(), Partial()))
+            test((Partial(), Replicate()), (Partial(), Replicate()))
+            test((Replicate(), Partial()), (Partial(), Replicate()))
+            # mixed
+            test((Shard(0), Partial()), (Partial(), Shard(1)))
+            test((Partial(), Replicate()), (Shard(0), Shard(0)))
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):

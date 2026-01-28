@@ -600,7 +600,8 @@ class TestDraftExport(TestCase):
                 "Real tensor propagation found an aliasing mismatch",
             ):
                 with torch._functorch.config.patch(
-                    fake_tensor_propagate_real_tensors=True
+                    fake_tensor_propagate_real_tensors=True,
+                    fake_tensor_prop_check_meta_aliasing=True,
                 ):
                     export(mod, inputs, strict=True)
 

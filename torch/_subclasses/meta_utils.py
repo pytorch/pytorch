@@ -1910,15 +1910,22 @@ class MetaConverter(Generic[_TensorT]):
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
                         if self.copy_data:
-                            if not _is_fake_tensor(r):
-                                raise AssertionError("Expected r to be a FakeTensor")
-                            if r.real_tensor is None:
-                                raise AssertionError(
-                                    "r.real_tensor must not be None when copy_data is True"
+                            # For traceable wrapper subclasses (e.g., DTensor), the outer
+                            # wrapper is not a FakeTensor - only its inner tensors are.
+                            # The real storage mapping for subclasses is handled when
+                            # recursively processing the inner tensors in empty_create_subclass.
+                            if not is_traceable_wrapper_subclass(r):
+                                if not _is_fake_tensor(r):
+                                    raise AssertionError(
+                                        "Expected r to be a FakeTensor"
+                                    )
+                                if r.real_tensor is None:
+                                    raise AssertionError(
+                                        "r.real_tensor must not be None when copy_data is True"
+                                    )
+                                _set_real_storage(
+                                    r.untyped_storage(), r.real_tensor.untyped_storage()
                                 )
-                            _set_real_storage(
-                                r.untyped_storage(), r.real_tensor.untyped_storage()
-                            )
                     else:
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,
