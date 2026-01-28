@@ -14,7 +14,7 @@ all:
 .PHONY: triton
 triton:
 	$(PIP) uninstall -y triton
-	@./scripts/install_triton_wheel.sh
+	@PYTHON=$(PYTHON) PIP=$(PIP) ./scripts/install_triton_wheel.sh
 
 .PHONY: clean
 clean: # This will remove ALL build folders.
