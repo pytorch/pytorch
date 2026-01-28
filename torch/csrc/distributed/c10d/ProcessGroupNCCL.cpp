@@ -1306,8 +1306,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   ncclOpts->split_from =
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
   ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
-  auto color = genNcclSplitColor(ranks);
-  ncclOpts->split_color = color;
+  // We use the lowest rank in the group as the split_color as each rank can
+  // only participate in one group.
+  // This value must be non-negative int32 and all ranks are.
+  ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
