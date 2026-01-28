@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import functools
 from typing import Any, TYPE_CHECKING
-from typing_extensions import TypeVar
+from typing_extensions import ParamSpec, TypeVar
 
 from torch._functorch.utils import argnums_t, exposed_in
 from torch._functorch.vmap import (
@@ -26,6 +26,9 @@ from torch._functorch.vmap import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    import torch
+
+_P = ParamSpec("_P")
 _R = TypeVar("_R")
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
@@ -37,13 +40,13 @@ _R = TypeVar("_R")
 
 @exposed_in("torch.func")
 def vmap(
-    func: Callable[..., _R],
+    func: Callable[_P, _R],
     in_dims: in_dims_t = 0,
     out_dims: out_dims_t = 0,
     randomness: str = "error",
     *,
     chunk_size: int | None = None,
-) -> Callable[..., _R]:
+) -> Callable[_P, _R]:
     """
     vmap is the vectorizing map; ``vmap(func)`` returns a new function that
     maps ``func`` over some dimension of the inputs. Semantically, vmap
@@ -212,9 +215,17 @@ def vmap(
             f"vmap: chunk_size should be None or greater than 0. (got {chunk_size})"
         )
 
-    def wrapped(*args: Any, **kwargs: Any) -> Any:
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        # pyrefly: ignore[bad-argument-type]
         return vmap_impl(
-            func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs
+            # pyrefly: ignore[bad-argument-type]
+            func,
+            in_dims,
+            out_dims,
+            randomness,
+            chunk_size,
+            *args,
+            **kwargs,
         )
 
     if not is_compiling():
@@ -224,12 +235,12 @@ def vmap(
 
 
 def chunk_vmap(
-    func: Callable[..., _R],
+    func: Callable[_P, _R],
     in_dims: in_dims_t = 0,
     out_dims: out_dims_t = 0,
     randomness: str = "error",
     chunks: int = 2,
-) -> Callable[..., _R]:
+) -> Callable[_P, _R]:
     """
     chunk_vmap is the vectorizing map (vmap) using chunks of input data. It is a mix of vmap (which vectorizes
     everything) and map (which executes things sequentially). ``chunk_vmap`` vectorizes the input with number of
@@ -291,7 +302,7 @@ def chunk_vmap(
         return chunks_flat_args
 
     @functools.wraps(func)
-    def wrapped_with_chunks(*args: Any, **kwargs: Any) -> _R:
+    def wrapped_with_chunks(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         _check_out_dims_is_int_or_int_pytree(out_dims, func)
         _, flat_in_dims, flat_args, args_spec = _process_batched_inputs(
             in_dims, args, func
@@ -301,6 +312,7 @@ def chunk_vmap(
 
         # Apply vmap on chunks
         return _chunked_vmap(
+            # pyrefly: ignore[bad-argument-type]
             func,
             flat_in_dims,
             chunks_flat_args,
@@ -313,10 +325,11 @@ def chunk_vmap(
     return wrapped_with_chunks
 
 
+# TODO: Improve the return type of this function
 @exposed_in("torch.func")
 def grad(
-    func: Callable[..., _R], argnums: argnums_t = 0, has_aux: bool = False
-) -> Callable[..., Any]:
+    func: Callable[_P, Any], argnums: argnums_t = 0, has_aux: bool = False
+) -> Callable[_P, Any]:
     """``grad`` operator helps computing gradients of ``func`` with respect to the
     input(s) specified by ``argnums``. This operator can be nested to
     compute higher-order gradients.
@@ -416,7 +429,7 @@ def grad(
     import torch._functorch.eager_transforms as eager_transforms
     from torch.compiler import is_compiling
 
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> tuple[Any, torch.Tensor]:
         return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)
 
     if not is_compiling():
@@ -425,10 +438,11 @@ def grad(
     return wrapper
 
 
+# TODO: Improve the return type of this function
 @exposed_in("torch.func")
 def grad_and_value(
-    func: Callable[..., _R], argnums: argnums_t = 0, has_aux: bool = False
-) -> Callable[..., Any]:
+    func: Callable[_P, Any], argnums: argnums_t = 0, has_aux: bool = False
+) -> Callable[_P, tuple[Any, Any]]:
     """
     Returns a function to compute a tuple of the gradient and primal, or
     forward, computation.
@@ -459,7 +473,7 @@ def grad_and_value(
     from torch._functorch import eager_transforms
     from torch.compiler import is_compiling
 
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> tuple[Any, torch.Tensor]:
         return eager_transforms.grad_and_value_impl(
             func, argnums, has_aux, args, kwargs
         )
