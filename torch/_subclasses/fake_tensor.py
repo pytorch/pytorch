@@ -2349,36 +2349,42 @@ class FakeTensorMode(TorchDispatchMode):
 
         fake_paths_leaves, fake_spec = pytree.tree_flatten_with_path(fake_out)
         real_leaves, _ = pytree.tree_flatten(real_out)
-        try:
-            # catch aliasing mismatches between fake/real tensors
-            _check_alias_info(
-                "Real tensor propagation found", real_out, real_in, fake_out, fake_in
-            )
-        except MetadataMismatchError as exc:
-            # if mismatch found, optionally infer fake kernel
-            if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
-                dtrace_structured(
-                    "mismatched_fake_kernel",
-                    metadata_fn=lambda: {
-                        "op": str(func),
-                        "reason": (
-                            f"Mismatched aliasing spec between fake kernel and real kernel: {exc.reason}"  # noqa: F821
-                        ),
-                    },
+        # Only check aliasing if fake_tensor_prop_check_meta_aliasing is enabled
+        if torch._functorch.config.fake_tensor_prop_check_meta_aliasing:
+            try:
+                # catch aliasing mismatches between fake/real tensors
+                _check_alias_info(
+                    "Real tensor propagation found",
+                    real_out,
+                    real_in,
+                    fake_out,
+                    fake_in,
                 )
-                # if aliasing mismatches are found, it's likely that the fake tensor impl
-                # is incorrectly aliasing, since we don't support aliasing custom ops.
-                # in this case we can default to inferring non-aliasing fake kernels from the real outputs.
-                _clear_pending_unbacked()
-                return tree_map(
-                    lambda x: _infer_fake_from_real_tensor(self, func, x), real_out
-                )
-            else:
-                raise MetadataMismatchError(
-                    f"Real tensor propagation found an aliasing mismatch between "
-                    f"fake output {fake_out} and real output {real_out}, "
-                    f" for func: {func}"
-                ) from exc
+            except MetadataMismatchError as exc:
+                # if mismatch found, optionally infer fake kernel
+                if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                    dtrace_structured(
+                        "mismatched_fake_kernel",
+                        metadata_fn=lambda: {
+                            "op": str(func),
+                            "reason": (
+                                f"Mismatched aliasing spec between fake kernel and real kernel: {exc.reason}"  # noqa: F821
+                            ),
+                        },
+                    )
+                    # if aliasing mismatches are found, it's likely that the fake tensor impl
+                    # is incorrectly aliasing, since we don't support aliasing custom ops.
+                    # in this case we can default to inferring non-aliasing fake kernels from the real outputs.
+                    _clear_pending_unbacked()
+                    return tree_map(
+                        lambda x: _infer_fake_from_real_tensor(self, func, x), real_out
+                    )
+                else:
+                    raise MetadataMismatchError(
+                        f"Real tensor propagation found an aliasing mismatch between "
+                        f"fake output {fake_out} and real output {real_out}, "
+                        f" for func: {func}"
+                    ) from exc
 
         # if no errors raised, run cross checks on fake/real tensors,
         # optionally overriding individual fake tensors, if individual meta kernel output is incorrect.
