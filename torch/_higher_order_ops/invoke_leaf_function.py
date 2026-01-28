@@ -43,13 +43,14 @@ class GradientInfo:
     """
     We need the gradient edge to trigger the autograd engine backward.
 
-    We need the tensor metadata (size, dtype, device) to create zeros when
+    We need the tensor metadata (size, stride, dtype, device) to create zeros when
     gradient is None at runtime but required by the backward graph (because the graph
     is traced with fake implementation).
     """
 
     edge: torch.autograd.graph.GradientEdge
     size: torch.Size
+    stride: tuple[int, ...]
     dtype: torch.dtype
     device: torch.device
 
@@ -248,7 +249,9 @@ def autograd_grad_with_gradient_info(
         grad = grads[filtered_idx]
         if grad is None:
             info = filtered_input_infos[filtered_idx]
-            grad = torch.zeros(info.size, dtype=info.dtype, device=info.device)
+            grad = torch.empty_strided(
+                info.size, info.stride, dtype=info.dtype, device=info.device
+            ).zero_()
         result[original_idx] = grad
 
     return tuple(result)
@@ -307,6 +310,7 @@ def _make_forward(
                     GradientInfo(
                         edge=get_gradient_edge(inp),
                         size=inp.size(),
+                        stride=inp.stride(),
                         dtype=inp.dtype,
                         device=inp.device,
                     )
@@ -319,6 +323,7 @@ def _make_forward(
                     GradientInfo(
                         edge=get_gradient_edge(out),
                         size=out.size(),
+                        stride=out.stride(),
                         dtype=out.dtype,
                         device=out.device,
                     )
@@ -367,14 +372,14 @@ invoke_leaf_function = InvokeLeafFunction()
 #   - They call the user's original leaf function with the reconstructed args
 #   - They return the user function's outputs
 #
-# We wrap real_fn and fake_fn again (via _make_forward) to handle autograd properly:
+# We wrap real_fn (via _make_forward) to handle autograd properly:
 # 1. Detach inputs and outputs to isolate the leaf function's autograd graph from the
 #    outer graph (gradients flow through our backward, not internal ops)
-# 2. Real/fake functions are invoked at backend dispatch keys (CompositeExplicitAutograd/FakeTensorMode)
+# 2. Real function is invoked at backend dispatch keys (i.e. CompositeExplicitAutograd)
 #    where autograd is disabled. We re-enable grad and restore dispatch keys for the autograd engine to work.
 # 3. Store GradientInfo (gradient edges + tensor metadata) instead of full tensors for backward,
 #    which is sufficient for autograd.grad and avoids keeping tensors alive.
-
+#
 # We automatically generate backward functions:
 # - real_backward uses the stored input/output GradientInfo and invokes the autograd engine
 # - fake_backward creates empty gradients for inputs that requires grad
@@ -385,7 +390,6 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
     # pyrefly: ignore [bad-override]
     def forward(ctx, real_fn_spec, fake_fn_spec, *flat_args):
         real_fn = unwrap_fn_spec(real_fn_spec)
-        fake_fn = unwrap_fn_spec(fake_fn_spec)
 
         include_keys = torch._C._dispatch_tls_local_include_set()
         exclude_keys = torch._C._dispatch_tls_local_exclude_set()
@@ -398,9 +402,6 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
 
         real_forward, real_state = _make_forward(
             real_fn, requires_grad_indices, include_keys, exclude_keys
-        )
-        fake_forward, fake_state = _make_forward(
-            fake_fn, requires_grad_indices, include_keys, exclude_keys
         )
 
         def real_backward(*grads):
@@ -415,24 +416,34 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
                 allow_unused=True,
             )
 
+        input_infos_for_fake = tuple(
+            GradientInfo(
+                edge=None,  # type: ignore[arg-type]
+                size=arg.size(),
+                stride=arg.stride(),
+                dtype=arg.dtype,
+                device=arg.device,
+            )
+            if isinstance(arg, torch.Tensor) and arg.requires_grad
+            else None
+            for arg in flat_args
+        )
+
         def fake_backward(*grads):
-            if fake_state["inputs"] is None:
-                raise RuntimeError(
-                    "invoke_leaf_function backward expects inputs to be set in forward."
-                )
             return tuple(
-                torch.empty(info.size, dtype=info.dtype, device=info.device)
+                torch.empty_strided(
+                    info.size, info.stride, dtype=info.dtype, device=info.device
+                )
                 if info is not None
                 else None
-                for info in fake_state["inputs"]
+                for info in input_infos_for_fake
             )
 
         _, new_real_fn_spec = func_to_graphable(real_forward)
-        _, new_fake_fn_spec = func_to_graphable(fake_forward)
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outputs = invoke_leaf_function(
-                new_real_fn_spec, new_fake_fn_spec, *flat_args
+                new_real_fn_spec, fake_fn_spec, *flat_args
             )
 
         ctx.real_backward = real_backward
