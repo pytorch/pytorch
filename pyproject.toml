@@ -359,6 +359,8 @@ keep-runtime-typing = true
 "torch/jit/**" = ["S101"]
 "torch/onnx/_internal/**" = ["S101"]
 "torch/testing/**" = ["S101"]
+"torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
+"torch/_export/db/examples/list_contains.py" = ["S101"]
 "tools/**" = [
     "S101"
 ]
