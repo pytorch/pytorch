@@ -305,6 +305,24 @@ class AttrSource(ChainedSource):
 
 
 @dataclass_with_cached_hash(frozen=True)
+class CellContentsSource(AttrSource):
+    """
+    Source for closure cell contents that also stores the freevar name.
+    This allows guard failure messages to show which variable the closure cell refers to.
+    """
+
+    freevar_name: str = dataclasses.field(default="")
+
+    def __post_init__(self) -> None:
+        assert self.base, (
+            "Can't construct a CellContentsSource without a valid base source"
+        )
+        assert self.member == "cell_contents", (
+            "CellContentsSource should only be used for cell_contents"
+        )
+
+
+@dataclass_with_cached_hash(frozen=True)
 class GenericAttrSource(ChainedSource):
     member: str
 
@@ -1113,40 +1131,6 @@ class CallMethodItemSource(ChainedSource):
         return "{0}.item()"
 
 
-@dataclass_with_cached_hash(frozen=True)
-class CallMethodSource(ChainedSource):
-    method_name: str
-    args: tuple = ()
-    kwargs: tuple = ()  # tuple of (k, v) pairs
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen(self.base)
-
-        codegen.load_method(self.method_name)
-        for arg in self.args:
-            codegen.append_output(codegen.create_load_const(arg))
-        if self.kwargs:
-            kwargs_dict = dict(self.kwargs)
-            for v in kwargs_dict.values():
-                codegen.append_output(codegen.create_load_const(v))
-            kw_names = tuple(kwargs_dict.keys())
-            codegen.extend_output(
-                codegen.create_call_function_kw(
-                    len(self.args) + len(kwargs_dict), kw_names, push_null=False
-                )
-            )
-        else:
-            # Just call with positional args
-            codegen.call_method(len(self.args))
-
-    @property
-    def _name_template(self) -> str:
-        args_str = [repr(v) for v in self.args]
-        kwargs_str = [f"{k}={repr(v)}" for k, v in self.kwargs]
-        all_str = ", ".join(args_str + kwargs_str)
-        return f"{{0}}.{self.method_name}({all_str})"
-
-
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
@@ -1198,6 +1182,7 @@ class BackwardStateSource(Source):
         return GuardSource.BACKWARD_STATE
 
 
+@functools.lru_cache
 def get_local_source_name(
     source: Source, *, only_allow_input: bool = False
 ) -> Optional[str]:
@@ -1210,14 +1195,17 @@ def get_local_source_name(
     return source.local_name
 
 
+@functools.lru_cache
 def is_from_local_source(source: Source, *, only_allow_input: bool = False) -> bool:
     return get_local_source_name(source, only_allow_input=only_allow_input) is not None
 
 
+@functools.lru_cache
 def is_from_global_source(source: Source) -> bool:
     return get_global_source_name(source) is not None
 
 
+@functools.lru_cache
 def get_global_source_name(source: Source | None) -> str | None:
     if isinstance(source, ChainedSource):
         return get_global_source_name(source.base)
@@ -1226,6 +1214,7 @@ def get_global_source_name(source: Source | None) -> str | None:
     return source.global_name
 
 
+@functools.lru_cache
 def is_from_nonlocal_source(source: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_nonlocal_source(source.base)
@@ -1236,6 +1225,7 @@ def is_from_nonlocal_source(source: Source) -> bool:
     )
 
 
+@functools.lru_cache
 def is_from_closure_source(source: Source) -> bool:
     if isinstance(source, ClosureSource):
         return True
@@ -1244,6 +1234,7 @@ def is_from_closure_source(source: Source) -> bool:
     return False
 
 
+@functools.lru_cache
 def is_from_source(source: Source, target: Source) -> bool:
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)

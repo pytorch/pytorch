@@ -850,7 +850,11 @@ def _compile_fx_inner(
     # may not be valid for use after they are run/autotuned
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
-    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
+    if (
+        dynamo_utils.count_calls(gm.graph) == 0
+        and not aot_mode
+        and not torch._functorch.config.bundled_autograd_cache
+    ):
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
         from torch._dynamo.utils import CompileEventLogLevel

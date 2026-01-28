@@ -4,6 +4,7 @@ Distributed computing variable tracking classes for PyTorch Dynamo.
 This module implements variable tracking for distributed computing components:
 - Process Groups (for collective communication)
 - Device Meshes (for distributed tensor sharding)
+- Placement Types (for specifying distribution strategies)
 - Distributed Tensors and their operations
 - Backward hooks for distributed module operations
 
@@ -24,13 +25,12 @@ from typing import Any, Literal, TYPE_CHECKING
 import torch
 from torch.fx.experimental._backward_state import BackwardState
 
-from .. import compiled_autograd, variables
+from .. import compiled_autograd
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
-from ..utils import istype
 from .base import VariableTracker
 from .constant import EnumVariable
 
@@ -132,75 +132,18 @@ class WorldMetaClassVariable(DistributedVariable):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "WORLD":
+            from .builder import SourcelessBuilder
+
             assert self.source
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return ProcessGroupVariable(self.value.WORLD)
+            return SourcelessBuilder.create(tx, self.value.WORLD)
         elif name == "NON_GROUP_MEMBER":
             assert self.source
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return EnumVariable(self.value.NON_GROUP_MEMBER)
         return super().var_getattr(tx, name)
-
-
-class ProcessGroupVariable(DistributedVariable):
-    """
-    We don't want a ProcessGroup object to end up in our output graph.
-
-    But it's common for dynamo to intercept a PG that is then used to get info like
-    rank() or world_size(), as well as passed to utility functions in distributed_c10d
-    which desugar it into plain types like a ranklist and tag.
-
-    For convenience and proper guarding, we construct a variable type.
-
-    TODO: make it possible to use ProcessGroupVariable as input to simple functions
-          like _expand_group without dynamo complaining about making a proxy for it.
-          It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
-          torch library functions are dealing with tensor-like types and would have proxies
-          for their args.
-    TODO: should we make this inherit VT instead of UDOV? Do we want any of the default behaviors
-          or just graph-break whenever one of our special cases is not hit?
-    """
-
-    def as_python_constant(self) -> Any:
-        return self.value
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "rank":
-            return variables.ConstantVariable.create(self.value.rank())
-        if name == "size":
-            return variables.ConstantVariable.create(self.value.size())
-        if name == "_get_backend_name":
-            return variables.ConstantVariable.create(self.value._get_backend_name())
-
-        return super().call_method(tx, name, args, kwargs)
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        if name == "group_name":
-            return variables.ConstantVariable.create(self.value.group_name)
-        if name in ["rank", "size"]:
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
-            )
-        # TODO should this just raise unimplemented?
-        return super().var_getattr(tx, name)
-
-    @staticmethod
-    def is_process_group(value: object) -> bool:
-        # we can't rely on importing/accessing torch distributed, it is not always built.
-        if not DistributedVariable.is_available():
-            return False
-        from torch._C._distributed_c10d import ProcessGroup
-        from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
-
-        return istype(value, (ProcessGroup, FakeProcessGroup))
 
 
 class BackwardHookVariable(VariableTracker):

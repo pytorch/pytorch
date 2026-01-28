@@ -3625,7 +3625,7 @@ class CompiledAutograd0(torch.nn.Module):
         getitem_27 = validate_outputs_1[0];  validate_outputs_1 = None
 
         getitem_28 = hooks[0];  getitem_28 = None
-        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], getitem_27);  getitem_1 = getitem_2 = getitem_27 = None
+        call_aot_bwd_prologue = torch__dynamo_compiled_autograd_call_aot_bwd_prologue((getitem_1, getitem_2), [], [], getitem_27);  getitem_1 = getitem_2 = getitem_27 = None
         aot0_primals_1 = call_aot_bwd_prologue[0]
         aot0_primals_2 = call_aot_bwd_prologue[1]
         aot0_tangents_1 = call_aot_bwd_prologue[2]
@@ -5227,6 +5227,7 @@ known_graph_breaks_tests = {
     "test_nested_checkpoint_two_children_early_stop_False",  # dynamo disable
     "test_nested_checkpoint_two_children_early_stop_True",  # dynamo disable
     "test_custom_autograd_ac_early_stop",  # marked as skipped
+    "test_checkpoint_compile_no_recompile",  # torch._dynamo.exc.Unsupported: Attempted to call function marked as skipped
     "test_dropout",  # dynamo disable
     "test_dropout_inductor",  # dynamo disable
     "test_function_with_kwargs",  # dynamo disable
@@ -5398,7 +5399,6 @@ class TestCompiledAutogradOpInfo(TestCase):
         super(TestCase, self).tearDown()
         reset()
 
-    @skipIfXpu(msg="NotImplementedError: The operator 'testlib::mutating_custom_op'")
     @ops(
         list(filter(lambda op: op.name not in xfail_hops, hop_db)),
         allowed_dtypes=(torch.float,),

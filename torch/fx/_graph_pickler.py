@@ -3,7 +3,7 @@ import importlib
 import io
 import pickle
 from abc import abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
@@ -39,12 +39,22 @@ def _ops_filter_safe(name: str) -> bool:
     )
 
 
+def _node_metadata_key_filter_safe(key: str) -> bool:
+    """
+    A metadata filter which allows pickle-safe node metadata. These often times contain
+    stacks with pointers to unserializable objects, so we clear them out.
+    """
+    return key not in ["source_fn_stack", "nn_module_stack", "fwd_source_fn_stack"]
+
+
 @dataclasses.dataclass
 class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
     ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
-    ignore_metadata_fields: Sequence[str] = dataclasses.field(default_factory=tuple)
+    node_metadata_key_filter: Optional[Callable[[str], bool]] = (
+        _node_metadata_key_filter_safe
+    )
 
 
 class GraphPickler(pickle.Pickler):
@@ -391,11 +401,15 @@ class _NodePickleData:
         self.type = node.type
         # self.sort_key = node._sort_key
         # self.repr_fn = node._repr_fn
-        self.meta = node.meta
-        if options.ignore_metadata_fields:
-            self.meta = self.meta.copy()
-            for k in options.ignore_metadata_fields:
-                self.meta.pop(k, None)
+        # self.meta = node.meta
+        self.meta = {
+            k: v
+            for k, v in node.meta.items()
+            if (
+                not options.node_metadata_key_filter
+                or options.node_metadata_key_filter(k)
+            )
+        }
 
     def unpickle(
         self,
@@ -593,7 +607,8 @@ class _GraphPickleData:
         nodes: dict[_NodePickleData, torch.fx.Node] = {}
         for nd in self.nodes:
             nodes[nd] = nd.unpickle(graph, nodes, unpickle_state)
-        graph._codegen = self._codegen
+        if hasattr(self, "_codegen"):
+            graph._codegen = self._codegen
 
         return graph
 

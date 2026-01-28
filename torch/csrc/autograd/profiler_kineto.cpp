@@ -74,6 +74,27 @@ using torch::profiler::impl::strListToStr;
 using torch::profiler::impl::TensorMetadata;
 using torch::profiler::impl::variantShapesToStr;
 
+// Helper function to check if ProfilerState is a Kineto-compatible state
+inline bool isKinetoCompatibleState(ProfilerState state) {
+  return state == ProfilerState::KINETO ||
+      state == ProfilerState::KINETO_GPU_FALLBACK ||
+      state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK;
+}
+
+// Helper function to check if ProfilerState is valid for disabling profiler
+inline bool isValidDisableState(ProfilerState state) {
+  return isKinetoCompatibleState(state) ||
+      state == ProfilerState::KINETO_ONDEMAND || state == ProfilerState::NVTX ||
+      state == ProfilerState::ITT || state == ProfilerState::PRIVATEUSE1;
+}
+
+// Helper function to check if ProfilerState uses an external tracer
+// (NVTX/ITT/PRIVATEUSE1 - these use their own tracing callbacks, not Kineto)
+inline bool isExternalTracerState(ProfilerState state) {
+  return state == ProfilerState::NVTX || state == ProfilerState::ITT ||
+      state == ProfilerState::PRIVATEUSE1;
+}
+
 struct OpArgData {
   bool hasData;
   std::vector<shape> shapes;
@@ -625,9 +646,7 @@ void prepareProfiler(
     return;
   }
   TORCH_CHECK(
-      config.state == ProfilerState::KINETO ||
-          config.state == ProfilerState::KINETO_GPU_FALLBACK ||
-          config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK,
+      isKinetoCompatibleState(config.state),
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
       /*cpuOnly=*/!(
@@ -769,22 +788,25 @@ void enableProfiler(
       "Profiler is already enabled",
       (config.global() ? "." : " on this thread."));
 
-  if (config.state == ProfilerState::NVTX) {
-    torch::profiler::impl::pushNVTXCallbacks(config, scopes);
-    return;
-  } else if (config.state == ProfilerState::ITT) {
-    torch::profiler::impl::pushITTCallbacks(config, scopes);
-    return;
-  } else if (config.state == ProfilerState::PRIVATEUSE1) {
-    torch::profiler::impl::pushPRIVATEUSE1CallbacksStub(config, scopes);
+  // Handle external tracer states - these use their own tracing callbacks
+  if (isExternalTracerState(config.state)) {
+    switch (config.state) {
+      case ProfilerState::NVTX:
+        torch::profiler::impl::pushNVTXCallbacks(config, scopes);
+        break;
+      case ProfilerState::ITT:
+        torch::profiler::impl::pushITTCallbacks(config, scopes);
+        break;
+      case ProfilerState::PRIVATEUSE1:
+        torch::profiler::impl::pushPRIVATEUSE1CallbacksStub(config, scopes);
+        break;
+      default:
+        break;
+    }
     return;
   }
 
-  TORCH_CHECK(
-      config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
-      config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
-      config.global());
+  TORCH_CHECK(isKinetoCompatibleState(config.state) || config.global());
   TORCH_CHECK(!activities.empty(), "No activities specified.");
   TORCH_INTERNAL_ASSERT(
       has_cpu || !config.global(),
@@ -841,20 +863,13 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   auto state_ptr = ProfilerStateBase::pop();
   const auto& config = state_ptr->config();
   TORCH_CHECK(
-      state_ptr &&
-          (config.state == ProfilerState::KINETO ||
-           config.state == ProfilerState::KINETO_GPU_FALLBACK ||
-           config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
-           config.state == ProfilerState::KINETO_ONDEMAND ||
-           config.state == ProfilerState::NVTX ||
-           config.state == ProfilerState::ITT ||
-           config.state == ProfilerState::PRIVATEUSE1),
+      state_ptr && isValidDisableState(config.state),
       "Can't disable Kineto profiler when it's not running");
 
   state_ptr->removeCallback();
 
   // Traces are converged via libkineto automatically for ondemand flow
-  if (state_ptr->config().global()) {
+  if (config.global()) {
     (void)std::static_pointer_cast<KinetoThreadLocalState>(state_ptr)
         ->finalizeTrace();
     return std::make_unique<ProfilerResult>();
@@ -863,14 +878,12 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   // Shared among NVTX, PRIVATEUSE1, KINETO, KINETO_GPU_FALLBACK,
   // KINETO_PRIVATEUSE1_FALLBACK
   std::unique_ptr<ProfilerResult> result;
-  if (state_ptr->config().state == ProfilerState::NVTX ||
-      state_ptr->config().state == ProfilerState::PRIVATEUSE1) {
+  if (config.state == ProfilerState::NVTX ||
+      config.state == ProfilerState::PRIVATEUSE1) {
     result = std::make_unique<ProfilerResult>();
   }
 
-  if (config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
-      config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
+  if (isKinetoCompatibleState(config.state)) {
     auto kineto_state_ptr =
         std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
     auto trace = kineto_state_ptr->finalizeTrace();
