@@ -128,15 +128,8 @@ This config is used to reorder logging functions so that they are called at the 
 traced function, thus avoiding a graph break.
 However, the logged contents may differ if, for example, a mutation occurs.
 
+Note: `reorderable_logging_functions` has restrictions, these functions must return `None`, and their arguments must be limited to tensors, constants, or format strings.
 
-```{code-cell}
-torch._dynamo.config.reorderable_logging_functions.add(print)
-
-@torch.compile
-def fn(x):
-    x += 1
-    print("log!")
-    return torch.sin(x)
-
-print(fn(torch.ones(3, 3)))
-```
+If you do not need to run the printing or logging function, then consider using
+`torch.compiler.is_compiling()` or `torch._dyanmo.config.ignore_logging_functions` to skip the function
+entirely. See [this page for more details](programming_model.fullgraph_true.skipping_functions).

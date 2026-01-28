@@ -188,7 +188,7 @@ py::object PythonValue::getattr(
     const std::string& name) {
   try {
     return py::getattr(self, name.c_str());
-  } catch (py::error_already_set& e) {
+  } catch (py::error_already_set&) {
     throw(ErrorReport(loc) << "object has no attribute " << name);
   }
 }
@@ -907,7 +907,7 @@ bool PythonClassValue::hasAttr(
   try {
     py::getattr(py_type_, field.c_str());
     return true;
-  } catch (py::error_already_set& e) {
+  } catch (py::error_already_set&) {
     return false;
   }
 }

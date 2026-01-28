@@ -362,6 +362,7 @@ def parse_args(
                 # Catch a more specific exception instead.
                 arg_names = [None] * len(args)  # type: ignore[list-item]
                 fn_name = None
+            # pyrefly: ignore [bad-assignment]
             args = [
                 _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
@@ -1803,27 +1804,22 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
-            # pyrefly: ignore [missing-attribute]
             if input.isCompleteTensor():
                 input_scalar_type = _type_utils.JitScalarType.from_value(input)
                 if input_scalar_type != dtype_0:
                     raise errors.SymbolicValueError(
                         f"Inputs of {op_name} must have same dtype."
                         f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
-                        # pyrefly: ignore [bad-argument-type]
                         input,
                     )
         for i, input in enumerate(inputs):
-            # pyrefly: ignore [missing-attribute]
             if input.isCompleteTensor() and not _is_fp(input):
                 inputs[i] = g.op(
                     "Cast",
-                    # pyrefly: ignore [bad-argument-type]
                     input,
                     to_i=target_float_t.onnx_type(),
                 )
 
-    # pyrefly: ignore [bad-argument-type]
     self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:

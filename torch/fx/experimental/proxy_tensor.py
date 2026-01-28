@@ -26,6 +26,7 @@ from typing import (
     overload,
     Protocol,
     TYPE_CHECKING,
+    TypeAlias,
     TypeVar,
     Union,
 )
@@ -40,16 +41,18 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_value, OpaqueType
 from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
+    get_plain_tensors,
     is_fake,
     unset_fake_temporarily,
 )
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.graph_module import _assign_attr
@@ -82,6 +85,7 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
     from torch._ops import OpOverload
     from torch.fx._symbolic_trace import PHBase
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
@@ -185,22 +189,6 @@ def is_sym_node(node: _HasMeta) -> bool:
     return "val" in node.meta and isinstance(node.meta["val"], py_sym_types)
 
 
-@overload  # type: ignore[no-overload-impl]
-def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> None: ...
-
-
-@overload
-def set_proxy_slot(
-    obj: _AnyScriptObjectType, tracer: _ProxyTracer, proxy: Proxy
-) -> None: ...
-
-
-@overload
-def set_proxy_slot(
-    obj: PySymType, tracer: _ProxyTracer, proxy: _PySymProxyType
-) -> None: ...
-
-
 class _DisableUpdateTensorTracker(threading.local):
     value: bool = False
 
@@ -263,8 +251,24 @@ def _proxy_tensor_disable_update_tensor_tracker() -> Generator[None, None, None]
         _disable_update_tensor_tracker_tls.value = orig_value
 
 
-def set_proxy_slot(  # type: ignore[no-redef]
-    obj: Union[PySymType, _AnyScriptObjectType, Tensor],
+@overload
+def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> None: ...
+
+
+@overload
+def set_proxy_slot(
+    obj: _AnyScriptObjectType | OpaqueType, tracer: _ProxyTracer, proxy: Proxy
+) -> None: ...
+
+
+@overload
+def set_proxy_slot(
+    obj: PySymType, tracer: _ProxyTracer, proxy: _PySymProxyType
+) -> None: ...
+
+
+def set_proxy_slot(
+    obj: Union[PySymType, _AnyScriptObjectType, Tensor, OpaqueType],
     tracer: _ProxyTracer,
     proxy: object,
 ) -> None:
@@ -274,9 +278,12 @@ def set_proxy_slot(  # type: ignore[no-redef]
         # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
         # see NOTE [Do not clobber inplace ops]
-        if not _is_proxy_tensor_update_tensor_tracker_disabled():
+        if (
+            obj not in tracer.tensor_tracker
+            or not _is_proxy_tensor_update_tensor_tracker_disabled()
+        ):
             tracer.tensor_tracker[obj] = proxy
-    elif isinstance(obj, (_AnyScriptObject)):
+    elif isinstance(obj, (_AnyScriptObject)) or is_opaque_value(obj):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         assert isinstance(proxy, Proxy)
         tracer.script_object_tracker[obj] = proxy
@@ -314,11 +321,12 @@ def set_proxy_slot(  # type: ignore[no-redef]
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
-    # pyrefly: ignore [no-matching-overload]
+
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
 
 
-_PySymProxyType = Thunk[Proxy]
+_PySymProxyType: TypeAlias = Thunk[Proxy]
+_OpaqueObjectProxyType: TypeAlias = Thunk[Proxy]
 
 
 @overload
@@ -386,6 +394,14 @@ def get_proxy_slot(
 
 @overload
 def get_proxy_slot(
+    obj: OpaqueType,
+    tracer: _ProxyTracer,
+    default: T,
+) -> Union[T, _OpaqueObjectProxyType]: ...
+
+
+@overload
+def get_proxy_slot(
     obj: PySymType,
     tracer: _ProxyTracer,
     default: U,
@@ -397,7 +413,7 @@ def get_proxy_slot(
 # the transform argument is handy if you need to extract a subfield from
 # the successfully looked up result (but NOT the default.)
 def get_proxy_slot(
-    obj: Union[Tensor, _AnyScriptObjectType, PySymType],
+    obj: Union[Tensor, _AnyScriptObjectType, PySymType, OpaqueType],
     tracer: _ProxyTracer,
     default: object = no_default,
     transform: Callable = lambda x: x,
@@ -405,7 +421,7 @@ def get_proxy_slot(
     tracker: Any
     if isinstance(obj, Tensor):
         tracker = tracer.tensor_tracker
-    elif isinstance(obj, _AnyScriptObject):
+    elif isinstance(obj, _AnyScriptObject) or is_opaque_value(obj):
         tracker = tracer.script_object_tracker
     else:
         assert isinstance(obj, py_sym_types), type(obj)
@@ -438,6 +454,28 @@ def get_proxy_slot(
 
     res = transform(value)
     return res
+
+
+# Recursively traverses tensor subclasses,
+# returnining an (unordered) list of Proxy objects that are tracked
+# for all inner tensors, given the current extant proxy mode.
+# Returns an empty list if no proxy mode is active.
+def _get_proxies(t: torch.Tensor) -> list[Proxy]:
+    proxies = []
+    mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+    if mode is None:
+        return proxies
+    assert isinstance(mode, ProxyTorchDispatchMode)
+    tracer = mode.tracer
+    for t_inner in get_plain_tensors(t, out=[]):
+        if isinstance(t_inner, FunctionalTensor):
+            t_inner = torch._from_functional_tensor(t_inner.elem)
+        if not isinstance(t_inner, torch.Tensor):
+            continue
+        proxy_tensor = get_proxy_slot(t_inner, tracer)
+        if proxy_tensor is not None:
+            proxies.append(proxy_tensor.proxy)
+    return proxies
 
 
 @functools.cache
@@ -568,20 +606,20 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Optional[Tensor]:
         return val.detach()
 
 
-_ExtractValType = Optional[
-    Union[
-        PySymType,
-        _AnyScriptObjectType,
-        BackwardState,
-        list["_ExtractValType"],
-        tuple["_ExtractValType", ...],
-        dict[str, "_ExtractValType"],
-        Tensor,
-        int,
-        float,
-        bool,
-    ]
-]
+_ExtractValType: TypeAlias = (
+    None
+    | PySymType
+    | OpaqueType
+    | _AnyScriptObjectType
+    | BackwardState
+    | list["_ExtractValType"]
+    | tuple["_ExtractValType", ...]
+    | dict[str, "_ExtractValType"]
+    | Tensor
+    | int
+    | float
+    | bool
+)
 
 
 def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractValType:
@@ -592,6 +630,8 @@ def extract_val(val: _ExtractValType, include_real: bool = False) -> _ExtractVal
     elif isinstance(val, _AnyScriptObject):
         return val
     elif isinstance(val, BackwardState):
+        return val
+    elif is_opaque_value(val):
         return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
@@ -828,7 +868,7 @@ def track_tensor_tree(
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, thunkify(tracer, lambda: proxy))
-        elif isinstance(e, _AnyScriptObject):
+        elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
             assert isinstance(proxy, Proxy)
             set_proxy_slot(e, tracer, proxy)
             set_meta(proxy, e)
@@ -844,6 +884,7 @@ def track_tensor_tree(
                     return None
                 else:
                     assert isinstance(c, (list, tuple))
+                    # pyrefly: ignore [bad-return]
                     return c[idx]
 
             for idx, ee in enumerate(e):
@@ -925,8 +966,15 @@ def fetch_object_proxy(
 ) -> Union[_PySymProxyType, PySymType]: ...
 
 
+@overload
 def fetch_object_proxy(
-    tracer: _ProxyTracer, t: Union[Tensor, _AnyScriptObjectType, PySymType]
+    tracer: _ProxyTracer, t: OpaqueType
+) -> Union[_OpaqueObjectProxyType, PySymType]: ...
+
+
+def fetch_object_proxy(
+    tracer: _ProxyTracer,
+    t: Tensor | _AnyScriptObjectType | PySymType | OpaqueType,
 ) -> object:
     return get_proxy_slot(t, tracer, t)
 
@@ -977,7 +1025,7 @@ def _fetch_proxies_and_all_constant_flag(
     f_flat_args_kwargs = [
         (
             fetch_object_proxy(tracer, x)
-            if isinstance(x, (Tensor, _AnyScriptObject))
+            if isinstance(x, (Tensor, _AnyScriptObject)) or is_opaque_value(x)
             else x
         )
         for x in flat_args_kwargs
@@ -1248,7 +1296,7 @@ class _SympyExprTrackerValue:
 
 
 class PythonKeyTracer(Tracer):
-    script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
+    script_object_tracker: MutableMapping[_AnyScriptObjectType | OpaqueType, Proxy]
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
@@ -1320,7 +1368,7 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e, lambda x: x.proxy)  # type: ignore[attr-defined]
         elif isinstance(e, py_sym_types):
             return get_proxy_slot(e, self, e, lambda e: e.force())
-        elif isinstance(e, _AnyScriptObject):
+        elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
             return get_proxy_slot(e, self, e)
         else:
             return e
@@ -1682,6 +1730,11 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # This lets us properly reset the state on exit.
         self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
         self.decomp_layers: int = 0
+        # See invoke_subgraph
+        self._invoke_subgraph_names: set[str] = set()
+        self._invoke_subgraph_cache: dict[
+            torch.fx.GraphModule | FunctionalizeCtxWrapper, str
+        ] = {}
         from torch._inductor import config
 
         self.emulate_precision_casts: bool = config.emulate_precision_casts
@@ -2074,7 +2127,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 # Warning: We blow away our own attributes here to mimic the base class
                 # - so don't expect `self.x` to do anything useful.
                 # pyrefly: ignore [no-matching-overload]
-                # pyrefly: ignore [bad-override]
+
                 self.__class__ = type(
                     base.__class__.__name__,
                     (self.__class__, base.__class__),
@@ -2097,7 +2150,6 @@ class _ModuleStackTracer(PythonKeyTracer):
                 if not isinstance(attr_val, Module):
                     return attr_val
 
-                # pyrefly: ignore [index-error]
                 return AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
 
             def get_base(self) -> Module:
@@ -2110,12 +2162,12 @@ class _ModuleStackTracer(PythonKeyTracer):
                         res = torch.nn.Sequential(
                             OrderedDict(list(self._modules.items())[idx])
                         )
-                        # pyrefly: ignore [index-error]
+
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
                     elif isinstance(self, torch.nn.ModuleList):
                         # Copied from nn/modules/container.py
                         res = torch.nn.ModuleList(list(self._modules.values())[idx])
-                        # pyrefly: ignore [index-error]
+
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
 
                 return super().__getitem__(idx)  # type: ignore[misc]
@@ -2125,6 +2177,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 assert "_modules" in self.__dict__
                 submodules = self.__dict__["_modules"]
                 assert isinstance(submodules, dict)
+                # pyrefly: ignore [bad-return]
                 return {
                     key: (
                         AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))  # type: ignore[misc]
@@ -2212,6 +2265,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             mod = obj
 
             # Get the parent module
+            # pyrefly: ignore [bad-assignment]
             for item in path:
                 if not hasattr(mod, item):
                     return False
@@ -2324,6 +2378,7 @@ class _MakefxTracer:
         record_stack_traces: bool = False,
         parent_tracer: Optional[_MakefxTracer] = None,
         proxy_module_inputs: bool = False,
+        _disable_torch_fn_metadata_mode: bool = False,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2357,6 +2412,7 @@ class _MakefxTracer:
         self.record_stack_traces = record_stack_traces
         self.parent_tracer: Optional[_MakefxTracer] = parent_tracer
         self.proxy_module_inputs = proxy_module_inputs
+        self._disable_torch_fn_metadata_mode = _disable_torch_fn_metadata_mode
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2465,7 +2521,8 @@ class _MakefxTracer:
         if self.tracing_mode == "symbolic" or self.pre_dispatch:
             self.python_dispatcher_mode = enable_python_dispatcher()
 
-        self.torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
+        if not self._disable_torch_fn_metadata_mode:
+            self.torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
         fx_tracer.proxy_module_inputs = self.proxy_module_inputs  # type: ignore[union-attr]
 
     @contextmanager
@@ -2534,7 +2591,7 @@ class _MakefxTracer:
                         hint=x,
                         source=source,
                     )
-                elif isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
+                elif isinstance(x, torch.ScriptObject) or is_opaque_value(x):
                     return torch._library.fake_class_registry.maybe_to_fake_obj(
                         self.fake_tensor_mode, x
                     )
@@ -2643,6 +2700,24 @@ class _MakefxTracer:
         with sub_tracer._init_modes_from_parent(self):
             return sub_tracer._trace_inner(f, *args)
 
+    def trace_subgraph_custom_decomp(
+        self, f: Callable, decomp_table: Mapping[OpOverload, Callable], *args
+    ) -> GraphModule:
+        assert isinstance(decomp_table, Mapping)
+        # Create a new tracer based on parent's config, but use a different decomposition table
+        sub_tracer = _MakefxTracer(
+            decomp_table,
+            "real",
+            self._allow_non_fake_inputs,
+            self.pre_dispatch,
+            self.record_module_stack,
+            self._allow_fake_constant,
+            self._error_on_data_dependent_ops,
+            parent_tracer=self,
+        )
+        with sub_tracer._init_modes_from_parent(self):
+            return sub_tracer._trace_inner(f, *args)
+
 
 _CURRENT_MAKE_FX_TRACER: Optional[_MakefxTracer] = None
 
@@ -2670,6 +2745,7 @@ def make_fx(
     _error_on_data_dependent_ops: bool = True,
     record_stack_traces: bool = False,
     proxy_module_inputs: bool = False,
+    _disable_torch_fn_metadata_mode: bool = False,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
@@ -2694,6 +2770,7 @@ def make_fx(
         record_stack_traces=record_stack_traces
         or config.trace.provenance_tracking_level == 1,
         proxy_module_inputs=proxy_module_inputs,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
 
     @functools.wraps(f)

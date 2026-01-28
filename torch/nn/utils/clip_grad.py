@@ -84,7 +84,7 @@ def _get_total_norm(
     first_device = tensors[0].device
     grouped_tensors: dict[
         tuple[torch.device, torch.dtype], tuple[list[list[Tensor]], list[int]]
-    ] = _group_tensors_by_device_and_dtype(
+    ] = _group_tensors_by_device_and_dtype(  # pyrefly: ignore [bad-assignment]
         [tensors]  # type: ignore[list-item]
     )  # type: ignore[assignment]
 

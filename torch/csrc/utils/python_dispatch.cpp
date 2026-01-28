@@ -932,7 +932,7 @@ void initDispatchBindings(PyObject* module) {
       [](const char* dispatch_key) -> std::optional<c10::DispatchKey> {
         try {
           return c10::parseDispatchKey(dispatch_key);
-        } catch (const c10::Error& err) {
+        } catch (const c10::Error&) {
           return std::nullopt;
         }
       });

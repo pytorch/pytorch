@@ -23,6 +23,7 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._library.utils import get_layout_constraint_tag
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import (
@@ -421,6 +422,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.torchbind_constants: dict[
             str, Union[torch._C.ScriptObject, FakeScriptObject]
         ] = {}
+        self.opaque_value_type_classes: dict[str, type] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
         self.removed_operations: OrderedSet[str] = OrderedSet()
@@ -526,7 +528,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.bw_donated_idxs = get_donated_idxs()
 
         # Cache for dep size hints to avoid expensive recomputation
-        self.dep_size_hint_cache: dict[Dep, int] = {}
+        self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
 
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
@@ -553,7 +555,7 @@ class GraphLowering(torch.fx.Interpreter):
             # create_symbolic_sizes_strides_storage_offset but we hope we can
             # just delete this entirely
             source = ConstantSource(
-                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
+                f"__inductor_unknown_tensor_{len(self._shape_env.backed_var_to_val)}"
             )
             (
                 size,
@@ -592,7 +594,7 @@ class GraphLowering(torch.fx.Interpreter):
             isinstance(node, ir.ComputedBuffer)
             and node.name in self.buffer_to_padded_size
         ):
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             return self.buffer_to_padded_size[node.name]
         else:
             return node.get_size()
@@ -614,22 +616,25 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
 
-    def get_dep_size_hint(self, dep: Dep) -> int:
+    def get_dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
         """
         Get the size hint for a dependency with caching to avoid expensive recomputation.
         """
-        if dep not in self.dep_size_hint_cache:
+        if (dep, count_bytes) not in self.dep_size_hint_cache:
             res = 0
             try:
                 if not dep.has_unbacked_symbols():
-                    res = dep.numbytes_hint()
+                    if count_bytes:
+                        res = dep.numbytes_hint()
+                    else:
+                        res = dep.numel_hint()
             except KeyError:
                 # In at least one test (test/inductor/test_torchbind.py) we
                 # create a StarDep that doesn't exist in the graph and calling
                 # `has_unbacked_symbols()` throws an error.
                 pass
-            self.dep_size_hint_cache[dep] = res
-        return self.dep_size_hint_cache[dep]
+            self.dep_size_hint_cache[(dep, count_bytes)] = res
+        return self.dep_size_hint_cache[(dep, count_bytes)]
 
     def get_current_device_or_throw(self) -> torch.device:
         if device := self.current_device:
@@ -1096,7 +1101,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(
         self, data: Tensor, name: Optional[str] = None
-    ) -> Union[TensorBox, ir.ShapeAsConstantBuffer]:
+    ) -> TensorBox:
         new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
@@ -1298,7 +1303,9 @@ class GraphLowering(torch.fx.Interpreter):
                     #
                     # TODO: should really switch to "needs_fixed_stride" constraint on these
                     # and identify them one by one.
-                    decided_constraint = require_contiguous  # type: ignore[assignment]
+                    decided_constraint: Optional[Callable[..., tuple[Any, Any]]] = (
+                        require_contiguous
+                    )
                 else:
                     default_tag: torch._C.Tag = get_layout_constraint_tag(
                         target, with_default=True
@@ -1366,9 +1373,17 @@ class GraphLowering(torch.fx.Interpreter):
 
             return out
         except Exception as e:
-            raise LoweringException(e, target, args, kwargs).with_traceback(
-                e.__traceback__
-            ) from None
+            stack_trace = None
+            if (
+                hasattr(self, "current_node")
+                and self.current_node is not None
+                and hasattr(self.current_node, "meta")
+                and self.current_node.meta is not None
+            ):
+                stack_trace = self.current_node.meta.get("stack_trace", None)
+            raise LoweringException(
+                e, target, args, kwargs, stack_trace=stack_trace
+            ).with_traceback(e.__traceback__) from None
 
     @staticmethod
     def can_inline_constant(t: torch.Tensor) -> bool:
@@ -1406,6 +1421,10 @@ class GraphLowering(torch.fx.Interpreter):
             self.torchbind_constants[target] = value
             self.constant_reprs[target] = ""
             return TorchBindObject(name=target, value=value)
+        elif is_opaque_type(type(value)):
+            self.torchbind_constants[target] = value  # type: ignore[arg-type]
+            self.constant_reprs[target] = ""
+            return TorchBindObject(name=target, value=value)  # type: ignore[arg-type]
 
         assert isinstance(value, torch.Tensor)
         if (
@@ -1461,6 +1480,7 @@ class GraphLowering(torch.fx.Interpreter):
                     int,
                     ir.EffectfulKernel,
                     ir.ShapeAsConstantBuffer,
+                    TorchBindObject,
                 ),
             )
             for x in result
@@ -1774,7 +1794,7 @@ class GraphLowering(torch.fx.Interpreter):
                     allow_padding = (
                         config.pad_outputs or not is_user_visible
                     ) and not is_input_for_as_strided
-                    dense = torch._prims_common.is_non_overlapping_and_dense(
+                    dense = torch._prims_common.is_non_overlapping_and_dense_or_false(
                         n.meta["val"]
                     )
                     unbacked_symbols_in_strides = (
@@ -1796,7 +1816,6 @@ class GraphLowering(torch.fx.Interpreter):
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
                         if n.meta["val"]._is_view() or isinstance(
-                            # pyrefly: ignore [missing-attribute]
                             result.data,
                             ir.BaseView,
                         ):
@@ -2451,7 +2470,7 @@ class GraphLowering(torch.fx.Interpreter):
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
 
             tuning_code = (
-                '"""\n'
+                'r"""\n'
                 + "Compile-time auto-tuning block: \n"
                 + kernel_autotune_defs
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
@@ -2496,7 +2515,11 @@ class GraphLowering(torch.fx.Interpreter):
                 key,
                 path,
                 linemap=linemap,  # type: ignore[arg-type]
-                attrs={**self.constants, **self.torchbind_constants},
+                attrs={
+                    **self.constants,
+                    **self.torchbind_constants,
+                    **self.opaque_value_type_classes,
+                },
             )
         self.cache_key = key
         self.cache_path = path

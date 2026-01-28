@@ -133,7 +133,11 @@ static_assert(
   } while (0)
 
 // Macro to throw on a non-successful NCCL return value, non-blocking.
-#define C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, yield_fn)      \
+// Thread-safe: uses NCCLComm wrapper's getAsyncError() which acquires mutex
+// before calling ncclCommGetAsyncError to prevent race conditions between
+// watchdog and main threads.
+#define C10D_NCCL_CHECK_TIMEOUT_BASE(                                         \
+    cmd, commWrapper, failureReason, yield_fn)                                \
   do {                                                                        \
     ncclResult_t result = cmd;                                                \
     auto startTimepoint = std::chrono::steady_clock::now();                   \
@@ -141,7 +145,7 @@ static_assert(
     while (result == ncclInProgress) {                                        \
       C10D_CHECK_TIMEOUT(startTimepoint, timeout);                            \
       yield_fn;                                                               \
-      ncclCommGetAsyncError(comm, &result);                                   \
+      commWrapper->getAsyncError(&result);                                    \
     }                                                                         \
     if (result != ncclSuccess) {                                              \
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
@@ -160,15 +164,16 @@ static_assert(
 // This macro uses sched_yield() to yield the CPU.
 // Thus suitable for NCCL calls that would quickly turn ncclSuccess, e.g.
 // collectives.
-#define C10D_NCCL_CHECK_TIMEOUT(cmd, comm, failureReason) \
-  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, sched_yield())
+#define C10D_NCCL_CHECK_TIMEOUT(cmd, commWrapper, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, commWrapper, failureReason, sched_yield())
 
 // Macro to throw exception on a non-successful NCCL return value or timeout.
 // This macro uses sleep to yield the CPU.
 // Thus suitable for NCCL calls that would take longer to turn ncclSuccess, e.g.
 // ncclCommInitRankConfig, ncclCommFinalize, etc.
-#define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, comm, failureReason) \
-  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, C10D_SCHED_SLEEP())
+#define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, commWrapper, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(                                        \
+      cmd, commWrapper, failureReason, C10D_SCHED_SLEEP())
 
 #define C10D_NCCL_CHECK_TIMEOUT_GROUPEND(cmd, comm, failureReason)           \
   do {                                                                       \
@@ -179,7 +184,7 @@ static_assert(
       do {                                                                   \
         C10D_CHECK_TIMEOUT(startTimepoint, timeout);                         \
         sched_yield();                                                       \
-        ncclCommGetAsyncError(comm->getNcclComm(), &state);                  \
+        comm->getAsyncError(&state);                                         \
       } while (state == ncclInProgress);                                     \
     }                                                                        \
     if (state != ncclSuccess) {                                              \
@@ -355,6 +360,12 @@ class NCCLComm {
   uint64_t getCommSplitCounter() const;
 
   ncclResult_t checkForNcclError();
+
+  // Thread-safe wrapper for ncclCommGetAsyncError that acquires the mutex
+  // before calling the NCCL API. This is needed because NCCL does not provide
+  // thread-safety guarantees for ncclCommGetAsyncError, and both the main
+  // thread and watchdog thread may call it concurrently.
+  ncclResult_t getAsyncError(ncclResult_t* asyncError);
 
   ncclResult_t registerSegment(
       void* ptr,

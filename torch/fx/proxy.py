@@ -17,6 +17,7 @@ from typing import Any, Optional
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import getArtifactLogger
 from torch.utils._traceback import CapturedTraceback
 
@@ -411,6 +412,9 @@ class TracerBase:
             )
 
         elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
+            return a
+
+        elif is_opaque_value_type(type(a)):
             return a
 
         elif is_dataclass(a):
