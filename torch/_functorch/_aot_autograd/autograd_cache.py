@@ -440,6 +440,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
             }
         )
 
+    # pyrefly: ignore[bad-override]
     def reducer_override(self, obj: Any) -> Any:
         """
         Override to handle tensor subclasses (like DTensor) that aren't caught

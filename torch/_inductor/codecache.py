@@ -25,6 +25,7 @@ import tempfile
 import textwrap
 import threading
 import warnings
+import weakref
 from bisect import bisect_right
 from copy import copy
 from ctypes import c_void_p, CDLL, cdll
@@ -528,6 +529,12 @@ class FxGraphCachePickler(pickle.Pickler):
                 torch.fx.experimental._backward_state.BackwardState: functools.partial(
                     self._reduce_unsupported
                 ),
+                # WeakValueDictionary can't be pickled due to internal callback.
+                # Reduce to empty tuple since contents are runtime objects that
+                # shouldn't affect cache key.
+                weakref.WeakValueDictionary: functools.partial(
+                    self._reduce_weakvaluedict
+                ),
             }
         )
         if has_user_defined_triton_kernels:
@@ -598,6 +605,19 @@ class FxGraphCachePickler(pickle.Pickler):
         raise to bypass caching.
         """
         raise BypassFxGraphCache("Reduce unsupported")
+
+    def _reduce_weakvaluedict(
+        self, d: weakref.WeakValueDictionary
+    ) -> tuple[Callable[[T], T], tuple[()]]:
+        """
+        Custom reducer for WeakValueDictionary.
+
+        WeakValueDictionary cannot be pickled because its __init__ creates a local
+        callback function 'remove' that is unpicklable. We reduce it to an empty
+        tuple since the contents are weak references to runtime objects that
+        shouldn't affect the cache key.
+        """
+        return (_ident, ((),))
 
     def _reduce_graph_module(
         self, gm: torch.fx.GraphModule
