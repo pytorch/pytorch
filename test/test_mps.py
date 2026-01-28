@@ -12659,7 +12659,11 @@ class TestConsistency(TestCaseMPS):
         if op.name == "masked.mean":
             return (7e-4, 2e-3)
         if op.name == "native_layer_norm":
-            return (1e-4, 1.3e-5)
+            # Tolerance increased to handle edge case where N=1 (single element normalization).
+            # In this case, the gradient is mathematically 0, but CPU returns small non-zero
+            # values (~1.2e-4) due to numerical artifacts while MPS correctly returns 0.
+            # See https://github.com/pytorch/pytorch/issues/173525
+            return (1.5e-4, 1.3e-5)
         if op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
             # TODO: Investigate why this is needed
             # See https://github.com/pytorch/pytorch/issues/120237
