@@ -39,7 +39,8 @@ else
 fi
 
 echo "Building for Python: $desired_python Version: $build_version Build: $build_number"
-python_nodot="$(echo $desired_python | tr -d m.u)"
+python_tag="cp$(echo $desired_python | tr -d m.ut)"
+abi_tag="cp$(echo $desired_python | tr -d .)"
 
 # Version: setup.py uses $PYTORCH_BUILD_VERSION.post$PYTORCH_BUILD_NUMBER if
 # PYTORCH_BUILD_NUMBER > 1
@@ -96,11 +97,11 @@ fi
 whl_tmp_dir="${MAC_PACKAGE_WORK_DIR}/dist"
 mkdir -p "$whl_tmp_dir"
 
-mac_version='macosx-11_0-arm64'
+mac_version='macosx-11.0-arm64'
 libtorch_arch='arm64'
 
 # Create a consistent wheel package name to rename the wheel to
-wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-cp${python_nodot}-none-${mac_version//[-,]/_}.whl"
+wheel_filename_new="${TORCH_PACKAGE_NAME}-${build_version}${build_number_prefix}-${python_tag}-${abi_tag}-${mac_version//[-,.]/_}.whl"
 
 ###########################################################
 
@@ -132,21 +133,15 @@ RENAME_WHEEL=true
 case $desired_python in
     3.14t)
         echo "Using 3.14 deps"
-        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
-        RENAME_WHEEL=false
         ;;
     3.14)
         echo "Using 3.14t deps"
-        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
-        RENAME_WHEEL=false
         ;;
     3.13t)
         echo "Using 3.13t deps"
-        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
-        RENAME_WHEEL=false
         ;;
     3.13)
         echo "Using 3.13 deps"
