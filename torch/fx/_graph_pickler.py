@@ -181,12 +181,12 @@ class GraphPickler(pickle.Pickler):
             try:
                 cls.dumps(o, options)
                 return None
-            except BaseException as e:
+            except Exception as e:
                 return e
 
         def walk(o: Any, path: str, depth: int) -> Optional[str]:
             if depth > max_depth:
-                log(f"{'  '*depth}Depth limit at {path} ({type(o)})")
+                log(f"{'  ' * depth}Depth limit at {path} ({type(o)})")
                 return path + " (depth_limit)"
 
             key = (id(o), type(o).__name__)
@@ -242,7 +242,7 @@ class GraphPickler(pickle.Pickler):
             try:
                 red = pickler.reducer_override(o)
                 log(f"{indent}reducer_override -> {type(red)}")
-            except BaseException as e2:
+            except Exception as e2:
                 log(f"{indent}💥 reducer_override crashed: {e2}")
                 return path
 
@@ -272,7 +272,7 @@ class GraphPickler(pickle.Pickler):
                 try:
                     state = getstate()
                     log(f"{indent}__getstate__ -> {type(state)}")
-                except BaseException as e3:
+                except Exception as e3:
                     log(f"{indent}💥 __getstate__ failed: {e3}")
                     return path + ".__getstate__()"
                 bad = walk(state, path + ".__getstate__()", depth + 1)
@@ -303,7 +303,7 @@ class GraphPickler(pickle.Pickler):
                 elif hasattr(o, "__reduce__"):
                     reduce_tuple = o.__reduce__()
                     log(f"{indent}__reduce__ -> {type(reduce_tuple)}")
-            except BaseException as e4:
+            except Exception as e4:
                 log(f"{indent}💥 reduce protocol failed: {e4}")
                 return path
 
