@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     MI200_ARCH,
     MI300_ARCH,
+    MI350_ARCH,
     parametrize,
     recover_orig_fp32_precision,
     run_tests,
@@ -4227,6 +4228,7 @@ class TestCudaMallocAsync(TestCase):
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
     @requiresCppContext
+    @skipIfRocmArch(MI350_ARCH)
     def test_memory_plots(self):
         for context, stacks in (
             ("all", "all" if IS_LINUX else "python"),
