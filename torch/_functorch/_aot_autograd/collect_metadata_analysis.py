@@ -65,7 +65,6 @@ from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-
 zip = strict_zip
 
 log = logging.getLogger(__name__)
@@ -177,7 +176,9 @@ def run_functionalized_fw_and_collect_metadata(
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: dict[Tensor, Tensor] = {}
 
-    def _to_fun(t: Any) -> Any:
+    # TODO: see if we can rewrite this to be more accurate using
+    # overload
+    def _to_fun(t: object) -> object:
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
@@ -699,7 +700,7 @@ from a multi-output view call"
             output_info.append(out_info)
 
         # See Note [AOT Autograd: Views to avoid tangents aliasing inputs]
-        def view_avoid_dupes_with_primals(t: Any) -> Any:
+        def view_avoid_dupes_with_primals(t: object) -> object:
             if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
                 return transform_subclass(
                     t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t)
@@ -718,7 +719,7 @@ from a multi-output view call"
                     x.shape, dtype=x.dtype, device=x.device, layout=x.layout
                 )
 
-        def _is_subclass_mutated_input_tangent_always_subclass(inp: Any) -> bool:
+        def _is_subclass_mutated_input_tangent_always_subclass(inp: object) -> bool:
             return (
                 isinstance(inp, torch.nested._internal.nested_tensor.NestedTensor)
                 or torch._functorch.config.disable_guess_zero_tangent_for_mutated_input_subclass

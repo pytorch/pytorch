@@ -1,3 +1,9 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from __future__ import annotations
 
 import contextlib
@@ -5,7 +11,7 @@ import functools
 import itertools
 from collections.abc import Callable  # noqa: TC003
 from functools import partial
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast, NoReturn, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -29,12 +35,6 @@ from torch.utils._pytree import (
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable
-
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
 
 
 _P = ParamSpec("_P")
@@ -100,7 +100,7 @@ def _as_tuple(
 
 
 def _process_batched_inputs(
-    in_dims: in_dims_t, args: tuple[Any, ...], func: Callable[_P, _R]
+    in_dims: in_dims_t, args: tuple[Any, ...], func: Callable[..., Any]
 ) -> tuple[int, list[int | None], list[Any], TreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
@@ -161,6 +161,7 @@ def _process_batched_inputs(
 # Returns the (potentially) batched arguments and the batch_size.
 
 
+# TODO: See if we can explain how flat works to the type checker
 def _create_batched_inputs(
     flat_in_dims: list[int | None],
     flat_args: list[Any],
@@ -209,11 +210,11 @@ def _unwrap_batched(
     out_dims: out_dims_t,
     vmap_level: int,
     batch_size: int,
-    func: Callable[_P, _R],
+    func: Callable[..., Any],
 ) -> tuple[Any, ...]:
     flat_batched_outputs, output_spec = tree_flatten(batched_outputs)
 
-    def incompatible_error() -> Any:
+    def incompatible_error() -> NoReturn:
         raise ValueError(
             f"vmap({_get_name(func)}, ..., out_dims={out_dims})(<inputs>): "
             f"out_dims is not compatible with the structure of `outputs`. "
@@ -221,7 +222,7 @@ def _unwrap_batched(
             f"has structure {output_spec}."
         )
 
-    flat_out_dims: list[int | None]
+    flat_out_dims: list[int | None] = []
     if isinstance(batched_outputs, torch.Tensor):
         # Some weird edge case requires us to spell out the following
         # see test_out_dims_edge_case
@@ -232,11 +233,11 @@ def _unwrap_batched(
         elif out_dims is None:
             flat_out_dims = [out_dims]
         else:
-            flat_out_dims = incompatible_error()
+            incompatible_error()
     else:
         broadcast_result = _broadcast_to_and_flatten(out_dims, output_spec)
         if broadcast_result is None:
-            flat_out_dims = incompatible_error()
+            incompatible_error()
         else:
             flat_out_dims = broadcast_result
 
@@ -249,7 +250,7 @@ def _unwrap_batched(
     return tree_unflatten(flat_outputs, output_spec)
 
 
-def _check_int_or_none(x: Any, func: Callable[_P, _R], out_dims: out_dims_t) -> None:
+def _check_int_or_none(x: Any, func: Callable[..., Any], out_dims: out_dims_t) -> None:
     if isinstance(x, int):
         return
     if x is None:
@@ -262,14 +263,14 @@ def _check_int_or_none(x: Any, func: Callable[_P, _R], out_dims: out_dims_t) -> 
 
 
 def _check_out_dims_is_int_or_int_pytree(
-    out_dims: out_dims_t, func: Callable[_P, _R]
+    out_dims: out_dims_t, func: Callable[..., Any]
 ) -> None:
     if isinstance(out_dims, int):
         return
     tree_map_(partial(_check_int_or_none, func=func, out_dims=out_dims), out_dims)
 
 
-def _get_name(func: Callable[_P, _R]) -> str:
+def _get_name(func: Callable[..., Any]) -> str:
     if hasattr(func, "__name__"):
         return func.__name__
 
@@ -288,8 +289,8 @@ def vmap_impl(
     out_dims: out_dims_t,
     randomness: str,
     chunk_size: int | None,
-    *args: Any,
-    **kwargs: Any,
+    *args: _P.args,
+    **kwargs: _P.kwargs,
 ) -> Any:
     lazy_load_decompositions()
     _check_out_dims_is_int_or_int_pytree(out_dims, func)

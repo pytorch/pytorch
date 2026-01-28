@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 
-_P_args = TypeVar("_P_args")
 _R = TypeVar("_R")
 
 
@@ -26,8 +25,8 @@ def synchronize() -> None:
 
 
 def dump_chrome_trace(
-    f: Callable[..., _R],
-    input_: _P_args,
+    f: Callable[[tuple[Any, ...]], _R],
+    input_: tuple[Any, ...],
     trace_filename: str,
     optimize_ctx: AbstractContextManager[Any],
     activities: Sequence[ProfilerActivity],
@@ -179,8 +178,8 @@ def compute_utilization(filename: str, total_length: float) -> tuple[float, floa
 
 
 def benchmark_utilization(
-    f: Callable[..., _R],
-    input_: _P_args,
+    f: Callable[[tuple[Any, ...]], _R],
+    input_: tuple[Any, ...],
     trace_folder: str,
     optimize_ctx: AbstractContextManager[Any] | None = None,
     trace_file_name: str = "tmp_chrome_trace",

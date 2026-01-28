@@ -165,7 +165,8 @@ def _try_get_metadata_from_dynamo(
     for i, name in enumerate(param_keys):
         assert name in param_name_to_source, f"{name} not found."
         source = param_name_to_source[name]
-        assert source not in seen_sources, source is not None
+        assert source not in seen_sources, source
+        assert source is not None
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
@@ -180,7 +181,7 @@ def _try_get_metadata_from_dynamo(
         # `source`` specifies the source from user code. ddp optimizer may have
         # intermediate values becoming submodule placeholders which does not
         # have a source
-        assert source is None or source not in seen_sources
+        assert source is None or source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
         source_name = source.name if source else str(source)
