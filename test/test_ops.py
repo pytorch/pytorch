@@ -33,6 +33,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     skipCUDAIfNotRocm,
     skipMeta,
+    skipMPS,
     skipXPU,
 )
 from torch.testing._internal.common_dtype import (
@@ -1560,6 +1561,7 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @skipXPU
+    @skipMPS
     @ops(op_db, allowed_dtypes=(torch.bool,))
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
