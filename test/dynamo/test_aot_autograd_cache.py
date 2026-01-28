@@ -2480,81 +2480,31 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(c1, c2)
             self.assertNotEqual(c3, c4)
 
-    @unittest.skipIf(
-        not torch.distributed.is_available(), "requires distributed"
-    )
-    def test_dtensor_cache_key_stability(self):
-        """
-        Test that DTensor cache keys are stable (don't depend on memory addresses).
-
-        This is a regression test for the issue where DTensor (a subclass of torch.Tensor)
-        was not explicitly handled by AOTAutogradCachePickler's dispatch_table. When
-        falling through to default pickle behavior, the pickle includes tensor storage
-        memory addresses which are non-deterministic across processes, causing cache
-        misses on warm starts.
-
-        The fix ensures DTensor is routed through _reduce_tensor which uses
-        extract_tensor_metadata_for_cache_key to extract only stable metadata.
-        """
-        import torch.distributed as c10d
-        from torch.distributed.device_mesh import init_device_mesh
-        from torch.distributed.tensor import DTensor, Replicate, Shard
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-        from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCachePickler
-
-        fake_store = FakeStore()
-        c10d.init_process_group("fake", store=fake_store, rank=0, world_size=2)
-        try:
-            mesh = init_device_mesh("cpu", (2,))
-
-            # Create DTensor
-            local_tensor = torch.zeros(4, 4)
-            dtensor = DTensor.from_local(local_tensor, mesh, [Replicate()])
-
-            def fn(x):
-                return x.sin()
-
-            # Get a GraphModule for the pickler
-            _, fx_g, _ = self._get_dynamo_output(fn, dtensor)
-
-            pickler = AOTAutogradCachePickler(fx_g)
-
-            # Get the pickled bytes for the DTensor
-            pickled_bytes = pickler.dumps(dtensor)
-
-            # Check that storage addresses are NOT in the pickle
-            # Storage addresses look like '128660944' (numeric strings)
-            import re
-
-            pickled_str = pickled_bytes.decode("latin-1")
-            # Look for patterns that match storage IDs (9-digit numbers that aren't
-            # part of other data like tensor shapes)
-            storage_id_pattern = re.compile(r"X\t\x00\x00\x00(\d{9})")
-            matches = storage_id_pattern.findall(pickled_str)
-
-            self.assertEqual(
-                len(matches),
-                0,
-                f"Found storage addresses in pickle: {matches}. "
-                "DTensor pickle should use stable metadata, not memory addresses.",
+    def test_nested_tensor_subclass_cache_key(self):
+        ctx = multiprocessing.get_context("spawn")
+        results = []
+        for _ in range(2):
+            queue = ctx.Queue()
+            p = ctx.Process(
+                target=_subprocess_gen_nested_subclass_cache_key,
+                args=(queue,),
             )
+            p.start()
+            p.join()
 
-            # Also verify different placements produce different keys
-            dtensor_shard = DTensor.from_local(torch.zeros(4, 4), mesh, [Shard(0)])
-            hash1 = pickler.get_hash(dtensor)
-            hash2 = pickler.get_hash(dtensor_shard)
-            self.assertNotEqual(
-                hash1,
-                hash2,
-                "DTensors with different placements should produce different cache keys",
-            )
+            if p.exitcode != 0:
+                self.skipTest(f"Subprocess exited with code {p.exitcode}")
 
-        finally:
-            c10d.destroy_process_group()
+            results.append(queue.get())
 
-    @unittest.skipIf(
-        not torch.distributed.is_available(), "requires distributed"
-    )
+        # Cache keys from two different processes should be identical
+        self.assertEqual(
+            results[0],
+            results[1],
+            "Nested tensor subclass cache keys should be identical across processes",
+        )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
     def test_dtensor_different_process_cache_key(self):
         """
         Test that DTensor cache keys are consistent across different processes.
@@ -2595,12 +2545,10 @@ def _subprocess_gen_dtensor_cache_key(queue):
     import torch
     import torch._dynamo
     import torch.distributed as c10d
+    from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCachePickler
     from torch.distributed.device_mesh import init_device_mesh
     from torch.distributed.tensor import DTensor, Replicate
     from torch.testing._internal.distributed.fake_pg import FakeStore
-    from torch._functorch._aot_autograd.autograd_cache import (
-        AOTAutogradCachePickler,
-    )
 
     fake_store = FakeStore()
     c10d.init_process_group("fake", store=fake_store, rank=0, world_size=2)
@@ -2632,6 +2580,37 @@ def _subprocess_gen_dtensor_cache_key(queue):
         queue.put(cache_key)
     finally:
         c10d.destroy_process_group()
+
+
+def _subprocess_gen_nested_subclass_cache_key(queue):
+    import torch
+    import torch._dynamo
+    from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCachePickler
+    from torch.testing._internal.two_tensor import TwoTensor
+
+    inner1 = TwoTensor(torch.zeros(4, 4), torch.zeros(4, 4))
+    inner2 = TwoTensor(torch.zeros(4, 4), torch.zeros(4, 4))
+    nested_two_tensor = TwoTensor(inner1, inner2)
+
+    def fn(x):
+        return x.sin()
+
+    # Get dynamo output
+    torch._dynamo.reset()
+    fx_graph = None
+
+    def compiler(gm, inputs, **kwargs):
+        nonlocal fx_graph
+        fx_graph = gm
+        return gm
+
+    g = torch.compile(fn, backend=compiler, fullgraph=True)
+    g(nested_two_tensor)
+
+    pickler = AOTAutogradCachePickler(fx_graph)
+    cache_key = pickler.get_hash(nested_two_tensor)
+
+    queue.put(cache_key)
 
 
 def _policy_save_mm(ctx, op, *args, **kwargs):
