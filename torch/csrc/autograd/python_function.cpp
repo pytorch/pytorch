@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
@@ -59,6 +60,26 @@ PyObject* THPGradientEdgeClass = nullptr;
 
 // Anonymous namespace for helpful functions used in this file
 namespace {
+
+// Check if a PyObject is a DTensor. This is used to determine whether
+// zeros_like() should be used for undefined gradients to preserve the
+// tensor subclass type. We specifically check for DTensor (rather than all
+// tensor subclasses) to avoid affecting other subclasses that may not need
+// this behavior.
+inline bool is_dtensor(PyObject* obj) {
+#ifdef USE_DISTRIBUTED
+  try {
+    py::handle dtensor_class = get_dtensor_class();
+    return (PyObject*)Py_TYPE(obj) == dtensor_class.ptr() ||
+        py::isinstance(py::handle(obj), dtensor_class);
+  } catch (const py::error_already_set&) {
+    // DTensor module not available or failed to import
+    return false;
+  }
+#else
+  return false;
+#endif
+}
 
 inline void check_legacy_fn_attr_access(
     const std::shared_ptr<torch::autograd::Node>& cdata,
@@ -769,20 +790,20 @@ static void _wrap_outputs(
     } else {
       if (is_executable) {
         // If one of the grad outputs is undefined, a correctly-shaped zeros
-        // should be used instead. To construct these for NJT or tensor
-        // subclasses (like DTensor), zeros_like() must be used to preserve
-        // the tensor type. Failing to do this may result in undefined errors
-        // depending on the tensor subclass's behavior. DTensor will error
-        // out due to mixing DTensor and torch.Tensor in the following
-        // computation.
+        // should be used instead. To construct these for NJT or DTensor,
+        // zeros_like() must be used to preserve the tensor type. Failing to
+        // do this may result in undefined errors depending on the tensor
+        // subclass's behavior. DTensor will error out due to mixing DTensor
+        // and torch.Tensor in the following computation.
+        // Note: We specifically check for DTensor rather than all tensor
+        // subclasses to avoid affecting other subclasses that may not need
+        // this behavior.
         bool is_differentiable =
             (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
                  0 &&
              isDifferentiableType(wrapped_output->scalar_type()));
-        bool is_tensor_subclass =
-            wrapped_output->unsafeGetTensorImpl()->is_python_dispatch();
         bool use_zeros_like = is_differentiable && num_outputs > 1 &&
-            (wrapped_output->is_nested() || is_tensor_subclass);
+            (wrapped_output->is_nested() || is_dtensor(obj));
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
