@@ -25,6 +25,7 @@ This is a core part of Dynamo's tracing system, translating torch operations int
 traceable graph nodes while preserving correct semantics and handling edge cases.
 """
 
+import enum
 import functools
 import inspect
 import logging
@@ -608,33 +609,36 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         return super().call_function(tx, args, kwargs)
 
 
+class AllowInGraphKind(enum.Enum):
+    DEFAULT = "default"
+    NONSTRICT_TRACE = "nonstrict_trace"
+    LEAF_FUNCTION = "leaf_function"
+
+
 class TorchInGraphFunctionVariable(BaseTorchVariable):
     """Points to a torch function/method that should be put in FX graph"""
 
     def __init__(
         self,
         value: Callable[..., Any],
-        nonstrict_traceable: bool | None = None,
-        leaf_function: bool | None = None,
+        style: AllowInGraphKind | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
         from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
-        if nonstrict_traceable is None:
-            nonstrict_traceable = is_nonstrict_trace_callable(value)
-        if leaf_function is None:
-            leaf_function = is_leaf_function(value)
+        if style is None:
+            if is_leaf_function(value):
+                style = AllowInGraphKind.LEAF_FUNCTION
+            elif is_nonstrict_trace_callable(value):
+                style = AllowInGraphKind.NONSTRICT_TRACE
+            else:
+                style = AllowInGraphKind.DEFAULT
 
-        self.nonstrict_traceable = nonstrict_traceable
-        self.leaf_function = leaf_function
+        self.style = style
 
     def __repr__(self) -> str:
-        return (
-            f"TorchInGraphFunctionVariable({self.value}, "
-            f"nonstrict_traceable={self.nonstrict_traceable}, "
-            f"leaf_function={self.leaf_function})"
-        )
+        return f"TorchInGraphFunctionVariable({self.value}, style={self.style})"
 
     def get_function(self) -> Callable[..., Any]:
         return self.value
@@ -2156,10 +2160,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from . import ConstantVariable, SymNodeVariable
         from .builder import wrap_fx_proxy
 
-        if self.nonstrict_traceable:
+        if self.style == AllowInGraphKind.NONSTRICT_TRACE:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)
 
-        if self.leaf_function:
+        if self.style == AllowInGraphKind.LEAF_FUNCTION:
             return self._call_leaf_function(tx, args, kwargs)
 
         if self.torch_function_override_enabled(tx, args, kwargs):
@@ -2746,7 +2750,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         if fake_impl is None:
             raise ValueError(
                 f"leaf_function '{getattr(decorated_fn, '__name__', decorated_fn)}' "
-                "requires a fake_impl. Please provide one using the @<func>.fake_impl "
+                "requires a fake implementation. Please provide one using the @<func>.register_fake "
                 "decorator. See the leaf_function docstring for details."
             )
 
