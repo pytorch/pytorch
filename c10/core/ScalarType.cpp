@@ -187,6 +187,8 @@ std::pair<std::string_view, std::string_view> getDtypeNames(
       return {"float16", "half"};
     case c10::ScalarType::ComplexHalf:
       return {"complex32", "chalf"};
+    case c10::ScalarType::BComplex32:
+      return {"bcomplex32", ""};
     case c10::ScalarType::ComplexFloat:
       return {"complex64", "cfloat"};
     case c10::ScalarType::ComplexDouble:
