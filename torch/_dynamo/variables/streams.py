@@ -157,6 +157,20 @@ def _(
 has_side_effect(torch.ops.streams.wait_event.default)
 
 
+@custom_op("streams::synchronize_event", mutates_args=())
+def synchronize_event(event_index: int) -> None:
+    event = _get_event_by_index(event_index)
+    event.synchronize()
+
+
+@synchronize_event.register_fake
+def _(event_index: int) -> None:
+    pass
+
+
+has_side_effect(torch.ops.streams.synchronize_event.default)
+
+
 @custom_op("streams::wait_stream", mutates_args=())
 def wait_stream(waiting_stream_index: int, waited_on_stream_index: int) -> None:
     waiting = _get_stream_by_index(waiting_stream_index)
@@ -471,7 +485,10 @@ class EventVariable(VariableTracker):
             return ConstantVariable(None)
         elif name == "synchronize":
             tx.output.create_proxy(
-                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                "call_function",
+                torch.ops.streams.synchronize_event,
+                (self.user_object_index,),
+                {},
             )
             return ConstantVariable(None)
         elif name == "query":
