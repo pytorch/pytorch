@@ -36,7 +36,7 @@ import types
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, NoReturn, Optional, overload, TYPE_CHECKING, Union
 
 import sympy
 
@@ -198,13 +198,7 @@ from .dicts import (
     OrderedSetVariable,
     SetVariable,
 )
-from .distributed import (
-    DeviceMeshVariable,
-    PlacementClassVariable,
-    PlacementVariable,
-    ProcessGroupVariable,
-    WorldMetaClassVariable,
-)
+from .distributed import DeviceMeshVariable, WorldMetaClassVariable
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -224,7 +218,7 @@ from .higher_order_ops import (
     TorchHigherOrderOperatorVariable,
 )
 from .iter import ItertoolsVariable
-from .lazy import LazyVariableTracker
+from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -297,6 +291,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedEnumClassVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
@@ -462,6 +457,7 @@ class VariableBuilder:
         self,
         tx: "InstructionTranslator",
         source: Source,
+        allow_lazy_constant: bool = True,
     ) -> None:
         assert source is not None, (
             "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
@@ -471,6 +467,10 @@ class VariableBuilder:
         self.tx = tx
         self.source = source
         self.name = source.name
+        # allow_lazy_constant controls whether LazyConstantVariable can be returned
+        # for int/float/bool/str. Set to False when called from LazyCache.realize()
+        # to prevent double-wrapping (LazyVariableTracker containing LazyConstantVariable).
+        self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
@@ -494,7 +494,13 @@ class VariableBuilder:
 
         cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
         if cached_vt:
-            return cached_vt
+            # If allow_lazy_constant=False but the cached VT is a lazy variable,
+            # we need to rebuild to get a non-lazy version. This happens when
+            # LazyConstantVariable.realize() calls VariableBuilder.
+            if self.allow_lazy_constant or not isinstance(
+                cached_vt, LazyVariableTracker
+            ):
+                return cached_vt
 
         vt = self._wrap(value)
 
@@ -759,18 +765,24 @@ class VariableBuilder:
 
         if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            output = [
+            output: list[VariableTracker] = [
                 LazyVariableTracker.create(
                     getattr(value, name),
                     source=AttrSource(self.source, name),
                 )
                 for name in namedtuple_fields(type(value))
             ]
+
+            tuple_vt = TupleVariable(
+                output,
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
             result = NamedTupleVariable(
-                # type: ignore[arg-type]
                 output,
                 tuple_cls=type(value),
                 source=self.source,
+                tuple_vt=tuple_vt,
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
@@ -1180,24 +1192,10 @@ class VariableBuilder:
             return DispatchKeySetVariable(value)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
-        elif ProcessGroupVariable.is_process_group(value):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return ProcessGroupVariable(value, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return DeviceMeshVariable(value, source=self.source)
-        elif PlacementClassVariable.is_placement_type(value):
-            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return PlacementClassVariable(value, source=self.source)
-        elif PlacementVariable.is_placement(value):
-            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
-            self.install_guards(GuardBuilder.EQUALS_MATCH)
-            return PlacementVariable(
-                value,
-                source=self.source,
-            )
         elif value is OrderedSet:
             self.install_guards(GuardBuilder.ID_MATCH)
             return OrderedSetClassVariable()
@@ -1496,6 +1494,12 @@ class VariableBuilder:
 
             if is_opaque_type(value):
                 return OpaqueObjectClassVariable(
+                    value,
+                    source=self.source,
+                )
+
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(
                     value,
                     source=self.source,
                 )
@@ -1998,7 +2002,7 @@ class VariableBuilder:
                 context=str(value),
                 explanation="Dynamo does not support RNN, GRU, or LSTM.",
                 hints=[
-                    "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+                    "Set torch._dynamo.config.allow_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -2124,6 +2128,7 @@ class VariableBuilder:
 
     def wrap_literal(self, value: object) -> VariableTracker:
         if type(value) is int:
+            assert isinstance(value, int)
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
@@ -2167,15 +2172,64 @@ class VariableBuilder:
                     )
                     return ConstantVariable.create(value=value, source=self.source)
 
-            return self.wrap_symint(value)
-        elif not config.specialize_float and type(value) is float:
-            return self.wrap_symfloat(value)
+                return self._wrap_lazy_constant(value, self._wrap_symint_for_lazy)
+
+            return self._wrap_lazy_constant(value)
+        elif type(value) is float:
+            assert isinstance(value, float)
+            if not config.specialize_float:
+                return self._wrap_lazy_constant(value, self._wrap_symfloat_for_lazy)
+
+            return self._wrap_lazy_constant(value)
+        elif type(value) in (bool, str):
+            assert isinstance(value, (bool, str))
+            return self._wrap_lazy_constant(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
             if isinstance(value, (list, set)):
                 return self.tx.output.side_effects.track_mutable(value, result)
             return result
+
+    def _wrap_symint_for_lazy(self, value: int) -> VariableTracker:
+        return self.wrap_symint(value)
+
+    def _wrap_symfloat_for_lazy(self, value: float) -> VariableTracker:
+        return self.wrap_symfloat(value)
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: int,
+        wrap_fn: Callable[[int], VariableTracker],
+    ) -> VariableTracker: ...
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: float,
+        wrap_fn: Callable[[float], VariableTracker],
+    ) -> VariableTracker: ...
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: Union[int, float, bool, str],
+        wrap_fn: None = None,
+    ) -> VariableTracker: ...
+
+    def _wrap_lazy_constant(
+        self,
+        value: Union[int, float, bool, str],
+        wrap_fn: Optional[Callable[[Any], VariableTracker]] = None,
+    ) -> VariableTracker:
+        """Wrap a primitive constant, deferring guard installation if allowed."""
+        if not self.allow_lazy_constant:
+            if wrap_fn is not None:
+                return wrap_fn(value)
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+        return LazyConstantVariable.create(value, source=self.source)
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
@@ -2300,7 +2354,7 @@ class VariableBuilder:
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
                 explanation="torch.compile does not support sparse Tensors",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
 
         if (
@@ -3161,7 +3215,7 @@ def handle_traced_output(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
                 context=str(example_value),
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
@@ -3259,7 +3313,7 @@ def handle_traced_output(
             ), (
                 f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             )
-            return NamedTupleVariable(unpacked, example_value.__class__, **options)
+            return NamedTupleVariable(unpacked, example_value.__class__, **options)  # type: ignore[arg-type]
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -3372,6 +3426,17 @@ def handle_traced_output(
     elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif is_opaque_type(type(example_value)):
+        # This is for handling opaque objects in custom ops
+        if is_opaque_value_type(type(example_value)):
+            proxy = example_value  # pyrefly: ignore[bad-assignment]
+        fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+            tx.output.fake_mode, example_value
+        )
+        return TorchScriptObjectVariable.create(
+            proxy,
+            fake_script_obj,
+        )
     else:
         unimplemented(
             gb_type="torch.* op returned non-Tensor",
@@ -3850,6 +3915,7 @@ def _automatic_dynamic(
         view_base_context=view_base_context,
         tensor_source=source,
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
+        shape_ids=getattr(e, "_dynamo_shape_ids", None),
     )
 
 
@@ -3994,6 +4060,15 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
+        elif is_opaque_type(type(value)):
+            # This is for handling opaque objects in custom ops
+            fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                tx.output.fake_mode, value
+            )
+            return TorchScriptObjectVariable.create(
+                value,
+                fake_script_obj,
+            )
         # type: ignore[attr-defined]
         elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return UserDefinedObjectVariable(value)
@@ -4019,6 +4094,8 @@ class SourcelessBuilder:
         ):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
@@ -4039,8 +4116,6 @@ class SourcelessBuilder:
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
-        elif PlacementVariable.is_placement(value):
-            return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
         elif value is functools.wraps:

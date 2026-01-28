@@ -1017,5 +1017,195 @@ class TestFusibleNodeOverlap(InductorTestCase):
         ).check("wait_tensor").run(graph_str)
 
 
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestOverlapSchedulingFixes(InductorTestCase):
+    """
+    Test cases for specific bug fixes in overlap scheduling.
+    These tests would fail without their corresponding fixes.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=16, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_no_self_dependency_cycle_with_dtype_conversion(self):
+        """
+        Test that bucketing collectives with dtype conversion doesn't create
+        self-dependency cycles.
+
+        This tests the fix in augmented_graph_helper.py that adds != new_node
+        checks to prevent self-dependencies when merging nodes.
+
+        The bug: When two convert_element_type nodes (inputs to all_gathers)
+        have timeline dependencies between them and both get merged into
+        _pre_bucket_all_gather, the dependency becomes a self-dependency
+        which causes _stable_topological_sort to fail.
+        """
+
+        def func(a, b, c, d):
+            group_name = dist.distributed_c10d._get_default_group().group_name
+            group_size = 16
+
+            # Multiple all_gathers with dtype conversion
+            # The convert nodes will have timeline dependencies between them
+            conv_a = torch.ops.prims.convert_element_type.default(a, torch.bfloat16)
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_a, group_size, group_name
+            )
+
+            conv_b = torch.ops.prims.convert_element_type.default(b, torch.bfloat16)
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_b, group_size, group_name
+            )
+
+            # Compute between all_gathers
+            mm = torch.mm(c, d)
+
+            conv_c = torch.ops.prims.convert_element_type.default(c, torch.bfloat16)
+            ag3 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_c, group_size, group_name
+            )
+
+            conv_d = torch.ops.prims.convert_element_type.default(d, torch.bfloat16)
+            ag4 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_d, group_size, group_name
+            )
+
+            # Wait for all
+            w1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            w2 = torch.ops._c10d_functional.wait_tensor(ag2)
+            w3 = torch.ops._c10d_functional.wait_tensor(ag3)
+            w4 = torch.ops._c10d_functional.wait_tensor(ag4)
+
+            return w1.sum() + w2.sum() + w3.sum() + w4.sum() + mm.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            d = torch.ones(4, 4, device=self.device)
+
+            traced = make_fx(func)(a, b, c, d)
+
+        # Run full overlap scheduling with bucketing enabled
+        # This would fail with AssertionError in _stable_topological_sort
+        # before the self-dependency fix
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=True,
+            insert_overlap_deps=True,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=None,
+            collective_estimator="analytical",
+            enable_fusion_regions=False,
+        )
+        # This should complete without cycle error
+        result = scheduler.run()
+        result.graph.lint()
+
+    def test_no_cycle_with_fusion_regions_and_bucketing(self):
+        """
+        Test that fusion regions + bucketing doesn't create cycles.
+
+        This tests multiple fixes:
+        1. Self-dependency prevention (augmented_graph_helper.py)
+        2. Track erased getitem nodes (const_fold.py, fusion_regions.py)
+        3. Skip DCE during expansion (const_fold.py, fusion_regions.py)
+
+        The scenario: Fusion regions collapse fusible ops into call_module nodes.
+        When bucketing merges collectives, getitem nodes from fusion outputs
+        get erased. Without proper tracking and DCE skip, this causes cycles
+        or assertion failures.
+        """
+
+        def func(a, b, c, d):
+            group_name = dist.distributed_c10d._get_default_group().group_name
+            group_size = 16
+
+            # Start collectives
+            conv_a = torch.ops.prims.convert_element_type.default(a, torch.bfloat16)
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_a, group_size, group_name
+            )
+
+            conv_b = torch.ops.prims.convert_element_type.default(b, torch.bfloat16)
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_b, group_size, group_name
+            )
+
+            # Fusible compute chain (will become a fusion region)
+            x = c + 1
+            x = x * 2
+            x = x - 3
+            x = x / 4
+
+            # Wait and use results
+            w1 = torch.ops._c10d_functional.wait_tensor(ag1)
+            w2 = torch.ops._c10d_functional.wait_tensor(ag2)
+
+            # More collectives
+            conv_c = torch.ops.prims.convert_element_type.default(c, torch.bfloat16)
+            ag3 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_c, group_size, group_name
+            )
+
+            conv_d = torch.ops.prims.convert_element_type.default(d, torch.bfloat16)
+            ag4 = torch.ops._c10d_functional.all_gather_into_tensor(
+                conv_d, group_size, group_name
+            )
+
+            # Another fusible chain
+            y = d + 1
+            y = y * 2
+
+            w3 = torch.ops._c10d_functional.wait_tensor(ag3)
+            w4 = torch.ops._c10d_functional.wait_tensor(ag4)
+
+            return w1.sum() + w2.sum() + w3.sum() + w4.sum() + x.sum() + y.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            c = torch.ones(4, 4, device=self.device)
+            d = torch.ones(4, 4, device=self.device)
+
+            traced = make_fx(func)(a, b, c, d)
+
+        # Run with fusion regions enabled - this exercises all the fixes
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=True,
+            insert_overlap_deps=True,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=None,
+            collective_estimator="analytical",
+            enable_fusion_regions=True,  # Enable fusion regions
+        )
+        # This should complete without errors
+        result = scheduler.run()
+        result.graph.lint()
+
+
 if __name__ == "__main__":
     run_tests()

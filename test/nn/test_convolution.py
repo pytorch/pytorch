@@ -1725,59 +1725,54 @@ class TestConvolutionNNDeviceType(NNTestCase):
             weight = torch.randn(1, 1, 3, 3, device=device)
             grad_output = torch.randn(1, 1, 2, 2, device=device)
             grad_input, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
-                grad_output,            # grad_output
-                input,                  # input
-                weight,                 # weight
-                [1],                    # bias_sizes
-                (1, 1),                 # stride
-                (0, 0),                 # padding
-                (1, 1),                 # dilation
-                False,                  # transposed
-                (0, 0),                 # output_padding
-                1,                      # groups
-                output_mask,            # output_mask: (grad_input, grad_weight, grad_bias)
+                grad_output,
+                input,
+                weight,
+                [1],
+                (1, 1),
+                (0, 0),
+                (1, 1),
+                False,
+                (0, 0),
+                1,
+                output_mask,  # output_mask: (grad_input, grad_weight, grad_bias)
             )
-            self.assertIsNotNone(grad_input) if output_mask[0] else self.assertIsNone(
-                grad_input
-            )
-            self.assertIsNotNone(grad_weight) if output_mask[1] else self.assertIsNone(
-                grad_weight
-            )
-            self.assertIsNotNone(grad_bias) if output_mask[2] else self.assertIsNone(
-                grad_bias
-            )
+            if output_mask[0]:
+                self.assertIsNotNone(grad_input)
+            else:
+                self.assertIsNone(grad_input)
+            if output_mask[1]:
+                self.assertIsNotNone(grad_weight)
+            else:
+                self.assertIsNone(grad_weight)
+            if output_mask[2]:
+                self.assertIsNotNone(grad_bias)
+            else:
+                self.assertIsNone(grad_bias)
 
         # Convolution Backward(ConvB) propagation must return valid  input, weight, bias gradient
-        output_mask = [True, True, True]
-        test_conv_backward_output_mask(output_mask)
+        test_conv_backward_output_mask([True, True, True])
 
         # ConvB propagation must return input and weight gradient
-        output_mask = [True, True, False]
-        test_conv_backward_output_mask(output_mask)
+        test_conv_backward_output_mask([True, True, False])
 
         # ConvB propagation must return input and bias gradient
-        output_mask = [True, False, True]
-        test_conv_backward_output_mask(output_mask)
+        test_conv_backward_output_mask([True, False, True])
 
         # ConvB propagation must return just input gradient
-        output_mask = [True, False, False]
-        test_conv_backward_output_mask(output_mask)
+        test_conv_backward_output_mask([True, False, False])
 
         # ConvB propagation must return weight and bias gradient
-        output_mask = [False, True, True]
-        test_conv_backward_output_mask(output_mask)
+        test_conv_backward_output_mask([False, True, True])
 
         # ConvB propagation must return just weight gradient
-        output_mask = [False, True, False]
-        test_conv_backward_output_mask(output_mask)
+        test_conv_backward_output_mask([False, True, False])
 
         # ConvB propagation must return just bias gradient
-        output_mask = [False, False, True]
-        test_conv_backward_output_mask(output_mask)
+        test_conv_backward_output_mask([False, False, True])
 
         # ConvB propagation shouldn't return any of gradient
-        output_mask = [False, False, False]
-        test_conv_backward_output_mask(output_mask)
+        test_conv_backward_output_mask([False, False, False])
 
     def test_conv_double_backward_no_bias(self):
         kern = 3

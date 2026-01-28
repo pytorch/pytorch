@@ -7,15 +7,18 @@ import unittest.mock as mock
 import torch
 import torch._inductor
 from torch._higher_order_ops import foreach_map
+from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    skipIfRocm,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.utils._pytree import tree_flatten
 
 
@@ -157,7 +160,7 @@ un_ops_under_test = [
     *foreach_map_un_ops_under_test,
 ]
 
-compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
+compose_ops = [torch._foreach_addcdiv]
 all_ops = parametrize(
     "op",
     ternary_ops_under_test + bin_ops_under_test + un_ops_under_test,
@@ -1271,6 +1274,82 @@ class ForeachTests(TestCase):
             torch.allclose(ref.grad, act.grad)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+
+    @requires_cuda_and_triton
+    @config.patch({"emulate_precision_casts": True})
+    def test_foreach_addcmul_fma_bitwise_equal(self):
+        """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
+        self_tensors = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor1_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor2_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+
+        # ROCm may have small numerical differences
+        # For some reason ROCm isn't bitwise equivalent between eager and compiled
+        atol = 1e-5 if TEST_WITH_ROCM else 0
+        rtol = 1e-5 if TEST_WITH_ROCM else 0
+
+        # Test with default value=1
+        eager_result = torch._foreach_addcmul(self_tensors, tensor1_list, tensor2_list)
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2)
+
+        compiled_result = fn(self_tensors, tensor1_list, tensor2_list)
+        for eager, compiled in zip(eager_result, compiled_result):
+            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
+
+        # Test with value != 1
+        eager_result2 = torch._foreach_addcmul(
+            self_tensors, tensor1_list, tensor2_list, value=2.5
+        )
+
+        @torch.compile
+        def fn2(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2, value=2.5)
+
+        compiled_result2 = fn2(self_tensors, tensor1_list, tensor2_list)
+        for eager, compiled in zip(eager_result2, compiled_result2):
+            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
+
+    @skipIfRocm
+    @requires_cuda_and_triton
+    @config.patch({"emulate_precision_casts": True})
+    def test_foreach_addcmul_uses_fma_instruction(self):
+        """Test that _foreach_addcmul generates code using FMA instruction."""
+        from torch._inductor.utils import run_and_get_code
+
+        self_tensors = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor1_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor2_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2, value=2.0)
+
+        _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
+        code = " ".join(code)
+        self.assertIn(
+            "libdevice.fma", code, "Expected FMA to be used in generated code"
+        )
 
 
 if __name__ == "__main__":

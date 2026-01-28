@@ -18,9 +18,11 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
+from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
@@ -182,7 +184,10 @@ def run_functionalized_fw_and_collect_metadata(
     @simple_wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
+        assert all(
+            isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
+            for a in flat_args
+        )
 
         input_info: list[InputAliasInfo] = []
         output_info: list[OutputAliasInfo] = []
@@ -202,7 +207,7 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending:
+        with disable_above, mode, suppress_pending, disable_autocast_cache():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
