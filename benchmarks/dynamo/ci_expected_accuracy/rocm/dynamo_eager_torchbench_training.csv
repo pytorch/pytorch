@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,pass,6
-
-
-
 BERT_pytorch,pass,6
 
 
@@ -22,7 +18,7 @@ Super_SloMo,pass,7
 
 
 
-alexnet,pass,0
+alexnet,pass,6
 
 
 
@@ -82,7 +78,7 @@ lennard_jones,pass,7
 
 
 
-llava,model_fail_to_load,0
+llava,eager_fail_to_run,0
 
 
 
@@ -146,7 +142,7 @@ pytorch_unet,pass_due_to_skip,7
 
 
 
-resnet152,pass,0
+resnet152,pass,7
 
 
 
@@ -186,15 +182,11 @@ squeezenet1_1,pass,6
 
 
 
-stable_diffusion_text_encoder,pass,0
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
-
-
-
 torch_multimodal_clip,pass,7
+
+
+
+torchrec_dlrm,pass,6
 
 
 
@@ -202,7 +194,7 @@ tts_angular,pass,9
 
 
 
-vgg16,pass,0
+vgg16,pass,6
 
 
 

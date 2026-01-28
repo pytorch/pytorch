@@ -1,12 +1,9 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
 #include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -434,10 +431,10 @@ struct VerboseLogger : public PythonLogger {
       }
       oss << it->key_size;
       if (std::next(it) != cached_keys.end()) {
-        oss << ",";
+        oss << ',';
       }
     }
-    oss << "]";
+    oss << ']';
     std::string compile_reason = oss.str();
     log(PythonLogger::DEBUG, compile_reason);
     return compile_reason;
@@ -454,7 +451,7 @@ struct VerboseLogger : public PythonLogger {
     }
     oss << "sizes["
         << std::to_string(new_dyn_sizes_idx[new_dyn_sizes_idx.size() - 1])
-        << "]";
+        << ']';
     std::string recompile_reason = oss.str();
     log(PythonLogger::DEBUG, recompile_reason);
     return recompile_reason;

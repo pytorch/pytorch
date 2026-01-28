@@ -20,14 +20,12 @@ aten = torch.ops.aten
 @inductor_config.patch({"triton.native_matmul": True})
 class TestTritonDotReduction(TestCase):
     def _check_equal(
-        self,
-        f: Callable,
-        example_inputs: tuple[torch.Tensor],
+        self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
     ):
         compiled = torch.compile(f)
         actual = compiled(*example_inputs)
         expect = f(*example_inputs)
-        self.assertTrue(same(expect, actual))
+        self.assertTrue(same(expect, actual, tol=tol))
 
     def _check_code(
         self,
@@ -93,7 +91,11 @@ class TestTritonDotReduction(TestCase):
         x = rand_strided((M, K), (K, 1), dtype=torch.float16, device=GPU_TYPE)
         y = rand_strided((K, N), (N, 1), dtype=torch.float32, device=GPU_TYPE)
 
-        self._check_equal(f, (x, y))
+        # _check_equal calls torch._dynamo.utils.same with kwarg tol=1e-4.
+        # For fp16 dtype, torch.allclose() defaults to atol=1e-3 rtol=1e-5,
+        # but same() uses the single value to assign both, resulting in
+        # Accuracy failed: allclose not within tol=0.0001.
+        self._check_equal(f, (x, y), tol=1e-3)
         self._check_code(f, (x, y), 1, 1)
 
     def test_reduction_mask_zeroout(self):

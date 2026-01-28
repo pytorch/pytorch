@@ -7,11 +7,10 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/eval_frame.h>
+#include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
-#include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 
 static struct PyModuleDef _module =
@@ -82,12 +81,6 @@ template <typename F>
 THPObjectPtr _unicode_dispatch(PyObject* str) {
   if (!PyUnicode_Check(str)) {
     PyErr_SetString(PyExc_TypeError, "String expected");
-    return THPObjectPtr();
-  }
-
-  // Remove this when we're 3.10+
-  if (PyUnicode_READY(str) != 0) {
-    // Returns -1 with an exception set on failure
     return THPObjectPtr();
   }
 
@@ -224,6 +217,7 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("code", &CacheEntry::code)
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
+      .def_readonly("backend", &CacheEntry::backend)
       .def_property_readonly("next", &CacheEntry::next)
       .def(
           "update_diff_guard_root_manager",
@@ -249,6 +243,9 @@ void initDynamoBindings(PyObject* torch) {
       }))
       .def_readwrite("cur_action", &FrameExecStrategy::cur_action)
       .def_readwrite("recursive_action", &FrameExecStrategy::recursive_action);
+
+  m.def("set_c_recursion_limit", &dynamo_set_c_recursion_limit);
+  m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
 
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);

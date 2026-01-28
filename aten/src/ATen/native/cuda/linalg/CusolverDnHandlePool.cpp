@@ -1,8 +1,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
-#if defined(CUDART_VERSION) || defined(USE_ROCM)
-
 namespace at::cuda {
 namespace {
 
@@ -48,5 +46,3 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
 }
 
 } // namespace at::cuda
-
-#endif // CUDART_VERSION

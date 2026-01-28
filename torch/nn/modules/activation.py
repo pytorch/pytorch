@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -261,8 +260,8 @@ class Hardtanh(Module):
         min_val: float = -1.0,
         max_val: float = 1.0,
         inplace: bool = False,
-        min_value: Optional[float] = None,
-        max_value: Optional[float] = None,
+        min_value: float | None = None,
+        max_value: float | None = None,
     ) -> None:
         super().__init__()
         if min_value is not None:
@@ -283,7 +282,10 @@ class Hardtanh(Module):
         self.min_val = min_val
         self.max_val = max_val
         self.inplace = inplace
-        assert self.max_val > self.min_val
+        if self.max_val <= self.min_val:
+            raise AssertionError(
+                f"max_val ({self.max_val}) must be greater than min_val ({self.min_val})"
+            )
 
     def forward(self, input: Tensor) -> Tensor:
         """
@@ -1053,7 +1055,7 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
-def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
+def _check_arg_device(x: torch.Tensor | None) -> bool:
     if x is not None:
         return x.device.type in [
             "cpu",
@@ -1063,7 +1065,7 @@ def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
     return True
 
 
-def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
+def _arg_requires_grad(x: torch.Tensor | None) -> bool:
     if x is not None:
         return x.requires_grad
     return False
@@ -1156,8 +1158,8 @@ class MultiheadAttention(Module):
     """
 
     __constants__ = ["batch_first"]
-    bias_k: Optional[torch.Tensor]
-    bias_v: Optional[torch.Tensor]
+    bias_k: torch.Tensor | None
+    bias_v: torch.Tensor | None
 
     def __init__(
         self,
@@ -1189,9 +1191,8 @@ class MultiheadAttention(Module):
         self.dropout = dropout
         self.batch_first = batch_first
         self.head_dim = embed_dim // num_heads
-        assert self.head_dim * num_heads == self.embed_dim, (
-            "embed_dim must be divisible by num_heads"
-        )
+        if self.head_dim * num_heads != self.embed_dim:
+            raise AssertionError("embed_dim must be divisible by num_heads")
 
         if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(
@@ -1258,12 +1259,12 @@ class MultiheadAttention(Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        key_padding_mask: Optional[Tensor] = None,
+        key_padding_mask: Tensor | None = None,
         need_weights: bool = True,
-        attn_mask: Optional[Tensor] = None,
+        attn_mask: Tensor | None = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Tensor | None]:
         r"""Compute attention outputs using query, key, and value embeddings.
 
             Supports optional parameters for padding, masks and attention weights.
@@ -1446,10 +1447,11 @@ class MultiheadAttention(Module):
                     )
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
-        assert not any_nested, (
-            "MultiheadAttention does not support NestedTensor outside of its fast path. "
-            + f"The fast path was not hit because {why_not_fast_path}"
-        )
+        if any_nested:
+            raise AssertionError(
+                "MultiheadAttention does not support NestedTensor outside of its fast path. "
+                + f"The fast path was not hit because {why_not_fast_path}"
+            )
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
@@ -1517,10 +1519,10 @@ class MultiheadAttention(Module):
 
     def merge_masks(
         self,
-        attn_mask: Optional[Tensor],
-        key_padding_mask: Optional[Tensor],
+        attn_mask: Tensor | None,
+        key_padding_mask: Tensor | None,
         query: Tensor,
-    ) -> tuple[Optional[Tensor], Optional[int]]:
+    ) -> tuple[Tensor | None, int | None]:
         r"""Determine mask type and combine masks if necessary.
 
         If only one mask is provided, that mask
@@ -1535,8 +1537,8 @@ class MultiheadAttention(Module):
             merged_mask: merged mask
             mask_type: merged mask type (0, 1, or 2)
         """
-        mask_type: Optional[int] = None
-        merged_mask: Optional[Tensor] = None
+        mask_type: int | None = None
+        merged_mask: Tensor | None = None
 
         if key_padding_mask is not None:
             mask_type = 1
@@ -1732,9 +1734,9 @@ class Softmin(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1797,9 +1799,9 @@ class Softmax(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1882,9 +1884,9 @@ class LogSoftmax(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 

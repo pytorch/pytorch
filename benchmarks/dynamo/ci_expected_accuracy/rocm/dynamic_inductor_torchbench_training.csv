@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,fail_to_run,3
-
-
-
 BERT_pytorch,pass,6
 
 
@@ -46,7 +42,7 @@ dcgan,pass,6
 
 
 
-demucs,fail_to_run,4
+demucs,pass,9
 
 
 
@@ -82,7 +78,7 @@ lennard_jones,pass,7
 
 
 
-llava,model_fail_to_load,0
+llava,eager_fail_to_run,0
 
 
 
@@ -94,7 +90,7 @@ microbench_unbacked_tolist_sum,pass,9
 
 
 
-mnasnet1_0,pass,7
+mnasnet1_0,fail_accuracy,7
 
 
 
@@ -146,7 +142,7 @@ pytorch_unet,pass_due_to_skip,7
 
 
 
-resnet152,pass,0
+resnet152,eager_two_runs_differ,0
 
 
 
@@ -182,15 +178,11 @@ squeezenet1_1,pass,6
 
 
 
-stable_diffusion_text_encoder,pass,5
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
-
-
-
 torch_multimodal_clip,pass,7
+
+
+
+torchrec_dlrm,pass,6
 
 
 
@@ -198,11 +190,11 @@ tts_angular,pass,9
 
 
 
-vgg16,pass,0
+vgg16,pass,6
 
 
 
-vision_maskrcnn,fail_accuracy,37
+vision_maskrcnn,fail_to_run,37
 
 
 

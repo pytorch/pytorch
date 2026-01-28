@@ -78,7 +78,13 @@ class AOTInductorModelContainer {
     constant_blob_ = model->release_constant_blob();
     constants_internal_offset_.resize(
         model->num_constants() - model->num_folded_constants());
-    model->compute_constant_blob(blob_size_, constants_internal_offset_);
+    secondary_cpu_constants_internal_offset_.resize(
+        model->num_constants() - model->num_folded_constants());
+    model->compute_constant_blob(
+        blob_size_,
+        constants_internal_offset_,
+        secondary_cpu_blob_size_,
+        secondary_cpu_constants_internal_offset_);
     constant_folded_ = ConstantState::INITIALIZED;
 
     for (auto& model : models_) {
@@ -123,10 +129,8 @@ class AOTInductorModelContainer {
       constants_folding_lk.unlock();
       model_lk.lock();
     } else if (const_folded != ConstantState::FOLDED) {
-      STD_TORCH_CHECK(
-          false,
-          "Unknown constant state: ",
-          toStringConstantState(constant_folded_));
+      throw std::runtime_error(
+          "Unknown constant state: " + toStringConstantState(constant_folded_));
     }
 
     try {
@@ -169,10 +173,8 @@ class AOTInductorModelContainer {
           /* validate_full_update = */ false);
       const_folded = ConstantState::FOLDED;
     } else if (constant_folded_ != ConstantState::FOLDED) {
-      STD_TORCH_CHECK(
-          false,
-          "Unknown constant state: ",
-          toStringConstantState(constant_folded_));
+      throw std::runtime_error(
+          "Unknown constant state: " + toStringConstantState(constant_folded_));
     }
 
     model->run_single_threaded(
@@ -206,56 +208,56 @@ class AOTInductorModelContainer {
   }
 
   size_t num_constants() const {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No available models in container!");
-
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
     return models_[0]->num_constants();
   }
 
   // retrieve the constant name of constants_info_[idx]
   const char* constant_name(size_t idx) const {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No available models in container!");
-
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
     return models_[0]->constant_name(static_cast<int64_t>(idx));
   }
 
   // retrieve original FQN of constants_info_[idx]
   const char* constant_original_fqn(size_t idx) const {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No available models in container!");
-
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
     return models_[0]->constant_original_fqn(static_cast<int64_t>(idx));
   }
 
   // retrieve whether constant is from folded of constants_info_[idx]
   bool constant_from_folded(size_t idx) const {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No available models in container!");
-
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
     return models_[0]->constant_from_folded(static_cast<int64_t>(idx));
   }
 
   size_t constant_data_size(size_t idx) const {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No available models in container!");
-
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
     return models_[0]->constant_data_size(static_cast<int64_t>(idx));
   }
 
   // retrieve type of constants_info_[idx]
   int32_t constant_type(size_t idx) const {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No available models in container!");
-
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
     return models_[0]->constant_type(static_cast<int64_t>(idx));
   }
 
   // retrieve dtype of constants_info_[idx]
   int32_t constant_dtype(size_t idx) const {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No available models in container!");
-
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
     return models_[0]->constant_dtype(static_cast<int64_t>(idx));
   }
 
@@ -387,12 +389,9 @@ class AOTInductorModelContainer {
                     << " in model, but not provided by user!\n";
           continue;
         }
-
-        STD_TORCH_CHECK(
-            false,
-            "Cannot find constants ",
-            constant_name,
-            " in constants_map!");
+        throw std::runtime_error(
+            std::string("Cannot find constants ") + constant_name +
+            std::string(" in constants_map!"));
       }
     }
   }
@@ -402,8 +401,9 @@ class AOTInductorModelContainer {
       std::unordered_map<std::string, AtenTensorHandle>&& constants_map,
       bool use_inactive,
       bool validate_full_update) {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No available models in container!");
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No model available in container!");
+    }
     if (validate_full_update) {
       assert_all_constants(constants_map);
     }
@@ -449,11 +449,27 @@ class AOTInductorModelContainer {
       bool use_inactive,
       bool validate_full_update,
       bool user_managed = false) {
-    STD_TORCH_CHECK(
-        this->num_models() != 0, "No model available in container!");
-
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No model available in container!");
+    }
     if (validate_full_update) {
       assert_all_constants(constants_map);
+    }
+
+    // update_constant_buffer does not support mixed CPU/CUDA constants
+    int32_t model_device_type = models_[0]->get_device_type();
+    for (const auto& kv : constants_map) {
+      int32_t tensor_device_type = 0;
+      aoti_torch_get_device_type(kv.second, &tensor_device_type);
+      if (tensor_device_type != model_device_type) {
+        throw std::runtime_error(
+            "update_constant_buffer does not support mixed device constants. "
+            "Constant '" +
+            kv.first + "' has device type " +
+            std::to_string(tensor_device_type) +
+            " but model expects device type " +
+            std::to_string(model_device_type));
+      }
     }
 
     ConstantState& const_folded = use_inactive == use_secondary_
@@ -657,6 +673,8 @@ class AOTInductorModelContainer {
 
   size_t blob_size_;
   std::vector<size_t> constants_internal_offset_;
+  size_t secondary_cpu_blob_size_;
+  std::vector<size_t> secondary_cpu_constants_internal_offset_;
 
   // Determine which constants is being used for the model.
   // If true,

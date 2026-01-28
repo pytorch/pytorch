@@ -9,6 +9,7 @@ import itertools
 import logging
 import operator
 import pathlib
+import sys
 import textwrap
 import traceback
 import typing
@@ -182,6 +183,9 @@ class TorchTensor(ir.Tensor):
         ).from_address(tensor.data_ptr())
 
     def tobytes(self) -> bytes:
+        # On big-endian machines, call the super's tobytes() which returns a little-endian result.
+        if sys.byteorder == "big":
+            return super().tobytes()
         # Implement tobytes to support native PyTorch types so we can use types like bloat16
         # Reading from memory directly is also more efficient because
         # it avoids copying to a NumPy array
@@ -189,6 +193,9 @@ class TorchTensor(ir.Tensor):
         return bytes(data)
 
     def tofile(self, file) -> None:
+        # On big-endian machines, call the super's tofile() which returns a little-endian result.
+        if sys.byteorder == "big":
+            return super().tofile(file)
         _, data = self._get_cbytes()
         return file.write(data)
 
@@ -262,15 +269,10 @@ def _set_shape_type(
         # In this case, we don't change the dtype or the shape of the tensor.
         if value.dtype is None:
             value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype)
-            if complex_to_float:
-                if meta_val.dtype == torch.complex64:
-                    value.dtype = ir.DataType.FLOAT
-                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                    dims.append(2)
-                elif meta_val.dtype == torch.complex128:
-                    value.dtype = ir.DataType.DOUBLE
-                    # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
-                    dims.append(2)
+            if complex_to_float and meta_val.dtype.is_complex:
+                value.dtype = torch_dtype_to_onnx_dtype(meta_val.dtype.to_real())
+                # Add 2 as the last dimension if the tensor is complex to hold the real/imag parts
+                dims.append(2)
 
         value.shape = ir.Shape(dims)
     elif isinstance(meta_val, (int, torch.SymInt)):
@@ -1245,12 +1247,19 @@ def _exported_program_to_onnx_program(
                 f"Tensor '{name}' should be a torch.Tensor. Actual type is '{type(torch_tensor)}': {torch_tensor!r}. "
                 "This is unexpected and not yet supported."
             )
+
+        # Turn complex tensors into float tensors when converting to ONNX
+        complex_to_float = lower != "none"
+        if complex_to_float:
+            if torch_tensor.dtype.is_complex:
+                torch_tensor = torch.view_as_real(torch_tensor)
+
         ir_tensor = TorchTensor(torch_tensor, name=name)
         initializer.const_value = ir_tensor
         _set_shape_type(
             initializer,
             torch_tensor,
-            complex_to_float=lower != "none",
+            complex_to_float=complex_to_float,
         )
 
     # TODO: Decide if we should keep mutated buffers as inputs/outputs
@@ -1265,7 +1274,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     """Prints messages based on `verbose`."""
     if verbose is False:
         return lambda *_, **__: None
-    # pyrefly: ignore [not-iterable]
+
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
@@ -1289,6 +1298,8 @@ def export(
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
     verbose: bool | None = None,
+    optimize: bool = True,
+    opset_version: int | None = None,
 ) -> _onnx_program.ONNXProgram:
     """Export a PyTorch model to ONNXProgram.
 
@@ -1308,6 +1319,9 @@ def export(
         dump_exported_program: Whether to save the exported program to a file.
         artifacts_dir: The directory to save the exported program and error reports.
         verbose: Whether to print verbose messages. If None (default), some messages will be printed.
+        optimize: Whether to optimize the exported ONNX graph.
+        opset_version: The ONNX opset version to use. If None, use the default opset version
+            from the registry.
 
     Returns:
         The ONNXProgram with the exported IR graph.
@@ -1341,7 +1355,6 @@ def export(
     else:
         # Convert an nn.Module to an ExportedProgram
         # Try everything 🐰 (all paths for getting an ExportedProgram)
-        # When input is a JIT module, the last strategy will succeed so it is handled
         result: _capture_strategies.Result | None = None
         for strategy_class in _capture_strategies.CAPTURE_STRATEGIES:
             strategy = strategy_class(  # type: ignore[abstract]
@@ -1422,7 +1435,7 @@ def export(
             verbose_print(f"ExportedProgram has been saved to '{program_path}'.")
 
     # Step 2: Decompose the exported program and insert type promotion nodes
-    verbose_print("Run decomposition...")
+    verbose_print("Run decompositions...")
 
     try:
         # Build the ONNX function registry
@@ -1435,7 +1448,7 @@ def export(
         )
     except Exception as e:
         export_status.decomposition = False
-        verbose_print("Run decomposition... ❌")
+        verbose_print("Run decompositions... ❌")
         profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
         if report:
@@ -1465,7 +1478,7 @@ def export(
         ) from e
     else:
         export_status.decomposition = True
-        verbose_print("Run decomposition... ✅")
+        verbose_print("Run decompositions... ✅")
 
     # Step 3: Translate the decomposed program to ONNX and produce ONNXProgram
     verbose_print("Translate the graph into ONNX...")
@@ -1484,12 +1497,6 @@ def export(
         )
         # Record the strategy used for getting the exported program for unit test assertions
         onnx_program._capture_strategy = capture_strategy
-
-        # Run the ONNX passes
-        if input_names:
-            _ir_passes.rename_inputs(onnx_program.model, input_names)
-        if output_names:
-            _ir_passes.rename_outputs(onnx_program.model, output_names)
 
         export_status.onnx_translation = True
         verbose_print("Translate the graph into ONNX... ✅")
@@ -1534,6 +1541,23 @@ def export(
     profile_result = _maybe_stop_profiler_and_get_result(profiler)
 
     assert onnx_program.exported_program is not None
+
+    # Converter opset version and optimize
+    if opset_version is not None:
+        onnx_program.model = onnxscript_apis.convert_version(
+            onnx_program.model, opset_version
+        )
+
+    if optimize:
+        verbose_print("Optimize the ONNX graph...")
+        onnx_program.optimize()
+        verbose_print("Optimize the ONNX graph... ✅")
+
+    # Run the ONNX passes
+    if input_names:
+        _ir_passes.rename_inputs(onnx_program.model, input_names)
+    if output_names:
+        _ir_passes.rename_outputs(onnx_program.model, output_names)
 
     if not verify:
         # Return if verification is not requested

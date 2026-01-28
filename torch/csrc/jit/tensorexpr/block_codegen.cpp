@@ -1,10 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/block_codegen.h>
 
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/tensorexpr/analysis.h>
-#include <torch/csrc/jit/tensorexpr/eval.h>
-#include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch::jit::tensorexpr {
 
@@ -132,7 +128,7 @@ void BlockPrinter::visit(const ForPtr& v) {
     os() << '\n';
     emitIndent();
     PrintReshapeInfo(buf_writes, true); // print reverse reshape
-    os() << "}";
+    os() << '}';
     os() << '\n';
   } else if (loop_options.is_gpu_thread_index()) {
     PrintDMAs(buf_reads);
@@ -154,12 +150,12 @@ void BlockPrinter::PrintTensorInfo(const std::unordered_set<BufPtr>& bufs) {
     emitIndent();
     auto num_dims = block_analysis_->getMultiDimBuf(buf)->dims().size();
     os() << block_analysis_->getInputName(buf) << " = ";
-    os() << "{";
+    os() << '{';
     for (unsigned long d = 0; d < num_dims; d++) {
-      os() << "{" << dim_names[d] << "};";
+      os() << '{' << dim_names[d] << "};";
     }
     os() << " elem : " << blockDtypeCppString(buf->dtype());
-    os() << "}";
+    os() << '}';
   }
 
   for (auto& buf : bufs) {
@@ -168,15 +164,14 @@ void BlockPrinter::PrintTensorInfo(const std::unordered_set<BufPtr>& bufs) {
     emitIndent();
     auto num_dims = block_analysis_->getMultiDimBuf(buf)->dims().size();
     os() << block_analysis_->getFlatInputName(buf) << " = ";
-    os() << "{";
-    os() << "{" << flat_dim_names[num_dims - 1] << "};";
+    os() << '{';
+    os() << '{' << flat_dim_names[num_dims - 1] << "};";
     os() << " elem : " << blockDtypeCppString(buf->dtype());
-    os() << "}"
-         << " // flattened tensor";
+    os() << '}' << " // flattened tensor";
   }
   os() << '\n';
   emitIndent();
-  os() << "}" << '\n' << '\n';
+  os() << '}' << '\n' << '\n';
 }
 
 void BlockPrinter::PrintArguments(const std::unordered_set<BufPtr>& bufs) {
@@ -213,7 +208,7 @@ void BlockPrinter::PrintArguments(const std::unordered_set<BufPtr>& bufs) {
   emitIndent();
   os() << "var bs_DPE = " << blck_sz << '\n';
   emitIndent();
-  os() << "}" << '\n' << '\n';
+  os() << '}' << '\n' << '\n';
 }
 
 void BlockPrinter::PrintBufferInfo(const std::unordered_set<BufPtr>& bufs) {
@@ -230,7 +225,7 @@ void BlockPrinter::PrintBufferInfo(const std::unordered_set<BufPtr>& bufs) {
   }
   os() << '\n';
   emitIndent();
-  os() << "}" << '\n' << '\n';
+  os() << '}' << '\n' << '\n';
 }
 
 void BlockPrinter::PrintDistribution(const std::unordered_set<BufPtr>& bufs) {
@@ -253,14 +248,14 @@ void BlockPrinter::PrintLoop(
   auto trip = 0;
   for (auto& buf : bufs) {
     if (trip > 0) {
-      os() << ",";
+      os() << ',';
     }
     os() << "{dim : ";
     os() << block_analysis_->getFlatInputName(buf) << ".dim.0, ";
     os() << (block_idx ? "block: bs_N}" : "block: bs_DPE}");
     ++trip;
   }
-  os() << ")";
+  os() << ')';
 }
 
 void BlockPrinter::PrintReshapeInfo(
@@ -274,7 +269,7 @@ void BlockPrinter::PrintReshapeInfo(
          << ", "
          << (reverse ? block_analysis_->getInputName(buf)
                      : block_analysis_->getFlatInputName(buf))
-         << ")" << '\n';
+         << ')' << '\n';
   }
 }
 
@@ -283,7 +278,7 @@ void BlockPrinter::PrintDMAs(const std::unordered_set<BufPtr>& bufs) {
     emitIndent();
     os() << "dma_in(";
     os() << block_analysis_->getFlatInputName(read);
-    os() << ")" << '\n';
+    os() << ')' << '\n';
   }
 }
 void BlockPrinter::PrintAdjustBuffers(const std::unordered_set<BufPtr>& bufs) {
@@ -291,7 +286,7 @@ void BlockPrinter::PrintAdjustBuffers(const std::unordered_set<BufPtr>& bufs) {
     emitIndent();
     os() << "adjust_buffer(";
     os() << block_analysis_->getFlatInputName(read);
-    os() << ")" << '\n';
+    os() << ')' << '\n';
   }
 }
 
@@ -305,14 +300,14 @@ void BlockPrinter::visit(const StorePtr& v) {
 }
 
 void BlockPrinter::visit(const BlockPtr& v) {
-  os() << "{" << '\n';
+  os() << '{' << '\n';
   indent_++;
   for (const StmtPtr& s : v->stmts()) {
     s->accept(this);
   }
   indent_--;
   emitIndent();
-  os() << "}";
+  os() << '}';
 }
 
 std::string BlockCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
@@ -341,18 +336,18 @@ void BlockCodeGen::Initialize() {
   };
 
   std::string func_name = GetUniqueFuncName("func");
-  os() << "kernel " << func_name << "(";
+  os() << "kernel " << func_name << '(';
   for (auto const& arg : buf_writes) {
     os() << block_analysis_->getInputName(arg);
   }
   for (auto const& arg : buf_reads) {
-    os() << ";" << block_analysis_->getInputName(arg);
+    os() << ';' << block_analysis_->getInputName(arg);
   }
-  os() << ")";
+  os() << ')';
 
   stmt_v->accept(printer_.get());
 
-  GRAPH_DEBUG("Generated Block code: ", oss_.str(), "\n");
+  GRAPH_DEBUG("Generated Block code: ", oss_.str(), '\n');
 }
 
 void BlockCodeGen::call(const std::vector<CallArg>& args) {

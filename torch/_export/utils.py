@@ -24,6 +24,8 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 if TYPE_CHECKING:
+    import sympy
+
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._ops import OperatorBase
     from torch.export import ExportedProgram
@@ -433,8 +435,6 @@ def _check_symint(
 def _check_input_constraints_for_graph(
     input_placeholders: list[torch.fx.Node], flat_args_with_path, range_constraints
 ) -> None:
-    import sympy  # noqa: TC002
-
     if len(flat_args_with_path) != len(input_placeholders):
         raise RuntimeError(
             "Unexpected number of inputs "
@@ -1141,14 +1141,14 @@ def placeholder_naming_pass(
         if (  # handle targets for custom objects
             spec.kind == InputKind.CUSTOM_OBJ and spec.target in name_map
         ):
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             spec.target = name_map[spec.target][4:]  # strip obj_ prefix
 
     for spec in export_graph_signature.output_specs:
         if spec.arg.name in name_map:
             spec.arg.name = name_map[spec.arg.name]
         if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             spec.target = name_map[spec.target]
 
     # rename keys in constants dict for custom objects

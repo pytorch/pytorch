@@ -53,7 +53,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-build
     with:
-      build-environment: linux-jammy-rocm-py3.10
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.test-matrix }}
     secrets: inherit

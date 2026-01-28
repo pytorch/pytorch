@@ -10,7 +10,6 @@ import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional
 
 
 try:
@@ -48,54 +47,8 @@ def persist_print(msg):
 # List of regex patterns for ignore bucket
 IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
-        r"Dynamo failed to run FX node with fake tensors: call_method fill_diagonal_"
-    ),  # https://github.com/pytorch/pytorch/issues/163420
-    re.compile(
-        r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"
-    ),  # https://github.com/pytorch/pytorch/issues/163457
-    re.compile(
-        r"RuntimeError: self\.stride\(-1\) must be 1 to view ComplexDouble as"
-    ),  # https://github.com/pytorch/pytorch/issues/162561
-    re.compile(
-        r"BooleanAtom not allowed in this context"
-    ),  # https://github.com/pytorch/pytorch/issues/160726
-    re.compile(
-        r"TypeError\(\"unsupported operand type\(s\) for \*: 'SymBool' and 'FakeTensor'\"\)"
-    ),  # https://github.com/pytorch/pytorch/issues/164684
-    re.compile(r"KeyError: u\d+"),  # https://github.com/pytorch/pytorch/issues/164685
-    re.compile(
-        r"torch\._inductor\.exc\.InductorError: CppCompileError: C\+\+ compile error"
-    ),  # https://github.com/pytorch/pytorch/issues/164686
-    re.compile(
-        r"\.item\(\) # dtype="
-    ),  # https://github.com/pytorch/pytorch/issues/164725
-    re.compile(
-        r"dimensionality of sizes \(0\) must match dimensionality of strides \(1\)"
-    ),  # https://github.com/pytorch/pytorch/issues/164814
-    re.compile(
-        r"self and mat2 must have the same dtype"
-    ),  # https://github.com/pytorch/pytorch/issues/165718
-    re.compile(
-        r"free\(\): invalid next size \(fast\)"
-    ),  # TODO: figure out why sometimes heap metadata gets corrupted on program exit (checks actually pass successfully)
-    re.compile(
-        r'assert "int" in str\(indices\.get_dtype\(\)\)'
-    ),  # https://github.com/pytorch/pytorch/issues/166042
-    re.compile(
-        r'self\.shape_env\.guard_or_defer_runtime_assert\(expr, "guard_equals"\)'
-    ),  # https://github.com/pytorch/pytorch/issues/166245
-    re.compile(
-        r"assert len\(self\.stride\) == len\(order\)"
-    ),  # https://github.com/pytorch/pytorch/issues/166270
-    re.compile(
-        r"assert len\(input_size\) == len\(new_size\)"
-    ),  # https://github.com/pytorch/pytorch/issues/166279
-    re.compile(
-        r"torch\._inductor\.exc\.InductorError: IndexError: list index out of range"
-    ),  # https://github.com/pytorch/pytorch/issues/166290
-    re.compile(
-        r"assert bool\(static_expr\)"
-    ),  # https://github.com/pytorch/pytorch/issues/166319
+        r"torch\._inductor\.exc\.InductorError: AssertionError: -1"
+    ),  # https://github.com/pytorch/pytorch/issues/167937
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
@@ -130,7 +83,7 @@ def is_ignored_output(output: str) -> int:
 def run_fuzzer_with_seed(
     seed: int,
     template: str = "default",
-    supported_ops: Optional[str] = None,
+    supported_ops: str | None = None,
 ) -> FuzzerResult:
     """
     Run fuzzer.py with a specific seed.
@@ -254,12 +207,12 @@ def handle_result_output(
 
 
 def run_multi_process_fuzzer(
-    num_processes: Optional[int] = None,
+    num_processes: int | None = None,
     seed_start: int = 0,
     seed_count: int = 100,
     verbose: bool = False,
     template: str = "default",
-    supported_ops: Optional[str] = None,
+    supported_ops: str | None = None,
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -550,10 +503,10 @@ def _print_operation_distribution(results: list[FuzzerResult]) -> None:
 
 
 def run_until_failure(
-    num_processes: Optional[int] = None,
+    num_processes: int | None = None,
     verbose: bool = False,
     template: str = "default",
-    supported_ops: Optional[str] = None,
+    supported_ops: str | None = None,
 ) -> None:
     """
     Run the multi-process fuzzer with a random starting seed, iterating until a failure is found.

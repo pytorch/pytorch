@@ -33,6 +33,31 @@ fi
 ARCH=$(uname -m)
 echo "Building for architecture: $ARCH"
 
+# Detect and configure NVPL for BLAS/LAPACK and ARM Compute Library for CUDA aarch64
+if [[ "$ARCH" == "aarch64" ]]; then
+    # Use NVPL (NVIDIA Performance Libraries) for ARM
+    # NVPL provides optimized BLAS and LAPACK for better cpu performance on NVIDIA platforms
+    if [[ ! -f "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0" ]]; then
+        echo "ERROR: NVPL not found at /usr/local/lib/"
+        echo "NVPL (BLAS/LAPACK) is required for CUDA aarch64 builds"
+        exit 1
+    fi
+    echo "Using NVPL BLAS/LAPACK for CUDA aarch64"
+    export BLAS=NVPL
+
+    # ACL is required for aarch64 builds
+    if [[ ! -d "/acl" ]]; then
+        echo "ERROR: ARM Compute Library not found at /acl"
+        echo "ACL is required for aarch64 builds. Check Docker image setup."
+        exit 1
+    fi
+
+    export USE_MKLDNN=1
+    export USE_MKLDNN_ACL=1
+    export ACL_ROOT_DIR=/acl
+    echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
+fi
+
 # Determine CUDA version and architectures to build for
 #
 # NOTE: We should first check `DESIRED_CUDA` when determining `CUDA_VERSION`,
@@ -79,19 +104,18 @@ filter_aarch64_archs() {
 }
 
 # Base: Common architectures across all modern CUDA versions
-TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0"
+TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0"
 
 case ${CUDA_VERSION} in
-    12.6) TORCH_CUDA_ARCH_LIST="5.0;6.0;${TORCH_CUDA_ARCH_LIST}" ;;  # Only 12.6 includes Legacy Maxwell/Pascal that will be removed in future releases
-    12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0" ;;  # +Hopper/Blackwell support
-    12.9) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0+PTX" # +Hopper/Blackwell support + PTX for forward compatibility
+    12.6) TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;${TORCH_CUDA_ARCH_LIST//10.0/}" ;;  # Only 12.6 includes legacy Maxwell/Pascal/Volta, -Hopper support
+    12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};12.0" ;;  # +Blackwell support
+    12.9) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};12.0+PTX" # +Blackwell support + PTX for forward compatibility
         if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//7.0;/}"  # Remove 7.0 to resolve the ld error
             TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//8.6;/}"  # Remove 8.6 for libtorch
         fi
         ;;
     13.0)
-        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
+        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
         export TORCH_NVCC_FLAGS="-compress-mode=size"
         export BUILD_BUNDLE_PTXAS=1
         ;;

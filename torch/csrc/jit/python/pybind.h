@@ -117,7 +117,7 @@ struct type_caster<torch::jit::IValue> {
     try {
       value = torch::jit::toTypeInferredIValue(src);
       return true;
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       return false;
     }
   }
@@ -142,7 +142,7 @@ struct type_caster<torch::jit::Symbol> {
     std::string src_str;
     try {
       src_str = py::cast<std::string>(src);
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       return false;
     }
     value = torch::jit::Symbol::fromQualString(src_str);

@@ -80,6 +80,11 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
     MPSGraphTensor* outputTensor_ = nil;
   };
 
+  // Crashes with
+  // MPSGraphUtilities.mm:97:0: error: 'mps.sample_grid' op operand #0 must be tensor of mps native type values, but got
+  // 'tensor<2x3x5x20xcomplex<f32>>'
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "grid_sampler_2d is not supported for complex on MPS");
   @autoreleasepool {
     std::string key = "grid_sampler_2d_mps" + getTensorsStringKey({input, grid}) + ":" +
         std::to_string(interpolation_mode) + ":" + std::to_string(padding_mode) + ":" + std::to_string(align_corners);
