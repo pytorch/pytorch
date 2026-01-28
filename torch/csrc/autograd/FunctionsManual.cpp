@@ -4960,11 +4960,11 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     auto ggI_sum = ggI_expanded.sum(1, true);
     auto ggI_mu_sum = (ggI_expanded * input_sub_mu).sum(1, true);
 
+    auto three_over_n = c10::SymFloat(3.) / c10::SymFloat(N);
     auto all_sub = ((ggI_sum * gxhat_sum).div_(N))
                        .sub_((ggI_expanded * gxhat).sum(1, true))
                        .add_((sigma2_eps_neg_1 * gxhat_mu_sum * ggI_mu_sum)
-                                 .mul_(3.)
-                                 .div_(N));
+                                 .mul_(three_over_n));
     auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
     auto gI_1t =
         (ggI_mu_sum * sigma2_eps_neg_3_2).div_(N) * (gxhat_sum.div(N) - gxhat);
