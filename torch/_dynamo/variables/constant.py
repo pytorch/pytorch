@@ -146,9 +146,15 @@ its type to `common_constant_types`.
         return type(obj) in common_constant_types
 
     @staticmethod
-    def is_literal(obj: object) -> bool:
+    def is_literal(obj: object, cache: dict[int, object] | None = None) -> bool:
+        if cache is None:
+            cache = {}
+        if id(obj) in cache:
+            # no-op if there is a cyclical reference
+            return True
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
-            return all(ConstantVariable.is_literal(x) for x in obj)  # type: ignore[attr-defined]
+            cache[id(obj)] = obj
+            return all(ConstantVariable.is_literal(x, cache) for x in obj)  # type: ignore[attr-defined]
         return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(

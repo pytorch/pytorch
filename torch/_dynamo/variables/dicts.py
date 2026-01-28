@@ -28,7 +28,12 @@ from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 from torch.utils._ordered_set import OrderedSet
 
 from .. import graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_call_method,
+    create_dup_top,
+    create_instruction,
+)
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, is_constant_source, is_from_local_source
@@ -345,10 +350,33 @@ class ConstDictVariable(VariableTracker):
                     ]
                 )
             )
+            codegen.extend_output(
+                [
+                    *create_call_function(0, False),
+                    create_dup_top(),
+                ]
+            )
+            codegen.add_cache(self)
+
+            codegen.append_output(create_dup_top())
+            codegen.load_method("update")
             self.reconstruct_kvs_into_new_dict(codegen)
-            codegen.extend_output(create_call_function(1, False))
+            codegen.extend_output(
+                [
+                    *create_call_method(1),
+                    create_instruction("POP_TOP"),
+                ]
+            )
         else:
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_MAP", arg=0),
+                    create_dup_top(),
+                ]
+            )
+            codegen.add_cache(self)
             self.reconstruct_kvs_into_new_dict(codegen)
+            codegen.append_output(create_instruction("DICT_UPDATE", arg=1))
 
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -1007,8 +1035,23 @@ class DefaultDictVariable(ConstDictVariable):
             )
         )
         codegen(self.default_factory)
+        codegen.extend_output(
+            [
+                *create_call_function(1, False),
+                create_dup_top(),
+            ]
+        )
+        codegen.add_cache(self)
+
+        codegen.append_output(create_dup_top())
+        codegen.load_method("update")
         self.reconstruct_kvs_into_new_dict(codegen)
-        codegen.extend_output(create_call_function(2, False))
+        codegen.extend_output(
+            [
+                *create_call_method(1),
+                create_instruction("POP_TOP"),
+            ]
+        )
 
 
 # TODO: Implementing this via inheritance rather than composition is a
