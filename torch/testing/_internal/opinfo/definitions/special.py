@@ -1088,6 +1088,15 @@ python_ref_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.float16,),
             ),
+            # Some but not all platforms throw:
+            # Exception: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
         ),
     ),
     #
