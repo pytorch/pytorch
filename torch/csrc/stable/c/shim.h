@@ -152,6 +152,18 @@ AOTI_TORCH_EXPORT void torch_c10_cuda_free_error_msg(char* error_msg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
 
+/**
+ * The beginning of all shims added in 2.11.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
+// Adds shims for the relevant dtypes not already in
+// torch/csrc/inductor/aoti_torch/c/shim.h
+AOTI_TORCH_EXPORT int32_t torch_dtype_float8_e8m0fnu();
+AOTI_TORCH_EXPORT int32_t torch_dtype_float4_e2m1fn_x2();
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus

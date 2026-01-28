@@ -46,6 +46,8 @@ def get_supported_dtypes():
         torch.float8_e4m3fn,
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fnuz,
+        torch.float8_e8m0fnu,
+        torch.float4_e2m1fn_x2,
         torch.complex32,
         torch.complex64,
         torch.complex128,
@@ -249,6 +251,27 @@ class TestLibtorchAgnostic(TestCase):
         import libtorch_agn_2_9 as libtorch_agnostic
 
         t = torch.rand(3, 1, device=device) - 0.5
+        cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
+        self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
+
+        def _make_cuda_tensors(prior_mem):
+            cuda_t = libtorch_agnostic.ops.my_ones_like(t, device)
+            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
+            self.assertEqual(cuda_t, torch.ones_like(t, device=device))
+
+        if t.is_cuda:
+            init_mem = torch.cuda.memory_allocated(device)
+            for _ in range(3):
+                _make_cuda_tensors(init_mem)
+                curr_mem = torch.cuda.memory_allocated(device)
+                self.assertEqual(curr_mem, init_mem)
+    
+    @xfailIfTorchDynamo
+    @skipIfTorchVersionLessThan(2, 11)  # Can only run with 2.11 because of float8_e8m0fnu
+    def test_my_ones_like_float8_e8m0fnu(self, device):
+        import libtorch_agn_2_9 as libtorch_agnostic
+
+        t = torch.rand(3, 1, device=device, dtype=torch.float8_e8m0fnu) - 0.5
         cpu_t = libtorch_agnostic.ops.my_ones_like(t, "cpu")
         self.assertEqual(cpu_t, torch.ones_like(t, device="cpu"))
 
