@@ -9,11 +9,11 @@ import pickle
 import tokenize
 import unittest
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from types import FunctionType, ModuleType
 from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated
-from unittest import mock
 
 from torch._utils_internal import justknobs_check
 
@@ -191,7 +191,7 @@ def install_config_module(module: ModuleType) -> None:
             annotated_type = type_hints.get(key, None)
             if isinstance(value, CONFIG_TYPES):
                 config[name] = _ConfigEntry(
-                    _Config(default=value, value_type=annotated_type)
+                    _Config(default=value, value_type=annotated_type), name
                 )
                 if dest is module:
                     delattr(module, key)
@@ -199,7 +199,7 @@ def install_config_module(module: ModuleType) -> None:
                 if annotated_type is not None and value.value_type is None:
                     value.value_type = annotated_type
 
-                config[name] = _ConfigEntry(value)
+                config[name] = _ConfigEntry(value, name)
 
                 if dest is module:
                     delattr(module, key)
@@ -279,7 +279,7 @@ class _ConfigEntry:
     value_type: type
     # The value specified by the user when they overrode the configuration
     # _UNSET_SENTINEL indicates the value is not set.
-    user_override: Any = _UNSET_SENTINEL
+    user_override: ContextVar[object]
     # The justknob to check for this config
     justknob: str | None = None
     # environment variables are read at install time
@@ -299,13 +299,14 @@ class _ConfigEntry:
     hide: bool = False
     alias: str | None = None
 
-    def __init__(self, config: _Config) -> None:
+    def __init__(self, config: _Config, name: str) -> None:
         self.default = config.default
         self.value_type = (
             config.value_type if config.value_type is not None else type(self.default)
         )
         self.justknob = config.justknob
         self.alias = config.alias
+        self.user_override = ContextVar(name, default=_UNSET_SENTINEL)
         if config.env_name_default is not None:
             for val in config.env_name_default:
                 if (env_value := _read_env_variable(val)) is not None:
@@ -362,7 +363,7 @@ class ConfigModule(ModuleType):
         elif self._config[name].alias is not None:
             self._set_alias_val(self._config[name], value)
         else:
-            self._config[name].user_override = value
+            self._config[name].user_override.set(value)
             self._is_dirty = True
             self._config[name].hide = False
 
@@ -380,8 +381,9 @@ class ConfigModule(ModuleType):
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
 
-            if config.user_override is not _UNSET_SENTINEL:
-                return config.user_override
+            user_override = config.user_override.get()
+            if user_override is not _UNSET_SENTINEL:
+                return user_override
 
             if config.env_value_default is not _UNSET_SENTINEL:
                 return config.env_value_default
@@ -394,8 +396,8 @@ class ConfigModule(ModuleType):
             # copy them to user_overrides in case the user overrides
             # them
             if isinstance(config.default, (list, set, dict)):
-                config.user_override = copy.deepcopy(config.default)
-                return config.user_override
+                config.user_override.set(copy.deepcopy(config.default))
+                return config.user_override.get()
             return config.default
 
         except KeyError as e:
@@ -406,7 +408,7 @@ class ConfigModule(ModuleType):
         self._is_dirty = True
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        self._config[name].user_override = _UNSET_SENTINEL
+        self._config[name].user_override.set(_UNSET_SENTINEL)
         self._config[name].hide = True
 
     def _get_alias_module_and_name(
@@ -457,10 +459,10 @@ class ConfigModule(ModuleType):
             or config_val.env_value_force == config_val.default
         )
 
-        unset = config_val.user_override is _UNSET_SENTINEL
+        unset = config_val.user_override.get() is _UNSET_SENTINEL
         # Handle reference types specially to avoid spammy warnings
         if isinstance(config_val.default, (list, set, dict)):
-            unset = unset or config_val.user_override == config_val.default
+            unset = unset or config_val.user_override.get() == config_val.default
         return unset and not_set_env_default and not_set_env_force
 
     def _get_dict(
@@ -732,13 +734,13 @@ class ConfigModule(ModuleType):
         config = self._config
 
         def change() -> Callable[[], None]:
-            prior = {k: config[k].user_override for k in changes}
+            prior = {k: config[k].user_override.get() for k in changes}
             for k, v in changes.items():
-                self._config[k].user_override = v
+                self._config[k].user_override.set(v)
 
             def revert() -> None:
                 for k, v in prior.items():
-                    self._config[k].user_override = v
+                    self._config[k].user_override.set(v)
 
             return revert
 
@@ -805,15 +807,6 @@ class SubConfigProxy:
 
     def __delattr__(self, name: str) -> None:
         return self._config.__delattr__(self._prefix + name)
-
-
-def patch_object(obj: object, name: str, value: object) -> object:
-    """
-    Workaround `mock.patch.object` issue with ConfigModule
-    """
-    if isinstance(obj, ConfigModule):
-        return obj.patch(name, value)
-    return mock.patch.object(obj, name, value)
 
 
 def get_tristate_env(name: str, default: Any = None) -> bool | None:
