@@ -88,10 +88,10 @@ Tensor& addmm_out(
   // Different float64 handling.
   if (mat1.scalar_type() == at::kDouble) {
     bool is_inplace = self.is_same(result);
-    bool beta_not_zero = beta.to<double>() != 0.0;
-    Tensor self_copy;
+    bool is_beta_ne_zero = beta.to<double>() != 0.0;
 
-    if (is_inplace && beta_not_zero) {
+    Tensor self_copy;
+    if (is_inplace && is_beta_ne_zero) {
       self_copy = self.clone();
     }
 
@@ -101,12 +101,8 @@ Tensor& addmm_out(
       result.mul_(alpha);
     }
 
-    if (beta_not_zero) {
-      if (is_inplace) {
-        result.add_(self_copy, beta);
-      } else {
-        result.add_(self, beta);
-      }
+    if (is_beta_ne_zero) {
+      result.add_(is_inplace ? self_copy : self, beta);
     }
 
     return result;
@@ -251,12 +247,13 @@ Tensor& baddbmm_out(
   }
 
   // Different float64 handling.
-  if (batch1.scalar_type() == at::kDouble || batch2.scalar_type() == at::kDouble) {
+  if (batch1.scalar_type() == at::kDouble ||
+      batch2.scalar_type() == at::kDouble) {
     bool is_inplace = input.is_same(result);
-    bool beta_not_zero = beta.to<double>() != 0.0;
-    Tensor input_copy;
+    bool is_beta_ne_zero = beta.to<double>() != 0.0;
 
-    if (is_inplace && beta_not_zero) {
+    Tensor input_copy;
+    if (is_inplace && is_beta_ne_zero) {
       input_copy = input.clone();
     }
 
@@ -266,12 +263,8 @@ Tensor& baddbmm_out(
       result.mul_(alpha);
     }
 
-    if (beta_not_zero) {
-      if (is_inplace) {
-        result.add_(input_copy, beta);
-      } else {
-        result.add_(input, beta);
-      }
+    if (is_beta_ne_zero) {
+      result.add_(is_inplace ? input_copy : input, beta);
     }
 
     return result;
@@ -384,15 +377,14 @@ Tensor& addmv_out(
   bool is_float64 = mat.scalar_type() == at::kDouble ||
                     vec.scalar_type() == at::kDouble;
   bool is_inplace = self.is_same(out);
-  bool beta_non_zero = beta.to<double>() != 0.0;
-  if (is_float64 && is_inplace && beta_non_zero) {
-    Tensor self_v_copy;
-    self_v_copy = self_v.clone();
+  if (is_float64 && is_inplace) {
+    Tensor self_v_copy = self_v.clone();
     at::native::xpu::addmm_out(self_v_copy, mat, vec_v, beta, alpha, out);
-  } else {
-    at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
+    out.resize_({mat.size(0)});
+    return out;
   }
 
+  at::native::xpu::addmm_out(self_v, mat, vec_v, beta, alpha, out);
   out.resize_({mat.size(0)});
   return out;
 }
