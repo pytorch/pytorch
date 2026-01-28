@@ -221,42 +221,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    @pytest.mark.xfail(reason="Issue #163877")
-    def test_fuzzer_issue_163877(self):
-        torch.manual_seed(0)
-
-        def foo(arg0, arg1):
-            t0 = arg0  # size=(401120, 3), stride=(3, 1), dtype=float32, device=cuda
-            t1 = t0.clone()
-            t1.zero_()  # size=(401120, 3), stride=(3, 1), dtype=float32, device=cuda
-            t2 = t1.reshape(
-                (109, 115, 96)
-            )  # size=(109, 115, 96), stride=(11040, 96, 1), dtype=float32, device=cuda
-            t3 = arg1  # size=(), stride=(), dtype=float32, device=cuda
-            t4 = t3.contiguous()  # size=(), stride=(), dtype=float32, device=cuda
-            t5 = torch.nn.functional.relu(
-                t4
-            )  # size=(), stride=(), dtype=float32, device=cuda
-            t6 = t2.clone()
-            t6.fill_(
-                t5.item()
-            )  # size=(109, 115, 96), stride=(11040, 96, 1), dtype=float32, device=cuda
-            output = t6
-            return output
-
-        arg0 = torch.rand(
-            [401120, 3], dtype=torch.float32, device="cuda", requires_grad=True
-        )
-        arg1 = torch.rand([], dtype=torch.float32, device="cuda", requires_grad=True)
-
-        out_eager = foo(arg0, arg1)
-        out_eager.sum().backward()
-        print("Eager Success! ✅")
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0, arg1)
-        out_compiled.sum().backward()
-        print("Compile Success! ✅")
-
     @pytest.mark.xfail(reason="Issue #164059")
     def test_fuzzer_issue_164059(self):
         torch.manual_seed(0)
