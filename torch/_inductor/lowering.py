@@ -459,7 +459,6 @@ def _register_foreach_lowering(
 
     @functools.wraps(decomp_fn)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
-        assert len(args) <= 2
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -740,37 +739,47 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
         groups = group_foreach_args(zip(*broadcast_inputs))
 
-        outputs = [None] * len(a_list_input)
-        for (device, use_foreach), group in groups.items():
-            operation_list: list[str] = []
-            for (
-                output_ind,
-                args,
-            ) in group:
-                if allow_alpha:
-                    output = pw_fn(*args, alpha=alpha)
-                else:
-                    output = pw_fn(*args)
+        def apply_fn(args):
+            if allow_alpha:
+                return pw_fn(*args, alpha=alpha)
+            else:
+                return pw_fn(*args)
 
-                outputs[output_ind] = output
-
-                if (
-                    # pyrefly: ignore [unbound-name]
-                    V.graph.has_feature(device, BackendFeature.FOREACH)
-                    and use_foreach
-                    and realize_outputs
-                ):
-                    output.realize()
-                    operation_list.append(output.get_operation_name())
-
-            if operation_list:
-                # pyrefly: ignore [unbound-name]
-                V.graph.register_operation_list(operation_list)
-
-        assert all(x is not None for x in outputs)
-        return outputs
+        return foreach_group_loop(groups, len(a_list_input), apply_fn, realize_outputs)
 
     return inner
+
+
+def foreach_group_loop(groups, num_outputs, apply_fn, realize_outputs):
+    """
+    Common loop over grouped foreach arguments.
+
+    Args:
+        groups: Result of group_foreach_args - dict mapping (device, use_foreach) to groups
+        num_outputs: Number of outputs to produce
+        apply_fn: Function to apply to each set of args, returns the output
+        realize_outputs: Whether to realize outputs for foreach fusion
+    """
+    outputs = [None] * num_outputs
+    for (device, use_foreach), group in groups.items():
+        operation_list: list[str] = []
+        for output_ind, args in group:
+            output = apply_fn(args)
+            outputs[output_ind] = output
+
+            if (
+                V.graph.has_feature(device, BackendFeature.FOREACH)
+                and use_foreach
+                and realize_outputs
+            ):
+                output.realize()
+                operation_list.append(output.get_operation_name())
+
+        if operation_list:
+            V.graph.register_operation_list(operation_list)
+
+    assert all(x is not None for x in outputs)
+    return outputs
 
 
 def to_dtype(x: TensorBox, dtype: torch.dtype, copy: bool = False):
@@ -2290,7 +2299,15 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    assert op not in decompositions or override_decomp, (
+    # When emulate_precision_casts is enabled, we skip decomposing addcmul ops
+    # to use the inductor lowering which preserves FMA semantics.
+    # For _foreach_addcdiv, we use the native CUDA kernel.
+    skip_decomp_for_precision = config.emulate_precision_casts and op in {
+        aten.addcmul,
+        aten._foreach_addcmul.Scalar,
+        aten._foreach_addcdiv.Scalar,
+    }
+    assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
         f"both a fallback and a decomp for same op: {op}"
     )
     if (
@@ -2677,7 +2694,7 @@ def searchsorted(
 
 
 @register_lowering(
-    aten.bucketize, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
+    aten.bucketize.Tensor, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH
 )
 def bucketize(
     input: TensorBox,
@@ -3123,6 +3140,10 @@ make_fallback(
     warn=False,
 )
 make_fallback(
+    aten._scaled_dot_product_flash_attention.quantized,
+    warn=False,
+)
+make_fallback(
     aten._scaled_dot_product_flash_attention_backward.default,
     sdpa_constraint,
     warn=False,
@@ -3158,6 +3179,7 @@ make_fallback(
     warn=False,
 )
 make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
+make_fallback(aten._flash_attention_forward.quantized)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
@@ -6930,6 +6952,101 @@ sigmoid = register_pointwise_numeric_ldf64(aten.sigmoid)
 sqrt = register_pointwise_numeric_ldf64(aten.sqrt)
 square = register_pointwise(aten.square)
 sub = register_pointwise(aten.sub, allow_alpha=True)
+
+
+@register_lowering(aten.addcmul, broadcast=True)
+def addcmul(self, tensor1, tensor2, *, value=1):
+    """
+    Computes self + value * tensor1 * tensor2 using FMA for better precision.
+
+    Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
+    This is computed as: fma(value, tensor1 * tensor2, self)
+
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types
+    or AMD GPUs, we fall back to regular arithmetic since libdevice.fma doesn't support
+    integers and AMD has different FMA semantics.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
+    """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
+    dtype = get_promoted_dtype(
+        self,
+        tensor1,
+        tensor2,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    self_loader = self.make_loader()
+    t1_loader = tensor1.make_loader()
+    t2_loader = tensor2.make_loader()
+
+    # FMA is only available for floating-point types on non-AMD GPUs
+    use_fma = dtype.is_floating_point and not torch.version.hip
+
+    def inner_fn(idx):
+        self_val = self_loader(idx)
+        t1_val = t1_loader(idx)
+        t2_val = t2_loader(idx)
+
+        if value == 1 and use_fma:
+            return ops.fma(t1_val, t2_val, self_val)
+
+        # Match eager order: self + value * (tensor1 * tensor2)
+        # Compute tensor1 * tensor2 first
+        t1_times_t2 = ops.mul(t1_val, t2_val)
+
+        # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
+        if isinstance(value, sympy.Basic):
+            value_expr = ops.index_expr(value, dtype)
+        else:
+            value_expr = ops.constant(value, dtype)
+
+        if use_fma:
+            # Use FMA for floating-point types for better precision
+            return ops.fma(value_expr, t1_times_t2, self_val)
+        else:
+            # Fall back to regular arithmetic for integer types
+            return ops.add(self_val, ops.mul(value_expr, t1_times_t2))
+
+    return Pointwise.create(
+        device=self.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=self.get_size(),
+    )
+
+
+def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
+    """
+    Foreach version of addcmul with scalar value parameter.
+    Uses foreach_group_loop for consistent grouping behavior.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
+    """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
+    realize_outputs = (
+        len(V.graph.current_node.users) == 0
+        or V.graph.current_node.target in inplace_foreach_ops
+        or cur_node_has_non_foreach_users()
+    )
+
+    groups = group_foreach_args(zip(self, tensor1, tensor2))
+
+    def apply_fn(args):
+        return addcmul(*args, value=value)
+
+    return foreach_group_loop(groups, len(self), apply_fn, realize_outputs)
+
+
+_register_foreach_lowering(aten._foreach_addcmul.Scalar, _foreach_addcmul_scalar)
+
+
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
 abs = register_pointwise(aten.abs)
@@ -7710,6 +7827,49 @@ def prepare_softmax_online(x, dim):
         exp = lowerings[aten.exp](sub(x, amax))
         xsum = sum_(exp, dim, keepdims=True)
         return amax, xsum
+
+
+def _is_sm100_or_later():
+    """Check if we're on SM100+ hardware (Blackwell)."""
+    return torch.cuda.is_available() and torch.cuda.get_device_capability() >= (10, 0)
+
+
+@register_lowering(inductor_prims.cvt_e8m0_rceil, type_promotion_kind=None)
+def cvt_e8m0_rceil_lowering(inp):
+    """
+    Lowering for cvt_e8m0_rceil. Uses PTX cvt.rp.satfinite.ue8m0x2.f32 on SM100+.
+
+    The PTX instruction takes 2 float32 and outputs 2 e8m0 packed in uint16.
+    Currently we pass 0.0 as the second input and only use the low byte result.
+    """
+    # TODO: Optimize to process pairs (pack=2) by creating a custom Pointwise
+    # that loads adjacent elements, applies PTX to both, and uses a follow-up
+    # kernel to extract the packed uint16 results as uint8.
+    if not _is_sm100_or_later():
+        raise NotImplementedError(
+            "cvt_e8m0_rceil requires SM100+ (Blackwell) for PTX instruction support"
+        )
+
+    dtype = inp.get_dtype()
+    if dtype not in (torch.float32, torch.float16, torch.bfloat16):
+        raise ValueError(
+            f"cvt_e8m0_rceil requires float32, float16, or bfloat16 input, got {dtype}"
+        )
+
+    # Upcast bf16/fp16 to float32 for PTX instruction
+    if dtype != torch.float32:
+        inp = to_dtype(inp, torch.float32)
+
+    fn = functools.partial(
+        ops.inline_asm_elementwise,
+        asm="cvt.rp.satfinite.ue8m0x2.f32 $0, 0.0, $1;",
+        constraints="=h,r",
+        dtype=torch.uint16,
+        is_pure=True,
+        pack=1,
+    )
+    result = make_pointwise(fn)(inp)
+    return to_dtype(result, torch.uint8)
 
 
 # populate lowerings defined in kernel/*
