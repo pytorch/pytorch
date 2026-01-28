@@ -12,13 +12,14 @@ Fixes #<!-- Issue number. PRs without a linked issue may be automatically closed
 
 ## Summary
 
-<!-- Point to the issue for design discussion. If not discussed there (rare), add up to one paragraph. Overly verbose descriptions will be considered spam. -->
+<!-- Point to the issue for relevant design discussion. If not discussed there (rare), add up to one paragraph. Overly verbose descriptions will be considered spam. -->
 
 ## Checklist
 
 - [ ] Passes lint (`spin fixlint`)
 - [ ] Added/updated tests
 - [ ] Updated documentation (if applicable)
+- [ ] Included benchmark results (for PRs impacting perf)
 
 ## BC-breaking?
 

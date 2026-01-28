@@ -19,6 +19,7 @@ Before submitting, please review:
 - [ ] Passes lint (`spin fixlint`)
 - [ ] Added/updated tests
 - [ ] Updated documentation (if applicable)
+- [ ] Included benchmark results (for PRs impacting perf)
 
 ## BC-breaking?
 
