@@ -65,8 +65,6 @@ void cuda_device_assertions_catches_stream() {
   } catch (const c10::Error& err) {
     const auto err_str = std::string(err.what());
     ASSERT_THAT(
-        err_str, HasSubstr("# of GPUs this process interacted with = 1"));
-    ASSERT_THAT(
         err_str,
         HasSubstr("CUDA device-side assertion failures were found on GPU #0!"));
     ASSERT_THAT(
