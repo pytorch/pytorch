@@ -198,11 +198,7 @@ from .dicts import (
     OrderedSetVariable,
     SetVariable,
 )
-from .distributed import (
-    DeviceMeshVariable,
-    ProcessGroupVariable,
-    WorldMetaClassVariable,
-)
+from .distributed import DeviceMeshVariable, WorldMetaClassVariable
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -295,6 +291,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedEnumClassVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
@@ -644,7 +641,9 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
+        def build_key_value(
+            k: Any, v: Any
+        ) -> tuple[VariableTracker, LazyVariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -817,7 +816,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[VariableTracker, VariableTracker]:
+            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1193,9 +1192,6 @@ class VariableBuilder:
             return DispatchKeySetVariable(value)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
-        elif ProcessGroupVariable.is_process_group(value):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            return ProcessGroupVariable(value, source=self.source)
         elif DeviceMeshVariable.is_device_mesh(value):
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
             self.install_guards(GuardBuilder.EQUALS_MATCH)
@@ -1502,6 +1498,12 @@ class VariableBuilder:
                     source=self.source,
                 )
 
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(
+                    value,
+                    source=self.source,
+                )
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1613,7 +1615,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[VariableTracker, VariableTracker]:
+            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -4058,7 +4060,7 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        elif is_opaque_value_type(type(value)):
+        elif is_opaque_type(type(value)):
             # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 tx.output.fake_mode, value
@@ -4092,6 +4094,8 @@ class SourcelessBuilder:
         ):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)

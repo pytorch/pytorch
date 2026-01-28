@@ -286,6 +286,18 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
     _check_linters()
 
 
+def _check_arg(check_arg, arg, args_iter):
+    if arg.startswith(check_arg):
+        found_arg, sep, value = arg.partition("=")
+        if sep == "=":
+            if found_arg == check_arg:
+                return value.strip()
+        else:
+            if arg == check_arg:
+                return next(args_iter).strip()
+    return None
+
+
 def _process_lintrunner_args(lintrunner_args):
     take = None
     skip = None
@@ -295,16 +307,12 @@ def _process_lintrunner_args(lintrunner_args):
     has_paths = False
     has_all_files = False
     for arg in args_iter:
-        if arg == "--take":
-            take = set(next(args_iter).split(","))
-        elif arg == "--skip":
-            skip = set(next(args_iter).split(","))
-        elif arg.startswith("--tee-json"):
-            _, sep, tee_file = arg.partition("=")
-            if sep == "":
-                tee_file = next(args_iter)
-            elif sep == "=":
-                tee_file = tee_file.strip()
+        if (_take := _check_arg("--take", arg, args_iter)):
+            take = set(_take.split(","))
+        elif (_skip := _check_arg("--skip", arg, args_iter)):
+            skip = set(_skip.split(","))
+        elif (_tee_file := _check_arg("--tee-json", arg, args_iter)):
+            tee_file = _tee_file.strip()
         elif arg == "--all-files":
             has_all_files = True
         else:
