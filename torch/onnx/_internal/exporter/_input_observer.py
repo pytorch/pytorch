@@ -75,7 +75,7 @@ def _infer_dynamic_dimensions(
         shape_list:
             list of shapes, they must all have the same length
         set_batch_dimension:
-            make the first dimension dynamic if it is not
+            forces the first dimension to be treated as dynamic, even if all shapes have the same value for that dimension
 
     Returns:
         list of dynamic dimensions
@@ -212,7 +212,7 @@ class InputObserverInfo:
     def infer_dynamic_shapes(
         self, set_batch_dimension_for: set[int | str] | None = None
     ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
-        """Infers dynamic shapes.  based on the collected tensors.
+        """Infers dynamic shapes based on the collected tensors.
         Most of the time, models do support a batch dimension
         but this batch dimension has the same value for every input sample.
         Instead of running inference on new samples, argument `set_batch_dimension_for`
