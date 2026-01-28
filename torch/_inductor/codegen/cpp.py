@@ -2621,9 +2621,6 @@ class CppKernel(Kernel):
             return f"c10::convert<{DTYPE_TO_CPP[dtype]}>(std::round({src}))"
         return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({src})"
 
-    def get_round_int_expr(self, src, dtype, src_dtype):
-        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({src})"
-
     def cache_dtype_convert(self, dst, dst_dtype, src, src_dtype):
         expr = self.get_to_dtype_expr(src, dst_dtype, src_dtype)
         self.cse.put(expr, dst)
