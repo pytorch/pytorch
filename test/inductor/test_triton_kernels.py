@@ -322,6 +322,89 @@ def forward(self, x_1, output_1):
             )
 
     @requires_gpu
+    def test_triton_kernel_clone_wekdeps(self):
+        from functorch import make_fx
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.compile_fx import compile_fx_inner
+
+        TENSOR_SIZE = 30_000_000
+        BLOCK_SIZE = 1024
+
+        @triton.jit
+        def dual_output_kernel_with_inline_asm(
+            in_ptr0,
+            out_ptr0,
+            out_ptr1,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            result = x.to(tl.float32)
+            tl.store(out_ptr0 + offsets, result, mask=mask)
+            tl.store(out_ptr1 + offsets, result + x, mask=mask)
+
+        kernel_side_table.reset_table()
+
+        def f(x: torch.Tensor):
+            full_default = torch.full(
+                (TENSOR_SIZE,), 0.0, device=x.device, dtype=x.dtype
+            )
+            running_sum = torch.empty_like(x)
+            running_sum.fill_(0.0)
+
+            for _ in range(7):
+                n_elements = full_default.numel()
+                grid = (triton.cdiv(n_elements, BLOCK_SIZE), 1, 1)
+                out = triton_kernel_wrapper_functional(
+                    kernel_idx=kernel_side_table.add_kernel(
+                        dual_output_kernel_with_inline_asm
+                    ),
+                    constant_args_idx=kernel_side_table.add_constant_args(
+                        {"n_elements": n_elements, "BLOCK_SIZE": BLOCK_SIZE}
+                    ),
+                    grid=[grid],
+                    tma_descriptor_metadata={},
+                    kwargs={
+                        "in_ptr0": x,
+                        "out_ptr0": full_default,
+                        "out_ptr1": full_default,
+                    },
+                    tensors_to_clone=["out_ptr0", "out_ptr1"],
+                )
+                dk_output = out["out_ptr0"]
+                dv_output = out["out_ptr1"]
+                running_sum = running_sum + dk_output + dv_output
+
+            return (running_sum,)
+
+        t = torch.rand(TENSOR_SIZE, device=GPU_TYPE)
+
+        class NoFusionChoices(InductorChoices):
+            def can_fuse(self, scheduler, node1, node2, shared_data_score) -> bool:
+                return False
+
+        gm = make_fx(f, tracing_mode="fake")(t)
+
+        with inductor_config.patch({"inductor_choices_class": NoFusionChoices}):
+            log_stream, ctx = logs_to_string("torch._inductor.codecache", "output_code")
+            with ctx():
+                compiled_gm = compile_fx_inner(gm, [t])
+                compiled_result = compiled_gm([t])[0]
+
+            output_code = log_stream.getvalue()
+
+        FileCheck().check("del buf3").check(
+            "dual_output_kernel_with_inline_asm_0.run(x_1, buf0,"
+        ).run(output_code)
+
+        eager_result = f(t.clone())[0]
+        self.assertEqual(eager_result, compiled_result)
+
+    @requires_gpu
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_with_views(self, dynamic, backend):
