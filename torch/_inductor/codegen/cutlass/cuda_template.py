@@ -20,7 +20,7 @@ from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
-from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
+from .utils import DTYPE_TO_CUTLASS_TYPE
 
 
 if TYPE_CHECKING:
