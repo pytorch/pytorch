@@ -600,11 +600,11 @@ class TestInputObserver(common_utils.TestCase):
         cst = torch.export.Dim.DYNAMIC
         self.assertEqual(
             dict(x={0: cst, 1: cst}, y={1: cst}, z={0: cst, 1: cst}, w={1: cst}),
-            observer.infer_dynamic_shapes(add_batch_dimension_for={0, "z"}),
+            observer.infer_dynamic_shapes(set_batch_dimension_for={0, "z"}),
         )
         self.assertEqual(
             dict(x={0: cst, 1: cst}, y={1: cst}, z={0: cst, 1: cst}, w={1: cst}),
-            observer.infer_dynamic_shapes(add_batch_dimension_for={"x", "z"}),
+            observer.infer_dynamic_shapes(set_batch_dimension_for={"x", "z"}),
         )
 
 

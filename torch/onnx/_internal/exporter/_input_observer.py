@@ -66,7 +66,7 @@ def _flatten_unflatten_for_dynamic_shapes(
 
 
 def _infer_dynamic_dimensions(
-    shape_list: Sequence[tuple[int, ...]], add_batch_dimension: bool = False
+    shape_list: Sequence[tuple[int, ...]], set_batch_dimension: bool = False
 ) -> list[int]:
     """Returns the list of dynamic dimensions given a list of shapes
     corresponding to the same tensor.
@@ -74,7 +74,7 @@ def _infer_dynamic_dimensions(
     Args:
         shape_list:
             list of shapes, they must all have the same length
-        add_batch_dimension:
+        set_batch_dimension:
             make the first dimension dynamic if it is not
 
     Returns:
@@ -89,7 +89,7 @@ def _infer_dynamic_dimensions(
     dynamic = []
     for i in range(rank):
         dims = [shape[i] for shape in shape_list]
-        if len(set(dims)) > 1 or (i == 0 and add_batch_dimension):
+        if len(set(dims)) > 1 or (i == 0 and set_batch_dimension):
             dynamic.append(i)
     return dynamic
 
@@ -210,32 +210,36 @@ class InputObserverInfo:
         return flat_index_to_args, new_flat_inputs
 
     def infer_dynamic_shapes(
-        self, add_batch_dimension_for: set[int | str] | None = None
+        self, set_batch_dimension_for: set[int | str] | None = None
     ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
         """Infers dynamic shapes.  based on the collected tensors.
         Most of the time, models do support a batch dimension
         but this batch dimension has the same value for every input sample.
-        Instead of running inference on new samples, argument `add_batch_dimension_for`
+        Instead of running inference on new samples, argument `set_batch_dimension_for`
         can be used to tell the first dimension is a dynamic dimension for a particular
         set of inputs referenced by their name (str) or their position (int).
         """
 
-        def _add_batch_dimension(name_or_position):
-            if not add_batch_dimension_for:
+        def _set_batch_dimension(name_or_position):
+            if not set_batch_dimension_for:
                 return False
-            if name_or_position in add_batch_dimension_for:
+            if name_or_position in set_batch_dimension_for:
                 return True
-            if (
-                isinstance(name_or_position, int)
-                and self.signature_names[name_or_position] in add_batch_dimension_for
-            ):
-                return True
+            if isinstance(name_or_position, int):
+                torch._check(
+                    name_or_position < len(self.signature_names),
+                    lambda: f"argument at position {name_or_position} is out of boundary",
+                )
+                if self.signature_names[name_or_position] in set_batch_dimension_for:
+                    return True
             return False
 
-        flat_index_to_args, flat_inputs = self._build_inputs_completed_with_none_values()
+        flat_index_to_args, flat_inputs = (
+            self._build_inputs_completed_with_none_values()
+        )
 
-        def _add_batch_dimension_for_flat_index(index):
-            return _add_batch_dimension(flat_index_to_args[index])
+        def _set_batch_dimension_for_flat_index(index):
+            return _set_batch_dimension(flat_index_to_args[index])
 
         # This is already checked by build_inputs_completed_with_none_values
         # but this is not always well captured by tools checking types.
@@ -253,7 +257,7 @@ class InputObserverInfo:
         dynamic_shapes = [
             _infer_dynamic_dimensions(
                 [s for s in [shapes[index] for shapes in shape_lists] if s is not None],
-                add_batch_dimension=_add_batch_dimension_for_flat_index(index),
+                set_batch_dimension=_set_batch_dimension_for_flat_index(index),
             )
             for index in range(n_tensors)
         ]
@@ -444,18 +448,20 @@ class InputObserver:
             raise RuntimeError("No inputs were captured.")
 
     def infer_dynamic_shapes(
-        self, add_batch_dimension_for: set[int | str] | None = None
+        self, set_batch_dimension_for: set[int | str] | None = None
     ) -> tuple[dict[int, Any], ...] | dict[str, dict[int, Any]]:
         """
         Infers dynamic shapes. Most of the time, models do support a batch dimension
         but this batch dimension has the same value for every input sample.
-        Instead of running inference on new samples, argument `add_batch_dimension_for`
+        Instead of running inference on new samples, argument `set_batch_dimension_for`
         can be used to tell the first dimension is a dynamic dimension for a particular
         set of inputs referenced by their name (str) or their position (int).
         """
         self._check_captured()
         assert self.info is not None  # missed by type checking
-        return self.info.infer_dynamic_shapes(add_batch_dimension_for=add_batch_dimension_for)
+        return self.info.infer_dynamic_shapes(
+            set_batch_dimension_for=set_batch_dimension_for
+        )
 
     def infer_arguments(
         self, index: int | None = None
