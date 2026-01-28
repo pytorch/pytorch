@@ -23,12 +23,18 @@ class TestUtilizationAnnotations(TestCase):
 
     def test_basic_annotation(self):
         """Test utilization annotations are added correctly."""
-        from torch._inductor.analysis.profile_analysis import add_utilization_annotations
+        from torch._inductor.analysis.profile_analysis import (
+            add_utilization_annotations,
+        )
 
         trace_data = {
             "traceEvents": [
-                {"name": "kernel", "cat": "kernel", "dur": 100,
-                 "args": {"kernel_flop": 2e9, "kernel_num_gb": 0.1}},
+                {
+                    "name": "kernel",
+                    "cat": "kernel",
+                    "dur": 100,
+                    "args": {"kernel_flop": 2e9, "kernel_num_gb": 0.1},
+                },
             ],
             "deviceProperties": [{"id": 0, "name": "NVIDIA H100"}],
         }
@@ -44,12 +50,18 @@ class TestUtilizationAnnotations(TestCase):
 
     def test_skips_non_kernel_events(self):
         """Test that cpu_op events are not annotated."""
-        from torch._inductor.analysis.profile_analysis import add_utilization_annotations
+        from torch._inductor.analysis.profile_analysis import (
+            add_utilization_annotations,
+        )
 
         trace_data = {
             "traceEvents": [
-                {"name": "cpu_op", "cat": "cpu_op", "dur": 100,
-                 "args": {"kernel_flop": 1e9, "kernel_num_gb": 0.1}},
+                {
+                    "name": "cpu_op",
+                    "cat": "cpu_op",
+                    "dur": 100,
+                    "args": {"kernel_flop": 1e9, "kernel_num_gb": 0.1},
+                },
             ],
             "deviceProperties": [{"id": 0, "name": "NVIDIA H100"}],
         }
@@ -59,10 +71,14 @@ class TestUtilizationAnnotations(TestCase):
 
     def test_handles_missing_metrics(self):
         """Test that events without flop/bandwidth info are handled gracefully."""
-        from torch._inductor.analysis.profile_analysis import add_utilization_annotations
+        from torch._inductor.analysis.profile_analysis import (
+            add_utilization_annotations,
+        )
 
         trace_data = {
-            "traceEvents": [{"name": "kernel", "cat": "kernel", "dur": 100, "args": {}}],
+            "traceEvents": [
+                {"name": "kernel", "cat": "kernel", "dur": 100, "args": {}}
+            ],
             "deviceProperties": [{"id": 0, "name": "NVIDIA H100"}],
         }
 
@@ -74,19 +90,25 @@ class TestProfilerCallbacks(TestCase):
     """Test the profiler callback mechanism."""
 
     def setUp(self):
-        from torch._inductor.analysis.profile_analysis import clear_profiler_export_callbacks
+        from torch._inductor.analysis.profile_analysis import (
+            clear_profiler_export_callbacks,
+        )
+
         clear_profiler_export_callbacks()
 
     def tearDown(self):
-        from torch._inductor.analysis.profile_analysis import clear_profiler_export_callbacks
+        from torch._inductor.analysis.profile_analysis import (
+            clear_profiler_export_callbacks,
+        )
+
         clear_profiler_export_callbacks()
 
     def test_callback_registration_and_execution(self):
         """Test callbacks are registered and run in order."""
         from torch._inductor.analysis.profile_analysis import (
+            _profiler_export_callbacks,
             register_profiler_export_callback,
             run_profiler_export_callbacks,
-            _profiler_export_callbacks,
         )
 
         results = []
@@ -128,13 +150,18 @@ class ProfilerIntegrationBase(TestCase):
             data = json.load(f)
 
         return [
-            e for e in data["traceEvents"]
+            e
+            for e in data["traceEvents"]
             if e.get("cat") == "kernel"
-            and ("achieved_flops_percent" in e.get("args", {})
-                 or "achieved_bandwidth_percent" in e.get("args", {}))
+            and (
+                "achieved_flops_percent" in e.get("args", {})
+                or "achieved_bandwidth_percent" in e.get("args", {})
+            )
         ]
 
-    def assert_reasonable_utilization(self, kernel_events, min_util=10, max_util=95, check_flops=None):
+    def assert_reasonable_utilization(
+        self, kernel_events, min_util=10, max_util=95, check_flops=None
+    ):
         """Assert at least one kernel achieves reasonable utilization (10-95%).
 
         Args:
@@ -144,23 +171,32 @@ class ProfilerIntegrationBase(TestCase):
             check_flops: If True, assert FLOPS metrics exist. If False, assert they don't.
                         If None, don't check for FLOPS presence.
         """
-        self.assertGreater(len(kernel_events), 0, "No kernel events with utilization found")
+        self.assertGreater(
+            len(kernel_events), 0, "No kernel events with utilization found"
+        )
 
-        max_flop = max(e["args"].get("achieved_flops_percent", 0) for e in kernel_events)
-        max_bw = max(e["args"].get("achieved_bandwidth_percent", 0) for e in kernel_events)
+        max_flop = max(
+            e["args"].get("achieved_flops_percent", 0) for e in kernel_events
+        )
+        max_bw = max(
+            e["args"].get("achieved_bandwidth_percent", 0) for e in kernel_events
+        )
 
         if check_flops is True:
             self.assertGreater(max_flop, 0, "Expected FLOPS metrics but none found")
         elif check_flops is False:
-            self.assertEqual(max_flop, 0, f"Expected no FLOPS metrics but got {max_flop:.1f}%")
+            self.assertEqual(
+                max_flop, 0, f"Expected no FLOPS metrics but got {max_flop:.1f}%"
+            )
 
         self.assertTrue(
             max_flop >= min_util or max_bw >= min_util,
-            f"Utilization too low: FLOPS={max_flop:.1f}%, BW={max_bw:.1f}%"
+            f"Utilization too low: FLOPS={max_flop:.1f}%, BW={max_bw:.1f}%",
         )
         self.assertLessEqual(
-            max(max_flop, max_bw), max_util,
-            f"Utilization too high: FLOPS={max_flop:.1f}%, BW={max_bw:.1f}%"
+            max(max_flop, max_bw),
+            max_util,
+            f"Utilization too high: FLOPS={max_flop:.1f}%, BW={max_bw:.1f}%",
         )
 
 
@@ -189,6 +225,7 @@ class TestInductorUtilization(ProfilerIntegrationBase):
 
     def test_pointwise_bandwidth(self):
         """Test pointwise ops achieve reasonable bandwidth utilization."""
+
         @torch.compile
         def pointwise(a, b):
             return a + b * 2.0
@@ -207,6 +244,7 @@ class TestInductorUtilization(ProfilerIntegrationBase):
 
     def test_fused_kernel_bandwidth_exact(self):
         """Test fused kernels report correct bandwidth (deterministic)."""
+
         @torch.compile
         def fused(x):
             return torch.relu(torch.sigmoid(x)) + 1.0
@@ -237,6 +275,7 @@ class TestTritonGemmUtilization(ProfilerIntegrationBase):
 
     def test_triton_gemm_utilization(self):
         """Test max-autotune Triton GEMM achieves reasonable utilization."""
+
         @torch.compile(mode="max-autotune-no-cudagraphs")
         def triton_mm(a, b):
             return torch.mm(a, b)
@@ -277,12 +316,14 @@ class TestRooflineMetrics(ProfilerIntegrationBase):
         for e in gemm_kernels:
             arith_intensity = e["args"].get("arithmetic_intensity", 0)
             self.assertGreater(
-                arith_intensity, 50,
-                f"Expected high arithmetic intensity, got {arith_intensity:.1f}"
+                arith_intensity,
+                50,
+                f"Expected high arithmetic intensity, got {arith_intensity:.1f}",
             )
 
     def test_pointwise_is_memory_bound(self):
         """Test pointwise ops have low arithmetic intensity."""
+
         @torch.compile
         def add_op(a, b):
             return a + b
@@ -297,14 +338,17 @@ class TestRooflineMetrics(ProfilerIntegrationBase):
 
         kernels = self.profile_and_get_kernels(lambda: add_op(a, b))
 
-        memory_bound = [e for e in kernels if e["args"].get("roofline_bound") == "memory"]
+        memory_bound = [
+            e for e in kernels if e["args"].get("roofline_bound") == "memory"
+        ]
         self.assertGreater(len(memory_bound), 0, "No memory-bound kernels found")
 
         for e in memory_bound:
             arith_intensity = e["args"].get("arithmetic_intensity", 0)
             self.assertLess(
-                arith_intensity, 10,
-                f"Expected low arithmetic intensity, got {arith_intensity:.1f}"
+                arith_intensity,
+                10,
+                f"Expected low arithmetic intensity, got {arith_intensity:.1f}",
             )
 
 

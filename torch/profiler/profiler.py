@@ -36,6 +36,7 @@ __all__ = [
     "profile",
     "ExecutionTraceObserver",
     "register_export_chrome_trace_callback",
+    "unregister_export_chrome_trace_callback",
 ]
 
 # Callbacks to run when export_chrome_trace is called.
@@ -44,7 +45,7 @@ _export_chrome_trace_callbacks: list[Callable[[dict], dict]] = []
 
 
 def register_export_chrome_trace_callback(
-    callback: Callable[[dict], dict]
+    callback: Callable[[dict], dict],
 ) -> Callable[[dict], dict]:
     """
     Register a callback to be run when export_chrome_trace() is called.
@@ -61,6 +62,7 @@ def register_export_chrome_trace_callback(
                 if event.get("cat") == "kernel":
                     event["args"]["custom"] = "value"
             return data
+
 
         torch.profiler.register_export_chrome_trace_callback(add_custom_annotation)
         # Later, to remove:
@@ -357,6 +359,7 @@ class _KinetoProfile:
                 json.dump(data, f)
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(
                 "Profiler export callback failed: %s", e
             )

@@ -44,6 +44,7 @@ __all__ = [
     "record_function",
     "ExecutionTraceObserver",
     "register_export_chrome_trace_callback",
+    "unregister_export_chrome_trace_callback",
 ]
 
 from . import itt

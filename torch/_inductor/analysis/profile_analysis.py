@@ -791,7 +791,9 @@ def add_utilization_annotations(
         if device_info is not None:
             if not peak_tflops_by_dtype:
                 peak_tflops_by_dtype = {
-                    k: v for k, v in device_info.tops.items() if isinstance(k, torch.dtype)
+                    k: v
+                    for k, v in device_info.tops.items()
+                    if isinstance(k, torch.dtype)
                 }
             if peak_bw_gbps is None:
                 peak_bw_gbps = device_info.dram_bw_gbs
@@ -903,8 +905,6 @@ def add_utilization_annotations(
 def augment_trace_file(
     input_path: str,
     output_path: Optional[str] = None,
-    device_name: Optional[str] = None,
-    dtype: Optional[Union[torch.dtype, str]] = None,
     add_utilization: bool = True,
 ) -> str:
     """
@@ -916,23 +916,12 @@ def augment_trace_file(
     Args:
         input_path: Path to the input Chrome trace JSON file.
         output_path: Path to write the augmented trace. If None, overwrites input_path.
-        device_name: Optional device name for utilization calculations.
-        dtype: Optional dtype for FLOPS calculations.
         add_utilization: If True, also adds achieved_flops_percent and
-                        achieved_bandwidth_percent. Requires device info.
+                        achieved_bandwidth_percent. Device info is inferred
+                        from CUDA if available, or from the trace's deviceProperties.
 
     Returns:
         The path to the output file.
-
-    Example:
-        >>> from torch.profiler import profile, ProfilerActivity
-        >>> with profile(activities=[ProfilerActivity.CUDA]) as prof:
-        ...     # Do some work
-        ...     pass
-        >>> prof.export_chrome_trace("trace.json")
-        >>> # Now augment the trace with utilization metrics
-        >>> from torch._inductor.analysis.profile_analysis import augment_trace_file
-        >>> augment_trace_file("trace.json", device_name="NVIDIA H100")
     """
     with open(input_path) as f:
         data = json.load(f)
@@ -942,7 +931,7 @@ def augment_trace_file(
 
     # Optionally add utilization annotations
     if add_utilization:
-        data = add_utilization_annotations(data, device_name=device_name, dtype=dtype)
+        data = add_utilization_annotations(data)
 
     # Write output
     if output_path is None:
@@ -960,7 +949,7 @@ _profiler_export_callbacks: list[Callable[[dict[str, Any]], dict[str, Any]]] = [
 
 
 def register_profiler_export_callback(
-    callback: Callable[[dict[str, Any]], dict[str, Any]]
+    callback: Callable[[dict[str, Any]], dict[str, Any]],
 ) -> None:
     """
     Register a callback to run before profiler trace export.
