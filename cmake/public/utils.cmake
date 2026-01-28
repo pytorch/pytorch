@@ -394,6 +394,9 @@ function(torch_compile_options libname)
         # NS: One can compile CUDA code with extra-semi flag as nvcc generates code like
         # namespace MemoryOps_cu_d8602b38_109889 __attribute__((visibility("hidden")))  { };
         list(APPEND private_compile_options -Wextra-semi)
+      else()
+        # NVCC + clang15  reports deprecated copies from GPU lambda instantiations
+        list(APPEND private_compile_options -Wno-deprecated-copy)
       endif()
       list(APPEND private_compile_options -Wmove)
     else()
