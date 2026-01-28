@@ -275,7 +275,7 @@ void CUDAGraph::reset() {
   }
   captured_generator_states_.clear();
 
-  // Remove this graph from the global capture_id -> graph map
+  // Remove this graph from the global capture_id_to_graph map
   if (capture_id_ != 0) {
     std::lock_guard<std::mutex> lock(capture_id_to_graph_mutex);
     capture_id_to_graph.erase(capture_id_);

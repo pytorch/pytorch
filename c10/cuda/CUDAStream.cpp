@@ -381,13 +381,10 @@ CUDAStream getNonCapturingStreamFromPool(
     }
   }
 
-  // All streams in the pool are capturing, which shouldn't happen in normal
-  // usage. This likely indicates a bug or misuse of CUDA graph capture.
   TORCH_CHECK(
       false,
-      "All streams in the pool are currently capturing. "
-      "Cannot obtain a non-capturing stream. This may indicate "
-      "that CUDA graph capture is being used incorrectly.");
+      "Unable to obtain a non-capturing CUDA stream: all streams in the pool are currently participating in CUDA graph capture."
+      "Consider increasing the pool size or ensuring streams are released from capture before requesting a new one.");
 }
 
 CUDAStream getNonCapturingStreamFromPool(
