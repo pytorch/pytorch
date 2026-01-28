@@ -2024,6 +2024,7 @@ class BuiltinVariable(VariableTracker):
                 variables.ConstDictVariable,
                 variables.NNModuleVariable,
                 variables.TensorVariable,
+                variables.TupleVariable,
             ),
         ):
             return obj.call_method(tx, "__iter__", [], {})
