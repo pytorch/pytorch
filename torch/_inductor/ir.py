@@ -3991,9 +3991,11 @@ class FlexibleLayout(Layout):
         Use Max(size, 1) to handle zero-size tensors correctly, but only
         when we can't prove size >= 1.
         """
-        if (
-            _is_static(size) and size >= 1
-        ) or V.graph.sizevars.statically_known_geq(size, 1):
+        if _is_static(size) and int(size) >= 1:
+            return size
+        # For SymInt, extract the underlying sympy expression
+        size_expr = size.node.expr if isinstance(size, torch.SymInt) else size
+        if V.graph.sizevars.statically_known_geq(size_expr, 1):
             return size
         return sympy.Max(size, 1)
 
