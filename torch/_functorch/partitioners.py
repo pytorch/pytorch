@@ -136,6 +136,177 @@ class NodeInfo:
 
 
 @dataclass
+class PartitionedGraphSignature:
+    """
+    Holds categorized inputs/outputs for forward/backward graph partitioning.
+
+    This class encapsulates the different categories of graph inputs/outputs and provides
+    methods to determine their ordering in the extracted forward and backward graphs.
+    The ordering methods can be overridden by subclasses to customize partitioning
+    behavior for different use cases (e.g., AOTAutograd vs dI/dW splitting).
+    """
+
+    # Inputs extracted from placeholders
+    primal_inputs: list[fx.Node]
+    tangent_inputs: list[fx.Node]
+    fwd_seed_offset_inputs: list[fx.Node]
+    bwd_seed_offset_inputs: list[fx.Node]
+    backward_state_inputs: list[fx.Node]
+
+    # Saved activations (computed by min-cut or other partitioning logic)
+    saved_values: list[fx.Node]
+    saved_sym_nodes: list[fx.Node]
+    saved_opaque_objects: list[fx.Node]
+
+    # Forward/backward outputs extracted from the joint graph
+    fwd_outputs: list[fx.Node]
+    bwd_outputs: list[fx.Node]
+    fwd_outputs_descs: list[AOTOutput]
+    bwd_outputs_descs: list[AOTOutput]
+
+    # Index where no-VC-check saved values start (for descriptor generation)
+    no_vc_check_start_idx: int = 0
+
+    def fwd_graph_inputs(self) -> list[fx.Node]:
+        """Order of inputs to the forward graph."""
+        return self.primal_inputs + self.fwd_seed_offset_inputs
+
+    def fwd_graph_saved_outputs(self) -> list[fx.Node]:
+        """Order of saved activations in forward graph outputs (after fwd_outputs)."""
+        return self.saved_values + self.saved_opaque_objects + self.saved_sym_nodes
+
+    def fwd_graph_outputs(self) -> list[fx.Node]:
+        """Full ordered list of forward graph outputs."""
+        return self.fwd_outputs + self.fwd_graph_saved_outputs()
+
+    def fwd_graph_outputs_descs(self) -> list[AOTOutput]:
+        """Descriptors for forward graph outputs."""
+        saved_descs = []
+        num_saved = (
+            len(self.saved_values)
+            + len(self.saved_opaque_objects)
+            + len(self.saved_sym_nodes)
+        )
+        for i in range(num_saved):
+            if i >= self.no_vc_check_start_idx and i < len(self.saved_values):
+                saved_descs.append(SavedForBackwardsNoVcCheckAOTOutput(i))
+            else:
+                saved_descs.append(SavedForBackwardsAOTOutput(i))
+        return self.fwd_outputs_descs + saved_descs
+
+    def bwd_graph_inputs_preliminary(self) -> list[fx.Node]:
+        """
+        Order of inputs for preliminary backward graph extraction.
+
+        This is used for the initial backward graph extraction to identify
+        which saved values are actually used by the backward pass.
+        """
+        # return (
+        #     self.saved_sym_nodes
+        #     + self.saved_values
+        #     + self.tangent_inputs
+        #     + self.bwd_seed_offset_inputs
+        # )
+        assert not self.saved_opaque_objects
+        assert not self.backward_state_inputs
+        return self.bwd_graph_inputs()
+
+    def bwd_graph_inputs(self) -> list[fx.Node]:
+        """Order of inputs to the final backward graph."""
+        return (
+            self.saved_sym_nodes
+            + self.saved_values
+            + self.saved_opaque_objects
+            + self.tangent_inputs
+            + self.bwd_seed_offset_inputs
+            + self.backward_state_inputs
+        )
+
+    def symbol_binding_sources(
+        self, saved_sym_nodes_derived: list[fx.Node]
+    ) -> list[fx.Node]:
+        """
+        Nodes to iterate over when finding symbol bindings.
+
+        These nodes' shapes may reference symbols that need to be bound
+        and propagated to the backward graph.
+        """
+        return saved_sym_nodes_derived + self.saved_values + self.tangent_inputs
+
+    def split_sym_nodes_by_binding(self) -> tuple[list[fx.Node], list[fx.Node]]:
+        """
+        Split saved_sym_nodes into binding and derived nodes.
+
+        Returns:
+            (binding_nodes, derived_nodes): Nodes that bind symbols vs derived sym nodes.
+        """
+        binding_nodes = []
+        derived_nodes = []
+        for node in self.saved_sym_nodes:
+            symbol = is_symbol_binding_fx_node(node)
+            if symbol:
+                binding_nodes.append(node)
+            else:
+                derived_nodes.append(node)
+        return binding_nodes, derived_nodes
+
+    def separate_saved_values(
+        self,
+    ) -> tuple[list[fx.Node], list[fx.Node], list[fx.Node], int]:
+        """
+        Separate saved_values by VC check status and extract opaque objects.
+
+        Returns:
+            (values_with_vc_check, values_no_vc_check, opaque_objects, no_vc_check_start_idx)
+        """
+        values_with_vc_check = []
+        values_no_vc_check = []
+        opaque_objects = []
+        for node in self.saved_values:
+            if isinstance(node.meta.get("val"), FakeScriptObject):
+                opaque_objects.append(node)
+            elif node.meta.get("saved_tensor_with_no_vc_check", False):
+                values_no_vc_check.append(node)
+            else:
+                values_with_vc_check.append(node)
+        no_vc_check_start_idx = len(values_with_vc_check)
+        return (
+            values_with_vc_check,
+            values_no_vc_check,
+            opaque_objects,
+            no_vc_check_start_idx,
+        )
+
+    def finalize(
+        self,
+        reordered_sym_nodes: list[fx.Node],
+        reordered_saved_values: list[fx.Node],
+        saved_opaque_objects: list[fx.Node],
+        no_vc_check_start_idx: int,
+    ) -> "PartitionedGraphSignature":
+        """
+        Create a new PartitionedGraphSignature with finalized (reordered) saved values.
+
+        This avoids mutating the original lists and creates a clean final state.
+        """
+        return PartitionedGraphSignature(
+            primal_inputs=self.primal_inputs,
+            tangent_inputs=self.tangent_inputs,
+            fwd_seed_offset_inputs=self.fwd_seed_offset_inputs,
+            bwd_seed_offset_inputs=self.bwd_seed_offset_inputs,
+            backward_state_inputs=self.backward_state_inputs,
+            saved_values=reordered_saved_values,
+            saved_sym_nodes=reordered_sym_nodes,
+            saved_opaque_objects=saved_opaque_objects,
+            fwd_outputs=self.fwd_outputs,
+            bwd_outputs=self.bwd_outputs,
+            fwd_outputs_descs=self.fwd_outputs_descs,
+            bwd_outputs_descs=self.bwd_outputs_descs,
+            no_vc_check_start_idx=no_vc_check_start_idx,
+        )
+
+
+@dataclass
 class MinCutOptions:
     ban_if_used_far_apart: bool
     ban_if_long_fusible_chains: bool
@@ -902,6 +1073,38 @@ def _extract_fwd_bwd_modules(
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
+    """
+    Extract separate forward and backward graph modules from a joint fwd+bwd graph.
+
+    This function takes a joint graph (containing both forward and backward operations)
+    along with the saved activations determined by a partitioner (e.g., min-cut), and
+    produces two separate graph modules: one for forward and one for backward.
+
+    The extraction process involves several steps:
+    1. Create a preliminary PartitionedGraphSignature to define input/output ordering
+    2. Extract a preliminary backward graph to filter out unused saved values
+    3. Process symbol bindings to ensure all required symbols are propagated
+    4. Separate saved values by version-counter-check status and extract opaque objects
+    5. Create final PartitionedGraphSignature with reordered values via finalize()
+    6. Extract the final forward and backward graphs using the defined ordering
+    7. Apply activation quantization if configured
+
+    Args:
+        joint_module: The joint forward+backward graph module to partition.
+        saved_values: Tensor nodes that need to be saved from forward for backward.
+        saved_sym_nodes: Symbolic integer nodes that need to be saved.
+        num_fwd_outputs: Number of outputs that belong to the forward graph.
+        static_lifetime_input_nodes: Optional set of input nodes with static lifetime
+            (e.g., parameters) for activation quantization.
+
+    Returns:
+        A tuple of (forward_module, backward_module).
+
+    Note:
+        The ordering of inputs/outputs is encapsulated in PartitionedGraphSignature, which can
+        be subclassed to customize ordering for different use cases (e.g., dI/dW
+        splitting for pipeline parallelism).
+    """
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     )
@@ -912,9 +1115,27 @@ def _extract_fwd_bwd_modules(
     bwd_seed_offset_inputs = [*filter(_is_bwd_seed_offset, placeholders)]
     backward_state_inputs = [*filter(_is_backward_state, placeholders)]
 
+    # Create preliminary PartitionedGraphSignature for dead node filtering and symbol binding.
+    # saved_opaque_objects is empty here since we haven't separated them yet.
+    preliminary_inputs = PartitionedGraphSignature(
+        primal_inputs=primal_inputs,
+        tangent_inputs=tangent_inputs,
+        fwd_seed_offset_inputs=fwd_seed_offset_inputs,
+        bwd_seed_offset_inputs=bwd_seed_offset_inputs,
+        backward_state_inputs=backward_state_inputs,
+        saved_values=saved_values,
+        saved_sym_nodes=saved_sym_nodes,
+        saved_opaque_objects=[],  # Not yet separated from saved_values
+        fwd_outputs=fwd_outputs,
+        bwd_outputs=bwd_outputs,
+        fwd_outputs_descs=fwd_outputs_descs,
+        bwd_outputs_descs=bwd_outputs_descs,
+        no_vc_check_start_idx=0,
+    )
+
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        preliminary_inputs.bwd_graph_inputs_preliminary(),
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
@@ -948,23 +1169,22 @@ def _extract_fwd_bwd_modules(
     # These are not directly used in the graph but are required for downstream
     # sizevar assignment
     saved_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
-    saved_sym_nodes_binding = []
-    saved_sym_nodes_derived = []
 
-    # Some symbols may already be bound in the directly saved_sym_nodes,
-    # keep track of them so we don't re-bind them
-    for node in saved_sym_nodes:
+    # Split sym nodes into binding and derived nodes
+    saved_sym_nodes_binding, saved_sym_nodes_derived = (
+        preliminary_inputs.split_sym_nodes_by_binding()
+    )
+
+    # Track symbols already bound
+    for node in saved_sym_nodes_binding:
         symbol = is_symbol_binding_fx_node(node)
         if symbol:
             saved_symbols.add(symbol)
-            saved_sym_nodes_binding.append(node)
-        else:
-            saved_sym_nodes_derived.append(node)
 
     # Now go through all of the prospective backward inputs and track any
     # other symbols we need to bind
     symbol_bindings = find_symbol_binding_fx_nodes(joint_module.graph)
-    for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
+    for node in preliminary_inputs.symbol_binding_sources(saved_sym_nodes_derived):
         if "val" not in node.meta:
             continue
         new_symbols = free_symbols(node.meta["val"]) - saved_symbols
@@ -978,80 +1198,90 @@ def _extract_fwd_bwd_modules(
             saved_sym_nodes_binding.append(symbol_bindings[s])
         saved_symbols |= new_symbols
 
-    # Update saved_sym_nodes that are now reordered to have all bindings at
-    # front. This can also be used later on to figure out the position of saved
-    # sym nodes in the output of fwd graph.
-    saved_sym_nodes.clear()
-    saved_sym_nodes.extend(saved_sym_nodes_binding + saved_sym_nodes_derived)
+    # Reorder sym_nodes: bindings first, then derived
+    reordered_sym_nodes = saved_sym_nodes_binding + saved_sym_nodes_derived
 
+    # Separate saved_values by VC check status and extract opaque objects
     # See Note [Activations with no version counter checks in eager]
-    # Sort saved_values so that tensors with saved_tensor_with_no_vc_check=True
-    # are at the end. This allows us to have two consecutive slices:
-    # 1. tensors_saved_with_vc_check_slice - tensors saved via save_for_backward
-    # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
-    # The sort is stable, so the relative order within each group is preserved.
-    #
-    # Additionally, separate out opaque objects (FakeScriptObject) from tensors.
-    # Opaque objects should be placed after tensors in the forward outputs.
-    saved_values_with_vc_check = []
-    saved_values_no_vc_check = []
-    saved_opaque_objects = []
-    for node in saved_values:
-        # Check if this is an opaque object
-        if isinstance(node.meta.get("val"), FakeScriptObject):
-            saved_opaque_objects.append(node)
-        elif node.meta.get("saved_tensor_with_no_vc_check", False):
-            saved_values_no_vc_check.append(node)
-        else:
-            saved_values_with_vc_check.append(node)
-    saved_values.clear()
-    saved_values.extend(saved_values_with_vc_check + saved_values_no_vc_check)
-    no_vc_check_start_idx = len(saved_values_with_vc_check)
+    (
+        saved_values_with_vc_check,
+        saved_values_no_vc_check,
+        saved_opaque_objects,
+        no_vc_check_start_idx,
+    ) = preliminary_inputs.separate_saved_values()
+    reordered_saved_values = saved_values_with_vc_check + saved_values_no_vc_check
 
     # debug assert: given saved_values where the last k of them are expected to not
     # require VC checks, they should all have node metadata indicating so.
-    for i, node in enumerate(saved_values):
-        if i >= no_vc_check_start_idx:
-            assert node.meta.get("saved_tensor_with_no_vc_check", False), (
-                f"i={i}, no_vc_check_start_idx={no_vc_check_start_idx}, len(saved_values)={len(saved_values)}"
-            )
+    for i, node in enumerate(saved_values_no_vc_check):
+        assert node.meta.get("saved_tensor_with_no_vc_check", False), (
+            f"i={i}, no_vc_check_start_idx={no_vc_check_start_idx}, len(saved_values)={len(reordered_saved_values)}"
+        )
+
+    # Create final PartitionedGraphSignature with reordered values (immutable approach)
+    # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, opaque_objects, symints)
+    partition_inputs = preliminary_inputs.finalize(
+        reordered_sym_nodes=reordered_sym_nodes,
+        reordered_saved_values=reordered_saved_values,
+        saved_opaque_objects=saved_opaque_objects,
+        no_vc_check_start_idx=no_vc_check_start_idx,
+    )
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
-    # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, opaque_objects, symints)
+    fwd_module, bwd_module = _extract_graphs_from_partition_inputs(
+        joint_module, partition_inputs
+    )
+    enable_activation_quantization(
+        partition_inputs.saved_values,
+        fwd_module,
+        bwd_module,
+        static_lifetime_input_nodes,
+    )
+    return fwd_module, bwd_module
+
+
+def _extract_graphs_from_partition_inputs(
+    joint_module: fx.GraphModule,
+    partition_inputs: PartitionedGraphSignature,
+    *,
+    ignore_must_be_in_fw_bw: bool = False,
+) -> tuple[fx.GraphModule, fx.GraphModule]:
+    """
+    Extract forward and backward graph modules using the ordering defined in partition_inputs.
+
+    This is a lower-level helper that can be used directly when you have a custom
+    PartitionedGraphSignature configuration (e.g., for dI/dW splitting in pipeline parallelism).
+
+    Args:
+        joint_module: The joint forward+backward graph module to partition.
+        partition_inputs: Encapsulates the ordering of inputs/outputs for the partition.
+        ignore_must_be_in_fw_bw: If True, skip validation that nodes are properly
+            categorized as forward or backward. Useful for non-standard partitioning
+            like dI/dW splitting.
+
+    Returns:
+        A tuple of (forward_module, backward_module).
+    """
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_opaque_objects + saved_sym_nodes,
-        fwd_outputs_descs
-        + [
-            SavedForBackwardsNoVcCheckAOTOutput(i)
-            if i >= no_vc_check_start_idx and i < len(saved_values)
-            else SavedForBackwardsAOTOutput(i)
-            for i in range(
-                len(saved_values) + len(saved_opaque_objects) + len(saved_sym_nodes)
-            )
-        ],
+        partition_inputs.fwd_graph_inputs(),
+        partition_inputs.fwd_graph_outputs(),
+        partition_inputs.fwd_graph_outputs_descs(),
         "forward",
+        ignore_must_be_in_fw_bw=ignore_must_be_in_fw_bw,
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes
-        + saved_values
-        + saved_opaque_objects
-        + tangent_inputs
-        + bwd_seed_offset_inputs
-        + backward_state_inputs,
-        bwd_outputs,
-        bwd_outputs_descs,
+        partition_inputs.bwd_graph_inputs(),
+        partition_inputs.bwd_outputs,
+        partition_inputs.bwd_outputs_descs,
         "backward",
+        ignore_must_be_in_fw_bw=ignore_must_be_in_fw_bw,
     )
 
     fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
     bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
-    enable_activation_quantization(
-        saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
-    )
     return fwd_module, bwd_module
 
 
