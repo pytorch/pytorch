@@ -60,6 +60,11 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+  TORCH_CHECK(input.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
+  TORCH_CHECK(weight.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
+  TORCH_CHECK(packed.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
+  TORCH_CHECK(col_offsets.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
+  TORCH_CHECK(bias.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
 
   TORCH_WARN_ONCE("fbgemm_linear_int8_weight_fp32_activation is deprecated "
                   "and will be removed in a future PyTorch release.")
@@ -232,6 +237,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+  TORCH_CHECK(weight.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
   const Tensor weight_contig = weight.contiguous();
 
   // Calculate weight statistics
@@ -298,6 +304,7 @@ Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+  TORCH_CHECK(weight.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   const Tensor weight_contig = weight.contiguous();
@@ -383,6 +390,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+  TORCH_CHECK(weight.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
 
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
@@ -419,6 +427,9 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+  TORCH_CHECK(input.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
+  TORCH_CHECK(packed_weight.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
+  TORCH_CHECK(output.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
 
   const Tensor input_contig = input.contiguous();
   const float* input_ptr = input_contig.const_data_ptr<float>();
@@ -455,6 +466,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias);
   const Tensor& bias_ = *bias_maybe_owned;
   if (bias_.defined()) {
+    TORCH_CHECK(bias_.device().type() == torch::headeronly::DeviceType::CPU, "FBGEMM operations are CPU only.");
     TORCH_CHECK(bias_.dim() == 1);
     output.add_(bias_);
   }
