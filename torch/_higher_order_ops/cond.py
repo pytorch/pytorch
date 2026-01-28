@@ -225,9 +225,10 @@ def cond(
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
-    assert isinstance(operands, (list, tuple)), (
-        f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
-    )
+    if not isinstance(operands, (list, tuple)):
+        raise AssertionError(
+            f"Cond operands must be a list or tuple of tensors and SymInts {operands}"
+        )
 
     true_graph = reenter_make_fx(true_fn)(*operands)
     false_graph = reenter_make_fx(false_fn)(*operands)
@@ -254,7 +255,10 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     i, true_name = unique_graph_id(proxy_mode, prefix="true_graph")
 
     false_name = f"false_graph_{i}"
-    assert not hasattr(proxy_mode.tracer.root, false_name)
+    if hasattr(proxy_mode.tracer.root, false_name):
+        raise AssertionError(
+            f"proxy_mode.tracer.root already has attribute {false_name}"
+        )
 
     proxy_mode.tracer.root.register_module(true_name, true_graph)
     proxy_mode.tracer.root.register_module(false_name, false_graph)
@@ -274,11 +278,13 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cond_op_dense(pred, true_fn, false_fn, operands):
-    assert all(isinstance(o, (torch.Tensor, int)) for o in operands), (
-        f"Dense implementation operands must be a list of tensors and ints {operands}"
-    )
+    if not all(isinstance(o, (torch.Tensor, int)) for o in operands):
+        raise AssertionError(
+            f"Dense implementation operands must be a list of tensors and ints {operands}"
+        )
     mode = _get_current_dispatch_mode()
-    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+    if mode is not None:
+        raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     if pred:
         return true_fn(*operands)
     else:
@@ -431,7 +437,8 @@ def _merge_output(
     )
 
     if a is None or b is None:
-        assert a is None and b is None, (a, b)
+        if not (a is None and b is None):
+            raise AssertionError(f"expected both a and b to be None, got a={a}, b={b}")
         return None
 
     def min_max(s0, s1):
@@ -451,12 +458,16 @@ def _merge_output(
     if type(a) is int and type(b) is int:
         if a == b:
             return a
-        assert mode.shape_env is not None
+        if mode.shape_env is None:
+            raise AssertionError("mode.shape_env is None")
         merged_out = mode.shape_env.create_unbacked_symint()
         mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
         return merged_out
 
-    assert type(a) is FakeTensor and type(b) is FakeTensor, (a, type(a), b, type(b))
+    if not (type(a) is FakeTensor and type(b) is FakeTensor):
+        raise AssertionError(
+            f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
+        )
 
     # Note: we don't check size, stride because
     # they'll be merged with unbacked symints if they differ.
@@ -477,9 +488,12 @@ def _merge_output(
         msg_prefix="When merging two branches' output in torch.cond, ",
     )
     # NYI
-    assert not a.is_quantized and not b.is_quantized
-    assert not a.is_sparse and not b.is_sparse
-    assert not a.is_conj() and not b.is_conj()
+    if a.is_quantized or b.is_quantized:
+        raise AssertionError("quantized tensors not yet implemented")
+    if a.is_sparse or b.is_sparse:
+        raise AssertionError("sparse tensors not yet implemented")
+    if a.is_conj() or b.is_conj():
+        raise AssertionError("conjugate tensors not yet implemented")
 
     """
     Step 1: create unbacked symints for sizes that are different
@@ -510,7 +524,8 @@ def _merge_output(
         ):
             merged_size.append(s0)
         else:
-            assert mode.shape_env is not None
+            if mode.shape_env is None:
+                raise AssertionError("mode.shape_env is None")
             new_size = mode.shape_env.create_unbacked_symint()
             mode.shape_env.constrain_symbol_range(new_size.node.expr, *min_max(s0, s1))
             merged_size.append(new_size)
@@ -588,7 +603,10 @@ def _merge_output(
             b_stride_li[idx] = (b_ex_stride[i], -i)
 
         for a_pair, b_pair in zip(a_stride_li, b_stride_li):
-            assert a_pair is not None and b_pair is not None
+            if a_pair is None or b_pair is None:
+                raise AssertionError(
+                    f"expected a_pair and b_pair to be non-None, got a_pair={a_pair}, b_pair={b_pair}"
+                )
             _, a_idx = a_pair
             _, b_idx = b_pair
 
@@ -609,25 +627,35 @@ def _merge_output(
         b_stride_expr: dict[Any, Union[int, torch.SymInt]] = {}
         merged_strides: list[Union[int, torch.SymInt]] = [None] * len(a_ex_stride)  # type: ignore[list-item]
         for a_pair, b_pair in zip(a_stride_li, b_stride_li):
-            assert a_pair is not None and b_pair is not None
+            if a_pair is None or b_pair is None:
+                raise AssertionError(
+                    f"expected a_pair and b_pair to be non-None, got a_pair={a_pair}, b_pair={b_pair}"
+                )
             a_val, neg_i = a_pair
             b_val, _ = b_pair
 
             i = -neg_i
             if a_val == 0:
-                assert b_val == 0, (a_val, b_val)
+                if b_val != 0:
+                    raise AssertionError(
+                        f"expected b_val == 0 when a_val == 0, got a_val={a_val}, b_val={b_val}"
+                    )
                 merged_strides[i] = 0
                 continue
 
             if _maybe_expr(a_val) in a_stride_expr:
                 a_expr = a_stride_expr[_maybe_expr(a_val)]
-                assert b_stride_expr[_maybe_expr(b_val)] == a_expr, (
-                    f"a_stride_expr:{a_stride_expr}, b_stride_expr:{b_stride_expr}"
-                )
+                if b_stride_expr[_maybe_expr(b_val)] != a_expr:
+                    raise AssertionError(
+                        f"a_stride_expr:{a_stride_expr}, b_stride_expr:{b_stride_expr}"
+                    )
                 merged_strides[i] = a_expr
             else:
                 if a_val == 1:
-                    assert b_val == 1
+                    if b_val != 1:
+                        raise AssertionError(
+                            f"expected b_val == 1 when a_val == 1, got b_val={b_val}"
+                        )
                     a_stride_expr[_maybe_expr(a_val)] = 1
                     b_stride_expr[_maybe_expr(b_val)] = 1
                     merged_strides[i] = 1
@@ -680,12 +708,14 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
 
 @cond_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
-    assert isinstance(inputs, (list, tuple)), (
-        "Cond inputs must be a list or tuple of tensors"
-    )
-    assert all(isinstance(i, torch.Tensor) for i in inputs), (
-        "Cond inputs must be a list of tensors"
-    )
+    if not isinstance(inputs, (list, tuple)):
+        raise AssertionError(
+            f"Cond inputs must be a list or tuple of tensors, got {type(inputs)}"
+        )
+    if not all(isinstance(i, torch.Tensor) for i in inputs):
+        raise AssertionError(
+            f"Cond inputs must be a list of tensors, got {[type(i) for i in inputs]}"
+        )
 
     pred_is_batched = isinstance(pred, torch.Tensor) and is_batchedtensor(pred)
     pred_ = get_unwrapped(pred) if pred_is_batched else pred
