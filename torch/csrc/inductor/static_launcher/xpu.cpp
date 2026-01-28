@@ -1,30 +1,31 @@
 /**
- * This file follows the API design of "static_cuda_launcher.cpp" and copied
+ * This file follows the API design of "static_launcher/cuda.cpp" and copied
  * parts of the code.
- * TODO: Extract the parts shared with static_cuda_launcher.cpp and unify to a
- * static_triton_launcher.h
+ * TODO: Extract the parts shared with static_launcher/cuda.cpp and unify to a
+ * common static_triton_launcher.h
  */
 
 #if defined(USE_XPU)
 // TODO: enable on Windows.
 #ifndef _WIN32
-#include <torch/csrc/utils/pythoncapi_compat.h>
-
-#include <ATen/Context.h>
-#include <c10/core/DeviceGuard.h>
-#include <c10/xpu/XPUStream.h>
 #include <fmt/format.h>
-#include <torch/csrc/inductor/static_launcher/xpu.h>
-#include <cstdint>
-#include <stdexcept>
-
-#include <torch/csrc/utils/python_numbers.h>
 #include <filesystem>
 #include <fstream>
 #include <optional>
 
+#include <torch/csrc/utils/pythoncapi_compat.h>
+
+#include <ATen/Context.h>
+#include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/xpu/XPUStream.h>
+#include <torch/csrc/inductor/static_launcher/xpu.h>
+#include <cstdint>
+#include <stdexcept>
+
 #include <level_zero/ze_api.h>
 #include <sycl/sycl.hpp>
+#include <torch/csrc/utils/python_numbers.h>
 
 #define ZE_CHECK(status)                                                  \
   {                                                                       \
@@ -36,7 +37,9 @@
   }
 
 namespace {
-
+const at::xpu::LevelZero& ze() {
+  return at::globalContext().getLevelZero();
+}
 /**
  * For num_args <= MAX_ARGS, we use static allocated memory for better
  * performance. And for num_args > MAX_ARGS, we use dynamic allocated heap
@@ -82,7 +85,7 @@ syclDevicePtr_t getPointer(
   ze_memory_allocation_properties_t prop;
   prop.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
   prop.pNext = nullptr;
-  auto res = zeMemGetAllocProperties(
+  auto res = ze().zeMemGetAllocProperties(
       (ze_context_handle_t)handle, data_ptr, &prop, nullptr);
 
   TORCH_CHECK(
@@ -205,18 +208,18 @@ inline ze_module_handle_t _createModule(
   moduleDescription.pBuildFlags = buildFlags;
   ze_module_build_log_handle_t buildLog = nullptr;
   ze_module_handle_t module = nullptr;
-  auto error_no =
-      zeModuleCreate(context, device, &moduleDescription, &module, &buildLog);
+  auto error_no = ze().zeModuleCreate(
+      context, device, &moduleDescription, &module, &buildLog);
 
   if (error_no != ZE_RESULT_SUCCESS) {
     size_t szLog = 0;
-    ZE_CHECK(zeModuleBuildLogGetString(buildLog, &szLog, nullptr));
+    ZE_CHECK(ze().zeModuleBuildLogGetString(buildLog, &szLog, nullptr));
     std::vector<char> log(szLog);
-    ZE_CHECK(zeModuleBuildLogGetString(buildLog, &szLog, log.data()));
+    ZE_CHECK(ze().zeModuleBuildLogGetString(buildLog, &szLog, log.data()));
     std::cerr << "L0 build module failed. Log: " << log.data() << std::endl;
   }
   if (buildLog) {
-    ZE_CHECK(zeModuleBuildLogDestroy(buildLog));
+    ZE_CHECK(ze().zeModuleBuildLogDestroy(buildLog));
   }
   ZE_CHECK(error_no);
   return module;
@@ -234,12 +237,12 @@ inline sycl::kernel* _createKernel(
   kernelDescription.pNext = nullptr;
   kernelDescription.flags = ZE_KERNEL_FLAG_FORCE_RESIDENCY;
   kernelDescription.pKernelName = kernelName;
-  ZE_CHECK(zeKernelCreate(module, &kernelDescription, &kernel));
+  ZE_CHECK(ze().zeKernelCreate(module, &kernelDescription, &kernel));
   if (nSpillsPtr) {
     ze_kernel_properties_t props;
     props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
     props.pNext = nullptr;
-    ZE_CHECK(zeKernelGetProperties(kernel, &props));
+    ZE_CHECK(ze().zeKernelGetProperties(kernel, &props));
     *nSpillsPtr = props.spillMemSize;
   }
   auto& syclContext = c10::xpu::get_device_context();
