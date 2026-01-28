@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <iostream>
@@ -89,10 +90,6 @@ inline bool isStreamCapturing(
     std::optional<cudaStream_t> stream = std::nullopt) {
   return getStreamCaptureStatus(stream) == CaptureStatus::Active;
 }
-
-// CaptureId_t is defined in c10/core/Allocator.h as unsigned long long
-// We use the same type here for consistency with CUDA's capture ID
-using CaptureId_t = unsigned long long;
 
 inline std::optional<CaptureId_t> getStreamCaptureId(
     std::optional<cudaStream_t> stream = std::nullopt) {
