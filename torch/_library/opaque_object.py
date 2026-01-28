@@ -39,9 +39,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, NewType, Optional
+from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
+from torch._opaque_base import OpaqueBase, OpaqueBaseMeta  # noqa: F401
 
 from .fake_class_registry import register_fake_class
 
@@ -142,18 +144,6 @@ def register_opaque_type(
             - MemberType.USE_REAL: Evaluates with the real object at compile time and
               bakes the result as a constant
             - MemberType.INLINED: Inlines the method call into the trace
-
-    Examples:
-        >>> register_opaque_type(
-        >>>     MyClass,
-        >>>     typ="reference",
-        >>>     guard_fn=lambda obj: [obj.x, obj.y],  # Guard on x and y values
-        >>>     members={
-        >>>         "x": MemberType.USE_REAL,     # Bake x as constant
-        >>>         "y": MemberType.USE_REAL,     # Bake y as constant
-        >>>         "compute": MemberType.INLINED,   # Inline compute method
-        >>>     },
-        >>> )
     """
     import torch.utils._pytree as pytree
 
@@ -170,9 +160,19 @@ def register_opaque_type(
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
-    assert typ in ["reference", "value"], (
-        "Opaque type must be either 'reference' or 'value'"
-    )
+    if not isinstance(cls, OpaqueBaseMeta):
+        raise TypeError(
+            f"Opaque type {cls} must subclass torch._opaque_base.OpaqueBase "
+            "or 'metaclass=torch._opaque_base.OpaqueBaseMeta'. "
+            "This is required so that FakeScriptObject can be registered "
+            "as a virtual subclass, allowing isinstance() checks to work "
+            "during torch.compile tracing. "
+        )
+
+    if typ not in ["reference", "value"]:
+        raise AssertionError(
+            f"Opaque type must be either 'reference' or 'value', got {typ!r}"
+        )
 
     if typ == "value":
         if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
@@ -202,13 +202,6 @@ def register_opaque_type(
                 "a tuple of (repr_string, set_of_types)."
             )
 
-        if members is not None:
-            raise TypeError(
-                "No need to specify `members` for "
-                f"value-type opaque class {cls} as it will inline all methods "
-                "by default and be guarded based on `__eq__`."
-            )
-
         if guard_fn is not None:
             raise TypeError(
                 "No need to specify `guard_fn` for "
@@ -224,6 +217,10 @@ def register_opaque_type(
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
     torch._C._register_opaque_type(name)
+
+
+def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
+    return is_opaque_type(type(value))
 
 
 def is_opaque_type(cls: Any) -> bool:

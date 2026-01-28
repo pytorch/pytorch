@@ -644,6 +644,8 @@ def is_pytorch_file(rel_filepath) -> bool:
         return True
     if rel_filepath.startswith("third_party/fbgemm/"):
         return True
+    if rel_filepath.startswith("third_party/mslk/"):
+        return True
     if rel_filepath.startswith("tools/autograd/templates/"):
         return True
     return False
