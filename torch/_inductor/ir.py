@@ -3985,19 +3985,27 @@ class FlexibleLayout(Layout):
     allow_indexing = False
 
     @staticmethod
+    def _stride_multiplier(size: Expr) -> Expr:
+        """
+        Get the stride multiplier for a dimension of the given size.
+        Use Max(size, 1) to handle zero-size tensors correctly, but only
+        when we can't prove size >= 1.
+        """
+        if (
+            _is_static(size) and size >= 1
+        ) or V.graph.sizevars.statically_known_geq(size, 1):
+            return size
+        return sympy.Max(size, 1)
+
+    @staticmethod
     def contiguous_strides(sizes: Sequence[int]) -> list[Expr]:
         if len(sizes) == 0:
             return []
         reversed_strides = [sympy.S.One]
         for size in reversed(sizes[1:]):
-            # Use Max(size, 1) to handle zero-size tensors correctly.
-            # Only apply Max when we can't prove size >= 1 to preserve
-            # simplification for dimension merging.
-            if V.graph.sizevars.statically_known_geq(size, 1):
-                stride_factor = size
-            else:
-                stride_factor = sympy.Max(size, 1)
-            reversed_strides.append(stride_factor * reversed_strides[-1])
+            reversed_strides.append(
+                FlexibleLayout._stride_multiplier(size) * reversed_strides[-1]
+            )
         return list(reversed(reversed_strides))
 
     @staticmethod
@@ -4014,15 +4022,7 @@ class FlexibleLayout(Layout):
 
         for i in order:
             strides[i] = next_stride
-            size = sizes[i]
-            # Use Max(size, 1) to handle zero-size tensors correctly.
-            # Only apply Max when we can't prove size >= 1 to preserve
-            # simplification for dimension merging.
-            if V.graph.sizevars.statically_known_geq(size, 1):
-                stride_factor = size
-            else:
-                stride_factor = sympy.Max(size, 1)
-            next_stride = next_stride * stride_factor
+            next_stride = next_stride * FlexibleLayout._stride_multiplier(sizes[i])
         return strides
 
     @staticmethod
