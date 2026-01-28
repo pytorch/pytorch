@@ -1786,11 +1786,12 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_dtype_view_aliasing(self):
-        """
-        This test ensures that when a tensor is viewed with a different dtype
-        (e.g., int32 -> float32) and passed to a mutating custom op, the
-        fix_auto_functionalized_aliasing pass correctly identifies the aliasing
-        relationship and prevents unnecessary clone operations.
+        """Test dtype view clone elimination in compiled mode.
+
+        Verifies that dtype views (tensors sharing storage but with different
+        dtypes, e.g., int32 -> float32) have their clones eliminated when passed
+        to mutating custom ops. The fix_auto_functionalized_aliasing pass detects
+        dtype views and removes unnecessary clone operations.
         """
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -1810,8 +1811,7 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 pass
 
             def f(cache_int32, data_float32):
-                # Create a dtype view: int32 -> float32
-                # This shares storage but has different dtype
+                # Create a dtype view: int32 -> float32 (shares storage, different dtype)
                 cache_float = cache_int32.view(torch.float32)
                 torch.ops.mylib.mutate_inplace(cache_float, data_float32)
                 return cache_int32
@@ -1819,25 +1819,30 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             cache = torch.zeros((10, 10), dtype=torch.int32)
             data = torch.randn((10, 10), dtype=torch.float32)
 
-            for mode_ctx in [torch.no_grad(), torch.inference_mode()]:
-                counters.clear()
-                torch._dynamo.reset()
+            # Eager baseline
+            result_eager = f(cache.clone(), data)
 
+            # Test in both inference and training modes
+            for mode_name, mode_ctx in [
+                ("inference", torch.inference_mode()),
+                ("no_grad", torch.no_grad()),
+            ]:
                 with mode_ctx:
-                    cache_test = cache.clone()
+                    counters.clear()
+                    torch._dynamo.reset()
 
                     compiled_f = torch.compile(f, fullgraph=True, backend="inductor")
-                    result = compiled_f(cache_test, data)
+                    result = compiled_f(cache.clone(), data)
 
-                    self.assertEqual(result.shape, cache.shape)
+                    # Verify correctness
                     self.assertEqual(result.dtype, torch.int32)
+                    self.assertTrue(torch.equal(result, result_eager))
 
-                    # We don't compare against eager because the compiled version
-                    # may optimize the dtype view differently.
-                    self.assertFalse(torch.all(result == cache))
-
-                    self.assertGreater(
-                        counters["inductor"]["fix_auto_functionalized_aliasing"], 0
+                    # Verify clone was eliminated (counter increments when optimization applied)
+                    self.assertEqual(
+                        counters["inductor"]["fix_auto_functionalized_aliasing"],
+                        1,
+                        f"fix_auto_functionalized_aliasing should eliminate clone in {mode_name} mode",
                     )
 
 
