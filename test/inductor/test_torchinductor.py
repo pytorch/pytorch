@@ -107,7 +107,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
@@ -1895,7 +1894,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.rand(1024), torch.randint(50, (50,))))
 
-    @xfailIfS390X
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -12272,7 +12270,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
     @expectedFailureCodegenDynamic
-    @xfailIfS390X
     @skip_if_gpu_halide  # accuracy error
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
