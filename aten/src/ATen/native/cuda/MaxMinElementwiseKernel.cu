@@ -31,18 +31,23 @@ void maximum_kernel_cuda(TensorIteratorBase& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, common_dtype, "max_elementwise_cuda", [&]() {
-      opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
-          iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        if (a != a) {
-          return a;
-        } else if (b != b) {
-          return b;
-        } else {
-          return ::max(a, b);
-        }
-      });
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        common_dtype,
+        "max_elementwise_cuda",
+        [&]() {
+          opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+              iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+            if (a != a) {
+              return a;
+            } else if (b != b) {
+              return b;
+            } else {
+              return ::max(a, b);
+            }
+          });
+        });
   }
 }
 
@@ -54,37 +59,51 @@ void minimum_kernel_cuda(TensorIteratorBase& iter) {
   // See https://github.com/pytorch/pytorch/issues/173110
   auto common_dtype = iter.common_dtype();
   if (common_dtype == ScalarType::Bool) {
-    opmath_symmetric_gpu_kernel_with_scalars<bool>(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
+    opmath_symmetric_gpu_kernel_with_scalars<bool>(
+        iter, []GPU_LAMBDA(bool a, bool b) -> bool {
       return a && b;
     });
   } else if (isIntegralType(common_dtype, /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(common_dtype, "minimum_cuda", [&]() {
-      opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+          iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return ::min(a, b);
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, common_dtype, "min_elementwise_cuda", [&]() {
-      opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        if (a != a) {
-          return a;
-        } else if (b != b) {
-          return b;
-        } else {
-          return ::min(a, b);
-        }
-      });
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        common_dtype,
+        "min_elementwise_cuda",
+        [&]() {
+          opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+              iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+            if (a != a) {
+              return a;
+            } else if (b != b) {
+              return b;
+            } else {
+              return ::min(a, b);
+            }
+          });
+        });
   }
 }
 
 void fmax_kernel_cuda(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cuda", [&]() {
-      opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return ::fmax(a, b);
-      });
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        iter.common_dtype(),
+        "fmax_cuda",
+        [&]() {
+          opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+              iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+            return ::fmax(a, b);
+          });
+        });
   } else {
     maximum_kernel_cuda(iter);
   }
@@ -92,11 +111,17 @@ void fmax_kernel_cuda(TensorIteratorBase& iter) {
 
 void fmin_kernel_cuda(TensorIteratorBase& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cuda", [&]() {
-      opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        return ::fmin(a, b);
-      });
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        iter.common_dtype(),
+        "fmin_cuda",
+        [&]() {
+          opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(
+              iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+            return ::fmin(a, b);
+          });
+        });
   } else {
     minimum_kernel_cuda(iter);
   }
