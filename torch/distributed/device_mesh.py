@@ -70,7 +70,7 @@ else:
     BackendConfig = tuple[str | None, C10dBackend.Options | None]
     torch.serialization.add_safe_globals([_MeshLayout])
 
-    def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup | None:
+    def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup:
         """
         This method allows us to torch.compile through DeviceMesh and lift its
         PGs a inputs to the graph since all PGs will have a source from the
@@ -79,7 +79,14 @@ else:
         DeviceMesh into the frontend and backend.
         """
         if torch.compiler.is_compiling():
-            return mesh._pg_registry.get(name)
+            pg = mesh._pg_registry.get(name, None)
+            if pg is None:
+                raise RuntimeError(
+                    f"PG {name} was not found while torch.compile tracing "
+                    "This is probably because we pickle/unpickled a device mesh "
+                    "before the PGs were created."
+                )
+            return pg
         else:
             return _resolve_process_group(name)  # pyrefly: ignore[bad-argument-type]
 
