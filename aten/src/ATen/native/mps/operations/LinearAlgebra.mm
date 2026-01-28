@@ -1403,6 +1403,18 @@ static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   auto n = self.size(-1);
   auto k = tau.size(-1);
 
+  // The orgqr Metal kernel uses threadgroup_barrier for synchronization, but
+  // this only works when all threads are in the same threadgroup. For matrices
+  // where m*m > 1024 (max threadgroup size), fall back to CPU for now
+  constexpr int64_t kMaxThreadsPerThreadgroup = 1024;
+  if (m * m > kMaxThreadsPerThreadgroup) {
+    auto self_cpu = self.to(at::kCPU);
+    auto tau_cpu = tau.to(at::kCPU);
+    at::native::orgqr_stub(at::kCPU, self_cpu, tau_cpu);
+    self.copy_(self_cpu);
+    return self;
+  }
+
   if (tau.numel() == 0) {
     auto I = eye(m, self.scalar_type(), std::nullopt, self.device());
     return self.copy_(I.slice(-1, 0, n));
