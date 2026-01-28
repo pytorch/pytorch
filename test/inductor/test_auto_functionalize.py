@@ -1785,13 +1785,13 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             self.assertNotEqual(name_to_users["buf1"], name_to_users["buf5"])
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
-    def test_dtype_view_aliasing(self):
-        """Test dtype view clone elimination in compiled mode.
-
-        Verifies that dtype views (tensors sharing storage but with different
-        dtypes, e.g., int32 -> float32) have their clones eliminated when passed
-        to mutating custom ops. The fix_auto_functionalized_aliasing pass detects
-        dtype views and removes unnecessary clone operations.
+    def test_dtype_view_clone_elimination(self):
+        """
+        This test verifies that dtype views (tensors sharing storage but with
+        different dtypes, e.g., int32 -> float32) have their clones eliminated
+        when passed to mutating custom ops. The fix_auto_functionalized_dtype_views
+        pass detects dtype views that alias graph inputs and removes unnecessary
+        clone operations.
         """
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -1819,10 +1819,8 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             cache = torch.zeros((10, 10), dtype=torch.int32)
             data = torch.randn((10, 10), dtype=torch.float32)
 
-            # Eager baseline
             result_eager = f(cache.clone(), data)
 
-            # Test in both inference and training modes
             for mode_name, mode_ctx in [
                 ("inference", torch.inference_mode()),
                 ("no_grad", torch.no_grad()),
@@ -1834,15 +1832,14 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                     compiled_f = torch.compile(f, fullgraph=True, backend="inductor")
                     result = compiled_f(cache.clone(), data)
 
-                    # Verify correctness
                     self.assertEqual(result.dtype, torch.int32)
                     self.assertTrue(torch.equal(result, result_eager))
 
                     # Verify clone was eliminated (counter increments when optimization applied)
                     self.assertEqual(
-                        counters["inductor"]["fix_auto_functionalized_aliasing"],
+                        counters["inductor"]["fix_auto_functionalized_dtype_views"],
                         1,
-                        f"fix_auto_functionalized_aliasing should eliminate clone in {mode_name} mode",
+                        f"fix_auto_functionalized_dtype_views should eliminate clone in {mode_name} mode",
                     )
 
 

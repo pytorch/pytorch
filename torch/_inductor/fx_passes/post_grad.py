@@ -349,14 +349,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
-
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
 
     # Fix aliasing detection for dtype views AFTER reinplace determines cloning needs
-    GraphTransformObserver(gm, "fix_auto_functionalized_aliasing").apply_graph_pass(
-        fix_auto_functionalized_aliasing
+    GraphTransformObserver(gm, "fix_auto_functionalized_dtype_views").apply_graph_pass(
+        fix_auto_functionalized_dtype_views
     )
 
     GraphTransformObserver(
@@ -1265,12 +1264,12 @@ def decompose_triton_kernel_wrapper_functional(graph):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
-def fix_auto_functionalized_aliasing(graph: torch.fx.Graph) -> None:
+def fix_auto_functionalized_dtype_views(graph: torch.fx.Graph) -> None:
     """
     Fix aliasing detection for dtype views in auto_functionalized_v2.
 
     When a dtype view shares storage with a graph input, we can skip cloning
-    it during decomposition because DtypeViewInfo will regenerate it correctly.
+    it during decomposition because the view can be safely regenerated.
 
     This pass identifies such cases and updates the reinplace metadata to
     indicate no clone is needed.
@@ -1337,7 +1336,6 @@ def fix_auto_functionalized_aliasing(graph: torch.fx.Graph) -> None:
 
                             if is_dtype_view:
                                 # Dtype view of a graph input - no clone needed!
-                                # DtypeViewInfo will regenerate it from the base.
                                 log.debug(
                                     "Removing clone requirement for dtype view: "
                                     "base[%d] %s (dtype=%s) aliases %s (dtype=%s)",
@@ -1350,7 +1348,7 @@ def fix_auto_functionalized_aliasing(graph: torch.fx.Graph) -> None:
                                 new_only_clone_these.remove(idx)
                                 modified = True
                                 counters["inductor"][
-                                    "fix_auto_functionalized_aliasing"
+                                    "fix_auto_functionalized_dtype_views"
                                 ] += 1
 
                 except (AttributeError, RuntimeError, KeyError):
