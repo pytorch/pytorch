@@ -578,7 +578,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   }();
   check_foreach_api_restrictions(tensors);
   // If the tensor is empty and norm == infty, we cannot compute the norm
-  // because the operation does not have an identity. Also populate the has_int_or_complex flag.
+  // because the operation does not have an identity. Also populate the
+  // has_int_or_complex flag.
   bool has_int_or_complex = false;
   if (p == std::numeric_limits<double>::infinity()) {
     for (const auto& t : tensors) {
@@ -592,11 +593,12 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
       }
     }
   } else {
-    has_int_or_complex = std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
-      const auto scalar_type = t.scalar_type();
-      return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
-          at::isComplexType(scalar_type);
-    });
+    has_int_or_complex =
+        std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
+          const auto scalar_type = t.scalar_type();
+          return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
+              at::isComplexType(scalar_type);
+        });
   }
   if (!can_use_fast_route(tensors) || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
