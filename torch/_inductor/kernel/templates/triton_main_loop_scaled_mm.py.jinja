@@ -28,115 +28,100 @@
         block_shape=[BLOCK_N, BLOCK_K],
     )
 
-    tiles_per_SM = num_tiles // NUM_SMS
-    if start_pid < num_tiles % NUM_SMS:
-        tiles_per_SM += 1
-
-    tile_id = start_pid - NUM_SMS
-    ki = -1
-
-    pid_m = 0
-    pid_n = 0
-    offs_am = 0
-    offs_bn = 0
 
     num_pid_in_group = GROUP_M * num_pid_n
-    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
-    for _ in range(0, k_tiles * tiles_per_SM):
-        ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
-        if ki == 0:
-            tile_id += NUM_SMS
-            group_id = tile_id // num_pid_in_group
-            first_pid_m = group_id * GROUP_M
-            group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
-            pid_m = first_pid_m + (tile_id % group_size_m)
-            pid_n = (tile_id % num_pid_in_group) // group_size_m
+    am_blocks = tl.cdiv(M, TILE_SIZE_A)
+    ak_blocks = tl.cdiv(K, TILE_SIZE_A)
+    bn_blocks = tl.cdiv(N, TILE_SIZE_B)
+    bk_blocks = tl.cdiv(K, TILE_SIZE_B)
 
-            offs_am = pid_m * BLOCK_M
-            offs_bn = pid_n * BLOCK_N
+    for tile_id in range(start_pid, num_tiles, NUM_SMS):
+        group_id = tile_id // num_pid_in_group
+        first_pid_m = group_id * GROUP_M
+        group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+        pid_m = first_pid_m + (tile_id % group_size_m)
+        pid_n = (tile_id % num_pid_in_group) // group_size_m
 
-        offs_k = ki * BLOCK_K
+        offs_am = pid_m * BLOCK_M
+        offs_bn = pid_n * BLOCK_N
 
-        a = tl.load_tensor_descriptor(a_desc, [offs_am, offs_k])
-        b = tl.load_tensor_descriptor(b_desc, [offs_bn, offs_k])
+        accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+        for ki in range(0, k_tiles):
+            offs_k = ki * BLOCK_K
 
-        am_blocks = tl.cdiv(M, TILE_SIZE_A)
-        ak_blocks = tl.cdiv(K, TILE_SIZE_A)
-        bn_blocks = tl.cdiv(N, TILE_SIZE_B)
-        bk_blocks = tl.cdiv(K, TILE_SIZE_B)
+            a = tl.load_tensor_descriptor(a_desc, [offs_am, offs_k])
+            b = tl.load_tensor_descriptor(b_desc, [offs_bn, offs_k])
 
-        {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
-        scale_a_block = blockwise128x128_scaling(
-            pid_m,
-            A_inverse_scale,
-            ki,
-            am_blocks,
-            ak_blocks,
-            BLOCK_M,
-            BLOCK_K,
-            MIN_BLOCK_TILE_AM,
-            MIN_BLOCK_TILE_AK,
-        )
-        {%- else %}  # ScalingType.Blockwise1xTILESIZE
-        scale_a_block = blockwise1xTILESIZE_scaling(
-            pid_m,
-            A_inverse_scale,
-            ki,
-            M,
-            am_blocks,
-            ak_blocks,
-            BLOCK_M,
-            BLOCK_K,
-            MIN_BLOCK_TILE_AK,
-            TILE_SIZE_A,
-        )
-        {%- endif %}
+            {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
+            scale_a_block = blockwise128x128_scaling(
+                pid_m,
+                A_inverse_scale,
+                ki,
+                am_blocks,
+                ak_blocks,
+                BLOCK_M,
+                BLOCK_K,
+                MIN_BLOCK_TILE_AM,
+                MIN_BLOCK_TILE_AK,
+            )
+            {%- else %}  # ScalingType.Blockwise1xTILESIZE
+            scale_a_block = blockwise1xTILESIZE_scaling(
+                pid_m,
+                A_inverse_scale,
+                ki,
+                M,
+                am_blocks,
+                ak_blocks,
+                BLOCK_M,
+                BLOCK_K,
+                MIN_BLOCK_TILE_AK,
+                TILE_SIZE_A,
+            )
+            {%- endif %}
 
-        {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
-        scale_b_block = blockwise128x128_scaling(
-            pid_n,
-            B_inverse_scale,
-            ki,
-            bn_blocks,
-            bk_blocks,
-            BLOCK_N,
-            BLOCK_K,
-            MIN_BLOCK_TILE_BN,
-            MIN_BLOCK_TILE_BK,
-        )
-        {%- else %}  # ScalingType.Blockwise1xTILESIZE
-        scale_b_block = blockwise1xTILESIZE_scaling(
-            pid_n,
-            B_inverse_scale,
-            ki,
-            N,
-            bn_blocks,
-            bk_blocks,
-            BLOCK_N,
-            BLOCK_K,
-            MIN_BLOCK_TILE_BK,
-            TILE_SIZE_B,
-        )
-        {%- endif %}
+            {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
+            scale_b_block = blockwise128x128_scaling(
+                pid_n,
+                B_inverse_scale,
+                ki,
+                bn_blocks,
+                bk_blocks,
+                BLOCK_N,
+                BLOCK_K,
+                MIN_BLOCK_TILE_BN,
+                MIN_BLOCK_TILE_BK,
+            )
+            {%- else %}  # ScalingType.Blockwise1xTILESIZE
+            scale_b_block = blockwise1xTILESIZE_scaling(
+                pid_n,
+                B_inverse_scale,
+                ki,
+                N,
+                bn_blocks,
+                bk_blocks,
+                BLOCK_N,
+                BLOCK_K,
+                MIN_BLOCK_TILE_BK,
+                TILE_SIZE_B,
+            )
+            {%- endif %}
 
-        a_scaled = a * scale_a_block
-        b_scaled = b * scale_b_block
-        accumulator = tl.dot(a_scaled, b_scaled.T, accumulator)
+            a_scaled = a * scale_a_block
+            b_scaled = b * scale_b_block
+            accumulator = tl.dot(a_scaled, b_scaled.T, accumulator)
 
-        if ki == k_tiles - 1:
-            offs_cm = offs_am + tl.arange(0, BLOCK_M)
-            offs_cn = offs_bn + tl.arange(0, BLOCK_N)
+        offs_cm = offs_am + tl.arange(0, BLOCK_M)
+        offs_cn = offs_bn + tl.arange(0, BLOCK_N)
 
-            # inductor generates a suffix
-            {{store_output(
-                ("offs_am", "offs_bn"),
-                "accumulator",
-                indent_width=12,
-                val_shape=("BLOCK_M", "BLOCK_N"),
-                block_indexing=True,
-            )}}
-            accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+        # inductor generates a suffix
+        {{store_output(
+            ("offs_am", "offs_bn"),
+            "accumulator",
+            indent_width=8,
+            val_shape=("BLOCK_M", "BLOCK_N"),
+            block_indexing=True,
+        )}}
 
 
 @triton.jit
