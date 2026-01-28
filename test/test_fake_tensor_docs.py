@@ -1,10 +1,9 @@
+# Owner(s): ["module: meta tensors"]
 """
 Tests for FakeTensor public documentation.
 
 This tests Goal 4: Make FakeTensor have public docs.
 """
-
-import unittest
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -130,6 +129,9 @@ class TestFakeTensorDocs(TestCase):
         fake_mode = FakeTensorMode()
         real_tensor = torch.randn(5, 5)
         fake_tensor = fake_mode.from_tensor(real_tensor)
+
+        # Verify it's a FakeTensor
+        self.assertIsInstance(fake_tensor, FakeTensor)
 
         # Check documented attributes
         self.assertTrue(hasattr(fake_tensor, "fake_device"))
