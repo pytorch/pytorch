@@ -300,12 +300,14 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         subgraph_number: int,
         fixed_inputs: dict[str, Any],
         mask: Optional[str],
+        input_shapes: Optional[dict[str, tuple[str, ...]]] = None,
     ):
         super().__init__(V.ops)
         self.name = f"PlaceholderSubstitution_{subgraph_number}"
         self.kernel = kernel
         self.fixed_inputs = fixed_inputs
         self.mask = mask
+        self.input_shapes = input_shapes or {}
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
@@ -328,11 +330,12 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
             )
             return out
 
+        shape = self.input_shapes.get(name, ())
         return self.kernel.cse.generate(
             self.kernel.compute,
             f"({self.fixed_inputs[name]})",
             dtype=torch.float32,
-            shape=(),
+            shape=shape,
         )
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
@@ -365,14 +368,16 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     def _broadcast_index(self, index: sympy.Expr, shape: str) -> str:
         index_str = self._process_indexing(index)
         index_shape = TritonSymbols.get_block_shape(index)
-        if not index_shape:
-            return f"tl.broadcast_to({index_str}, {shape})"
-        if all(
-            V.graph.sizevars.statically_known_equals(sympy.sympify(d), 1)
-            for d in index_shape
+        if (
+            index_shape
+            and len(index_shape) == 1
+            and all(
+                V.graph.sizevars.statically_known_equals(sympy.sympify(d), 1)
+                for d in index_shape
+            )
         ):
             return f"tl.broadcast_to(tl.reshape({index_str}, []), {shape})"
-        return index_str
+        return f"tl.broadcast_to({index_str}, {shape})"
 
 
 # Function name, followed by args and kwargs.
@@ -873,6 +878,7 @@ class TritonTemplateKernel(TritonKernel):
         subgraph_number: int,
         output_name: Optional[str],
         mask: Optional[str] = None,
+        input_shapes: Optional[dict[str, tuple[str, ...]]] = None,
         **fixed_inputs,
     ) -> str:
         """This creates a modification function for a subgraph.
@@ -883,6 +889,8 @@ class TritonTemplateKernel(TritonKernel):
             output_name (Optional[str]): The name of the output variable to store the result in
             mask (Optional[str]): An optional mask to use for the store operation. If provided, this mask
                 will be applied to the store.
+            input_shapes (Optional[dict[str, tuple[str, ...]]]): Optional mapping of input names to their
+                block shapes. Used for proper shape propagation during codegen.
         """
         num = 0
         out = None
@@ -892,7 +900,7 @@ class TritonTemplateKernel(TritonKernel):
         with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapper(
-                self, subgraph_number, fixed_inputs, mask
+                self, subgraph_number, fixed_inputs, mask, input_shapes
             )
             with V.set_ops_handler(modification_handler):
                 assert isinstance(subgraph, (ir.ComputedBuffer, list)), (
