@@ -70,6 +70,7 @@ else()
     ${pytorch_android_DIR}/pytorch_jni_common.h
   )
 endif()
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384,-z,common-page-size=16384")
 add_library(${PYTORCH_JNI_TARGET} SHARED ${pytorch_android_SOURCES})
 
 if(APPLE)
