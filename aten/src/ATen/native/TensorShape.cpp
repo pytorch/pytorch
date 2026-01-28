@@ -3387,12 +3387,14 @@ static bool inline maybe_native_stack(
 }
 
 Tensor _stack(TensorList tensors, int64_t dim) {
+  TORCH_CHECK(!tensors.empty(), "_stack expects a non-empty TensorList");
   ScalarType high_type = result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return at::native::_stack_out(get_stack_inputs(tensors, dim), dim, result);
 }
 
 Tensor _stack_cpu(TensorList tensors, int64_t dim) {
+  TORCH_CHECK(!tensors.empty(), "_stack expects a non-empty TensorList");
   ScalarType high_type = result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return at::native::_stack_out_cpu(tensors, dim, result);
@@ -3475,6 +3477,7 @@ Tensor stack(TensorList tensors, int64_t dim) {
 
 // CPU specific implementation
 Tensor& _stack_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
+  TORCH_CHECK(!tensors.empty(), "_stack expects a non-empty TensorList");
   if (maybe_native_stack(result, tensors, dim)) {
     return result;
   } else {
@@ -3484,6 +3487,7 @@ Tensor& _stack_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
 
 // default backend
 Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
+  TORCH_CHECK(!tensors.empty(), "_stack expects a non-empty TensorList");
   return at::cat_out(result, tensors, dim);
 }
 

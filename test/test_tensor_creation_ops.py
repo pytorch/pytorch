@@ -1263,6 +1263,15 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(res_out.select(dim, 1), y, atol=0, rtol=0)
                 self.assertEqual(res_out.select(dim, 2), z, atol=0, rtol=0)
 
+    def test_stack_empty_raises(self, device):
+        # Test that _stack raises proper error instead of crashing with SIGSEGV
+        # See https://github.com/pytorch/pytorch/issues/173498
+        with self.assertRaisesRegex(RuntimeError, "_stack expects a non-empty TensorList"):
+            torch._stack([], 0)
+
+        with self.assertRaisesRegex(RuntimeError, "_stack expects a non-empty TensorList"):
+            torch._stack([], 2)
+
     def test_repeat_interleave(self, device):
         x = torch.tensor([0, 1, 2, 3], device=device)
         expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
