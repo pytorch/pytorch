@@ -162,6 +162,7 @@ ops_dde_xfail = {
     xfail("linalg.norm", "subgradients_at_zero"),
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
+    xfail("linalg.pinv", "singular"),
     xfail("linalg.qr"),
     xfail("linalg.slogdet"),
     xfail("linalg.solve"),
