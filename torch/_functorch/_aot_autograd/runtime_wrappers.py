@@ -415,7 +415,14 @@ class _FirstInvocationContext:
         Returns a context manager: _AnalyzeCustomOpInputOutputMode on first invocation, nullcontext thereafter.
         Automatically updates state after first use.
         """
-        if self._is_first and config.check_custom_op_aliasing:
+        # NB: Don't run the analyzer when you're forcing compile during FX
+        # tracing, as the analyzer doesn't play nicely when it's being
+        # make_fx'ed through
+        if (
+            self._is_first
+            and config.check_custom_op_aliasing
+            and not torch._dynamo.config.force_compile_during_fx_trace
+        ):
             self._is_first = False
             return _AnalyzeCustomOpInputOutputMode()
         return nullcontext()
@@ -617,6 +624,17 @@ def _create_runtime_wrapper(
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
                         original_inpt.detach().copy_(updated_inpt)
                     else:
+                        # Check if we have stream index information for this mutated input
+                        if (
+                            runtime_metadata.mutated_inp_stream_indices is not None
+                            and i < len(runtime_metadata.mutated_inp_stream_indices)
+                            and runtime_metadata.mutated_inp_stream_indices[i]
+                            is not None
+                        ):
+                            raise RuntimeError(
+                                "Mutations on inputs with user-specified streams are not yet supported. "
+                                "See: https://github.com/pytorch/pytorch/issues/172522"
+                            )
                         original_inpt.copy_(updated_inpt)
         else:
             fw_outs = all_outs

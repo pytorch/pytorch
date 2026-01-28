@@ -121,6 +121,7 @@ from .source import (
     AttrSource,
     CallFunctionNoArgsSource,
     CallMethodItemSource,
+    CellContentsSource,
     ChainedSource,
     ClosureSource,
     CodeSource,
@@ -813,12 +814,45 @@ def get_verbose_code_parts(
     verbose_code_parts = [
         get_verbose_code_part(code_part, guard) for code_part in code_parts
     ]
+
+    # For CellContentsSource (or any source with a CellContentsSource ancestor),
+    # add a hint explaining which closure variable is being checked.
+    # This helps users understand which closure variable caused the guard failure.
+    if guard is not None:
+        closure_hint = _get_closure_var_hint(guard.originating_source)
+        if closure_hint:
+            recompile_hint = (
+                f"{closure_hint}, {recompile_hint}" if recompile_hint else closure_hint
+            )
+
     if recompile_hint:
         verbose_code_parts = [
             f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
         ]
 
     return verbose_code_parts
+
+
+def _get_closure_var_hint(source: Optional[Source]) -> Optional[str]:
+    """
+    Walk up the source chain to find a CellContentsSource ancestor.
+    Returns a hint like 'guard on "varname".attr' or None if not found.
+    """
+    if source is None:
+        return None
+
+    full_name = source.name
+    current: Optional[Source] = source
+    while current is not None:
+        if isinstance(current, CellContentsSource) and current.freevar_name:
+            # Compute the path suffix by comparing names
+            # e.g., full_name="x.__closure__[0].cell_contents.scale"
+            #       current.name="x.__closure__[0].cell_contents"
+            #       suffix=".scale"
+            path_suffix = full_name[len(current.name) :]
+            return f'guard on "{current.freevar_name}"{path_suffix}'
+        current = current.base if isinstance(current, ChainedSource) else None
+    return None
 
 
 def convert_int_to_concrete_values(dim: Any) -> Optional[int]:
@@ -1480,7 +1514,9 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
+        elif istype(
+            source, (AttrSource, CellContentsSource, UnspecializedParamBufferSource)
+        ):
             assert base_guard_manager  # to make mypy happy
             assert isinstance(source, AttrSource)
             if should_optimize_getattr_on_nn_module(base_example_value):
@@ -3082,6 +3118,24 @@ class GuardBuilder(GuardBuilderBase):
                         get_verbose_code_parts(code_part, guard),
                         guard.user_stack,
                     )
+
+                # Guard on shape_ids when tensor has unbacked indices.
+                # shape_id is only set via mark_unbacked, which sets _dynamo_unbacked_indices.
+                # Empty dict is treated the same as not having the attribute.
+                if shape_ids := getattr(value, "_dynamo_shape_ids", None):
+                    code_part = f"((getattr({tensor_name}, '_dynamo_shape_ids', None) == {shape_ids!r}) if hasattr({tensor_name}, '_dynamo_unbacked_indices') else True)"  # noqa: B950
+                    code.append(code_part)
+                    self.get_guard_manager(guard).add_lambda_guard(
+                        lambda x, expected=shape_ids: (
+                            getattr(x, "_dynamo_shape_ids", None) == expected
+                            if hasattr(x, "_dynamo_unbacked_indices")
+                            else True
+                        ),
+                        get_verbose_code_parts(code_part, guard),
+                        guard.user_stack,
+                    )
+                    # TODO we dont have guards on _dynamo_unbacked_indices like those of _dynamo_dynamic_indices this seems wrong!!
+
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
 
