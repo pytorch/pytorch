@@ -13,7 +13,7 @@ using c10::Dict;
 using c10::IValue;
 using torch::jit::Pickler;
 
-using c10::cuda::CUDACachingAllocator::SegmentInfo;
+using c10::CachingDeviceAllocator::SegmentInfo;
 
 namespace {
 
@@ -201,18 +201,18 @@ void _record_memory_history(
     bool compileContext,
     bool globalRecordAnnotations,
     const std::vector<std::string>& skip_actions) {
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
   }
-  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  auto when = c10::CachingDeviceAllocator::RecordContext::NEVER;
   if (trace_alloc_record_context) {
-    when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+    when = c10::CachingDeviceAllocator::RecordContext::ALLOC;
   } else if (record_context) {
-    when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+    when = c10::CachingDeviceAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
@@ -258,21 +258,21 @@ void _record_memory_history(
   checkOptionIn(
       stacks, {"python", "all"}, "expected stacks to be 'python', or 'all'");
 
-  c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
+  c10::CachingDeviceAllocator::CreateContextFn recorder = gather;
   if (enabled && context && stacks == "all") {
     recorder = gather_with_cpp;
     // warm up C++ stack unwinding
     unwind::unwind();
   }
   max_entries = (enabled && *enabled == "all") ? max_entries : 1;
-  auto when = c10::cuda::CUDACachingAllocator::RecordContext::NEVER;
+  auto when = c10::CachingDeviceAllocator::RecordContext::NEVER;
   if (context) {
     if (context == "all") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::ALL;
+      when = c10::CachingDeviceAllocator::RecordContext::ALL;
     } else if (context == "alloc") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::ALLOC;
+      when = c10::CachingDeviceAllocator::RecordContext::ALLOC;
     } else if (context == "state") {
-      when = c10::cuda::CUDACachingAllocator::RecordContext::STATE;
+      when = c10::CachingDeviceAllocator::RecordContext::STATE;
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
