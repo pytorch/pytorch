@@ -14,6 +14,12 @@ if __name__ == "__main__":
 
 To test Tensor equality, use assertEqual.
 
+# Linting
+
+Always use `spin lint` to check if lint passes and `spin fixlint` to auto-fix lint issues. Never use `lintrunner` directly.
+
+If `spin` is not found, ask the user if a particular environment needs to be enabled to find it.
+
 # Commit messages
 
 Don't commit unless the user explicitly asks you to.
