@@ -388,10 +388,6 @@
       "description": ""
     },
     {
-      "name": "module: flaky-tests",
-      "description": "Problem is a flaky test in CI"
-    },
-    {
       "name": "module: flex attention",
       "description": ""
     },
