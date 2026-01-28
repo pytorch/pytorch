@@ -12,8 +12,6 @@
 
 namespace at::xpu::detail {
 
-const at::xpu::LevelZero& level_zero();
-
 void XPUHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.xpu");
   const auto device_count = c10::xpu::device_count_ensure_non_zero();
