@@ -27,12 +27,15 @@ from torch._inductor.fx_passes.bucketing import bucket_key
 from ..pattern_matcher import stable_topological_sort
 
 
-def make_all_device_put_sync(gm: torch.fx.GraphModule) -> None:
+def make_all_device_put_sync(gm: torch.fx.GraphModule) -> int:
     """
     Convert all non_blocking=True device_put operations to non_blocking=False.
 
     Only performs the conversion if at least one non_blocking=True device_put
     exists in the graph.
+
+    Returns:
+        The number of device_put operations converted to sync.
     """
     g = gm.graph
     device_put_nodes = list(
@@ -55,9 +58,10 @@ def make_all_device_put_sync(gm: torch.fx.GraphModule) -> None:
                 break
 
     if not has_async_device_put:
-        return
+        return 0
 
     # Convert all non_blocking=True to non_blocking=False
+    count = 0
     for n in device_put_nodes:
         opt_args_kwargs = normalize_function(
             n.target,
@@ -71,6 +75,9 @@ def make_all_device_put_sync(gm: torch.fx.GraphModule) -> None:
                 kwargs["non_blocking"] = False
                 n.args = n.args[0], kwargs["device"], kwargs["non_blocking"]
                 n.kwargs = {}
+                count += 1
+
+    return count
 
 
 def estimate_runtime_analytical(n: torch.fx.Node) -> float:
@@ -373,7 +380,13 @@ class OverlapScheduler:
         # They can be implicitly depending by user logic on other to(device) non_blocking=True.
         # OverlapScheduler can put reads of non_blocking device_put before blocking one.
         # This results in dirty reads.
-        make_all_device_put_sync(gm)
+        num_device_put_converted = make_all_device_put_sync(gm)
+        if num_device_put_converted > 0:
+            log.warning(
+                "overlap_scheduling converted %d device_put operations from "
+                "non_blocking=True to non_blocking=False. This may affect performance.",
+                num_device_put_converted,
+            )
 
         # Build and collapse fusion regions FIRST so all subsequent operations
         # work on the collapsed graph where fused ops are atomic units
