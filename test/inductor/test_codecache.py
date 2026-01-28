@@ -2845,21 +2845,41 @@ class TestFxGraphCacheHashing(TestCase):
 
     def test_bypass_on_runtime_error(self):
         """
-        Test that RuntimeError raised during pickling (e.g., from pybind11 objects)
-        is caught and converted to BypassFxGraphCache.
+        Test that RuntimeError raised by pybind11 during pickling (e.g., from
+        OpOverload._op which is a C++ function pointer) is caught and converted
+        to BypassFxGraphCache.
         """
 
-        class UnpickleableObject:
-            """An object that raises RuntimeError when pickled."""
+        class Pybind11LikeUnpickleableObject:
+            """An object that raises RuntimeError like pybind11 does when pickled."""
 
             def __reduce__(self):
-                raise RuntimeError("This object is not pickleable")
+                raise RuntimeError(
+                    "<pybind11_builtins.pybind11_object> is not pickleable."
+                )
 
         gm = torch.fx.GraphModule({}, torch.fx.Graph())
         pickler = FxGraphCachePickler(gm)
 
         with self.assertRaises(BypassFxGraphCache):
-            pickler.dumps(UnpickleableObject())
+            pickler.dumps(Pybind11LikeUnpickleableObject())
+
+    def test_non_pybind11_runtime_error_propagates(self):
+        """
+        Test that non-pybind11 RuntimeErrors are NOT caught and propagate up.
+        """
+
+        class OtherRuntimeErrorObject:
+            """An object that raises a non-pybind11 RuntimeError when pickled."""
+
+            def __reduce__(self):
+                raise RuntimeError("Some other runtime error")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        with self.assertRaises(RuntimeError):
+            pickler.dumps(OtherRuntimeErrorObject())
 
     def test_stable_strings(self):
         """
