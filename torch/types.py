@@ -38,7 +38,7 @@ __all__ = ["Number", "Device", "FileLike", "Storage"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
-_TensorOrTensors: TypeAlias = Tensor | Sequence[Tensor]]  # noqa: PYI047
+_TensorOrTensors: TypeAlias = Tensor | Sequence[Tensor]  # noqa: PYI047
 _TensorOrOptionalTensors: TypeAlias = Union[Tensor, Sequence[Optional[Tensor]]]  # noqa: PYI047
 _TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
     Tensor,
