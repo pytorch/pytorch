@@ -8141,11 +8141,24 @@ def _meta_grouped_mm_common(
     # aten/src/ATen/native/cuda/Blas.cpp.
 
     if scaled:
-        fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
-        torch._check(
-            mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
-            lambda: f"Expected inputs of E4M3 FP8 type but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}.",  # noqa: B950
-        )
+        if torch.version.hip:
+            allowed_fp8 = {torch.float8_e4m3fnuz, torch.float8_e4m3fn}
+            torch._check(
+                mat_a.dtype in allowed_fp8 and mat_b.dtype in allowed_fp8,
+                lambda: (
+                    f"Expected inputs of E4M3 FP8 type on ROCm "
+                    f"but got mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}."
+                ),
+            )
+        else:
+            fp8_dtype = torch.float8_e4m3fn
+            torch._check(
+                mat_a.dtype == fp8_dtype and mat_b.dtype == fp8_dtype,
+                lambda: (
+                    f"Expected inputs of E4M3 FP8 type but got "
+                    f"mat_a.dtype={mat_a.dtype} and mat_b.dtype={mat_b.dtype}."
+                ),
+            )
     else:
         torch._check(
             mat_a.dtype == torch.bfloat16 and mat_b.dtype == torch.bfloat16,
