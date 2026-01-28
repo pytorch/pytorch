@@ -622,24 +622,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def __init__(
         self,
         value: Callable[..., Any],
-        style: AllowInGraphKind | None = None,
+        kind: AllowInGraphKind | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
         from ..trace_rules import is_leaf_function, is_nonstrict_trace_callable
 
-        if style is None:
+        if kind is None:
             if is_leaf_function(value):
-                style = AllowInGraphKind.LEAF_FUNCTION
+                kind = AllowInGraphKind.LEAF_FUNCTION
             elif is_nonstrict_trace_callable(value):
-                style = AllowInGraphKind.NONSTRICT_TRACE
+                kind = AllowInGraphKind.NONSTRICT_TRACE
             else:
-                style = AllowInGraphKind.DEFAULT
+                kind = AllowInGraphKind.DEFAULT
 
-        self.style = style
+        self.kind = kind
 
     def __repr__(self) -> str:
-        return f"TorchInGraphFunctionVariable({self.value}, style={self.style})"
+        return f"TorchInGraphFunctionVariable({self.value}, kind={self.kind})"
 
     def get_function(self) -> Callable[..., Any]:
         return self.value
@@ -2161,10 +2161,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         from . import ConstantVariable, SymNodeVariable
         from .builder import wrap_fx_proxy
 
-        if self.style == AllowInGraphKind.NONSTRICT_TRACE:
+        if self.kind == AllowInGraphKind.NONSTRICT_TRACE:
             return self._call_nonstrict_traceable_function(tx, args, kwargs)
 
-        if self.style == AllowInGraphKind.LEAF_FUNCTION:
+        if self.kind == AllowInGraphKind.LEAF_FUNCTION:
             return self._call_leaf_function(tx, args, kwargs)
 
         if self.torch_function_override_enabled(tx, args, kwargs):
