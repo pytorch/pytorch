@@ -358,7 +358,7 @@ def expand_to_full_mesh_op_strategy(
     input_index: int = 1,
     inplace_op: bool = False,
     is_valid_strategy_cb: Callable[
-        [list[DTensorSpec], tuple[DTensorSpec | None, ...]], bool
+        [list[DTensorSpec], DTensorSpec | tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
 ) -> OpStrategy:
@@ -398,6 +398,8 @@ def expand_to_full_mesh_op_strategy(
     kwargs_strategy = op_schema.kwargs_strategy
     input_args_strategy = args_strategy + kwargs_strategy
     all_strategies = []
+    # Track input placements if we skip strategies due to inplace placement mismatch
+    blocking_inplace_input_placements: tuple[Placement, ...] | None = None
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
         # Track how many non-None output specs we've seen (for output_tensor_meta indexing).
@@ -451,14 +453,31 @@ def expand_to_full_mesh_op_strategy(
         if inplace_op and self_spec.placements != input_specs[0].placements:
             # if it's inplace op, we would only allow the OpSpec to be added when the
             # input_spec matches the first argument's runtime sharding, otherwise we skip
+            if blocking_inplace_input_placements is None:
+                blocking_inplace_input_placements = self_spec.placements
             continue
 
-        output_specs: tuple[DTensorSpec | None, ...]
-        if input_index > 1:
+        # For out= variant ops, output placement must match the "out" kwarg's placement
+        if (
+            op_schema.is_out_variant_op()
+            and "out" in op_schema.kwargs_schema
+            and isinstance(op_schema.kwargs_schema["out"], OpStrategy)
+        ):
+            out_kwarg_spec = op_schema.kwargs_schema["out"].strategies[0].output_spec
+            # spec_list[0] is the output spec for this strategy combination
+            if spec_list[0] is not None:
+                if spec_list[0].placements != out_kwarg_spec.placements:
+                    continue
+
+        output_specs: tuple[DTensorSpec | None, ...] | DTensorSpec | None
+        if input_index == 0:
+            # No outputs (e.g., _linalg_check_errors)
+            output_specs = None
+        elif input_index > 1:
             output_specs = tuple(spec_list[:input_index])
         else:
             if spec_list[0] is not None:
-                output_specs = spec_list[0]  # type: ignore[assignment]
+                output_specs = spec_list[0]
             else:
                 raise RuntimeError("output spec is None")
 
@@ -470,7 +489,8 @@ def expand_to_full_mesh_op_strategy(
             continue
 
         # perform additional op-specific filtering
-        if is_valid_strategy_cb is not None:
+        # Skip callback for no-output ops (output_specs is None)
+        if is_valid_strategy_cb is not None and output_specs is not None:
             if not is_valid_strategy_cb(input_specs, output_specs):
                 continue
 
@@ -485,6 +505,18 @@ def expand_to_full_mesh_op_strategy(
             redistribute_cost=redistribute_cost,
         )
         all_strategies.append(strategy)
+
+    # If all strategies were filtered out due to inplace placement mismatch,
+    # raise a clear error message instead of returning an empty OpStrategy
+    # (which would later cause a cryptic "min() arg is an empty sequence" error)
+    if not all_strategies and blocking_inplace_input_placements is not None:
+        raise RuntimeError(
+            f"{op_schema.op}: in-place operations that require placement changes "
+            f"are not supported. The input has placement {blocking_inplace_input_placements}, "
+            f"but no valid strategy preserves this placement. "
+            f"Please use the out-of-place version of this operation instead."
+        )
+
     return OpStrategy(all_strategies)
 
 
