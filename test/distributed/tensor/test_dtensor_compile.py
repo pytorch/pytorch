@@ -1168,10 +1168,10 @@ def forward(self, b_parametrizations_buffer_original0, x):
             str(fw_graph_cell[0]).strip(),
             """\
 def forward(self, primals_1):
-    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1);  primals_1 = None
+    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(primals_1)
     sin = torch.ops.aten.sin.default(wait_tensor)
     sin_1 = torch.ops.aten.sin.default(sin);  sin = None
-    return (sin_1, wait_tensor)""",
+    return (sin_1, primals_1, wait_tensor)""",
         )
 
     @skipIfTorchDynamo()

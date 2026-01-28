@@ -386,6 +386,7 @@ def draft_export(
         torch._functorch.config.patch(
             fake_tensor_propagate_real_tensors=True,
             generate_fake_kernels_from_real_mismatches=True,
+            fake_tensor_prop_check_meta_aliasing=True,
         ),
         capture_structured_log,
     ):
