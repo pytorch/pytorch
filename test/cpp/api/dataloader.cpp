@@ -769,7 +769,7 @@ TEST(DataTest, SharedBatchDatasetReallyIsShared) {
           "uncopyable");
 
   auto data_loader = torch::data::make_data_loader(
-      shared_dataset, torch::data::DataLoaderOptions().workers(3));
+      shared_dataset, {.workers = 3});
 
   for (auto batch : *data_loader) {
     /* exhaust */
@@ -1036,7 +1036,7 @@ TEST(DataLoaderTest, DataLoaderOptionsDefaultAsExpected) {
 }
 
 TEST(DataLoaderTest, DataLoaderOptionsCoalesceOptionalValues) {
-  auto partial_options = DataLoaderOptions(32).workers(10);
+  auto partial_options = { .batch_size = 32, .workers = 10 };
   FullDataLoaderOptions full_options(partial_options);
   ASSERT_EQ(full_options.batch_size, 32);
   ASSERT_EQ(full_options.max_jobs, 2 * 10);
@@ -1170,7 +1170,7 @@ TEST(DataLoaderTest, CanUseIteratorAlgorithms) {
 TEST(DataLoaderTest, CallingBeginWhileOtherIteratorIsInFlightThrows) {
   DummyDataset dataset;
   auto data_loader =
-      torch::data::make_data_loader(dataset, DataLoaderOptions(1).workers(2));
+      torch::data::make_data_loader(dataset, {.batch_size = 1, .workers = 2});
   auto i = data_loader->begin();
   ASSERT_THROWS_WITH(
       data_loader->begin(),
@@ -1235,7 +1235,7 @@ TEST(
     ReturnsLastBatchWhenSmallerThanBatchSizeWhenDropLastIsFalse) {
   DummyDataset dataset;
   auto data_loader = torch::data::make_data_loader(
-      dataset, DataLoaderOptions(33).drop_last(false));
+      dataset, {.batch_size = 33, .drop_last = false});
   auto iterator = data_loader->begin();
   ASSERT_EQ(iterator->size(), 33);
   ASSERT_EQ((++iterator)->size(), 33);
@@ -1249,7 +1249,7 @@ TEST(
     DoesNotReturnLastBatchWhenSmallerThanBatchSizeWhenDropLastIsTrue) {
   DummyDataset dataset;
   auto data_loader = torch::data::make_data_loader(
-      dataset, DataLoaderOptions(33).drop_last(true));
+      dataset, {.batch_size = 33, .drop_last = true});
   auto iterator = data_loader->begin();
   ASSERT_EQ(iterator->size(), 33);
   ASSERT_EQ((++iterator)->size(), 33);
@@ -1279,7 +1279,7 @@ TEST(DataLoaderTest, RespectsTimeout) {
   auto baton = std::make_shared<Baton>();
 
   auto data_loader = torch::data::make_data_loader(
-      D{baton}, DataLoaderOptions().workers(1).timeout(10 * kMillisecond));
+      D{baton}, { .workers = 1, .timeout = 10 * kMillisecond });
 
   auto start = std::chrono::system_clock::now();
 
@@ -1401,10 +1401,7 @@ TEST(DataLoaderTest, EnforcesOrderingAmongThreadsWhenConfigured) {
   auto data_loader = torch::data::make_data_loader(
       ordering_test::Dataset{},
       torch::data::samplers::SequentialSampler(ordering_test::kNumberOfWorkers),
-      DataLoaderOptions()
-          .batch_size(1)
-          .workers(ordering_test::kNumberOfWorkers)
-          .enforce_ordering(true));
+      { .batch_size = 1, .workers = ordering_test::kNumberOfWorkers, .enforce_ordering = true });
   std::vector<size_t> output;
   for (size_t value : *data_loader) {
     output.push_back(value);
@@ -1447,7 +1444,7 @@ TEST(DataLoaderTest, TestExceptionsArePropagatedFromWorkers) {
   };
 
   auto data_loader = torch::data::make_data_loader(
-      D{}, samplers::RandomSampler(100), DataLoaderOptions().workers(2));
+      D{}, samplers::RandomSampler(100), { .workers = 2 });
   auto iterator = data_loader->begin();
 
   try {
@@ -1525,8 +1522,7 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
 
   auto data_loader = torch::data::make_data_loader(
       torch::data::datasets::make_shared_dataset<D>(),
-      DataLoaderOptions().workers(kNumberOfWorkers));
-
+      {.workers = kNumberOfWorkers});
   for (const auto i : c10::irange(10)) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());
@@ -1568,7 +1564,7 @@ TEST(DataLoaderTest, StatefulDatasetWithMap) {
               [](const std::string& x) {
                 return torch::tensor(static_cast<int64_t>(std::stoi(x)));
               })),
-      DataLoaderOptions{});
+      {});
 
   for (const auto i : c10::irange(10)) {
     const auto number_of_iterations =
@@ -1669,7 +1665,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
 
         auto data_loader = torch::data::make_data_loader(
             dataset,
-            DataLoaderOptions(batch_size).workers(dataloader_worker_count));
+            {.batch_size = batch_size, .workers = dataloader_worker_count});
 
         for (const auto epoch_index : c10::irange(epoch_count)) {
           (void)epoch_index; // Suppress unused variable warning
@@ -1724,7 +1720,7 @@ TEST(DataLoaderTest, ChunkDataSetWithBatchSizeMismatch) {
           datasets::ChunkDatasetOptions(prefetch_count, batch_size));
 
   auto data_loader = torch::data::make_data_loader(
-      dataset, DataLoaderOptions(requested_batch_size).workers(0));
+      dataset, {.batch_size = requested_batch_size, .workers = 0});
 
   std::string exception_msg =
       "The requested batch size does not match with the initialized batch "
@@ -1769,7 +1765,7 @@ TEST(DataLoaderTest, ChunkDataSetWithEmptyBatch) {
           datasets::ChunkDatasetOptions(prefetch_count, batch_size));
 
   auto data_loader = torch::data::make_data_loader(
-      dataset, DataLoaderOptions(batch_size).workers(0));
+      dataset, {.batch_size = batch_size, .workers = 0});
 
   for (auto iterator = data_loader->begin(); iterator != data_loader->end();
        ++iterator) {
@@ -1814,7 +1810,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatchWithUnevenBatchSize) {
             datasets::ChunkDatasetOptions(1, batch_size));
 
     auto data_loader = torch::data::make_data_loader(
-        dataset, DataLoaderOptions(batch_size).workers(0));
+        dataset, {.batch_size = batch_size, .workers = 0});
 
     for (auto iterator = data_loader->begin(); iterator != data_loader->end();
          ++iterator) {
@@ -1858,7 +1854,7 @@ TEST(DataLoaderTest, CanAccessChunkSamplerWithChunkDataSet) {
           [](DummyChunkDataReader::BatchType batch) {
             return std::accumulate(batch.begin(), batch.end(), 0);
           })),
-      DataLoaderOptions(batch_size).workers(0));
+          {.batch_size = batch_size, .workers = 0});
 
   // before we start, the index should be 0.
   ASSERT_EQ(chunk_sampler.index(), 0);
@@ -1902,7 +1898,7 @@ TEST(DataLoaderTest, ChunkDatasetDoesNotHang) {
           [](DummyChunkDataReader::BatchType batch) {
             return std::accumulate(batch.begin(), batch.end(), 0);
           })),
-      DataLoaderOptions(batch_size).workers(0));
+          {.batch_size = batch_size, .workers = 0});
   // simply creates the iterator but no iteration. chunk preloaders are waiting
   // to fill the batch buffer but it is not draining. Still we need to exit
   // cleanly.
@@ -1973,7 +1969,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
 
     auto data_loader = torch::data::make_data_loader(
         dataset,
-        DataLoaderOptions(batch_size).workers(dataloader_worker_count));
+        {.batch_size = batch_size, .workers = dataloader_worker_count});
 
     for (const auto epoch_index : c10::irange(epoch_count)) {
       (void)epoch_index; // Suppress unused variable warning
@@ -2074,7 +2070,7 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   torch::load(*dataset, tempfile.name);
 
   auto data_loader = torch::data::make_data_loader(
-      dataset, DataLoaderOptions(batch_size).workers(dataloader_worker_count));
+      dataset, {.batch_size = batch_size, .workers = dataloader_worker_count});
 
   for (const auto epoch_index : c10::irange(epoch_count)) {
     int iteration_count = 0;
@@ -2202,7 +2198,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
                   cross_chunk_shuffle_count));
 
       auto data_loader = torch::data::make_data_loader(
-          dataset, DataLoaderOptions(batch_size).workers(0));
+          dataset, {.batch_size = batch_size, .workers = 0});
 
       std::vector<int> result;
       for (auto iterator = data_loader->begin(); iterator != data_loader->end();
@@ -2300,7 +2296,7 @@ TEST(DataLoaderTest, CustomPreprocessPolicy) {
               policy_function);
 
       auto data_loader = torch::data::make_data_loader(
-          dataset, DataLoaderOptions(batch_size).workers(0));
+          dataset, {.batch_size = batch_size, .workers = 0});
 
       std::vector<int> result;
       for (auto iterator = data_loader->begin(); iterator != data_loader->end();
