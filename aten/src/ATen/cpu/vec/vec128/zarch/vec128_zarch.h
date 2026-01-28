@@ -2387,29 +2387,17 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   template <>                                                                 \
   Vectorized<typex> inline operator/(                                         \
       const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    /* Unfortunately, this breaks some tests */                               \
-    /* Implement it like it's done for avx2 */                                \
-    auto fabs_cd = b.vec().abs(); /* |c|    |d| */                            \
-    auto fabs_dc = fabs_cd.swapped(); /* |d|    |c| */                        \
-    auto scale = typename Vectorized<typex>::vinner_type{1.0} /               \
-        maximum(fabs_cd, fabs_dc); /* 1/sc     1/sc */                        \
-    auto a2 = a.vec() * scale; /* a/sc     b/sc */                            \
-    auto b2 = b.vec() * scale; /* c/sc     d/sc */                            \
-    auto acbd2 = a2 * b2; /* ac/sc^2  bd/sc^2 */                              \
-                                                                              \
-    auto dc2 = b2.swapped(); /* d/sc         c/sc */                          \
-    dc2 = Vectorized<typex>::real_neg(dc2); /* -d/|c,d|        c/sc */        \
-    auto adbc2 = a2 * dc2; /* -ad/sc^2      bc/sc^2 */                        \
-    auto sum1 = acbd2 + acbd2.swapped(); /* (ac+bd)/sc^2  (ac+bd)/sc^2 */     \
-    auto sum2 = adbc2 + adbc2.swapped(); /* (bc-ad)/sc^2  (bc-ad)/sc^2 */     \
-    auto res2 = Vectorized<typex>::vinner_type::mergee(                       \
-        sum1, sum2); /* (ac+bd)/sc^2  (bc-ad)/sc^2 */                         \
-                                                                              \
-    /* get the denominator */                                                 \
-    typename Vectorized<typex>::vinner_type denom2 =                          \
-        Vectorized<typex>{b2}.abs_2_(); /* (c^2+d^2)/sc^2   (c^2+d^2)/sc^2 */ \
-    res2 = res2 / denom2;                                                     \
-    return Vectorized<typex>{res2};                                           \
+      /* TODO: The vectorized implementation requires special handling for    \
+         the case where real number/imag number is 0/Inf/NaN. */              \
+    __at_align__ typex tmp1[Vectorized<typex>::size()];                       \
+    __at_align__ typex tmp2[Vectorized<typex>::size()];                       \
+    __at_align__ typex out[Vectorized<typex>::size()];                        \
+    a.store(tmp1);                                                            \
+    b.store(tmp2);                                                            \
+    for (const auto i : c10::irange(Vectorized<typex>::size())) {             \
+        out[i] = tmp1[i] / tmp2[i];                                           \
+    }                                                                         \
+    return Vectorized<typex>::loadu(out);                                     \
   }                                                                           \
                                                                               \
   template <>                                                                 \
