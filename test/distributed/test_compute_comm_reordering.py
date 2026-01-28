@@ -82,10 +82,6 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
 
 
 @requires_accelerator_dist_backend()
-@unittest.skipIf(
-    torch._inductor.config.triton.native_matmul,
-    "native matmul is fused with surrounding ops",
-)
 @instantiate_parametrized_tests
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
@@ -135,14 +131,23 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             code = run_and_get_triton_code(compiled, inputs)
             # Verify that the wait_tensor is sinked below the 1st matmul but
             # above the 2nd matmul.
-            (
-                FileCheck()
-                .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("extern_kernels.mm")
-                .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("extern_kernels.mm")
-                .run(code)
-            )
+            if not torch._inductor.config.triton.native_matmul:
+                (
+                    FileCheck()
+                    .check("torch.ops._c10d_functional.all_reduce_.default")
+                    .check("extern_kernels.mm")
+                    .check("torch.ops._c10d_functional.wait_tensor.default")
+                    .check("extern_kernels.mm")
+                    .run(code)
+                )
+            else:
+                (
+                    FileCheck()
+                    .check("triton_poi_fused_all_reduce_0")
+                    .check("triton_per_fused_mm_1")
+                    .check("triton_per_fused_mm_2")
+                    .run(code)
+                )
             out = compiled(inputs)
             correct = func(inputs)
             self.assertTrue(same(out, correct))
@@ -182,19 +187,28 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # writes to the output buffer of the 1st matmul, which is an input
             # to the first relu. Therefore, the all_reduce_ should be scheduled
             # after the first relu.
-            (
-                FileCheck()
-                .check("extern_kernels.mm")
-                .check("triton_poi_fused_relu")
-                .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check_same("buf0")
-                # mm not use buf prior to wait_tensor
-                .check("extern_kernels.mm")
-                .check_not("buf0")
-                .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("extern_kernels.mm")
-                .run(code)
-            )
+            if not torch._inductor.config.triton.native_matmul:
+                (
+                    FileCheck()
+                    .check("extern_kernels.mm")
+                    .check("triton_poi_fused_relu")
+                    .check("torch.ops._c10d_functional.all_reduce_.default")
+                    .check_same("buf0")
+                    # mm not use buf prior to wait_tensor
+                    .check("extern_kernels.mm")
+                    .check_not("buf0")
+                    .check("torch.ops._c10d_functional.wait_tensor.default")
+                    .check("extern_kernels.mm")
+                    .run(code)
+                )
+            else:
+                (
+                    FileCheck()
+                    .check("triton_per_fused_mm_0")
+                    .check("triton_per_fused_mm_relu_1")
+                    .check("triton_per_fused_mm_2")
+                    .run(code)
+                )
             out = compiled(inputs)
             correct = func(inputs)
             self.assertTrue(same(out, correct))
@@ -238,19 +252,29 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # matmul but below the 1st matmul.
             # - The wait_tensor should be sinked below the 3rd matmul but above
             # the 4th matmul.
-            (
-                FileCheck()
-                .check("extern_kernels.mm")
-                .check("triton_poi_fused_all_reduce_0")
-                .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("triton_poi_fused_relu")
-                .check("extern_kernels.mm")
-                .check("triton_poi_fused_relu")
-                .check("extern_kernels.mm")
-                .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("extern_kernels.mm")
-                .run(code)
-            )
+            if not torch._inductor.config.triton.native_matmul:
+                (
+                    FileCheck()
+                    .check("extern_kernels.mm")
+                    .check("triton_poi_fused_all_reduce_0")
+                    .check("torch.ops._c10d_functional.all_reduce_.default")
+                    .check("triton_poi_fused_relu")
+                    .check("extern_kernels.mm")
+                    .check("triton_poi_fused_relu")
+                    .check("extern_kernels.mm")
+                    .check("torch.ops._c10d_functional.wait_tensor.default")
+                    .check("extern_kernels.mm")
+                    .run(code)
+                )
+            else:
+                (
+                    FileCheck()
+                    .check("triton_per_fused_mm_0")
+                    .check("triton_poi_fused_all_reduce_1")
+                    .check("triton_per_fused_mm_relu_2")
+                    .check("triton_per_fused_mm_3")
+                    .run(code)
+                )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -297,20 +321,31 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            (
-                FileCheck()
-                .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("triton_poi_fused_relu")
-                .check("extern_kernels.mm")
-                .check("extern_kernels.mm")
-                .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("triton_poi_fused_all_reduce_mul")
-                .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("triton_poi_fused_add")
-                .check("extern_kernels.mm")
-                .run(code)
-            )
+            if not torch._inductor.config.triton.native_matmul:
+                (
+                    FileCheck()
+                    .check("torch.ops._c10d_functional.all_reduce_.default")
+                    .check("triton_poi_fused_relu")
+                    .check("extern_kernels.mm")
+                    .check("extern_kernels.mm")
+                    .check("torch.ops._c10d_functional.wait_tensor.default")
+                    .check("triton_poi_fused_all_reduce_mul")
+                    .check("torch.ops._c10d_functional.all_reduce_.default")
+                    .check("torch.ops._c10d_functional.wait_tensor.default")
+                    .check("triton_poi_fused_add")
+                    .check("extern_kernels.mm")
+                    .run(code)
+                )
+            else:
+                (
+                    FileCheck()
+                    .check("triton_poi_fused_all_reduce_0")
+                    .check("triton_poi_fused_relu_1")
+                    .check("triton_per_fused_mm_2")
+                    .check("triton_per_fused_all_reduce_mm_mul_3")
+                    .check("triton_per_fused_add_mm_4")
+                    .run(code)
+                )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
@@ -357,20 +392,31 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             # 2. then, we schedule the ops (g) that ARE NOT required for second all_reduce and DO NOT depend on first all_reduce.
             # 3. then, we schedule the ops (f) that ARE required for second all_reduce and DO depend on first all_reduce.
             # and then, we schedule the second all_reduce. And then schedule all ops that depend on second all_reduce.
-            (
-                FileCheck()
-                .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("triton_poi_fused_relu")
-                .check("extern_kernels.mm")
-                .check("extern_kernels.mm")
-                .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("triton_poi_fused_all_reduce_mul")
-                .check("torch.ops._c10d_functional.all_reduce_.default")
-                .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("triton_poi_fused_add")
-                .check("extern_kernels.mm")
-                .run(code)
-            )
+            if not torch._inductor.config.triton.native_matmul:
+                (
+                    FileCheck()
+                    .check("torch.ops._c10d_functional.all_reduce_.default")
+                    .check("triton_poi_fused_relu")
+                    .check("extern_kernels.mm")
+                    .check("extern_kernels.mm")
+                    .check("torch.ops._c10d_functional.wait_tensor.default")
+                    .check("triton_poi_fused_all_reduce_mul")
+                    .check("torch.ops._c10d_functional.all_reduce_.default")
+                    .check("torch.ops._c10d_functional.wait_tensor.default")
+                    .check("triton_poi_fused_add")
+                    .check("extern_kernels.mm")
+                    .run(code)
+                )
+            else:
+                (
+                    FileCheck()
+                    .check("triton_poi_fused_all_reduce_0")
+                    .check("triton_poi_fused_relu_1")
+                    .check("triton_per_fused_mm_2")
+                    .check("triton_per_fused_all_reduce_mm_mul_3")
+                    .check("triton_per_fused_add_mm_4")
+                    .run(code)
+                )
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
