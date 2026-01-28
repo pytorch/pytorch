@@ -1522,12 +1522,13 @@ class PallasKernel(SIMDKernel):
 
         # Check various conditions for skipping strided indexing
         is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        is_tpu_native = torch._inductor.config.pallas_tpu_native
         is_known_non_contiguous = not is_contiguous and all(
             s is not None for s in actual_strides
         )
         has_symbolic_coef = any(not isinstance(c, int | float) for c in coefficients)
         skip_for_non_contiguous = (
-            is_known_non_contiguous and not is_tpu and buf_numel == output_numel
+            is_known_non_contiguous and not is_tpu and not is_tpu_native and buf_numel == output_numel
         )
 
         # Determine if strided indexing is needed
@@ -2621,6 +2622,7 @@ class PallasKernel(SIMDKernel):
         kernel_name = name or "<KERNEL_NAME>"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        is_tpu_native = torch._inductor.config.pallas_tpu_native
         if is_tpu:
             if not torch._inductor.config.pallas_take_first_jax_device_only:
                 raise RuntimeError(
@@ -2631,7 +2633,12 @@ class PallasKernel(SIMDKernel):
                     "PALLAS_TARGET_TPU is set, but no TPU device was found. "
                     "Please make sure that you have a TPU available and that JAX is configured correctly."
                 )
-        interpret_literal = "True" if interpret_is_cpu else "False"
+        if is_tpu_native:
+            # TPU native mode: inputs are TPUTensor wrapping JAX arrays.
+            # Run pallas_call natively on TPU (not interpret mode).
+            interpret_literal = "False"
+        else:
+            interpret_literal = "True" if interpret_is_cpu else "False"
 
         # For GPU (Mosaic backend), import plgpu for TMA operations
         # Import math for symbolic expressions (e.g., math.floor, math.log2)
@@ -3335,18 +3342,28 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
         )
         with code.indent():
-            code.writeline("# Enable JAX x64 mode for float64/int64 support")
-            code.writeline("jax.config.update('jax_enable_x64', True)")
-            # Clear JAX caches to avoid Mosaic GPU backend state issues
-            code.writeline("jax.clear_caches()")
+            if not is_tpu_native:
+                # Enable x64 for GPU Pallas which may use float64/int64.
+                # Skip for TPU native: TPUs don't natively support 64-bit types,
+                # and x64 mode promotes jnp.arange iteration indices to int64
+                # which the Mosaic TPU compiler cannot legalize.
+                code.writeline("# Enable JAX x64 mode for float64/int64 support")
+                code.writeline("jax.config.update('jax_enable_x64', True)")
+                # Clear JAX caches to avoid Mosaic GPU backend state issues.
+                # Not needed for TPU native mode.
+                code.writeline("jax.clear_caches()")
             if alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
                 for alias_name in alias_params:
-                    # TODO: The `jax.device_put` path is a temporary workaround for a Mosaic compiler bug
-                    # that occurs with DLPack. Once TorchTPU provides a direct method for placing a
-                    # `torch.Tensor` on a TPU device, this should be reverted to use the
-                    #  `jax.dlpack.from_dlpack` path.
-                    if is_tpu:
+                    if is_tpu_native:
+                        code.writeline(
+                            f"{alias_name}_jax = {alias_name}._jax_array"
+                        )
+                    elif is_tpu:
+                        # TODO: The `jax.device_put` path is a temporary workaround for a Mosaic compiler bug
+                        # that occurs with DLPack. Once TorchTPU provides a direct method for placing a
+                        # `torch.Tensor` on a TPU device, this should be reverted to use the
+                        #  `jax.dlpack.from_dlpack` path.
                         code.writeline(
                             f"{alias_name}_jax = jax.device_put({alias_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
@@ -3357,7 +3374,11 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
                 if ptr.startswith("in_out_ptr"):
-                    if is_tpu:
+                    if is_tpu_native:
+                        code.writeline(
+                            f"{ptr}_jax = {ptr}._jax_array"
+                        )
+                    elif is_tpu:
                         code.writeline(
                             f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
@@ -3368,7 +3389,11 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
-                    if is_tpu:
+                    if is_tpu_native:
+                        code.writeline(
+                            f"{ptr}_jax = {ptr}._jax_array"
+                        )
+                    elif is_tpu:
                         code.writeline(
                             f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
@@ -3412,7 +3437,12 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
                 )
                 for idx in copy_output_indices:
                     name = output_params[idx]
-                    if is_tpu:
+                    if is_tpu_native:
+                        # Store JAX result directly back into TPUTensor
+                        code.writeline(
+                            f"{name}._jax_array = result_values[{idx}]"
+                        )
+                    elif is_tpu:
                         code.writeline(
                             f"res_cpu = jax.device_get(result_values[{idx}])"
                         )

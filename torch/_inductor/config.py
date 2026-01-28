@@ -1324,6 +1324,13 @@ pallas_take_first_jax_device_only: bool = Config(
     env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
 )
 
+# When True, assumes inputs are TPUTensor subclass instances wrapping JAX arrays.
+# Codegen extracts ._jax_array directly (no DLPack), allocates intermediates via
+# JAX default device, and stores results back to ._jax_array.
+pallas_tpu_native: bool = Config(
+    env_name_force="PALLAS_TPU_NATIVE", default=False
+)
+
 
 def get_worker_log_path() -> Optional[str]:
     log_loc = None

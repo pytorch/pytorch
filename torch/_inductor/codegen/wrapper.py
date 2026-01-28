@@ -1260,6 +1260,14 @@ class PythonWrapperCodegen(CodeGen):
             )
         except (AttributeError, ImportError):
             pass
+        if torch._inductor.config.pallas_tpu_native:
+            self.header.writeline("import torch.tpu")
+            self.header.writeline(
+                "empty_strided_tpu = torch.tpu.empty_strided"
+            )
+            self.header.writeline(
+                "rand_strided_tpu = torch.tpu.rand_strided"
+            )
         if config.annotate_training:
             self.header.writeline("from torch.cuda import nvtx")
         if config.triton.proton_profiling:
@@ -2249,12 +2257,20 @@ class PythonWrapperCodegen(CodeGen):
 
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
-            output.writeline(
-                f"{name} = rand_strided("
-                f"{self.codegen_python_shape_tuple(shape)}, "
-                f"{self.codegen_python_shape_tuple(stride)}, "
-                f"device='{device}', dtype={dtype})"
-            )
+            if config.pallas_tpu_native and str(device) == "cpu":
+                output.writeline(
+                    f"{name} = rand_strided_tpu("
+                    f"{self.codegen_python_shape_tuple(shape)}, "
+                    f"{self.codegen_python_shape_tuple(stride)}, "
+                    f"{dtype})"
+                )
+            else:
+                output.writeline(
+                    f"{name} = rand_strided("
+                    f"{self.codegen_python_shape_tuple(shape)}, "
+                    f"{self.codegen_python_shape_tuple(stride)}, "
+                    f"device='{device}', dtype={dtype})"
+                )
 
         def add_expr_input(name, val):
             output.writeline(f"{name} = {val}")
@@ -3232,6 +3248,14 @@ class PythonWrapperCodegen(CodeGen):
         elif device.type == "cpu" and is_pinned:
             out = (
                 f"{name} = empty_strided_cpu_pinned("
+                f"{codegen_allocation_shape_tuple}, "
+                f"{codegen_stride_tuple}, "
+                f"{dtype})"
+            )
+        elif torch._inductor.config.pallas_tpu_native and device.type == "cpu":
+            # TPU native: allocate intermediate buffers on TPU via JAX default device
+            out = (
+                f"{name} = empty_strided_tpu("
                 f"{codegen_allocation_shape_tuple}, "
                 f"{codegen_stride_tuple}, "
                 f"{dtype})"
