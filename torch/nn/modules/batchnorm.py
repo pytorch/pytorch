@@ -291,8 +291,16 @@ class BatchNorm1d(_BatchNorm):
 
         y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    where :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed per channel over
+    the mini-batch and spatial dimensions. For input shape `(N, C)` or `(N, C, L)`:
+
+    .. code-block:: python
+
+        # Equivalent computation for (N, C, L) input:
+        mean = input.mean(dim=(0, 2))  # shape: (C,)
+        var = input.var(dim=(0, 2), correction=0)  # shape: (C,)
+
+    :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the number of features or channels of the input). By default, the
     elements of :math:`\gamma` are set to 1 and the elements of :math:`\beta` are set to 0.
     At train time in the forward pass, the variance is calculated via the biased estimator,
@@ -402,8 +410,16 @@ class BatchNorm2d(_BatchNorm):
 
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    where :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed per channel over
+    the mini-batch and spatial dimensions. For input shape `(N, C, H, W)`:
+
+    .. code-block:: python
+
+        # Equivalent computation:
+        mean = input.mean(dim=(0, 2, 3))  # shape: (C,)
+        var = input.var(dim=(0, 2, 3), correction=0)  # shape: (C,)
+
+    :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
@@ -512,8 +528,16 @@ class BatchNorm3d(_BatchNorm):
 
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    where :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed per channel over
+    the mini-batch and spatial dimensions. For input shape `(N, C, D, H, W)`:
+
+    .. code-block:: python
+
+        # Equivalent computation:
+        mean = input.mean(dim=(0, 2, 3, 4))  # shape: (C,)
+        var = input.var(dim=(0, 2, 3, 4), correction=0)  # shape: (C,)
+
+    :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
     to 1 and the elements of :math:`\beta` are set to 0. At train time in the forward pass, the
     standard-deviation is calculated via the biased estimator, equivalent to
@@ -623,8 +647,18 @@ class SyncBatchNorm(_BatchNorm):
 
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension over all
-    mini-batches of the same process groups. :math:`\gamma` and :math:`\beta`
+    where :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed per channel over
+    all mini-batches of the same process groups and spatial dimensions. For a 4D input
+    `(N, C, H, W)`, this is conceptually equivalent to gathering all inputs across the
+    process group and computing:
+
+    .. code-block:: python
+
+        # Equivalent computation (after gathering across processes):
+        mean = gathered_input.mean(dim=(0, 2, 3))  # shape: (C,)
+        var = gathered_input.var(dim=(0, 2, 3), correction=0)  # shape: (C,)
+
+    :math:`\gamma` and :math:`\beta`
     are learnable parameter vectors of size `C` (where `C` is the input size).
     By default, the elements of :math:`\gamma` are sampled from
     :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
