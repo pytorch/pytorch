@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     parametrize,
     run_tests,
-    skipIfRocm,
     skipIfTorchDynamo,
     skipIfWindows,
     TestCase,
