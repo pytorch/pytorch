@@ -56,9 +56,11 @@ from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
+    _EvalFrameOverride,
     reset_code,
     set_code_exec_strategy,
     set_eval_frame,
+    set_eval_frame_override,
     set_guard_complete_hook,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
@@ -703,6 +705,12 @@ def guard_collectives_hook(guard_eval_result: bool) -> bool:
 _not_set = object()
 
 
+def _get_eval_frame_override() -> _EvalFrameOverride:
+    if torch._dynamo.config.error_on_dynamo_callback_in_fullgraph_compiled_code:
+        return _EvalFrameOverride.ERROR
+    return _EvalFrameOverride.SKIP
+
+
 class _TorchDynamoContext:
     def __init__(
         self,
@@ -929,6 +937,11 @@ class _TorchDynamoContext:
         @functools.wraps(fn)
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
+            prior_eval_frame_override: _EvalFrameOverride | None = None
+            if self.fullgraph:
+                prior_eval_frame_override = set_eval_frame_override(
+                    _get_eval_frame_override()
+                )
             try:
                 # We shouldn't compile inside kernel invocation.
                 if tracing_context := torch._guards.TracingContext.try_get():
@@ -1009,6 +1022,8 @@ class _TorchDynamoContext:
                     set_eval_frame(None)
                     if prior_error_on_graph_break is not None:
                         _set_error_on_graph_break(prior_error_on_graph_break)
+                    if prior_eval_frame_override is not None:
+                        set_eval_frame_override(prior_eval_frame_override)
                     torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
                         saved_dynamic_layer_stack_depth
                     )
