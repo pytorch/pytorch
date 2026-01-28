@@ -10,7 +10,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
-from torch.distributed.tensor import Shard
 from torch.distributed.utils import _apply_to_tensors
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
@@ -35,6 +34,7 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
     is_bw,
+    ShardPlacementFnResult,
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
@@ -132,7 +132,7 @@ class FSDPParamGroup:
         mesh_info: DataParallelMeshInfo,
         post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None,
+        shard_placement_fn: Callable[[nn.Parameter], ShardPlacementFnResult] | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):

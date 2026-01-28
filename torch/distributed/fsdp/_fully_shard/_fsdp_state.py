@@ -77,7 +77,9 @@ class FSDPState(_State):
 
     def __init__(self) -> None:
         super().__init__()
-        self._fsdp_param_group: FSDPParamGroup | None = None
+        # Support multiple param groups for per-param mesh support.
+        # Each group has params with the same mesh_info.
+        self._fsdp_param_groups: list[FSDPParamGroup] = []
         self._is_root: bool | None = None  # root set during lazy init
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
@@ -92,6 +94,26 @@ class FSDPState(_State):
     def _get_state_for_module(self, module: nn.Module) -> "FSDPState | None":
         """Get the state for a module. Subclasses can override to use different state getters."""
         return _get_module_fsdp_state(module)
+
+    @property
+    def _fsdp_param_group(self) -> FSDPParamGroup | None:
+        """
+        Returns the param group for backward compatibility.
+        This property is only valid when there is at most one param group.
+        For per-param mesh support with multiple param groups, use
+        ``_fsdp_param_groups`` instead.
+        """
+        if len(self._fsdp_param_groups) > 1:
+            raise AssertionError(
+                f"Expected at most 1 param group for backward compatibility, "
+                f"but got {len(self._fsdp_param_groups)}. "
+                f"Use `_fsdp_param_groups` (plural) to access all param groups "
+                f"when using per-param mesh via shard_placement_fn returning "
+                f"ShardPlacementResult."
+            )
+        if self._fsdp_param_groups:
+            return self._fsdp_param_groups[0]
+        return None
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -189,24 +211,25 @@ class FSDPState(_State):
                 state._is_root = False
             self._state_ctx.all_states.append(state)
             visited_states.add(state)
-        if self._fsdp_param_group and self._auto_reshard_after_forward:
-            # For the root, do not reshard after forward since for training,
-            # the parameters would be freed and all-gathered immediately
-            self._fsdp_param_group.post_forward_mesh_info = None
+        # For the root, do not reshard after forward since for training,
+        # the parameters would be freed and all-gathered immediately
+        if self._auto_reshard_after_forward:
+            for fsdp_param_group in self._fsdp_param_groups:
+                fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
         # Run parameter group lazy inits after initializing FQNs for improved
         # error messages
         for state in self._state_ctx.all_states:
-            if state._fsdp_param_group:
-                state._fsdp_param_group.lazy_init()
+            for fsdp_param_group in state._fsdp_param_groups:
+                fsdp_param_group.lazy_init()
 
     def _init_shared_state(self) -> None:
         self._comm_ctx.lazy_init(self._device)
         for state in self._state_ctx.all_states:
             state._state_ctx = self._state_ctx
             state._comm_ctx = self._comm_ctx
-            if fsdp_param_group := state._fsdp_param_group:
+            for fsdp_param_group in state._fsdp_param_groups:
                 fsdp_param_group.comm_ctx = self._comm_ctx
 
     def _init_fqns(self) -> None:
@@ -217,7 +240,7 @@ class FSDPState(_State):
         param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
         module_to_fsdp_param_group: dict[nn.Module, FSDPParamGroup] = {}
         for state in self._state_ctx.all_states:
-            if fsdp_param_group := state._fsdp_param_group:
+            for fsdp_param_group in state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
                 for module in fsdp_param_group.modules:
@@ -257,10 +280,10 @@ class FSDPState(_State):
                     _apply_to_tensors(cast_fn, args),
                     _apply_to_tensors(cast_fn, kwargs),
                 )
-        if self._fsdp_param_group:
-            args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
+        for fsdp_param_group in self._fsdp_param_groups:
+            args, kwargs = fsdp_param_group.pre_forward(module, args, kwargs)
         for fsdp_state in self._states_to_forward_prefetch:
-            if (target_param_group := fsdp_state._fsdp_param_group) is not None:
+            for target_param_group in fsdp_state._fsdp_param_groups:
                 FSDPParamGroup._prefetch_unshard(target_param_group, "forward")
         return args, kwargs
 
@@ -270,8 +293,8 @@ class FSDPState(_State):
         # post-backward hook is responsible for the reshard
         if self._training_state == TrainingState.PRE_BACKWARD:
             return output
-        if self._fsdp_param_group:
-            output = self._fsdp_param_group.post_forward(module, input, output)
+        for fsdp_param_group in self._fsdp_param_groups:
+            output = fsdp_param_group.post_forward(module, input, output)
         output = self._register_pre_backward_hook(output)
         self._training_state = TrainingState.IDLE
         if self._state_ctx.iter_forward_root is self:
@@ -295,11 +318,11 @@ class FSDPState(_State):
     def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
-        if self._fsdp_param_group:
-            default_prefetch = len(self._states_to_backward_prefetch) == 0
-            self._fsdp_param_group.pre_backward(default_prefetch)
+        default_prefetch = len(self._states_to_backward_prefetch) == 0
+        for fsdp_param_group in self._fsdp_param_groups:
+            fsdp_param_group.pre_backward(default_prefetch)
         for fsdp_state in self._states_to_backward_prefetch:
-            if (target_param_group := fsdp_state._fsdp_param_group) is not None:
+            for target_param_group in fsdp_state._fsdp_param_groups:
                 FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
         return grad
 
@@ -308,17 +331,13 @@ class FSDPState(_State):
             logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
-                fsdp_param_group = state._fsdp_param_group
-                if (
-                    fsdp_param_group
-                    and fsdp_param_group._training_state != TrainingState.POST_BACKWARD
-                ):
-                    # Run post-backward in case forward inputs did not require
-                    # gradient so the autograd backward did not run
-                    fsdp_param_group.post_backward()
-                state._training_state = TrainingState.IDLE
-                if fsdp_param_group:
+                for fsdp_param_group in state._fsdp_param_groups:
+                    if fsdp_param_group._training_state != TrainingState.POST_BACKWARD:
+                        # Run post-backward in case forward inputs did not require
+                        # gradient so the autograd backward did not run
+                        fsdp_param_group.post_backward()
                     fsdp_param_group._training_state = TrainingState.IDLE
+                state._training_state = TrainingState.IDLE
                 if self._state_ctx.is_last_backward:
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
@@ -343,8 +362,8 @@ class FSDPState(_State):
             warning_once(logger, msg, stacklevel=2)
             # Clear since we want the next forward to run
             self._modules_to_run_forward.clear()
-        if self._fsdp_param_group:
-            self._fsdp_param_group.finalize_backward()
+        for fsdp_param_group in self._fsdp_param_groups:
+            fsdp_param_group.finalize_backward()
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
