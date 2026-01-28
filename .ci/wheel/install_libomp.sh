@@ -23,4 +23,5 @@ pushd ${OMP_PREFIX}
   rm info-llvm-openmp-${llvm_openmp_version}.tar.zst
   rm lib/libiomp5.dylib
   install_name_tool -id ${OMP_PREFIX}/lib/libomp.dylib lib/libomp.dylib
+  codesign -f -s - lib/libomp.dylib
 popd
