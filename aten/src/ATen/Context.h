@@ -485,9 +485,9 @@ class TORCH_API Context {
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   CuBLASReductionOption allow_fp16_reduction_cublas =
-      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+      CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK;
   CuBLASReductionOption allow_bf16_reduction_cublas =
-      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+      CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK;
   bool allow_fp16_accumulation_cublas = false;
   std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
