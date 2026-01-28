@@ -16,6 +16,7 @@ dtype_abbrs = {
     torch.complex32: "c32",
     torch.complex64: "c64",
     torch.complex128: "c128",
+    torch.bcomplex32: "bc32",
     torch.int8: "i8",
     torch.int16: "i16",
     torch.int32: "i32",

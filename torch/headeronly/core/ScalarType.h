@@ -88,6 +88,7 @@ struct dummy_int1_7_t {};
   _(float, Float)                              \
   _(double, Double)                            \
   _(c10::complex<c10::Half>, ComplexHalf)      \
+  _(c10::complex<c10::BFloat16>, BComplex32)   \
   _(c10::complex<float>, ComplexFloat)         \
   _(c10::complex<double>, ComplexDouble)       \
   _(bool, Bool)                                \
@@ -146,7 +147,8 @@ struct dummy_int1_7_t {};
   _(c10::dummy_int1_7_t<6>, Int6) /* 42 */               \
   _(c10::dummy_int1_7_t<7>, Int7) /* 43 */               \
   _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */        \
-  _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */
+  _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */    \
+  _(c10::complex<c10::BFloat16>, BComplex32) /* 46 */
 
 // NB: despite its generic sounding name, the macros that don't take _AND
 // are mostly only used by tensorexpr

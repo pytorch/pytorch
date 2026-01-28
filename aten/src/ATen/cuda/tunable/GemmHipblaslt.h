@@ -44,6 +44,11 @@ constexpr hipDataType HipDataTypeFor<BFloat16>() {
 }
 
 template <>
+constexpr hipDataType HipDataTypeFor<c10::complex<c10::BFloat16>>() {
+  return HIP_C_16BF;
+}
+
+template <>
 constexpr hipDataType HipDataTypeFor<double>() {
   return HIP_R_64F;
 }

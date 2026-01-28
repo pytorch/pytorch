@@ -89,7 +89,7 @@ inline bool isFloatingType(ScalarType t) {
 inline bool isComplexType(ScalarType t) {
   return (
       t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
-      t == ScalarType::ComplexDouble);
+      t == ScalarType::ComplexDouble || t == ScalarType::BComplex32);
 }
 
 inline bool isBitsType(ScalarType t) {
@@ -162,6 +162,7 @@ inline bool isSignedType(ScalarType t) {
       CASE_ISSIGNED(ComplexHalf);
       CASE_ISSIGNED(ComplexFloat);
       CASE_ISSIGNED(ComplexDouble);
+      CASE_ISSIGNED(BComplex32);
       CASE_ISSIGNED(Bool);
     case ScalarType::Int1:
     case ScalarType::Int2:

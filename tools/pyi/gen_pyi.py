@@ -2002,6 +2002,7 @@ def gen_pyi(
             "cfloat",
             "complex128",
             "cdouble",
+            "bcomplex32",
             "quint8",
             "qint8",
             "qint32",
