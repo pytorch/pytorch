@@ -216,29 +216,15 @@ def bind_args_cached(
             # Maybe override pos-defaults applied above
             ba[name] = wrap_bound_arg(tx, rem_kw.pop(name))
         elif name not in ba:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    ConstantVariable.create(
-                        f"Missing required positional argument: {name}"
-                    )
-                ],
-            )
+            raise TypeError(f"missing required positional argument: {name}")
 
     # 2) *args
     extra = args[len(spec.all_pos_names) :]
     if spec.varargs_name:
         ba[spec.varargs_name] = wrap_bound_arg(tx, tuple(extra))
     elif extra:
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                ConstantVariable.create(
-                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
-                )
-            ],
+        raise TypeError(
+            f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
         )
 
     # 3) Keyword-only
@@ -251,27 +237,13 @@ def bind_args_cached(
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
-            raise_observed_exception(
-                TypeError,
-                tx,
-                args=[
-                    ConstantVariable.create(
-                        f"Missing required keyword-only argument: {name}"
-                    )
-                ],
-            )
+            raise TypeError(f"Missing required keyword-only argument: {name}")
 
     # 4) **kwargs
     if spec.varkw_name:
         ba[spec.varkw_name] = wrap_bound_arg(tx, rem_kw)
     elif rem_kw:
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[
-                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
-            ],
-        )
+        raise TypeError(f"Unexpected keyword arguments: {list(rem_kw)}")
 
     return ba
 
@@ -384,12 +356,18 @@ def fn_var_getattr(
 
 class BaseUserFunctionVariable(VariableTracker):
     def get_filename(self) -> str:
-        return self.get_code().co_filename  # type: ignore[attr-defined]
+        return self.get_code().co_filename
 
     def get_name(self) -> str:
-        return self.get_code().co_name  # type: ignore[attr-defined]
+        return self.get_code().co_name
 
     def get_globals(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_code(self) -> types.CodeType:
+        raise NotImplementedError
+
+    def has_self(self) -> bool:
         raise NotImplementedError
 
     def call_function(
@@ -967,14 +945,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 self.remaining_items = self.force_unpack_var_sequence(tx)
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
 
-    def bind_args(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> dict[str, VariableTracker]:
-        return self.vt.bind_args(tx, args, kwargs)  # type: ignore[attr-defined]
-
     def get_globals(self) -> dict[str, Any]:
         return self.f_globals
 
@@ -1274,7 +1244,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(
         self,
-        vt: VariableTracker,
+        vt: BaseUserFunctionVariable,
         *,
         generator_cls: type = LocalGeneratorObjectVariable,
         **kwargs: Any,
@@ -1288,8 +1258,15 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             return getattr(self, name)
         return getattr(self.vt, name)
 
+    # These need to be explicit so the custom __getattr__ doesn't fall back to the unimplemented base class version
+    def get_code(self) -> types.CodeType:
+        return self.vt.get_code()
+
     def get_globals(self) -> dict[str, Any]:
-        return self.vt.get_globals()  # type: ignore[attr-defined]
+        return self.vt.get_globals()
+
+    def has_self(self) -> bool:
+        return self.vt.has_self()
 
     def _build_inline_tracer(
         self,
@@ -1312,10 +1289,10 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if not is_generator(self.vt.get_code()):  # type: ignore[attr-defined]
+        if not is_generator(self.vt.get_code()):
             unimplemented(
                 gb_type="non-generator contextlib.contextmanager",
-                context=str(self.vt.get_code()),  # type: ignore[attr-defined]
+                context=str(self.vt.get_code()),
                 explanation="Cannot compile function decorated with `@contextlib.contextmanager` that is not a generator"
                 ", i.e. does not use `yield`",
                 hints=[
@@ -1325,8 +1302,8 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
             )
 
         inline_tracer = self._build_inline_tracer(tx, list(args), kwargs)
-        code = self.vt.get_code()  # type: ignore[attr-defined]
-        f_globals = self.vt.get_globals()  # type: ignore[attr-defined]
+        code = self.vt.get_code()
+        f_globals = self.vt.get_globals()
 
         # calling a generator returns a generator object
         return self.generator_cls(
@@ -1346,7 +1323,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
-    def __init__(self, vt: VariableTracker, **kwargs: Any) -> None:
+    def __init__(self, vt: BaseUserFunctionVariable, **kwargs: Any) -> None:
         super().__init__(
             vt,
             generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
@@ -1631,6 +1608,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         finally:
             _converting.discard(self_id)
 
+    def is_python_constant(self) -> bool:
+        try:
+            self.as_python_constant()
+            return True
+        except (NotImplementedError, Unsupported):
+            return False
+
     def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
         closure_cells = None
         if self.closure:
@@ -1824,7 +1808,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
     def __init__(
         self,
-        wrapped: Any,
+        wrapped: NestedUserFunctionVariable,
         context: "ContextWrappingVariable",
         **kwargs: Any,
     ) -> None:
@@ -1861,7 +1845,7 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
+        codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
@@ -2076,13 +2060,13 @@ class SkipFunctionVariable(VariableTracker):
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
         self,
-        wrapped: VariableTracker,
+        wrapped: SkipFunctionVariable,
         context: "ContextWrappingVariable",
         **kwargs: Any,
     ) -> None:
         kwargs.pop("value", None)
         kwargs.pop("reason", None)
-        super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)  # type: ignore[attr-defined]
+        super().__init__(wrapped.value, reason=wrapped.reason, **kwargs)
         self.wrapped = wrapped
         self.context = context
 
@@ -2098,7 +2082,7 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
         return result
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(lambda: codegen(self.context))  # type: ignore[arg-type]
+        codegen.add_push_null(lambda: codegen(self.context))
         codegen(self.wrapped)
         codegen.extend_output(create_call_function(1, False))
 
