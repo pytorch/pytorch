@@ -347,13 +347,18 @@ class DistMatrixOpsTest(DTensorTestBase):
             # Verify that local and distributed have comparable errors vs fp64 reference
             # Both should be within the same order of magnitude
             # If distributed were systematically worse, we'd see significantly larger errors
-            err_ratio = max(local_max_err, dist_max_err) / (min(local_max_err, dist_max_err) + 1e-10)
+            err_ratio = max(local_max_err, dist_max_err) / (
+                min(local_max_err, dist_max_err) + 1e-10
+            )
             # Error ratio should be close to 1.0 if both have similar accuracy
             # Allow up to 5x difference due to different rounding patterns from computation order
-            self.assertLess(err_ratio, 5.0,
+            self.assertLess(
+                err_ratio,
+                5.0,
                 f"Error ratio {err_ratio:.2f} too large. "
                 f"Local max err: {local_max_err:.2e}, Dist max err: {dist_max_err:.2e}. "
-                f"Local mean err: {local_mean_err:.2e}, Dist mean err: {dist_mean_err:.2e}")
+                f"Local mean err: {local_mean_err:.2e}, Dist mean err: {dist_mean_err:.2e}",
+            )
 
             # Both local and distributed results are compared against float64 reference
             # Relaxed tolerances needed for large tensors: 512x512x512 = 134M operations
@@ -371,8 +376,8 @@ class DistMatrixOpsTest(DTensorTestBase):
         shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
-            
-    @with_comms        
+
+    @with_comms
     def test_mm_single_dim_strategy(self):
         register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
         # unshardable input where some rank have empty _local_tensor
