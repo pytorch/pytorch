@@ -288,7 +288,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
 
 # defines a custom __eq__() / __hash__() to be registered as a pytree constant type
-class CustomConstantType:
+class CustomConstantType(torch._opaque_base.OpaqueBase):
     def __init__(self, a, b):
         self.a = a
         self.b = b
@@ -1506,6 +1506,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             True,
         )
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_ddp_module(self):
         import torch.distributed as dist
 
