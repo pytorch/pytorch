@@ -15354,6 +15354,11 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_small_values',
                                      dtypes=(torch.int8,)),
+                        # UnboundLocalError: cannot access local variable 'cpu_out' where it is not associated with a value
+                        DecorateInfo(
+                            unittest.expectedFailure, 'TestConsistency', 'test_output_match',
+                            device_type='mps', dtypes=(torch.bool,),
+                        ),
                     )),
     BinaryUfuncInfo('isclose',
                     ref=np.isclose,
