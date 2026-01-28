@@ -390,7 +390,12 @@ function(torch_compile_options libname)
       endif()
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      list(APPEND private_compile_options -Wextra-semi -Wmove)
+      if(NOT USE_CUDA)
+        # NS: One can compile CUDA code with extra-semi flag as nvcc generates code like
+        # namespace MemoryOps_cu_d8602b38_109889 __attribute__((visibility("hidden")))  { };
+        list(APPEND private_compile_options -Wextra-semi)
+      endif()
+      list(APPEND private_compile_options -Wmove)
     else()
       list(APPEND private_compile_options
         # Considered to be flaky.  See the discussion at
