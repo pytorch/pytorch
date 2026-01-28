@@ -4097,6 +4097,30 @@ class TestAutograd(TestCase):
             else:
                 run()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    def test_checkpoint_device_context_fn(self):
+        @contextlib.contextmanager
+        def apply_device(device):
+            try:
+                prev = torch.get_default_device()
+                torch.set_default_device(device)
+                yield
+            finally:
+                torch.set_default_device(prev)
+
+        def context_fn():
+            return contextlib.nullcontext(), apply_device("cuda")
+
+        def fn(x):
+            return x.sin().cos()
+
+        torch.set_default_device("cuda")
+        a = torch.tensor(1.0, requires_grad=True)
+        out = torch.utils.checkpoint.checkpoint(
+            fn, a, context_fn=context_fn, use_reentrant=False
+        )
+        out.backward()
+
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = x + 2
