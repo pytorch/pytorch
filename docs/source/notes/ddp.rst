@@ -199,7 +199,7 @@ DistributedDataParallel
     parameters when ``find_unused_parameters`` is set to ``True`` in DDP
     constructor.
 
-.. image:: https://user-images.githubusercontent.com/16999635/72313120-4e7c1c80-3658-11ea-9c6d-44336b2daeac.png
+.. image:: todo
     :alt: ddp_code.png
     :width: 400 px
 
