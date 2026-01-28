@@ -1231,7 +1231,6 @@ class TestLibtorchAgnostic(TestCase):
 
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
-    @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
     @parametrize("show_cpp_stacktraces", [False, True])
     def test_std_cuda_check_error(self, device, show_cpp_stacktraces):
         """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message.
@@ -1403,7 +1402,6 @@ except RuntimeError as e:
     @skipIfTorchVersionLessThan(2, 10)
     @onlyCUDA
     @parametrize("show_cpp_stacktraces", [False, True])
-    @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
     @unittest.skipIf(
         _get_torch_cuda_version() >= (13, 0), "To be resolved after branch cut"
     )
