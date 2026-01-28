@@ -32,6 +32,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
+    MACOS_VERSION,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
@@ -1165,12 +1166,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_non_standard_bool_values",
-                device_type="mps",
-            ),
             # RuntimeError: Failed to create function state object for: cross_float2
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
@@ -1301,6 +1296,15 @@ op_db: list[OpInfo] = [
                 "TestInductorOpInfo",
                 "test_comprehensive",
                 device_type="cuda",
+            ),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+                active_if=lambda _: MACOS_VERSION < 15.0,
             ),
         ),
     ),
@@ -2034,6 +2038,15 @@ op_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.complex64,),
             ),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+                active_if=lambda _: MACOS_VERSION < 15.0,
+            ),
         ),
     ),
     OpInfo(
@@ -2584,6 +2597,14 @@ op_db: list[OpInfo] = [
                 "test_fn_gradgrad",
                 device_type="cuda",
                 dtypes=[torch.cdouble],
+            ),
+            # NotImplementedError: The operator 'aten::linalg_qr.out' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=(torch.float32,),
             ),
         ),
     ),
