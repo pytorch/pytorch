@@ -1682,6 +1682,12 @@ class DictItemsVariable(DictViewVariable):
             if isinstance(args[0], DictItemsVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
             return ConstantVariable.create(False)
+        elif name == "__iter__":
+            from .lists import ListIteratorVariable
+
+            return ListIteratorVariable(
+                self.view_items_vt, mutation_type=ValueMutationNew()
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def is_python_hashable(self) -> Literal[False]:
