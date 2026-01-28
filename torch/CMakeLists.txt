@@ -172,7 +172,10 @@ endif()
 if(USE_XPU)
     include(${TORCH_ROOT}/cmake/public/xpu.cmake)
     append_filelist("libtorch_python_xpu_sources" TORCH_PYTHON_SRCS)
-
+    if(NOT WIN32)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ze_loader)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES sycl)
+    endif()
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_XPU)
 endif()
 
