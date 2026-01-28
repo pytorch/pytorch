@@ -15,6 +15,7 @@ import torch
 __all__ = [
     "BatchSampler",
     "RandomSampler",
+    "RandomBatchSampler",
     "Sampler",
     "SequentialSampler",
     "SubsetRandomSampler",
@@ -113,6 +114,11 @@ class SequentialSampler(Sampler[int]):
         return len(self.data_source)
 
 
+def init_generator():
+    seed = int(torch.empty((), dtype=torch.int64).random_())
+    return torch.Generator().manual_seed(seed)
+
+
 class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
 
@@ -140,14 +146,18 @@ class RandomSampler(Sampler[int]):
         self._num_samples = num_samples
         self.generator = generator
 
-        if not isinstance(self.replacement, bool):
+        self.validate_args(self.replacement, self.num_samples)
+
+    @staticmethod
+    def validate_args(replacement: bool, num_samples: int | None):
+        if not isinstance(replacement, bool):
             raise TypeError(
-                f"replacement should be a boolean value, but got replacement={self.replacement}"
+                f"replacement should be a boolean value, but got replacement={replacement}"
             )
 
-        if not isinstance(self.num_samples, int) or self.num_samples <= 0:
+        if not isinstance(num_samples, int) or num_samples <= 0:
             raise ValueError(
-                f"num_samples should be a positive integer value, but got num_samples={self.num_samples}"
+                f"num_samples should be a positive integer value, but got num_samples={num_samples}"
             )
 
     @property
@@ -159,12 +169,7 @@ class RandomSampler(Sampler[int]):
 
     def __iter__(self) -> Iterator[int]:
         n = len(self.data_source)
-        if self.generator is None:
-            seed = int(torch.empty((), dtype=torch.int64).random_().item())
-            generator = torch.Generator()
-            generator.manual_seed(seed)
-        else:
-            generator = self.generator
+        generator = self.generator if self.generator is not None else init_generator()
 
         if self.replacement:
             for _ in range(self.num_samples // 32):
@@ -314,6 +319,14 @@ class BatchSampler(Sampler[list[int]]):
         # Since collections.abc.Iterable does not check for `__getitem__`, which
         # is one way for an object to be an iterable, we don't do an `isinstance`
         # check here.
+        self.validate_args(batch_size, drop_last)
+
+        self.sampler = sampler
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+
+    @staticmethod
+    def validate_args(batch_size: int, drop_last: bool) -> None:
         if (
             not isinstance(batch_size, int)
             or isinstance(batch_size, bool)
@@ -326,9 +339,6 @@ class BatchSampler(Sampler[list[int]]):
             raise ValueError(
                 f"drop_last should be a boolean value, but got drop_last={drop_last}"
             )
-        self.sampler = sampler
-        self.batch_size = batch_size
-        self.drop_last = drop_last
 
     def __iter__(self) -> Iterator[list[int]]:
         sampler_iter = iter(self.sampler)
@@ -352,3 +362,56 @@ class BatchSampler(Sampler[list[int]]):
             return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
+
+
+class RandomBatchSampler(Sampler[list[int]]):
+    def __init__(
+        self,
+        data_source: Sized,
+        batch_size: int,
+        drop_last: bool,
+        replacement: bool = False,
+        generator=None,
+    ) -> None:
+        RandomSampler.validate_args(replacement, len(data_source))
+        BatchSampler.validate_args(batch_size, drop_last)
+
+        self.data_source = data_source
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.replacement = replacement
+        self.generator = generator
+
+        self.n_batches = len(self.data_source) // self.batch_size
+        self.last_size = len(self.data_source) % self.batch_size
+        if not self.drop_last and self.last_size > 0:
+            self.n_batches += 1
+
+    def sample_indices(self) -> torch.Tensor:
+        n = len(self.data_source)
+        generator = self.generator if self.generator is not None else init_generator()
+
+        if self.replacement:
+            indices = torch.randint(
+                high=n, size=(n,), dtype=torch.int64, generator=generator
+            )
+        else:
+            indices = torch.randperm(n, generator=generator)
+
+        return indices
+
+    def __iter__(self) -> Iterator[list[int]]:
+        indices = self.sample_indices().tolist()
+
+        indices_batched = (
+            indices[i: i + self.batch_size]
+            for i in range(0, len(indices) - self.last_size, self.batch_size)
+        )
+
+        yield from indices_batched
+
+        if not self.drop_last and self.last_size > 0:
+            yield indices[-self.last_size:]
+
+    def __len__(self):
+        return self.n_batches
