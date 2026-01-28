@@ -319,10 +319,17 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         to trace through and potentially optimize the code.
 
     Usage:
-        **Inputs and Outputs**:
-        - Both inputs and outputs must use pytree-compatible types.
-        Tensors, Python primitives (int, float, bool, str), and built-in containers
-        (list, tuple, dict) are supported by default.
+        **Supported Inputs**:
+        - Inputs must use pytree-compatible types: tensors, Python primitives
+        (int, float, bool, str), and built-in containers (list, tuple, dict).
+        User-defined classes must be registered as pytree nodes via
+        :func:`torch.utils.pytree.register_pytree_node`.
+        - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers are
+        tracked for autograd. The module must exist outside the compile region.
+
+        **Supported Outputs**: Must be a tuple of tensors: ``return (tensor,)`` for one tensor,
+        ``return (a, b)`` for multiple. Primitive types (int, float, bool, str) can also be
+        included in outputs.
 
         Note: We recommend leaf_functions only accept and return tensors. Though primitive
         types (int, float, bool, str) are supported in inputs and outputs, they may cause

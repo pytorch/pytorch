@@ -34,7 +34,7 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
 from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec, TypeIs
+from typing_extensions import TypeIs
 
 import torch._C
 import torch._refs
@@ -116,7 +116,6 @@ if TYPE_CHECKING:
 
 V = TypeVar("V")
 T = TypeVar("T")
-_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 
@@ -2755,34 +2754,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 "decorator. See the leaf_function docstring for details."
             )
 
-        # Create flattening wrappers for pytree output support.
-        # The output spec is captured during fake tensor propagation and used
-        # to reconstruct the pytree structure in dynamo.
-        captured_out_spec: pytree.TreeSpec | None = None
-
-        def make_flattening_wrapper(
-            fn: Callable[_P, Any],
-        ) -> Callable[_P, tuple[Any, ...]]:
-            def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> tuple[Any, ...]:
-                nonlocal captured_out_spec
-                out = fn(*args, **kwargs)
-                flat_out, out_spec = pytree.tree_flatten(out)
-                if captured_out_spec is None:
-                    captured_out_spec = out_spec
-                else:
-                    assert captured_out_spec == out_spec, (
-                        "leaf_function output structure mismatch: "
-                        f"expected {captured_out_spec}, got {out_spec}"
-                    )
-                return tuple(flat_out)
-
-            return wrapper
-
-        wrapped_real_impl = make_flattening_wrapper(real_impl)
-        wrapped_fake_impl = make_flattening_wrapper(fake_impl)
-
-        _, real_impl_spec = func_to_graphable(wrapped_real_impl)
-        _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
+        _, real_impl_spec = func_to_graphable(real_impl)
+        _, fake_impl_spec = func_to_graphable(fake_impl)
 
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
@@ -2817,19 +2790,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         result_proxy = tx.output.create_proxy(
             "call_function", invoke_leaf_function, invoke_args, {}
         )
-
-        # wrap_fx_proxy triggers fake tensor propagation which populates captured_out_spec
-        flat_output_vt = wrap_fx_proxy(tx, result_proxy)
-
-        # Reconstruct pytree structure using tree_unflatten
-        assert captured_out_spec is not None, (
-            "Output spec was not captured during fake tensor propagation. "
-            "This should not happen - please report a bug."
-        )
-        out_spec_vt = VariableTracker.build(tx, captured_out_spec)
-        return variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
-            tx, [flat_output_vt, out_spec_vt], {}
-        )
+        return wrap_fx_proxy(tx, result_proxy)
 
     def _call_ntuple(
         self,
