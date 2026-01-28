@@ -12,6 +12,7 @@ from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch._higher_order_ops import InvokeQuant, invoke_quant_packed
+from torch._dynamo.decorators import leaf_function
 
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
@@ -289,6 +290,28 @@ def simple_invoke_quant_packed(x):
     return invoke_quant_packed(fn, x)[0] * 2.0
 
 
+def sample_inputs_invoke_leaf_function(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
+
+
+@leaf_function
+def _invoke_leaf_fn_impl(x):
+    torch._dynamo.graph_break()
+    return (torch.sin(x) * 2.0,)
+
+
+@_invoke_leaf_fn_impl.register_fake
+def _invoke_leaf_fn_fake(x):
+    return (torch.empty_like(x),)
+
+
+def simple_invoke_leaf_function(x):
+    return torch.compile(_invoke_leaf_fn_impl, backend="eager", fullgraph=True)(x)[0]
+
+
 hop_db = [
     OpInfo(
         name="scan",
@@ -409,6 +432,29 @@ hop_db = [
         supports_autograd=True,
         # "torch.compile with aot_autograd does not currently support double backward."
         supports_gradgrad=False,
+    ),
+    OpInfo(
+        name="invoke_leaf_function",
+        variant_test_name="simple",
+        op=simple_invoke_leaf_function,
+        sample_inputs_func=sample_inputs_invoke_leaf_function,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=True,
+        # "torch.compile with aot_autograd does not currently support double backward."
+        supports_gradgrad=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        ),
     ),
     OpInfo(
         name="while_loop",
