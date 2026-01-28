@@ -8,7 +8,7 @@ import argparse
 import logging
 
 from cli.lib.common.cli_helper import BaseRunner, register_targets, RichHelp, TargetSpec
-from cli.lib.core.pytorch.torch_test_env_config import PytorchTestEnvironment
+from cli.lib.core.pytorch import PytorchTestEnvironment
 
 
 logger = logging.getLogger(__name__)
