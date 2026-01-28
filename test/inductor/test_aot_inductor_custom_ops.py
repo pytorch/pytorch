@@ -122,9 +122,7 @@ def _(x, dtype):
 
 # Custom ops to test MemoryFormat and Layout argument serialization
 # Using lower-level torch.library API since custom_op decorator doesn't support these types
-_memory_format_test_lib = torch.library.Library(
-    "aoti_custom_ops", "FRAGMENT"
-)
+_memory_format_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")
 _memory_format_test_lib.define(
     "fn_with_memory_format_arg(Tensor x, MemoryFormat memory_format) -> Tensor"
 )
