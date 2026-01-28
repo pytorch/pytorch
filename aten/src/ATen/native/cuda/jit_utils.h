@@ -204,6 +204,9 @@ template <> inline std::string typeName<bool>(){
 template <> inline std::string typeName<c10::complex<at::Half>>(){
     return "std::complex<at::Half>";
 }
+template <> inline std::string typeName<c10::complex<at::BFloat16>>(){
+    return "std::complex<at::BFloat16>";
+}
 template <> inline std::string typeName<c10::complex<float>>(){
     return "std::complex<float>";
 }
