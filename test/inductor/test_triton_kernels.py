@@ -132,6 +132,15 @@ class KernelTests(torch._inductor.test_case.TestCase):
         except torch._inductor.exc.InductorError as e:
             if isinstance(e.inner_exception, triton.compiler.errors.CompilationError):
                 catch_error = True
+            if (
+                isinstance(
+                    e.inner_exception,
+                    torch._inductor.compile_worker.subproc_pool.SubprocException,
+                )
+                and "triton.compiler.errors.CompilationError"
+                in e.inner_exception.details
+            ):
+                catch_error = True
         finally:
             # we assert user custom Triton kernel compile error can be captured
             # after torch.compile

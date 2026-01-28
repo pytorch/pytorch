@@ -486,7 +486,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
-        class State:
+        class State(torch._opaque_base.OpaqueBase):
             def __init__(self, n):
                 self.n = n
 
@@ -787,7 +787,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
-        class State:
+        class State(torch._opaque_base.OpaqueBase):
             def __init__(self, n):
                 self.n = n
 
@@ -1032,106 +1032,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
         )
 
         self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
-
-    def test_fullgraph_skips_nested_frames(self):
-        # Really weird setup where the compiled bytecode can
-        # trigger a Dynamo trace via weakref.finalize
-        import weakref
-
-        class Obj:
-            pass
-
-        # Could possibly be dynamo traced!
-        def finalize(x):
-            x += 4
-
-        lst = []
-
-        def _setup_finalizer(inp):
-            obj = Obj()
-            lst.append(obj)
-            weakref.finalize(obj, finalize, inp)
-
-        def fn(x):
-            x = x + 1
-            if lst:
-                lst.pop()
-            return x + 2
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
-
-        inp = torch.ones(3)
-        dummy = torch.ones(3)
-        _setup_finalizer(dummy)
-        # NOTE: the first call WILL pop lst, but not the second call!
-        self.assertEqual(opt_fn(inp), fn(inp))
-        self.assertEqual(dummy, torch.ones(3) + 4)
-        self.assertEqual(cnts.frame_count, 2)
-
-        cnts.clear()
-        torch.compiler.reset()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-
-        dummy = torch.ones(3)
-        _setup_finalizer(dummy)
-        self.assertEqual(opt_fn(inp), fn(inp))
-        self.assertEqual(dummy, torch.ones(3) + 4)
-        self.assertEqual(cnts.frame_count, 1)
-
-        with torch.compiler.set_stance("fail_on_recompile"):
-            dummy = torch.ones(3)
-            _setup_finalizer(dummy)
-            self.assertEqual(opt_fn(inp), fn(inp))
-            self.assertEqual(dummy, torch.ones(3) + 4)
-
-    # According to torch/_dynamo/types.py, the priority order is:
-    # 1. If code level (ExtraState) action is SKIP, apply its recursive action
-    #     (since we don't even look for a cache entry)
-    # 2. If frame level (CacheEntry) has a recursive action, apply that (tested by test_fullgraph_skips_nested_frames)
-    # 3. Apply code level (ExtraState) recursive action
-    @torch._dynamo.config.patch(recompile_limit=1)
-    def test_frame_recursive_action_rules(self):
-        def inner(x):
-            if torch.compiler.is_compiling():
-                return x + 1
-            return x + 2
-
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        def fn(x, n):
-            return inner(x) + n
-
-        opt_fn1 = torch.compile(fn, backend=cnts, fullgraph=True, dynamic=False)
-        opt_fn2 = torch.compile(fn, backend=cnts, fullgraph=False, dynamic=False)
-        opt_inner = torch.compile(inner, backend=cnts, fullgraph=True, dynamic=False)
-        opt_inner(torch.ones(3))
-
-        inp = torch.ones(3)
-
-        cnts.clear()
-
-        self.assertEqual(
-            opt_fn1(inp, 0), inp + 1
-        )  # new cache entry w/ SKIP recursive action
-        self.assertEqual(cnts.frame_count, 1)
-
-        self.assertEqual(
-            opt_fn2(inp, 1), inp + 2
-        )  # recompile limit exceeded, RUN_ONLY inner expected (case 3)
-        self.assertEqual(cnts.frame_count, 1)
-
-        self.assertEqual(
-            opt_fn2(inp, 1), inp + 2
-        )  # recompile limit exceeded, RUN_ONLY inner expected (case 3)
-        self.assertEqual(cnts.frame_count, 1)
-
-        torch._dynamo.eval_frame.skip_code(fn.__code__)
-        torch._dynamo.eval_frame.reset_code(inner.__code__)
-        self.assertEqual(
-            opt_fn1(inp, 0), inp + 1
-        )  # code marked as SKIP'd, so apply code-level recursive action (DEFAULT) - inner should be compiled again
-        self.assertEqual(cnts.frame_count, 2)
 
     def test_substitute_in_graph(self):
         counters.clear()

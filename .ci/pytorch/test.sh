@@ -148,6 +148,10 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
+if [[ -d "${HF_CACHE}" ]]; then
+  export HF_HOME="${HF_CACHE}"
+fi
+
 if [[ "$TEST_CONFIG" == 'default' ]]; then
   export CUDA_VISIBLE_DEVICES=0
   export HIP_VISIBLE_DEVICES=0
@@ -178,6 +182,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
+  # disable timeout due to shard not balance for xpu
+  export NO_TEST_TIMEOUT=True
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -215,8 +221,7 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
-  # JIT C++ extensions require ninja.
-  pip_install "ninja==1.10.2"
+  # JIT C++ extensions require ninja (installed from requirements-ci.txt).
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
   # but this script should be runnable by any user, including root
   export PATH="$HOME/.local/bin:$PATH"
@@ -1873,11 +1878,6 @@ elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
     (cd .ci/lumen_cli && python -m pip install -e .)
 
-    if [[ -d "${HF_CACHE}" ]]; then
-        # Enable HF_CACHE directory for vLLM tests. If this works out, we can enable
-        # this for (1) all CI jobs and (2) LF fleet
-        export HF_HOME="${HF_CACHE}"
-    fi
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch

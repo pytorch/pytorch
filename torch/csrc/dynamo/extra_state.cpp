@@ -143,7 +143,6 @@ void lookup(
     PyObject* backend,
     PyObject** maybe_cached_code,
     const char** trace_annotation,
-    std::optional<FrameAction>* recursive_action,
     bool is_skip_guard_eval_unsafe) {
   size_t index = 0;
   CacheEntry* found = nullptr;
@@ -151,8 +150,6 @@ void lookup(
   for (const auto& entry : extra_state->precompile_entries) {
     if (torch::dynamo::run_root_guard_manager(entry.root_mgr, f_locals)) {
       *maybe_cached_code = entry.code.ptr();
-      // Precompile entries don't have recursive_action
-      *recursive_action = std::nullopt;
       return;
     }
   }
@@ -202,7 +199,6 @@ void lookup(
     }
     *maybe_cached_code = found->code.ptr();
     *trace_annotation = found->trace_annotation.c_str();
-    *recursive_action = found->recursive_action;
     return;
   }
   *maybe_cached_code = py::none().ptr();
@@ -211,16 +207,13 @@ void lookup(
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
-    PyObject* backend,
-    std::optional<FrameAction> recursive_action) {
+    PyObject* backend) {
   std::list<CacheEntry>::iterator new_iter;
   if (use_lru) {
-    extra_state->cache_entry_list.emplace_front(
-        guarded_code, backend, recursive_action);
+    extra_state->cache_entry_list.emplace_front(guarded_code, backend);
     new_iter = extra_state->cache_entry_list.begin();
   } else {
-    extra_state->cache_entry_list.emplace_back(
-        guarded_code, backend, recursive_action);
+    extra_state->cache_entry_list.emplace_back(guarded_code, backend);
     new_iter = std::prev(extra_state->cache_entry_list.end());
   }
   new_iter->_owner = extra_state;

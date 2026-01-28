@@ -100,8 +100,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
                         CompileId(
                             frame_id=None, frame_compile_id=0, compiled_autograd_id=0
                         ),
-                    ),
-                    False,
+                    )
                 )
             return ConvertFrameReturn()
 
@@ -115,8 +114,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
                         CompileId(
                             frame_id=None, frame_compile_id=0, compiled_autograd_id=0
                         ),
-                    ),
-                    False,
+                    )
                 )
             return ConvertFrameReturn()
 
