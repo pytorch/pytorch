@@ -315,7 +315,6 @@ if torch.backends.mps.is_available():
             "cholesky_solve": None,
             "frexp": None,
             "gcd": None,
-            "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
             "heaviside": None,
@@ -336,7 +335,6 @@ if torch.backends.mps.is_available():
             "linalg.matrix_norm": [torch.float32],
             "linalg.norm": [torch.float32],
             "linalg.normsubgradients_at_zero": [torch.float32],
-            "linalg.qr": None,
             "linalg.svdvals": None,
             "masked.median": None,
             "matrix_exp": None,
@@ -551,7 +549,6 @@ if torch.backends.mps.is_available():
             "ormqr": None,
             "pca_lowrank": None,
             "pow": [torch.bool],
-            "qr": None,
             "remainder": [torch.bool],
             "rounddecimals_0": [
                 torch.uint8,

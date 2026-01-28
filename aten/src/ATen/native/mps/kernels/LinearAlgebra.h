@@ -20,3 +20,8 @@ struct UnpackPivotsParams {
   uint32_t pivots_batch_stride;
   uint32_t dim_size;
 };
+
+struct GeqrfParams {
+  uint32_t m;  // rows
+  uint32_t n;  // cols
+};

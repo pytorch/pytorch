@@ -9755,12 +9755,12 @@
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
-    CPU, CUDA: geqrf_out
+    CPU, CUDA, MPS: geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
   variants: method, function
   dispatch:
-    CPU, CUDA: geqrf
+    CPU, CUDA, MPS: geqrf
 
 # orgqr, alias for linalg_householder_product
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
@@ -14682,7 +14682,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_qr_out
+    CPU, CUDA, MPS: linalg_qr_out
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg

@@ -997,6 +997,146 @@ REGISTER_ORGQR(bfloat);
 REGISTER_ORGQR(float2);
 REGISTER_ORGQR(half2);
 
+// geqrf kernel: Computes QR factorization in packed Householder format
+// Input A is modified in-place: R in upper triangle, Householder vectors in lower
+// tau contains Householder reflector magnitudes i.e. we don't return Q matrix in full
+template <typename T>
+kernel void geqrf(
+    device T* A [[buffer(0)]],
+    device T* tau [[buffer(1)]],
+    constant GeqrfParams& params [[buffer(2)]],
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 bid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  
+  uint batch_idx = bid.x;
+  uint m = params.m;
+  uint n = params.n;
+  uint k = min(m, n);
+  
+  uint linear_tid = tid.y * tpg.x + tid.x;
+  uint group_size = tpg.x * tpg.y;
+  
+  // Offset to this batch's matrix and tau
+  device T* A_batch = A + batch_idx * m * n;
+  device T* tau_batch = tau + batch_idx * k;
+  
+  threadgroup float shared_scratch[8];
+  
+  for (uint col = 0; col < k; col++) {
+    // Step 1: Compute norm of column below diagonal
+    float norm_sq = 0.0f;
+    for (uint row = col + linear_tid; row < m; row += group_size) {
+      float val = float(A_batch[row * n + col]);
+      norm_sq += val * val;
+    }
+    
+    // Reduce norm_sq
+    float simd_result = simd_sum(norm_sq);
+    if (linear_tid % 32 == 0) {
+      shared_scratch[linear_tid / 32] = simd_result;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    if (linear_tid < 8) {
+      float sum = shared_scratch[linear_tid];
+      sum = simd_sum(sum);
+      shared_scratch[0] = sum;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    norm_sq = shared_scratch[0];
+    
+    float norm = sqrt(norm_sq);
+    
+    // Step 2: Compute Householder reflector
+    float x0 = float(A_batch[col * n + col]);
+    float sign = (x0 >= 0.0f) ? 1.0f : -1.0f;
+    float u0 = x0 + sign * norm;
+    
+    // Normalize v such that v[0] = 1
+    // v = u / u0
+    // squared_norm(v) = 1 + (norm_sq - x0^2) / u0^2
+    float dist_sq = norm_sq - x0 * x0;
+    float u0_sq = u0 * u0;
+    float v_norm_sq = 1.0f + ((u0_sq > 1e-20f) ? (dist_sq / u0_sq) : 0.0f);
+    
+    float tau_val = (v_norm_sq > 0.0f) ? 2.0f / v_norm_sq : 0.0f;
+    
+    // (LAPACK convention: avoid flipping the sign of the last element of the diagonal)
+    if (col == m - 1) {
+      tau_val = 0.0f;
+    }
+    
+    // Store tau
+    if (linear_tid == 0) {
+      tau_batch[col] = T(tau_val);
+      // Store R diagonal element
+      if (col != m - 1) {
+        A_batch[col * n + col] = T(-sign * norm);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    
+    // Store Householder vector below diagonal
+    // also normalize by u0
+    float u0_inv = (fabs(u0) > 1e-10f) ? 1.0f / u0 : 0.0f;
+    for (uint row = col + 1 + linear_tid; row < m; row += group_size) {
+      A_batch[row * n + col] = T(float(A_batch[row * n + col]) * u0_inv);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    
+    // Step 3: Apply Householder reflection to trailing columns
+    // A[col:m, col+1:n] = A[col:m, col+1:n] - tau * v * v^T * A[col:m, col+1:n]
+    for (uint j = col + 1; j < n; j++) {
+      // Compute v^T * A[:, j]
+      float dot = 0.0f;
+      for (uint row = col + linear_tid; row < m; row += group_size) {
+        float v_row = (row == col) ? 1.0f : float(A_batch[row * n + col]);
+        float a_row = float(A_batch[row * n + j]);
+        dot += v_row * a_row;
+      }
+      
+      // Reduce dot product
+      simd_result = simd_sum(dot);
+      if (linear_tid % 32 == 0) {
+        shared_scratch[linear_tid / 32] = simd_result;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      
+      if (linear_tid < 8) {
+        float sum = shared_scratch[linear_tid];
+        sum = simd_sum(sum);
+        shared_scratch[0] = sum;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      dot = shared_scratch[0];
+      
+      // Apply: A[:, j] -= tau * dot * v
+      float scale = tau_val * dot;
+      for (uint row = col + linear_tid; row < m; row += group_size) {
+        float v_row = (row == col) ? 1.0f : float(A_batch[row * n + col]);
+        A_batch[row * n + j] = T(float(A_batch[row * n + j]) - scale * v_row);
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    }
+  }
+}
+
+#define REGISTER_GEQRF(T)                            \
+  template [[host_name("geqrf_" #T)]]                \
+  kernel void geqrf<T>(                              \
+      device T* A [[buffer(0)]],                     \
+      device T* tau [[buffer(1)]],                   \
+      constant GeqrfParams& params [[buffer(2)]],    \
+      uint3 tid [[thread_position_in_threadgroup]],  \
+      uint3 bid [[threadgroup_position_in_grid]],    \
+      uint3 tpg [[threads_per_threadgroup]]);
+
+REGISTER_GEQRF(float);
+REGISTER_GEQRF(half);
+REGISTER_GEQRF(bfloat);
+
+
 #define REGISTER_UNPACK_PIVOTS(TO, TI)                    \
   template [[host_name("unpack_pivots_" #TO "_" #TI)]]    \
   kernel void unpack_pivots<TO, TI>(                      \
