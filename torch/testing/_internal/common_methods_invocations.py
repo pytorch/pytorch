@@ -15014,16 +15014,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
-           skips=(
-               # Some but not all platforms throw:
-               # AssertionError: Tensor-likes are not close!
-               # Greatest absolute difference: 13.361434936523438 at index (3, 1) (up to 1e-05 allowed)
-               # Greatest relative difference: 10.395817756652832 at index (3, 4) (up to 1.3e-06 allowed)
-               DecorateInfo(
-                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
-           )),
+           ),
     OpInfo('min',
            variant_test_name='reduction_no_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -15419,14 +15410,6 @@ op_db: list[OpInfo] = [
            skips=(
                # Exception: MPS supports tensors with dimensions <= 16, but got 65.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
-               # Some but not all platforms throw:
-               # AssertionError: Tensor-likes are not close!
-               # Greatest absolute difference: 13.361434936523438 at index (3, 1) (up to 1e-05 allowed)
-               # Greatest relative difference: 10.395817756652832 at index (3, 4) (up to 1.3e-06 allowed)
-               DecorateInfo(
-                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
            ),
            error_inputs_func=error_inputs_aminmax_amax_amin),
     OpInfo('as_strided',
@@ -19801,14 +19784,6 @@ op_db: list[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], device_type='cuda', active_if=not TEST_WITH_ROCM),
-               # Some but not all platforms throw:
-               # AssertionError: Tensor-likes are not close!
-               # Greatest absolute difference: 7951.0 at index (27,) (up to 1e-05 allowed)
-               # Greatest relative difference: inf at index (6312,) (up to 1.3e-06 allowed)
-               DecorateInfo(
-                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -21244,16 +21219,6 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_fast_mode=False,
            sample_inputs_func=sample_inputs_logsumexp,
-           skips=(
-               # Some but not all platforms throw:
-               # AssertionError: Tensor-likes are not close!
-               # Greatest absolute difference: nan at index (0, 0) (up to 1e-05 allowed)
-               # Greatest relative difference: nan at index (0, 0) (up to 1.3e-06 allowed)
-               DecorateInfo(
-                   unittest.skip('Skipped!'), 'TestCommon', 'test_out',
-                   device_type='mps', dtypes=(torch.float32,)
-               ),
-           ),
            reference_inputs_func=reference_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
@@ -23271,14 +23236,6 @@ op_db: list[OpInfo] = [
             # MPS: not supported for torch.int64
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64,)),
-            # Some but not all platforms throw:
-            # AssertionError: Tensor-likes are not close!
-            # Greatest absolute difference: 15.520018577575684 at index (2, 3) (up to 1e-05 allowed)
-            # Greatest relative difference: 20.158464431762695 at index (4, 1) (up to 1.3e-06 allowed)
-            DecorateInfo(
-                unittest.skip('Skipped!'), 'TestCommon', 'test_out',
-                device_type='mps', dtypes=(torch.float32,)
-            ),
         ),
     ),
     OpInfo(
