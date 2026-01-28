@@ -148,6 +148,18 @@ user_stack=None)
             self.assertIs(guards.check(), False)
             self.assertEqual(guards.reason(), "grad_mode ")
 
+    def test_global_state_reason_autocast_cache(self):
+        # Test that autocast_cache_enabled is reported specifically
+        old_cache = torch.is_autocast_cache_enabled()
+        try:
+            torch.set_autocast_cache_enabled(True)
+            guard = GlobalStateGuard()
+            torch.set_autocast_cache_enabled(False)
+            self.assertIs(guard.check(), False)
+            self.assertEqual(guard.reason(), "autocast_cache_enabled ")
+        finally:
+            torch.set_autocast_cache_enabled(old_cache)
+
     def test_python_lambda_leaf_guard(self):
         root = RootGuardManager()
         const_guard = guards.LAMBDA_GUARD(

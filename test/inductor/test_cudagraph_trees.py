@@ -623,6 +623,110 @@ if HAS_CUDA_AND_TRITON:
                 )
                 self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
 
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_index_put_boolean_mutation_across_partitions(self):
+            """
+            Test that index_put_ with boolean indices correctly passes the mutated
+            buffer to subsequent partitions. This tests the fix for mutation buffers
+            with NoneLayout (like IndexPutFallback) being correctly tracked across
+            partition boundaries.
+
+            The key scenario is:
+            1. A buffer is created in partition 0
+            2. index_put_ (with boolean mask) mutates it - this creates a partition split
+            3. The mutated buffer is used in partition 1
+            """
+
+            def fn(x, mask, values):
+                # Create a buffer in partition 0
+                result = x.clone() + 2
+                # index_put_ with boolean mask causes partition split
+                result.index_put_([mask], values)
+                # Use the mutated buffer in partition 1
+                return result * 2 + result.sum()
+
+            fn_c = torch.compile(mode="reduce-overhead")(fn)
+            x = torch.randn(4, 8, device="cuda")
+            mask = torch.tensor([True, False, True, False], device="cuda")
+            values = torch.randn(2, 8, device="cuda")
+
+            # Verify we get multiple partitions
+            _, code = run_and_get_code(fn_c, x, mask, values)
+            self.assertGreaterEqual(get_num_partitions(code), 2)
+
+            # Verify correctness across multiple runs (tests cudagraph replay)
+            for _ in range(3):
+                x = torch.randn(4, 8, device="cuda")
+                mask = torch.tensor([True, False, True, False], device="cuda")
+                values = torch.randn(2, 8, device="cuda")
+                out = fn_c(x, mask, values)
+                expected = fn(x, mask, values)
+                self.assertEqual(out, expected)
+
+        @config.patch(implicit_fallbacks=True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_graph_partition_custom_op_mutation_with_cudagraph_unsafe(self):
+            """
+            Test that custom ops with mutations work correctly with cudagraph-unsafe
+            ops that cause partition splits. This tests that mutated buffers from
+            custom ops are correctly passed across partition boundaries.
+            """
+
+            @torch.library.custom_op(
+                "mylib::mutating_op",
+                mutates_args=["x"],
+                schema="(Tensor(a!)? x) -> (Tensor, Tensor)",
+                device_types="cuda",
+            )
+            def mutating_op(x) -> tuple[torch.Tensor, torch.Tensor]:
+                x.add_(1)
+                return (x + 1, x + 2)
+
+            @mutating_op.register_fake
+            def _(x) -> tuple[torch.Tensor, torch.Tensor]:
+                return (torch.empty_like(x), torch.empty_like(x))
+
+            @torch.library.custom_op(
+                "mylib::cudagraph_unsafe_combine",
+                mutates_args=[],
+                schema="(Tensor x, Tensor y, Tensor x1, Tensor y1) -> Tensor",
+                device_types="cuda",
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def cudagraph_unsafe_combine(x0, x1, y0, y1) -> torch.Tensor:
+                return x0 + x1 + y0 + y1
+
+            @cudagraph_unsafe_combine.register_fake
+            def _(x0, x1, y0, y1) -> torch.Tensor:
+                return torch.empty_like(x0)
+
+            def f(x):
+                x = x + 1
+                x = mutating_op(x)
+                x0, x1 = x[0], x[1]
+                y0 = x0 + 1
+                y1 = x1 + 1
+                y = cudagraph_unsafe_combine(x0, x1, y0, y1)
+                z = y + x0 + x1
+                z += 1
+                return y + z
+
+            f_compiled = torch.compile(f, mode="reduce-overhead")
+
+            x = torch.randn((2, 4, 8), device="cuda")
+
+            # Verify we get multiple partitions
+            _, code = run_and_get_code(f_compiled, x.clone())
+            self.assertGreaterEqual(get_num_partitions(code), 2)
+
+            # Verify correctness across multiple runs (tests cudagraph replay)
+            for _ in range(5):
+                x = torch.randn((2, 4, 8), device="cuda")
+                x_cloned = x.clone()
+                eager_out = f(x)
+                compiled_out = f_compiled(x_cloned)
+                self.assertEqual(eager_out, compiled_out)
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
@@ -1068,6 +1172,75 @@ if HAS_CUDA_AND_TRITON:
             _, code = run_and_get_code(f_compiled, x)
             num_partitions = get_num_partitions(code)
             self.assertEqual(num_partitions, 2)
+
+        @torch._inductor.config.patch("graph_partition", True)
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_cudagraph_unsafe_unbacked_ops(self):
+            @torch.library.custom_op("mylib::get_size", mutates_args=())
+            def get_size(x: torch.Tensor) -> int:
+                return x.shape[0] // 2
+
+            @get_size.register_fake
+            def _(x):
+                ctx = torch.library.get_ctx()
+                return ctx.new_dynamic_size(min=0, max=x.shape[0])
+
+            x = torch.randn(8, 8, device="cuda")
+            W1 = torch.randn(8, 8, device="cuda")
+            W2 = torch.randn(8, 8, device="cuda")
+
+            def f(q):
+                # input q is on gpu. Here, we have 1 cuda addition op followed by cpu <> gpu device copy
+                # to enforce 1 graph partition. `torch._inductor.config.cudagraph_unsafe_unbacked_ops`
+                # will decide whether we have 1 more graph partition (i.e., 1 graph partition
+                # or 2 graph partitions in total).
+                q = q + 1
+                q_cpu = q.cpu()
+                q = q_cpu.cuda()
+
+                num_decode = torch.ops.mylib.get_size(q)  # Returns unbacked SymInt
+
+                torch._check(num_decode >= 0)
+                torch._check(num_decode <= q.shape[0])
+
+                num_prefill = q.shape[0] - num_decode
+
+                decode_q = q.narrow(0, 0, num_decode)
+                prefill_q = q.narrow(0, num_decode, num_prefill)
+
+                prefill_out = prefill_q @ W1
+                prefill_out2 = prefill_out @ W2
+
+                decode_out = decode_q @ W1
+
+                return prefill_out2, decode_out
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions_before = get_num_partitions(code)
+            # 2 partition since ops using unbacked symints are kept in graph partitions
+            self.assertEqual(num_partitions_before, 2)
+
+            # With config, ops using the unbacked symint should be partitioned out
+            torch._inductor.config.cudagraph_unsafe_unbacked_ops = ["mylib::get_size"]
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions_after = get_num_partitions(code)
+            # 1 partition since ops using unbacked symints are excluded from graph partitions
+            self.assertEqual(num_partitions_after, 1)
+
+            # Test with op_overload name (with .default suffix)
+            torch._inductor.config.cudagraph_unsafe_unbacked_ops = [
+                "mylib::get_size.default"
+            ]
+
+            f_compiled = torch.compile(f, mode="reduce-overhead", fullgraph=True)
+            _, code = run_and_get_code(f_compiled, x)
+            num_partitions_overload = get_num_partitions(code)
+            # 1 partition since ops using unbacked symints are excluded from graph partitions
+            self.assertEqual(num_partitions_overload, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
