@@ -1138,7 +1138,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             # Check if fn is a leaf_function (e.g., forward decorated with @leaf_function)
             if trace_rules.is_leaf_function(fn):
                 return variables.TorchInGraphFunctionVariable(
-                    fn, leaf_function=True
+                    fn, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
                 ).call_function(tx, [self] + list(args), kwargs)
             elif not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
                 fn_vt = VariableTracker.build(tx, fn, source=source)
