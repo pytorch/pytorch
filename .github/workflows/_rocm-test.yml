@@ -282,11 +282,7 @@ jobs:
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
       - name: Change permissions (only needed for kubernetes runners for now)
-<<<<<<< HEAD
-        if: ${{ always() && steps.test.conclusion && (contains(matrix.runner, 'gfx942') || contains(matrix.runner, 'gfx950') || contains(matrix.runner, 'mi355')) }}
-=======
         if: ${{ always() && steps.test.conclusion && (contains(matrix.runner, 'gfx942') || contains(matrix.runner, 'mi355') || contains(matrix.runner, 'mi250')) }}
->>>>>>> 3d9b73c540a (Update _rocm-test.yml to change permissions for mi250 runners as well)
         run: |
           docker exec -t "${{ env.CONTAINER_NAME }}" sh -c "sudo chown -R 1001:1001 test"
 
