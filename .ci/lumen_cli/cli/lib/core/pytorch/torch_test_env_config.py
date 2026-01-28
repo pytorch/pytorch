@@ -30,6 +30,7 @@ Usage:
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -126,7 +127,9 @@ class PytorchTestEnvironment:
         self._setup_sanitizers()
         self._setup_cpu_capability()
         self._setup_legacy_driver()
+        self._setup_custom_test_artifact_dir()
         self._setup_cuda_arch()
+        self._setup_rocm_arch()
 
         logger.debug(
             "TestEnvironment initialized: build_environment=%s, test_config=%s, "
@@ -242,6 +245,8 @@ class PytorchTestEnvironment:
         elif self.is_xpu:
             self._env_updates["PYTORCH_TESTING_DEVICE_ONLY_FOR"] = "xpu"
             self._env_updates["PYTHON_TEST_EXTRA_OPTION"] = "--xpu"
+            # Disable timeout due to shard not balance for xpu
+            self._env_updates["NO_TEST_TIMEOUT"] = "True"
 
         # Crossref tests
         if "crossref" in self.test_config:
@@ -328,6 +333,15 @@ class PytorchTestEnvironment:
         if self.test_config == "legacy_nvidia_driver":
             self._env_updates["USE_LEGACY_DRIVER"] = "1"
 
+    def _setup_custom_test_artifact_dir(self) -> None:
+        """Configure custom test artifact build directory."""
+        if self.is_bazel:
+            return
+
+        default_dir = "build/custom_test_artifacts"
+        custom_dir = os.environ.get("CUSTOM_TEST_ARTIFACT_BUILD_DIR", default_dir)
+        self._env_updates["CUSTOM_TEST_ARTIFACT_BUILD_DIR"] = os.path.realpath(custom_dir)
+
     def _setup_cuda_arch(self) -> None:
         """
         Detect and configure CUDA architecture.
@@ -356,6 +370,49 @@ class PytorchTestEnvironment:
         elif "nogpu" in self.test_config:
             # There won't be nvidia-smi in nogpu tests, so set to default minimum supported value
             self._env_updates["TORCH_CUDA_ARCH_LIST"] = "8.0"
+
+    def _setup_rocm_arch(self) -> None:
+        """
+        Detect and configure ROCm GPU architecture.
+
+        Uses rocminfo to query GPU information and sets:
+        - PYTORCH_ROCM_ARCH: The GPU architecture (e.g., gfx90a, gfx942)
+        - ROCM_PATH: Path prefix for ROCm (if detected)
+        """
+        if not self.is_rocm:
+            return
+
+        if not shutil.which("rocminfo"):
+            raise RuntimeError("rocminfo not found, skipping ROCm architecture detection")
+            return
+        try:
+            result = subprocess.run(
+                ["rocminfo"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            output = result.stdout
+
+            # Parse rocminfo output for GPU architecture (gfx*)
+            gfx_matches = re.findall(r"Name:\s*(gfx\w+)", output)
+            marketing_matches = re.findall(r"Marketing Name:\s*(.+)", output)
+
+            if gfx_matches:
+                # Use the first GPU architecture found
+                rocm_arch = gfx_matches[0].strip()
+                self._env_updates["PYTORCH_ROCM_ARCH"] = rocm_arch
+                logger.info("Detected ROCm GPU architecture: %s", rocm_arch)
+
+            if marketing_matches:
+                logger.info("ROCm GPU Marketing Name: %s", marketing_matches[0].strip())
+
+            # Set ROCM_PATH if not already set
+            if "ROCM_PATH" not in os.environ:
+                self._env_updates["ROCM_PATH"] = "/opt/rocm"
+
+        except subprocess.CalledProcessError:
+            logger.warning("Failed to query ROCm architecture from rocminfo")
 
     # =========================================================================
     # Build Environment Property Checks
@@ -410,6 +467,40 @@ class PytorchTestEnvironment:
     def is_aarch64(self) -> bool:
         """Check if this is an aarch64 build."""
         return "aarch64" in self.build_environment
+
+    @property
+    def rocm_benchmark_prefix(self) -> str:
+        """
+        Get the benchmark directory prefix for ROCm builds.
+
+        Returns 'rocm/' for ROCm builds to avoid clashes with CUDA benchmark results,
+        empty string otherwise.
+        """
+        return "rocm/" if self.is_rocm else ""
+
+    @property
+    def tests_to_include(self) -> str:
+        """Get the TESTS_TO_INCLUDE environment variable if set."""
+        return os.environ.get("TESTS_TO_INCLUDE", "")
+
+    @property
+    def include_clause(self) -> str:
+        """
+        Get the --include clause for test filtering.
+
+        Returns '--include <tests>' if TESTS_TO_INCLUDE is set, empty string otherwise.
+        """
+        tests = self.tests_to_include
+        return f"--include {tests}" if tests else ""
+
+    @property
+    def pr_number(self) -> str:
+        """
+        Get the PR number from environment.
+
+        Checks PR_NUMBER first, then falls back to CIRCLE_PR_NUMBER.
+        """
+        return os.environ.get("PR_NUMBER") or os.environ.get("CIRCLE_PR_NUMBER", "")
 
     # =========================================================================
     # Test Config Property Checks
