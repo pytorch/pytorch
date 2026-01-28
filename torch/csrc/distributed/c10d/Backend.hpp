@@ -500,6 +500,12 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  // Returns true if backend is fully initialized and ready for allocateTensor.
+  // Backends with lazy initialization (e.g. NCCL) should override this.
+  virtual bool isInitialized() {
+    return true;
+  }
+
   // Aborts all pending operations and connections in the backend if the backend
   // supports it.
   virtual void abort() {}

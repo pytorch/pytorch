@@ -5847,9 +5847,21 @@ bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
   return c10d::cuda::deviceSupportsMulticast(deviceIdx);
 }
 
+namespace {
+bool usePgAllocVerbose() {
+  static const char* env =
+      std::getenv("TORCH_C10D_FUNCTIONAL_USE_PG_ALLOC_VERBOSE");
+  static bool enabled = env != nullptr && std::strcmp(env, "1") == 0;
+  return enabled;
+}
+} // namespace
+
 at::Tensor ProcessGroupNCCL::allocateTensor(
     long size,
     at::TensorOptions options) {
+  // if (usePgAllocVerbose()) {
+  //   std::cout << "XXX ProcessGroupNCCL::allocateTensor size=" << size << std::endl;
+  // }
   // Some checks
   TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
   auto device = options.device();
