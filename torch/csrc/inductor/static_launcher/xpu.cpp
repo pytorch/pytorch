@@ -37,7 +37,7 @@
   }
 
 namespace {
-const at::xpu::LevelZero& l0() {
+const at::xpu::LevelZero& ze() {
   return at::globalContext().getLevelZero();
 }
 /**
@@ -85,7 +85,7 @@ syclDevicePtr_t getPointer(
   ze_memory_allocation_properties_t prop;
   prop.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
   prop.pNext = nullptr;
-  auto res = l0().zeMemGetAllocProperties(
+  auto res = ze().zeMemGetAllocProperties(
       (ze_context_handle_t)handle, data_ptr, &prop, nullptr);
 
   TORCH_CHECK(
@@ -208,18 +208,18 @@ inline ze_module_handle_t _createModule(
   moduleDescription.pBuildFlags = buildFlags;
   ze_module_build_log_handle_t buildLog = nullptr;
   ze_module_handle_t module = nullptr;
-  auto error_no = l0().zeModuleCreate(
+  auto error_no = ze().zeModuleCreate(
       context, device, &moduleDescription, &module, &buildLog);
 
   if (error_no != ZE_RESULT_SUCCESS) {
     size_t szLog = 0;
-    ZE_CHECK(l0().zeModuleBuildLogGetString(buildLog, &szLog, nullptr));
+    ZE_CHECK(ze().zeModuleBuildLogGetString(buildLog, &szLog, nullptr));
     std::vector<char> log(szLog);
-    ZE_CHECK(l0().zeModuleBuildLogGetString(buildLog, &szLog, log.data()));
+    ZE_CHECK(ze().zeModuleBuildLogGetString(buildLog, &szLog, log.data()));
     std::cerr << "L0 build module failed. Log: " << log.data() << std::endl;
   }
   if (buildLog) {
-    ZE_CHECK(l0().zeModuleBuildLogDestroy(buildLog));
+    ZE_CHECK(ze().zeModuleBuildLogDestroy(buildLog));
   }
   ZE_CHECK(error_no);
   return module;
@@ -237,12 +237,12 @@ inline sycl::kernel* _createKernel(
   kernelDescription.pNext = nullptr;
   kernelDescription.flags = ZE_KERNEL_FLAG_FORCE_RESIDENCY;
   kernelDescription.pKernelName = kernelName;
-  ZE_CHECK(l0().zeKernelCreate(module, &kernelDescription, &kernel));
+  ZE_CHECK(ze().zeKernelCreate(module, &kernelDescription, &kernel));
   if (nSpillsPtr) {
     ze_kernel_properties_t props;
     props.stype = ZE_STRUCTURE_TYPE_KERNEL_PROPERTIES;
     props.pNext = nullptr;
-    ZE_CHECK(l0().zeKernelGetProperties(kernel, &props));
+    ZE_CHECK(ze().zeKernelGetProperties(kernel, &props));
     *nSpillsPtr = props.spillMemSize;
   }
   auto& syclContext = c10::xpu::get_device_context();
