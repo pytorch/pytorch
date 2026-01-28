@@ -34,7 +34,6 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import RepararametrizeModuleContextVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -236,12 +235,14 @@ def only_consist_of(
 def _make_inlined(
     tx: "InstructionTranslator", f: Callable[..., Any]
 ) -> Callable[..., VariableTracker]:
+    from .builder import SourcelessBuilder
+
     assert callable(f), "Expect f to be a python callable."
 
     def inline_call(
         *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker:
-        return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+        return SourcelessBuilder.create(tx, f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
 
     return inline_call
 
@@ -370,7 +371,7 @@ def _call_function_and_unflatten_output(
     ret_spec: OutputSpec,
     body_r: VariableTracker | None,
 ) -> VariableTracker:
-    from .builder import wrap_fx_proxy
+    from .builder import SourcelessBuilder, wrap_fx_proxy
 
     # Store the invocation as a call
     flat_variable = wrap_fx_proxy(
@@ -401,10 +402,13 @@ def _call_function_and_unflatten_output(
     if ret_spec.num_intermediate_nodes_as_outputs:
         # The treespec was computed w/o any extra intermediate outputs. At this
         # point, it is safe to just get rid of the extra outputs
-        flat_variable = TupleVariable(
-            flat_variable.items[  # mypy: ignore[attr-defined]
-                : -ret_spec.num_intermediate_nodes_as_outputs
-            ]
+        flat_variable = SourcelessBuilder.create(
+            tx,
+            tuple(
+                flat_variable.items[  # mypy: ignore[attr-defined]
+                    : -ret_spec.num_intermediate_nodes_as_outputs
+                ]
+            ),
         )
 
     if ret_spec.masks_to_filter_const_values:
@@ -418,7 +422,9 @@ def _call_function_and_unflatten_output(
 
     # Transform variable back into a list (previously made into a tuple by
     # speculate_subgraph function) so as to respect the pytree API typing.
-    flat_list_variable = BuiltinVariable(list).call_function(tx, [flat_variable], {})
+    flat_list_variable = SourcelessBuilder.create(tx, list).call_function(
+        tx, [flat_variable], {}
+    )
     return (
         _make_inlined(tx, pytree.tree_unflatten)(flat_list_variable, ret_spec.treespec)
         if ret_spec.treespec
@@ -604,8 +610,12 @@ def _check_all_tensorvariable(args: Sequence[VariableTracker]) -> None:
 def _check_supported_callable_arg(
     tx: "InstructionTranslator", func_var: VariableTracker, arg_name: str
 ) -> None:
+    from .builder import SourcelessBuilder
+
     is_callable = (
-        BuiltinVariable(callable).call_function(tx, [func_var], {}).as_python_constant()
+        SourcelessBuilder.create(tx, callable)
+        .call_function(tx, [func_var], {})
+        .as_python_constant()
     )
     if not is_callable:
         unimplemented(
@@ -998,13 +1008,13 @@ def validate_args_and_maybe_create_graph_inputs(
     sub_args_names: Sequence[str] | None = None,
 ) -> list[Any]:
     from . import AutogradFunctionContextVariable
-    from .builder import wrap_fx_proxy_cls
+    from .builder import SourcelessBuilder, wrap_fx_proxy_cls
 
     assert tracer.parent is not None
 
     if set_subgraph_inputs == "flatten_manual":
         flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
-            ListVariable(sub_args)
+            SourcelessBuilder.create(tx, list(sub_args))
         ).unpack_var_sequence(tx)
 
         flat_inputs = validate_args_and_maybe_create_graph_inputs(
@@ -1016,7 +1026,7 @@ def validate_args_and_maybe_create_graph_inputs(
         )
 
         return _make_inlined(tx, pytree.tree_unflatten)(
-            ListVariable(flat_inputs), tree_spec
+            SourcelessBuilder.create(tx, list(flat_inputs)), tree_spec
         ).unpack_var_sequence(tx)
     else:
         if sub_args_names is not None:
@@ -1844,6 +1854,8 @@ def speculate_subgraph(
     if sub_kwargs is None:
         sub_kwargs = {}
 
+    from .builder import SourcelessBuilder
+
     assert set_subgraph_inputs in {
         "automatic",
         "automatic_with_forced_inputs",
@@ -1897,7 +1909,9 @@ def speculate_subgraph(
 
                 # Actually, transform the list (returned by flatten) into a tuple
                 # for dynamo consistency.
-                output = BuiltinVariable(tuple).call_function(tx, [output], {})
+                output = SourcelessBuilder.create(tx, tuple).call_function(
+                    tx, [output], {}
+                )
 
                 if remove_consts_from_outputs:
                     # Filter out the constants and save them into a spec. Filtering
@@ -4162,7 +4176,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         mask_fn = block_mask.items[-1]  # type: ignore[attr-defined]
         if mask_fn.is_python_constant() and mask_fn.as_python_constant() is None:
-            mask_fn = UserFunctionVariable(
+            mask_fn = VariableTracker.build(
+                tx,
                 torch.nn.attention.flex_attention.noop_mask,
                 source=mask_fn.source,
             )
@@ -4441,7 +4456,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         """
         from torch._functorch.autograd_function import DynamoAutogradFunctionTraceHelper
 
-        fwd_fn, fwd_args = self.prepare_fn_vt(ctx, "forward", args)
+        fwd_fn, fwd_args = self.prepare_fn_vt(tx, ctx, "forward", args)
 
         # autograd.Function forward does a few things like running in no_grad
         # mode and also applying view_as for input tensors that are returned as
@@ -4507,7 +4522,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         """
         Traces the backward method of the autograd.Function object.
         """
-        from . import UserDefinedClassVariable, UserFunctionVariable, UserMethodVariable
+        from . import UserDefinedClassVariable, UserMethodVariable
 
         # Note that for the forward, we do not restore side effects, because we
         # want the later tracing to see the side-effects. But for backward, we
@@ -4535,7 +4550,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     bwd_args.append(ConstantVariable.create(None))
 
-        bwd_fn, bwd_args = self.prepare_fn_vt(ctx, "backward", bwd_args)
+        bwd_fn, bwd_args = self.prepare_fn_vt(tx, ctx, "backward", bwd_args)
 
         def is_strict_for(v: VariableTracker) -> bool:
             if v.is_tensor():
@@ -4580,10 +4595,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 from .._trace_wrapped_higher_order_op import (
                     autograd_function_backward_rewritten,
                 )
+                from .builder import SourcelessBuilder
 
                 if isinstance(self.bwd_fn, types.FunctionType):
-                    bwd_fn = UserFunctionVariable(
-                        autograd_function_backward_rewritten(self.bwd_fn)
+                    bwd_fn = SourcelessBuilder.create(
+                        tx, autograd_function_backward_rewritten(self.bwd_fn)
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
                     bwd_fn = UserMethodVariable(
@@ -4970,11 +4986,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
     def prepare_fn_vt(
         self,
+        tx: "InstructionTranslator",
         ctx: "AutogradFunctionContextVariable",
         method_name: str,
         args: Sequence[VariableTracker],
     ) -> tuple[VariableTracker, Sequence[VariableTracker]]:
-        from . import UserDefinedClassVariable, UserFunctionVariable, UserMethodVariable
+        from . import UserDefinedClassVariable, UserMethodVariable
 
         source = None
         if self.parent_source:
@@ -4987,7 +5004,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         fn_vt, fn_args = None, None
         if isinstance(fn, types.FunctionType):
-            fn_vt = UserFunctionVariable(fn, source=source)
+            fn_vt = VariableTracker.build(tx, fn, source=source)
             fn_args = [ctx, *args]
         elif isinstance(fn, types.MethodType):
             cls_vt = UserDefinedClassVariable(fn.__class__)
