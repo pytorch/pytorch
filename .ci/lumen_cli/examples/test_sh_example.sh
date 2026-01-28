@@ -76,28 +76,22 @@ fi
 # ENVIRONMENT CONFIGURATION - Use lumen_cli
 # Replaces ~100 lines of bash if-else logic for env vars
 # ===========================================================================
-
-# Apply all computed environment variables from Python
-# This sets: TERM, LANG, TORCH_SERIALIZATION_DEBUG, BUILD_DIR, TORCH_INSTALL_DIR,
-# CUDA_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES, VALGRIND, ASAN_OPTIONS, UBSAN_OPTIONS,
-# PYTORCH_TEST_WITH_SLOW, PYTORCH_TESTING_DEVICE_ONLY_FOR, ATEN_CPU_CAPABILITY,
-# USE_LEGACY_DRIVER, CUSTOM_TEST_ARTIFACT_BUILD_DIR, and more...
-eval "$(lumen test pytorch env --export)"
+eval "$(lumen test pytorch env \
+    --build-environment "$BUILD_ENVIRONMENT" \
+    --test-config "${TEST_CONFIG}" \
+    --shard-id "${SHARD_NUMBER:1}" \
+    --num-shards "${NUM_TEST_SHARDS:1}" \
+    --export)"
 
 echo "Environment variables:"
 env
 
-# ===========================================================================
-# BUILD VERIFICATION - Use lumen_cli
-# Replaces ASAN crash tests, debug assert tests, CUDA init tests
-# ===========================================================================
-
-# This single command replaces:
-# - Lines 281-287: ASAN/UBSAN crash verification tests
-# - Lines 289-300: Debug assertion verification
-# - Line 310: CUDA initialization test for legacy_nvidia_driver
-# - Lines 193-194: ROCm info printing
-lumen test pytorch env --verify
+lumen test pytorch env \
+    --build-environment "$BUILD_ENVIRONMENT" \
+    --test-config "${TEST_CONFIG}" \
+    --shard-id "${SHARD_NUMBER:1}" \
+    --num-shards "${NUM_TEST_SHARDS:1}" \
+    --verify-build-env
 
 # ===========================================================================
 # REST OF test.sh CONTINUES FROM HERE (line 313+)
