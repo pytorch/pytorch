@@ -132,7 +132,7 @@ __global__ void lpmax_cleanup(
 
 std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
-  
+
   // for parity with max in ReduceAllOps.cpp, as max(empty) is undefined
   // Check this early before routing to slow path
   TORCH_CHECK(
@@ -141,7 +141,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
           tensors.end(),
           [](const auto& t) { return t.numel() > 0; }),
       "max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
-  
+
   if (!can_use_fast_route(tensors)) {
     return foreach_tensor_max_slow(tensors);
   }
