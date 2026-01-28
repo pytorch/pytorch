@@ -1197,6 +1197,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_subclass_method_override(self):
         class MyTensor(torch.Tensor):
             def sum(self, dim=None, keepdim=False):

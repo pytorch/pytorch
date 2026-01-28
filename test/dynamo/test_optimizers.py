@@ -36,6 +36,7 @@ class MyOptimizer(torch.optim.Optimizer):
 
 class End2EndTests(torch._dynamo.test_case.TestCase):
     # https://github.com/pytorch/torchdynamo/issues/1604
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_optimizing_over_tensor_with_requires_grad(self):
         class Net(torch.nn.Module):
             def forward(self, x, y):

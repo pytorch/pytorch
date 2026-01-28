@@ -119,7 +119,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             c2 = b - a
             return indirectly_unsupported(c1, c2)
 
-        self._common(fn, 2, 3)
+        self._common(fn, 1, 3)
 
     def test_indirect_unsupported2(self):
         def fn(a, b):
@@ -129,14 +129,14 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             c2 = b - a
             return local_const1 / (local_const2 - indirectly_unsupported(c1, c2))
 
-        self._common(fn, 3, 5)
+        self._common(fn, 2, 5)
 
     def test_indirect_unsupported3(self):
         def fn(a, b):
             args = [a - b, b - a]
             return indirectly_unsupported(*args)
 
-        self._common(fn, 2, 3)
+        self._common(fn, 1, 3)
 
     def test_stack_state1(self):
         def fn(a, b):
@@ -156,7 +156,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             c2 = b - a
             return t1 / (t2 - indirectly_unsupported(c1, c2))
 
-        self._common(fn, 3, 7)
+        self._common(fn, 2, 7)
 
     def test_multigraph(self):
         def fn(a, b):
@@ -199,7 +199,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 3, 7)
+        self._common(fn, 2, 7)
 
     def test_resume3(self):
         def fn(a, b):
@@ -212,7 +212,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 3, 7)
+        self._common(fn, 2, 7)
 
     def test_resume4(self):
         def fn(a, b):
@@ -225,7 +225,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             x = x + 2.0
             return x
 
-        self._common(fn, 3, 7)
+        self._common(fn, 2, 7)
 
     def test_resume5(self):
         def fn(a, b):
