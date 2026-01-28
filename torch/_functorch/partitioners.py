@@ -1169,7 +1169,7 @@ def _extract_fwd_bwd_modules(
     *,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
-) -> tuple[fx.GraphModule, fx.GraphModule]:
+) -> tuple[fx.GraphModule, fx.GraphModule, int]:
     """
     Extract separate forward and backward graph modules from a joint fwd+bwd graph.
 
@@ -1186,7 +1186,9 @@ def _extract_fwd_bwd_modules(
             (e.g., parameters) for activation quantization.
 
     Returns:
-        A tuple of (forward_module, backward_module).
+        A tuple of (forward_module, backward_module, num_saved_sym_nodes).
+        The num_saved_sym_nodes is the actual count after symbol binding resolution,
+        which may differ from len(saved_sym_nodes) if additional symbols were discovered.
 
     Note:
         The ordering of inputs/outputs is encapsulated in PartitionedGraphSignature, which can
@@ -1220,7 +1222,7 @@ def _extract_fwd_bwd_modules(
         bwd_module,
         static_lifetime_input_nodes,
     )
-    return fwd_module, bwd_module
+    return fwd_module, bwd_module, len(partition_inputs.saved_sym_nodes)
 
 
 def _extract_graphs_from_partition_inputs(
@@ -1440,7 +1442,7 @@ def default_partition(
 
     if static_lifetime_input_nodes is None:
         static_lifetime_input_nodes = node_info.static_lifetime_input_nodes
-    fw_module, bw_module = _extract_fwd_bwd_modules(
+    fw_module, bw_module, num_sym_nodes = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
@@ -1455,7 +1457,7 @@ def default_partition(
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(
-                joint_module, fw_module, bw_module, len(saved_sym_nodes)
+                joint_module, fw_module, bw_module, num_sym_nodes
             )
         bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
@@ -3592,8 +3594,7 @@ def min_cut_rematerialization_partition(
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
-    # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
-    fw_module, bw_module = _extract_fwd_bwd_modules(
+    fw_module, bw_module, num_sym_nodes = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
         # pyrefly: ignore [bad-argument-type]
@@ -3604,7 +3605,7 @@ def min_cut_rematerialization_partition(
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(
-                joint_module, fw_module, bw_module, len(saved_sym_nodes)
+                joint_module, fw_module, bw_module, num_sym_nodes
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
