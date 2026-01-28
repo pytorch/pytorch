@@ -424,12 +424,16 @@ class _RedistributeCall(_DebugCall):
         transform_info_str,
         call_depth,
         stack=False,
+        is_explicit=False,
     ) -> None:
         super().__init__(call_depth, stack=stack)
         self.arg = arg
         self.src_placement = src_placement
         self.dst_placement = dst_placement
         self.transform_info_str = transform_info_str
+        self.is_explicit = is_explicit
+        # Track if this is the outer call (arg index) vs inner call (tensor)
+        self.is_outer_call = isinstance(arg, int)
 
         self.arg_str: str | None = None
 
@@ -452,7 +456,15 @@ class _RedistributeCall(_DebugCall):
             dst_placement_str = _arg_to_str(self.dst_placement, attributes)
             placement_str = f"{src_placement_str} -> {dst_placement_str}"
 
-        base_str = f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
+        # Add [implicit/explicit] annotations for outer calls (from op dispatch)
+        if self.is_outer_call:
+            annotation = " [implicit] "
+        elif self.is_explicit:
+            annotation = " [explicit] "
+        else:
+            annotation = ""
+
+        base_str = f"{REDISTRIBUTE_FUNC}{annotation}({arg_str}, {placement_str})"
         if self.output_str:
             base_str += self.output_str
         return base_str
@@ -1096,6 +1108,7 @@ class DebugMode(TorchDispatchMode):
         src_placement,
         dst_placement,
         transform_info_str: str | None = None,
+        is_explicit: bool = False,
     ):
         try:
             self._record_call(
@@ -1106,6 +1119,7 @@ class DebugMode(TorchDispatchMode):
                     transform_info_str=transform_info_str,
                     call_depth=self.call_depth + 1,
                     stack=self.record_stack_trace,
+                    is_explicit=is_explicit,
                 )
             )
             self.call_depth += 1
