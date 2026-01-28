@@ -28,6 +28,25 @@ class DeviceInfo:
 # TODO investigate profiler support for tf32 and allow device to report correct number when it's turned on.
 _device_mapping: dict[str, DeviceInfo] = {
     # Source:
+    # @lint-ignore https://www.nvidia.com/en-us/data-center/h200/
+    "NVIDIA H200": DeviceInfo(
+        # Same compute as H100, more memory and bandwidth
+        tops={
+            torch.float64: 67.0,
+            torch.float32: 67.5,
+            "torch.tf32": 989.0,
+            torch.bfloat16: 1979.0,
+            torch.float16: 1979.0,
+            torch.float8_e8m0fnu: 3958.0,
+            torch.float8_e4m3fnuz: 3958.0,
+            torch.float8_e5m2: 3958.0,
+            torch.float8_e5m2fnuz: 3958.0,
+            torch.int8: 3958.0,
+        },
+        dram_bw_gbs=4800,  # 4.8 TB/s HBM3e
+        dram_gb=141,
+    ),
+    # Source:
     # @lint-ignore https://www.nvidia.com/en-us/data-center/h100/
     "NVIDIA H100": DeviceInfo(
         tops={
