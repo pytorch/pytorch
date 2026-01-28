@@ -551,7 +551,7 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
     return
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class JointOutputResult:
     """Results from processing joint outputs."""
 
@@ -760,6 +760,15 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
+        if (
+            torch.are_deterministic_algorithms_enabled()
+            and not torch.is_deterministic_algorithms_warn_only_enabled()
+            and needs_block_mask
+        ):
+            raise NotImplementedError(
+                "Deterministic backward for flex_attention with block_mask using the FLASH backend "
+                "is not yet implemented. The TRITON backend supports deterministic backward."
+            )
         score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,

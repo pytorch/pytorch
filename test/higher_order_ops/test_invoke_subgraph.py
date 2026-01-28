@@ -14,6 +14,7 @@ import torch._inductor
 import torch._inductor.decomposition
 import torch.utils._pytree as pytree
 from functorch.compile import aot_function, nop
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
@@ -2999,6 +3000,99 @@ class GraphModule(torch.nn.Module):
             return (add,)
 """,
         )
+
+    def test_do_not_remove_used_output(self):
+        # Test that the ggn's outputs are not pruned.
+
+        @nested_compile_region
+        def ggn(x):
+            return torch.max(x, 0)
+
+        @nested_compile_region
+        def gn(x):
+            a, b = ggn(x)
+            return a, b
+
+        def fn(x):
+            _, b = ggn(x)
+            c, d = gn(x)
+            return b, c, d
+
+        x = torch.randn(64, 1)
+
+        ref = fn(x)
+        gm = dynamo_graph_capture_for_export(fn)(x)
+
+        res = gm(x)
+        self.assertEqual(ref, res)
+
+    def test_remove_unused_output(self):
+        # Test that the ggn's graph's output is pruned.
+
+        @nested_compile_region
+        def ggn(x):
+            return torch.max(x, 0)
+
+        @nested_compile_region
+        def gn(x):
+            a, b = ggn(x)
+            return a, b
+
+        def fn(x):
+            _, b = ggn(x)
+            _, d = gn(x)
+            return b, d
+
+        x = torch.randn(64, 1)
+
+        ref = fn(x)
+        gm = dynamo_graph_capture_for_export(fn)(x)
+
+        res = gm(x)
+        self.assertEqual(ref, res)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(gm.print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x):
+        _fn_args = (x, )
+        L_x_, = self._dynamo_bytecode_flatten(*_fn_args)
+        l_x_ = L_x_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = None
+        b: "i64[1]" = invoke_subgraph[1];  invoke_subgraph = None
+
+        subgraph_1 = self.subgraph_1
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', l_x_);  subgraph_1 = l_x_ = None
+        getitem_4: "i64[1]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return self._dynamo_bytecode_unflatten((b, getitem_4,), _fn_args)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[64, 1]"):
+            max_1 = torch.max(l_x_, 0);  l_x_ = None
+            getitem: "f32[1]" = max_1[0]
+            getitem_1: "i64[1]" = max_1[1];  max_1 = None
+            return (getitem, getitem_1)
+
+    class subgraph_1(torch.nn.Module):
+        def forward(self, l_x_: "f32[64, 1]"):
+            subgraph_0 = self.subgraph_0
+            invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = l_x_ = None
+            a: "f32[1]" = invoke_subgraph[0];  a = None
+            b: "i64[1]" = invoke_subgraph[1];  invoke_subgraph = None
+            return (b,)
+
+        class subgraph_0(torch.nn.Module):
+            def forward(self, l_x_: "f32[64, 1]"):
+                max_1 = torch.max(l_x_, 0);  l_x_ = None
+                getitem: "f32[1]" = max_1[0]
+                getitem_1: "i64[1]" = max_1[1];  max_1 = None
+                return (getitem, getitem_1)
+""",
+            )
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
