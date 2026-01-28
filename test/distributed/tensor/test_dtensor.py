@@ -654,12 +654,8 @@ class DTensorTest(DTensorTestBase):
                 grads["grad_out2"] = grad_out2
                 return grad_out1 * 2, grad_out2 * 3
 
-        x_local = torch.randn(
-            4, 4, device=self.device_type, requires_grad=True
-        )
-        y_local = torch.randn(
-            4, 4, device=self.device_type, requires_grad=True
-        )
+        x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
+        y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
         x = DTensor.from_local(x_local, device_mesh, [Replicate()])
         y = DTensor.from_local(y_local, device_mesh, [Replicate()])
         out1, out2 = MultiOutputFunc.apply(x, y)
