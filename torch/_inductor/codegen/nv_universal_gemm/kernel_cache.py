@@ -25,10 +25,33 @@ def _build_kernel_cache() -> dict[str, Any]:
     """Build the kernel name -> kernel object cache."""
     import cutlass_api
 
+    try:
+        from torch._inductor.kernel.vendored_templates.cutedsl import (  # noqa: F401
+            wrappers,
+        )
+    except ImportError:
+        log.debug("Vendored kernel wrappers not available")
+
     log.debug("Building NVGEMM kernel cache (this may take a few seconds)...")
     all_kernels = cutlass_api.get_kernels()
     cache = {k.metadata.kernel_name: k for k in all_kernels}
-    log.debug("NVGEMM kernel cache built: %d kernels", len(cache))
+
+    class_counts: dict[str, int] = {}
+    vendored_count = 0
+    for kernel in all_kernels:
+        class_name = kernel.metadata.kernel_class.__name__
+        class_counts[class_name] = class_counts.get(class_name, 0) + 1
+        if kernel.metadata.kernel_name.startswith("inductor_vendored."):
+            vendored_count += 1
+
+    log.debug(
+        "NVGEMM kernel cache built: %d kernels (%d vendored)",
+        len(cache),
+        vendored_count,
+    )
+    for class_name, count in sorted(class_counts.items()):
+        log.debug("  %s: %d kernels", class_name, count)
+
     return cache
 
 
@@ -56,11 +79,23 @@ def get_compatible_kernels(
             continue
         compatible.append(kernel)
 
+    class_counts: dict[str, int] = {}
+    vendored_count = 0
+    for kernel in compatible:
+        class_name = kernel.metadata.kernel_class.__name__
+        class_counts[class_name] = class_counts.get(class_name, 0) + 1
+        if kernel.metadata.kernel_name.startswith("inductor_vendored."):
+            vendored_count += 1
+
     log.debug(
-        "Found %d compatible kernels from cache of %d total",
+        "Found %d compatible kernels from cache of %d total (%d vendored)",
         len(compatible),
         len(_kernel_by_name_cache),
+        vendored_count,
     )
+    for class_name, count in sorted(class_counts.items()):
+        log.debug("  %s: %d compatible", class_name, count)
+
     return compatible
 
 
