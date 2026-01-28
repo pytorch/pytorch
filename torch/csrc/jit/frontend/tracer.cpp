@@ -542,7 +542,7 @@ void abandon() {
 }
 
 void setValueTrace(const IValue& v, Value* value) {
-  return getTracingState()->setValue(v, value);
+  getTracingState()->setValue(v, value);
 }
 void TracingState::setValue(const IValue& v, Value* value) {
   if (v.isTensor()) {
@@ -902,7 +902,7 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
 }
 
 void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
-  return addOutput(node, outputs.vec());
+  addOutput(node, outputs.vec());
 }
 
 void addOutput(
@@ -1053,7 +1053,7 @@ static void defaultRecordSourceLocation(Node* n) {}
 static std::atomic<decltype(&defaultRecordSourceLocation)>
     record_source_location(defaultRecordSourceLocation);
 void recordSourceLocation(Node* n) {
-  return record_source_location.load()(n);
+  record_source_location.load()(n);
 }
 void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);

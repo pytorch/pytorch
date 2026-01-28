@@ -20,7 +20,8 @@ void ContiguousLayoutBuffer::allocate(size_t size) {
   if (C10_LIKELY(size_ > 0)) {
     if (C10_LIKELY(
             size <= size_) /* NOTE: size will be monotonically increasing */) {
-      return clear(size_);
+      clear(size_);
+      return;
     } else {
       deallocate();
     }

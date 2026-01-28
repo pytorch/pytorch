@@ -585,16 +585,20 @@ class ShapePropagator : public PropertyPropBase {
     // analysis is flow invariant, we set any Tensor that can alias a resized
     // Tensor to the base Tensor Type without size information.
     if (setUnshapedTypeIfAliasResizedSet(node->inputs())) {
-      return setUnshapedType(node);
+      setUnshapedType(node);
+      return;
     }
 
     // These don't require the types, and have complicated schema. Return early
     // after we process them.
     switch (node->kind()) {
-      case prim::If:
-        return processIf(node);
+      case prim::If: {
+        processIf(node);
+        return;
+      }
       case prim::Loop: {
-        return processLoop(node);
+        processLoop(node);
+        return;
       }
       case aten::Bool:
       case aten::Int:
@@ -623,7 +627,8 @@ class ShapePropagator : public PropertyPropBase {
         if (node->inputs().at(0)->type()->isSubtypeOf(*TensorType::get())) {
           break;
         }
-        return propagateTorchTensorShape(node);
+        propagateTorchTensorShape(node);
+        return;
       }
       case prim::TupleConstruct: {
         // We refresh the tuple type, because the input types could have been
@@ -712,7 +717,8 @@ class ShapePropagator : public PropertyPropBase {
 
     if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor") ||
         node->kind() == prim::FusedConcat) {
-      return PropagateCatShape(node);
+      PropagateCatShape(node);
+      return;
     }
 
     if (auto maybe_complete_types =
@@ -734,7 +740,7 @@ class ShapePropagator : public PropertyPropBase {
     if (PropagateShapeOnNodeByRunningIt(node)) {
       return;
     }
-    return setUnshapedType(node);
+    setUnshapedType(node);
   }
 
   static std::optional<size_t> determineListSize(Value* list) {

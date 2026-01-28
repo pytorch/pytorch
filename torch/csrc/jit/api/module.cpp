@@ -303,7 +303,7 @@ void Module::clone_method(const Module& orig, const std::string& name) {
           s.value, Module(entry.second.attr(s.name).toObject()));
     }
   }
-  return clone_method(orig, orig.get_method(name).function(), type_remap);
+  clone_method(orig, orig.get_method(name).function(), type_remap);
 }
 
 Module Module::copy() const {

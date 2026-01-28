@@ -567,7 +567,7 @@ void initDispatchBindings(PyObject* module) {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
     if (!op) {
     } else {
-      return op->checkInvariants();
+      op->checkInvariants();
     }
   });
 
@@ -970,16 +970,19 @@ void initDispatchBindings(PyObject* module) {
   });
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
-    return at::functionalization::impl::replace_(a, b);
+    at::functionalization::impl::replace_(a, b);
+    return;
   });
   m.def("_propagate_xla_data", [](const at::Tensor& a, const at::Tensor& b) {
     at::functionalization::impl::propagate_xla_data(a, b);
   });
   m.def("_commit_update", [](const at::Tensor& a) {
-    return at::functionalization::impl::commit_update(a);
+    at::functionalization::impl::commit_update(a);
+    return;
   });
   m.def("_unsafe_reset_storage", [](const at::Tensor& a) {
-    return at::functionalization::impl::unsafe_reset_storage(a);
+    at::functionalization::impl::unsafe_reset_storage(a);
+    return;
   });
 
   m.def("_dispatch_key_for_device", [](const std::string& device_type) {

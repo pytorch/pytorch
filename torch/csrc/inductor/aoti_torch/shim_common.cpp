@@ -204,7 +204,7 @@ bool aoti_torch_grad_mode_is_enabled() {
 }
 
 void aoti_torch_grad_mode_set_enabled(bool enabled) {
-  return c10::GradMode::set_enabled(enabled);
+  c10::GradMode::set_enabled(enabled);
 }
 
 size_t aoti_torch_dtype_element_size(int32_t dtype) {

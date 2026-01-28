@@ -69,7 +69,8 @@ inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
     case can_mutate_inplace_result::success:
       return;
     case can_mutate_inplace_result::non_default_backward_view: {
-      return handle_view_on_rebase(impl::get_view_autograd_meta(tensor));
+      handle_view_on_rebase(impl::get_view_autograd_meta(tensor));
+      return;
     }
     case can_mutate_inplace_result::view_of_leaf:
       TORCH_CHECK(

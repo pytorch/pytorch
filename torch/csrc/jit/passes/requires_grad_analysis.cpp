@@ -59,17 +59,21 @@ void PropagateRequiresGradSimpleNode(Node* node) {
 
   // NOLINTNEXTLINE(bugprone-branch-clone)
   if (node->isMemberOf(comparison_ops)) {
-    return setRequiresGrad(node->output(), false);
+    setRequiresGrad(node->output(), false);
+    return;
   } else if (node->matches(
                  "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
-    return setRequiresGrad(node->output(), node->input(0)->requires_grad());
+    setRequiresGrad(node->output(), node->input(0)->requires_grad());
+    return;
   } else if (node->matches("aten::detach(Tensor(a) self) -> Tensor(a)")) {
-    return setRequiresGrad(node->output(), false);
+    setRequiresGrad(node->output(), false);
+    return;
   } else if (node->kind() == aten::tensor) {
     if (auto grad_index =
             node->schema().argumentIndexWithName("requires_grad")) {
       if (auto const_arg = constant_as<bool>(node->inputs().at(*grad_index))) {
-        return setRequiresGrad(node->output(), *const_arg);
+        setRequiresGrad(node->output(), *const_arg);
+        return;
       }
     }
     if (auto type = node->output()->type()->cast<TensorType>()) {
