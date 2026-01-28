@@ -641,55 +641,67 @@ class DTensorTest(DTensorTestBase):
         from torch.autograd import Function
 
         device_mesh = self.build_device_mesh()
-        grads = {}
 
-        class MultiOutputFunc(Function):
-            @staticmethod
-            def forward(ctx, x, y):
-                return x * 2, y * 3
+        for use_compile in [True, False]:
+            with self.subTest(use_compile=use_compile):
+                grads = {}
 
-            @staticmethod
-            def backward(ctx, grad_out1, grad_out2):
-                grads["grad_out1"] = grad_out1
-                grads["grad_out2"] = grad_out2
-                return grad_out1 * 2, grad_out2 * 3
+                class MultiOutputFunc(Function):
+                    @staticmethod
+                    def forward(ctx, x, y):
+                        return x * 2, y * 3
 
-        x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
-        y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
-        x = DTensor.from_local(x_local, device_mesh, [Replicate()])
-        y = DTensor.from_local(y_local, device_mesh, [Replicate()])
-        out1, out2 = MultiOutputFunc.apply(x, y)
-        self.assertIsInstance(out1, DTensor)
-        self.assertIsInstance(out2, DTensor)
+                    @staticmethod
+                    def backward(ctx, grad_out1, grad_out2):
+                        grads["grad_out1"] = grad_out1
+                        grads["grad_out2"] = grad_out2
+                        return grad_out1 * 2, grad_out2 * 3
 
-        # Only use out1, so out2's gradient should be zeros.
-        loss = out1.sum()
-        loss.backward()
+                x_local = torch.randn(
+                    4, 4, device=self.device_type, requires_grad=True
+                )
+                y_local = torch.randn(
+                    4, 4, device=self.device_type, requires_grad=True
+                )
+                x = DTensor.from_local(x_local, device_mesh, [Replicate()])
+                y = DTensor.from_local(y_local, device_mesh, [Replicate()])
 
-        # Both gradients should be DTensors
-        self.assertIsInstance(
-            grads["grad_out1"],
-            DTensor,
-            "grad_out1 should be a DTensor",
-        )
-        self.assertIsInstance(
-            grads["grad_out2"],
-            DTensor,
-            "grad_out2 should be a DTensor, not a plain Tensor",
-        )
+                if use_compile:
+                    out1, out2 = torch.compile(MultiOutputFunc.apply)(x, y)
+                else:
+                    out1, out2 = MultiOutputFunc.apply(x, y)
 
-        # Verify grad_out2 is zeros (since out2 was not used)
-        self.assertTrue(
-            torch.all(grads["grad_out2"].to_local() == 0),
-            "grad_out2 should be all zeros since out2 was not used",
-        )
+                self.assertIsInstance(out1, DTensor)
+                self.assertIsInstance(out2, DTensor)
 
-        # Verify grad_out2 has the same placement as out2
-        self.assertEqual(
-            grads["grad_out2"].placements,
-            out2.placements,
-            "grad_out2 should have the same placements as out2",
-        )
+                # Only use out1, so out2's gradient should be zeros.
+                loss = out1.sum()
+                loss.backward()
+
+                # Both gradients should be DTensors
+                self.assertIsInstance(
+                    grads["grad_out1"],
+                    DTensor,
+                    "grad_out1 should be a DTensor",
+                )
+                self.assertIsInstance(
+                    grads["grad_out2"],
+                    DTensor,
+                    "grad_out2 should be a DTensor, not a plain Tensor",
+                )
+
+                # Verify grad_out2 is zeros (since out2 was not used)
+                self.assertTrue(
+                    torch.all(grads["grad_out2"].to_local() == 0),
+                    "grad_out2 should be all zeros since out2 was not used",
+                )
+
+                # Verify grad_out2 has the same placement as out2
+                self.assertEqual(
+                    grads["grad_out2"].placements,
+                    out2.placements,
+                    "grad_out2 should have the same placements as out2",
+                )
 
 
 DTensorTestWithLocalTensor = create_local_tensor_test_class(

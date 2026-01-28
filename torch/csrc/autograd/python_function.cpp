@@ -61,26 +61,6 @@ PyObject* THPGradientEdgeClass = nullptr;
 // Anonymous namespace for helpful functions used in this file
 namespace {
 
-// Check if a PyObject is a DTensor. This is used to determine whether
-// zeros_like() should be used for undefined gradients to preserve the
-// tensor subclass type. We specifically check for DTensor (rather than all
-// tensor subclasses) to avoid affecting other subclasses that may not need
-// this behavior.
-inline bool is_dtensor(PyObject* obj) {
-#ifdef USE_DISTRIBUTED
-  try {
-    py::handle dtensor_class = get_dtensor_class();
-    return (PyObject*)Py_TYPE(obj) == dtensor_class.ptr() ||
-        py::isinstance(py::handle(obj), dtensor_class);
-  } catch (const py::error_already_set&) {
-    // DTensor module not available or failed to import
-    return false;
-  }
-#else
-  return false;
-#endif
-}
-
 inline void check_legacy_fn_attr_access(
     const std::shared_ptr<torch::autograd::Node>& cdata,
     const char* attr) {
@@ -802,8 +782,22 @@ static void _wrap_outputs(
             (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
                  0 &&
              isDifferentiableType(wrapped_output->scalar_type()));
+        bool obj_is_dtensor = is_dtensor(obj);
         bool use_zeros_like = is_differentiable && num_outputs > 1 &&
-            (wrapped_output->is_nested() || is_dtensor(obj));
+            (wrapped_output->is_nested() || obj_is_dtensor);
+        if (use_zeros_like && obj_is_dtensor) {
+          TORCH_WARN_ONCE(
+              "Autograd is calling zeros_like() on a DTensor to materialize "
+              "the gradient for an unused output in ",
+              cdata->name(),
+              ". This preserves the DTensor type but may have performance "
+              "implications. To avoid this: (1) call "
+              "ctx.set_materialize_grads(False) in forward() (only works when "
+              "the autograd.Function is not compiled with torch.compile), "
+              "(2) detach unused outputs before returning from forward() "
+              "(required if torch.compile() may be used), and (3) handle None "
+              "gradients in backward() instead of relying on zero tensors.");
+        }
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
