@@ -245,8 +245,8 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
         self.assertIn("Break Reasons", explain_str)
 
         # Verify that for the given functions above, we report the correct number of graphs, graph breaks, and ops
-        self.assertEqual(8, explain_output.graph_count)
-        self.assertEqual(7, explain_output.graph_break_count)
+        self.assertEqual(2, explain_output.graph_count)
+        self.assertEqual(1, explain_output.graph_break_count)
         self.assertEqual(8, explain_output.op_count)
 
 

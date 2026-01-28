@@ -23,12 +23,14 @@ def normalize_graph(gm):
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributed(DynamoTestCase):
     def setUp(self):
+        super().setUp()
         # Use FakeProcessGroup to run tests on a single process
         dist.init_process_group(backend="fake", rank=0, world_size=2)
         self.local_rank = 0
         self.world_size = 2
 
     def tearDown(self):
+        super().tearDown()
         dist.destroy_process_group()
 
     def test_all_to_all_single_autograd(self):

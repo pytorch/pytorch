@@ -2649,6 +2649,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         model = ToyModel()
         self._forward_hook_test_helper(model)
 
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_backward_hooks(self):
         # this test shouldn't care whether hook guards are enabled or not
 

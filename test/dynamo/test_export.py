@@ -4364,7 +4364,7 @@ def forward(self, x):
 
         expected = [
             """x = torch.sin(l_x_)""",
-            """cos = torch.cos(l_stack0_)""",
+            """cos = torch.cos(l_nested_frame_values_0_1_)""",
         ]
 
         def test_backend(gm: torch.fx.GraphModule, example_inputs):
