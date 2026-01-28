@@ -8,6 +8,7 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
+#include <util/BFloat16.h>
 
 // Defines the accumulation type for a scalar type.
 // Example:
@@ -102,6 +103,7 @@ MPS_ACC_TYPE(int32_t, int64_t)
 MPS_ACC_TYPE(int64_t, int64_t)
 MPS_ACC_TYPE(bool, bool)
 MPS_ACC_TYPE(c10::complex<Half>, c10::complex<float>)
+MPS_ACC_TYPE(c10::complex<BFloat16>, c10::complex<float>)
 MPS_ACC_TYPE(c10::complex<float>, c10::complex<float>)
 MPS_ACC_TYPE(c10::complex<double>, c10::complex<float>)
 
@@ -121,6 +123,7 @@ XPU_ACC_TYPE(int32_t, int64_t)
 XPU_ACC_TYPE(int64_t, int64_t)
 XPU_ACC_TYPE(bool, bool)
 XPU_ACC_TYPE(c10::complex<Half>, c10::complex<float>)
+XPU_ACC_TYPE(c10::complex<BFloat16>, c10::complex<float>)
 XPU_ACC_TYPE(c10::complex<float>, c10::complex<float>)
 XPU_ACC_TYPE(c10::complex<double>, c10::complex<double>)
 
@@ -143,6 +146,7 @@ CUDA_ACC_TYPE(int32_t, int64_t)
 CUDA_ACC_TYPE(int64_t, int64_t)
 CUDA_ACC_TYPE(bool, bool)
 CUDA_ACC_TYPE(c10::complex<Half>, c10::complex<float>)
+CUDA_ACC_TYPE(c10::complex<BFloat16>, c10::complex<float>)
 CUDA_ACC_TYPE(c10::complex<float>, c10::complex<float>)
 CUDA_ACC_TYPE(c10::complex<double>, c10::complex<double>)
 
@@ -162,6 +166,7 @@ CPU_ACC_TYPE(int32_t, int64_t)
 CPU_ACC_TYPE(int64_t, int64_t)
 CPU_ACC_TYPE(bool, bool)
 CPU_ACC_TYPE(c10::complex<Half>, c10::complex<float>)
+CPU_ACC_TYPE(c10::complex<BFloat16>, c10::complex<float>)
 CPU_ACC_TYPE(c10::complex<float>, c10::complex<double>)
 CPU_ACC_TYPE(c10::complex<double>, c10::complex<double>)
 

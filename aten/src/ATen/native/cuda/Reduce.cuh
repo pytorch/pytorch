@@ -1237,12 +1237,14 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   // at::BFloat16 has lower precision and can lead to rounding errors.
   // So when scalar_t and out_scalar_t are at::BFloat16, we
   // set can_accumulate_in_output to False.
-  static constexpr bool is_inp_out_type_bfloat16 =
+  static constexpr bool is_inp_out_type_bfloat16_or_bcomplex32 =
       (std::is_same_v<at::BFloat16, scalar_t> &&
-       std::is_same_v<at::BFloat16, out_scalar_t>);
+       std::is_same_v<at::BFloat16, out_scalar_t>) ||
+      (std::is_same_v<c10::complex<BFloat16>, scalar_t> &&
+       std::is_same_v<c10::complex<BFloat16>, out_scalar_t>);
   static constexpr bool can_accumulate_in_output =
       std::is_convertible_v<arg_t, out_scalar_t> &&
-      !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16);
+      !(is_inp_out_type_half_or_chalf || is_inp_out_type_bfloat16_or_bcomplex32);
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
   std::unique_ptr<AccumulationBuffer> owned_buf_ptr;

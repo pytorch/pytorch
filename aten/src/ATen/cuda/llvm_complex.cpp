@@ -644,6 +644,31 @@ struct alignas(2) complex<at::Half> {
 }
 )ESCAPE";
 
+const std::string complex_bfloat16_body = R"ESCAPE(
+namespace std {
+template <>
+struct alignas(2) complex<at::BFloat16> {
+  at::BFloat16 real_;
+  at::BFloat16 imag_;
+
+  // Constructors
+  complex() = default;
+
+  // implicit casting to and from `complex<float>`.
+  // NOTE: computation of `complex<BFloat16>` will occur in `complex<float>`
+  __host__ __device__ inline complex(const std::complex<float>& value)
+      : real_(value.real()), imag_(value.imag()) {}
+
+  inline __host__ __device__ operator std::complex<float>() const {
+    return {real_, imag_};
+  }
+
+  at::BFloat16 real() const {return real_;}
+  at::BFloat16 imag() const {return imag_;}
+
+};
+}
+)ESCAPE";
 
 const std::string &get_complex_body_string() {
   return complex_body;
@@ -651,6 +676,10 @@ const std::string &get_complex_body_string() {
 
 const std::string &get_complex_half_body_string() {
   return complex_half_body;
+}
+
+const std::string &get_complex_bfloat16_body_string() {
+  return complex_bfloat16_body;
 }
 
 const std::string complex_math = R"ESCAPE(

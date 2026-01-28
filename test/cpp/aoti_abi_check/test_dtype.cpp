@@ -165,6 +165,7 @@ TEST(TestDtype, TestScalarType) {
       ScalarType::ComplexHalf,
       ScalarType::ComplexFloat,
       ScalarType::ComplexDouble,
+      ScalarType::BComplex32,
       ScalarType::Bool,
       ScalarType::QInt8,
       ScalarType::QUInt8,

@@ -657,6 +657,8 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.size = sizeof(bool), .type = type, .value.b = scalar.to<bool>()};
     case ScalarType::ComplexHalf:
       return {.size = sizeof(int32_t), .type = type, .value.ch = scalar.to<c10::complex<Half>>()};
+    case ScalarType::ComplexBFloat16:
+      return {.size = sizeof(int32_t), .type = type, .value.ch = scalar.to<c10::complex<BFloat16>>()};
     case ScalarType::ComplexFloat:
     case ScalarType::ComplexDouble:
       return {.size = sizeof(int64_t), .type = type, .value.cf = scalar.to<c10::complex<float>>()};

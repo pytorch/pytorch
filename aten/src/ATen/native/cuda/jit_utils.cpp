@@ -271,6 +271,7 @@ const std::string jit_common_types = R"ESCAPE(
   ${bfloat16_string}
   ${complex_body_string}
   ${complex_half_body_string}
+  ${complex_bfloat16_body_string}
   ${complex_math_string}
 
 
@@ -1136,6 +1137,7 @@ std::string generate_code(
   if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
       f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>" ||
       f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>") {
+      f_inputs_type == "std::complex<at::BFloat16>" || result_type == "std::complex<at::BFloat16>") {
     // complex<Half> depends on complex<T> and Half dtypes.
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
@@ -1162,6 +1164,16 @@ std::string generate_code(
     env.s("complex_half_body_string", get_complex_half_body_string());
   } else {
     env.s("complex_half_body_string", "");
+  }
+
+  if (f_inputs_type == "std::complex<at::BFloat16>" ||
+      result_type == "std::complex<at::BFloat16>" || dynamic_casting) {
+    // dynamic_casting requires the definition of all types
+    // include complex<at::Half>
+    // Look at the definition of `StoreWithCast` and `LoadWithCast`.
+    env.s("complex_bfloat16_body_string", at::cuda::get_complex_bfloat16_body_string());
+  } else {
+    env.s("complex_bfloat16_body_string", "");
   }
 
   env.s("load_support", load_support_literal);
@@ -1427,6 +1439,11 @@ std::string generate_reduction_code(
         env.s("complex_half_body_string", get_complex_half_body_string());
       } else {
         env.s("complex_half_body_string", "");
+      }
+      if (f_inputs_type == "std::complex<at::BFloat16>") {
+        env.s("complex_bfloat16_body_string", at::cuda::get_complex_bfloat16_body_string());
+      } else {
+        env.s("complex_bfloat16_body_string", "");
       }
       env.s("cmath_string", get_cmath_string());
       env.s("functor", func);

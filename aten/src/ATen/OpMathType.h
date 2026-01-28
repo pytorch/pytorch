@@ -8,6 +8,7 @@
 #include <c10/util/Float8_e5m2.h>
 #include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
+#include <util/BFloat16.h>
 
 namespace at {
 
@@ -46,6 +47,10 @@ struct OpMathType<at::Float8_e8m0fnu> {
 };
 template <>
 struct OpMathType<c10::complex<Half>> {
+  using type = c10::complex<float>;
+};
+template <>
+struct OpMathType<c10::complex<BFloat16>> {
   using type = c10::complex<float>;
 };
 
