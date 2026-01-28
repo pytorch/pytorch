@@ -692,7 +692,6 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    @unittest.expectedFailure
     def test_triton_pow_type_mismatch(self, device):
         """
         Test that libdevice.pow handles mixed float32/float64 types correctly.
