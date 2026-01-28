@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
 from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -1782,6 +1783,62 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             )
             name_to_users = eval(graph_inductor)
             self.assertNotEqual(name_to_users["buf1"], name_to_users["buf5"])
+
+    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
+    def test_dtype_view_aliasing(self):
+        """
+        This test ensures that when a tensor is viewed with a different dtype
+        (e.g., int32 -> float32) and passed to a mutating custom op, the
+        fix_auto_functionalized_aliasing pass correctly identifies the aliasing
+        relationship and prevents unnecessary clone operations.
+        """
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define(
+                "mylib::mutate_inplace",
+                "(Tensor(a!) x, Tensor y) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::mutate_inplace", "cpu", lib=lib)
+            @torch._dynamo.disable
+            def mutate_inplace_cpu(x, y):
+                x.copy_(y)
+
+            @torch.library.impl("mylib::mutate_inplace", "Meta", lib=lib)
+            def mutate_inplace_meta(x, y):
+                pass
+
+            def f(cache_int32, data_float32):
+                # Create a dtype view: int32 -> float32
+                # This shares storage but has different dtype
+                cache_float = cache_int32.view(torch.float32)
+                torch.ops.mylib.mutate_inplace(cache_float, data_float32)
+                return cache_int32
+
+            cache = torch.zeros((10, 10), dtype=torch.int32)
+            data = torch.randn((10, 10), dtype=torch.float32)
+
+            for mode_ctx in [torch.no_grad(), torch.inference_mode()]:
+                counters.clear()
+                torch._dynamo.reset()
+
+                with mode_ctx:
+                    cache_test = cache.clone()
+
+                    compiled_f = torch.compile(f, fullgraph=True, backend="inductor")
+                    result = compiled_f(cache_test, data)
+
+                    self.assertEqual(result.shape, cache.shape)
+                    self.assertEqual(result.dtype, torch.int32)
+
+                    # We don't compare against eager because the compiled version
+                    # may optimize the dtype view differently.
+                    self.assertFalse(torch.all(result == cache))
+
+                    self.assertGreater(
+                        counters["inductor"]["fix_auto_functionalized_aliasing"], 0
+                    )
 
 
 if __name__ == "__main__":

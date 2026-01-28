@@ -1335,7 +1335,9 @@ def fix_auto_functionalized_aliasing(graph: torch.fx.Graph) -> None:
                             )
                             fixed_bases[i] = actual_input
                             modified = True
-                            counters["inductor"]["fix_dtype_view_bases"] += 1
+                            counters["inductor"][
+                                "fix_auto_functionalized_aliasing"
+                            ] += 1
 
                 except (AttributeError, RuntimeError, KeyError):
                     # Skip if we can't access storage info
