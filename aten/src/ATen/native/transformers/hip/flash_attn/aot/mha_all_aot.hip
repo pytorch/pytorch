@@ -796,6 +796,7 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
   at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
   check_gpu_arch(stream);
+  
 
   bool is_dropout = p_dropout > 0.0;
 

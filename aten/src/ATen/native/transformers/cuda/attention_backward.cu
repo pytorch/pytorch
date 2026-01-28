@@ -496,6 +496,8 @@ _efficient_attention_backward(
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck)
   {
 #if defined(USE_ROCM_CK_SDPA)
+    TORCH_WARN_ONCE("Using CK backend for Efficient Attention backward...");
+
     const auto my_softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     // Store grad_bias in optional
     std::optional<at::Tensor> opt_grad_bias = grad_bias;
@@ -544,6 +546,9 @@ _efficient_attention_backward(
                 "[AOTriton] Accelerated SDPA only supports MI200/MI300X/7900XTX/9070XT GPUs"
                 " (gfx90a/gfx942/gfx1100/gfx1201)")
     }
+
+    TORCH_WARN_ONCE("Using AOTriton backend for Efficient Attention backward...");
+
     const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     bool is_causal;
     if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {

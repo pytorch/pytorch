@@ -913,6 +913,13 @@ if(USE_ROCM)
   endif()
 endif()
 
+# link CK library
+if(USE_ROCM)
+  if(UNIX AND USE_ROCM_CK_SDPA)
+    include(cmake/External/ck_kernels.cmake)
+  endif()
+endif()
+
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")

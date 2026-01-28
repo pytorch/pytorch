@@ -940,6 +940,10 @@ if(USE_ROCM)
   if(USE_FLASH_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_aotriton)
   endif()
+# link CK library if not building CK_kernels from source
+  if(USE_ROCM_CK_SDPA AND NOT CK_KERNELS_INSTALL_FROM_SOURCE)
+    target_link_libraries(torch_hip PRIVATE __ck_kernels_lib)
+  endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_hip)  # see cmake/public/utils.cmake
   # TODO: Not totally sure if this is live or not

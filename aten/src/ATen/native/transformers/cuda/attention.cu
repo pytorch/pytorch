@@ -1403,6 +1403,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     at::ROCmFABackend::Ck) {
 
 #if defined(USE_ROCM_CK_SDPA)
+    TORCH_WARN_ONCE("Using CK backend for Efficient Attention forward...");
+
     std::optional<Tensor> out(res);
     std::optional<Tensor> seqused_k = std::nullopt;
     std::optional<Tensor> alibi_slopes = std::nullopt;
@@ -1444,6 +1446,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                   "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
                   " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
     }
+
+    TORCH_WARN_ONCE("Using AOTriton backend for Efficient Attention forward...");
 
     // AOTriton may accept aligned on logsumexp tensor in the future for better
     // performance, but for now it requires compact logsumexp tensor, even if

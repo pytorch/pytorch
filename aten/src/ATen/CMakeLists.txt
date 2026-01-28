@@ -187,26 +187,29 @@ if(USE_FLASH_ATTENTION)
     caffe2_update_option(USE_ROCM_CK_SDPA ON)
   endif()
   if(USE_ROCM_CK_SDPA)
-    if(DEFINED ENV{PYTORCH_ROCM_ARCH})
-      list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
-      if(NUM_ARCHS GREATER 1)
-        message(WARNING "Building CK for multiple archs can increase build time considerably!
-        Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
-      endif()
-    endif()
     message(STATUS "USE_ROCM_CK_SDPA is set; building PyTorch with CK SDPA enabled")
-    message(STATUS "Generating CK kernel instances...")
-    add_subdirectory(native/transformers/hip/flash_attn/ck)
+    if(DEFINED CK_KERNELS_INSTALL_FROM_SOURCE)
+      if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+        list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
+        if(NUM_ARCHS GREATER 1)
+          message(WARNING "Building CK for multiple archs can increase build time considerably!
+          Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
+        endif()
+      endif()
+      # building CK kernels from source
+      message(STATUS "Generating CK kernel instances...")
+      add_subdirectory(native/transformers/hip/flash_attn/ck)
+      add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
+    endif() # end of CK_KERNELS_INSTALL_FROM_SOURCE
     file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
     list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
     # FAv3 Generation
-    add_subdirectory(native/transformers/hip/flash_attn/ck/fav_v3)
     file(GLOB flash_attention_v3_hip "native/transformers/hip/flash_attn/ck/fav_v3/*.hip")
     list(APPEND native_transformers_hip_hip ${flash_attention_v3_hip})
-  endif()
+  endif() # end of USE_ROCM_CK_SDPA
   file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
   file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
-endif()
+endif() # end of USE_FLASH_ATTENTION
 
 #Mem_eff attention sources
 file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")
