@@ -284,6 +284,38 @@ class HopSchema(torch._C.FunctionSchema):
             copy.deepcopy(self.tree_spec),
         )
 
+    def __reduce__(self):
+        # Serialize the schema as a string to avoid pickling torch._C.Argument objects.
+        # The base class FunctionSchema can be reconstructed from its string representation.
+        return (
+            _reconstruct_hop_schema,
+            (
+                str(self),
+                self.is_vararg,
+                self.is_varret,
+                self.tree_spec,
+            ),
+        )
+
+
+def _reconstruct_hop_schema(
+    schema_str: str,
+    is_vararg: bool,
+    is_varret: bool,
+    tree_spec,
+) -> "HopSchema":
+    """Helper function for unpickling HopSchema."""
+    base_schema = torch._C.parse_schema(schema_str)
+    return HopSchema(
+        base_schema.name,
+        base_schema.overload_name,
+        list(base_schema.arguments),
+        list(base_schema.returns),
+        is_vararg,
+        is_varret,
+        tree_spec,
+    )
+
 
 def find_hop_schema(
     gm: torch.fx.GraphModule, target: Target
