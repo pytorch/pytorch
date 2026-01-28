@@ -135,11 +135,9 @@ class NodeInfo:
         return self.fw_order[n]
 
 
-@dataclass(frozen=True)
+@dataclass
 class PartitionedGraphSignature:
     """
-    Immutable container for categorized inputs/outputs for forward/backward graph partitioning.
-
     This class encapsulates the different categories of graph inputs/outputs and provides
     methods to determine their ordering in the extracted forward and backward graphs.
     The ordering methods can be overridden by subclasses to customize partitioning
