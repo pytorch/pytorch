@@ -5001,9 +5001,14 @@ class CppScheduling(BaseScheduling):
         match_div = False
         matched_node = None
 
+        # Collect node info for later compatibility check
+        node_bodies: list[tuple[Any, Any]] = []
+
         for node in nodes:
             assert isinstance(node.node, ir.ComputedBuffer)
-            _, original_body, _ = node.node.get_default_sizes_body()
+            sizes_body = node.node.get_default_sizes_body()
+            node_bodies.append((node, sizes_body))
+            (index_size, _), original_body, _ = sizes_body
             for name, expr in original_body.indexing_exprs.items():
                 if not isinstance(expr, sympy.Expr):
                     continue
@@ -5035,6 +5040,25 @@ class CppScheduling(BaseScheduling):
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
         if not match_div:
             return nodes
+
+        # Check if all nodes have split_var in their iter_vars and have compatible sizes
+        # (same number of index dimensions). If not, bail out to avoid incompatible
+        # var_ranges after loop split which would cause assertion failures in
+        # simplify_and_reorder or codegen_functions.
+        assert matched_node is not None
+        matched_index_size = None
+        for node, ((index_size, _), original_body, _) in node_bodies:
+            if node == matched_node:
+                matched_index_size = index_size
+                break
+        assert matched_index_size is not None
+        matched_num_dims = len(matched_index_size)
+
+        for node, ((index_size, _), original_body, _) in node_bodies:
+            if split_var not in original_body.iter_vars:
+                return nodes
+            if len(index_size) != matched_num_dims:
+                return nodes
 
         extra_indexing_constraints = None
 
