@@ -52,7 +52,8 @@ at::Tensor allocate_all_gather_output(
   // Use comm-optimized allocator if enabled and available
   if (usePgAllocator() && group != nullptr) {
     auto backend = group->getBackend(input.device().type());
-    if (backend->supportsTensorAlloc(input.device().index())) {
+    if (backend->supportsTensorAlloc(input.device().index()) &&
+        backend->isInitialized()) {
       long total_size = 1;
       for (auto dim : output_size) {
         total_size *= dim;
@@ -81,7 +82,8 @@ at::Tensor allocate_reduce_scatter_output(
   // Use comm-optimized allocator if enabled and available
   if (usePgAllocator() && group != nullptr) {
     auto backend = group->getBackend(input.device().type());
-    if (backend->supportsTensorAlloc(input.device().index())) {
+    if (backend->supportsTensorAlloc(input.device().index()) &&
+        backend->isInitialized()) {
       long total_size = 1;
       for (auto dim : output_size) {
         total_size *= dim;
