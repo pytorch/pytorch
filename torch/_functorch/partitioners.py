@@ -203,6 +203,17 @@ class PartitionedGraphSignature:
             + fw_outputs[sym_node_start_idx:]
         )
 
+    @classmethod
+    def _bwd_graph_inputs_preliminary(
+        cls, builder: "PartitionedGraphSignatureBuilder"
+    ) -> list[fx.Node]:
+        return (
+            builder._saved_sym_nodes
+            + builder._saved_values
+            + builder._tangent_inputs
+            + builder._bwd_seed_offset_inputs
+        )
+
     def bwd_graph_inputs(self) -> list[fx.Node]:
         return (
             self.saved_sym_nodes
@@ -246,6 +257,7 @@ class PartitionedGraphSignatureBuilder:
         saved_sym_nodes: list[fx.Node],
         num_fwd_outputs: int,
     ) -> None:
+        self._dataclass = PartitionedGraphSignature
         self._joint_module = joint_module
 
         # Make copies to avoid mutating the caller's lists
@@ -273,16 +285,10 @@ class PartitionedGraphSignatureBuilder:
         self._saved_opaque_objects: list[fx.Node] = []
         self._no_vc_check_start_idx: int = 0
 
-    def _bwd_graph_inputs_preliminary(self) -> list[fx.Node]:
-        """Order of inputs for preliminary backward graph extraction."""
-        return (
-            self._saved_sym_nodes
-            + self._saved_values
-            + self._tangent_inputs
-            + self._bwd_seed_offset_inputs
-        )
+    def override_dataclass(self, dataclass: type):
+        self._dataclass = dataclass
 
-    def filter_unused_bwd_inputs(self) -> None:
+    def filter_unused_bwd_inputs(self, ignore_must_be_in_fw_bw: bool = False) -> None:
         """
         Filter out saved values that aren't actually used by the backward pass.
 
@@ -291,10 +297,11 @@ class PartitionedGraphSignatureBuilder:
         """
         bwd_graph = _extract_graph_with_inputs_outputs(
             self._joint_module.graph,
-            self._bwd_graph_inputs_preliminary(),
+            self._dataclass._bwd_graph_inputs_preliminary(self),
             self._bwd_outputs,
             self._bwd_outputs_descs,
             "backward",
+            ignore_must_be_in_fw_bw=ignore_must_be_in_fw_bw,
         )
 
         distributed_enabled = torch.distributed.is_available()
@@ -399,7 +406,7 @@ class PartitionedGraphSignatureBuilder:
         This should be called after all filtering, symbol resolution,
         and reordering operations have been performed.
         """
-        return PartitionedGraphSignature(
+        return self._dataclass(
             primal_inputs=self._primal_inputs,
             tangent_inputs=self._tangent_inputs,
             fwd_seed_offset_inputs=self._fwd_seed_offset_inputs,
