@@ -866,16 +866,58 @@ class TritonPrinter(PythonPrinter):
         return f"tl.sqrt_rn(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
-        return (
-            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
-        )
+        base = self._print(expr.args[0])
+        exp = self._print(expr.args[1])
+        # libdevice.pow requires both arguments to have the same type.
+        # Check for type mismatch by looking at the final (outermost) type conversion.
+        # Use rfind to get the last occurrence which indicates the final type.
+        base_last_f64 = base.rfind("tl.float64")
+        base_last_f32 = base.rfind("tl.float32")
+        exp_last_f64 = exp.rfind("tl.float64")
+        exp_last_f32 = exp.rfind("tl.float32")
+        base_is_f64 = base_last_f64 > base_last_f32
+        base_is_f32 = base_last_f32 > base_last_f64
+        exp_is_f64 = exp_last_f64 > exp_last_f32
+        exp_is_f32 = exp_last_f32 > exp_last_f64
+        # Mismatch if one is explicitly f32 and other is explicitly f64
+        if (base_is_f32 and exp_is_f64) or (base_is_f64 and exp_is_f32):
+            # Type mismatch - cast both to float64 for precision
+            if not base_is_f64:
+                base = f"({base}).to(tl.float64)"
+            if not exp_is_f64:
+                exp = f"({exp}).to(tl.float64)"
+        return f"libdevice.pow({base}, {exp})"
 
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
+        # libdevice.pow requires both arguments to have the same type.
         if expr.args[0].is_Integer:
-            return f"libdevice.pow({float(expr.args[0])}, {self._print(expr.args[1])})"
-        return (
-            f"libdevice.pow({self._print(expr.args[0])}, {self._print(expr.args[1])})"
-        )
+            base = str(float(expr.args[0]))
+            base_is_f64 = False
+            base_is_f32 = False
+        else:
+            base = self._print(expr.args[0])
+            base_last_f64 = base.rfind("tl.float64")
+            base_last_f32 = base.rfind("tl.float32")
+            base_is_f64 = base_last_f64 > base_last_f32
+            base_is_f32 = base_last_f32 > base_last_f64
+        exp_val = expr.args[1]
+        if exp_val.is_Integer:
+            exp = str(float(exp_val))
+            exp_is_f64 = False
+            exp_is_f32 = False
+        else:
+            exp = self._print(exp_val)
+            exp_last_f64 = exp.rfind("tl.float64")
+            exp_last_f32 = exp.rfind("tl.float32")
+            exp_is_f64 = exp_last_f64 > exp_last_f32
+            exp_is_f32 = exp_last_f32 > exp_last_f64
+        # Only cast to float64 if there's a type mismatch
+        if (base_is_f32 and exp_is_f64) or (base_is_f64 and exp_is_f32):
+            if not base_is_f64:
+                base = f"tl.full([], {base}, tl.float64)" if expr.args[0].is_Integer else f"({base}).to(tl.float64)"
+            if not exp_is_f64:
+                exp = f"tl.full([], {exp}, tl.float64)" if exp_val.is_Integer else f"({exp}).to(tl.float64)"
+        return f"libdevice.pow({base}, {exp})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c = self.doprint(expr.args[0])
