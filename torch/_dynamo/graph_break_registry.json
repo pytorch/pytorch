@@ -2278,6 +2278,14 @@
       ]
     }
   ],
+  "GB1739": [
+    {
+      "Gb_type": "Unsupported member type on OpaqueObject",
+      "Context": "value={real_obj}, attr={name}, member_type={member_type}",
+      "Explanation": "Member type '{member_type}' is not supported for this operation.",
+      "Hints": []
+    }
+  ],
   "GB0197": [
     {
       "Gb_type": "list elements are pointing to the list itself",
