@@ -10,11 +10,13 @@ import torch.distributed as dist
 from torch import nn
 from torch.distributed._composable.contract import _get_registry
 from torch.distributed._composable.replicate_with_fsdp import (
-    _get_managed_modules,
+    _get_module_replicate_state,
+    is_composable_with_replicate,
     replicate,
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp._fully_shard._fsdp_init import _get_managed_modules
 from torch.distributed.tensor import Replicate, Shard
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -167,7 +169,16 @@ class ReplicateTest(MultiProcessTestCase):
         model = Transformer(model_args)
         replicate_model = deepcopy(model)
 
-        self.assertEqual(len(_get_managed_modules((replicate_model,))), 49)
+        self.assertEqual(
+            len(
+                _get_managed_modules(
+                    (replicate_model,),
+                    is_composable_fn=is_composable_with_replicate,
+                    get_state_fn=_get_module_replicate_state,
+                )
+            ),
+            49,
+        )
 
         for i, layer in enumerate(replicate_model.layers):
             if i % 3 == 0:
@@ -176,7 +187,16 @@ class ReplicateTest(MultiProcessTestCase):
                 fully_shard(layer)
 
         replicate_model = replicate(replicate_model)
-        self.assertEqual(len(_get_managed_modules((replicate_model,))), 21)
+        self.assertEqual(
+            len(
+                _get_managed_modules(
+                    (replicate_model,),
+                    is_composable_fn=is_composable_with_replicate,
+                    get_state_fn=_get_module_replicate_state,
+                )
+            ),
+            21,
+        )
 
     @skip_if_lt_x_gpu(4)
     def test_replicate_tp_device_mesh(self):

@@ -52,7 +52,7 @@ from .dicts import (
     OrderedSetVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
+from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -68,6 +68,7 @@ from .functions import (
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
+    SparseTensorCreationSkipVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
     UserFunctionVariable,
@@ -197,7 +198,6 @@ __all__ = [
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "OptimizerVariable",
-    "PlacementVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",

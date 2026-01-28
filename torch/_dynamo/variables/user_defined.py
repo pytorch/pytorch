@@ -76,6 +76,7 @@ from ..utils import (
     check_constant_args,
     cmp_name_to_op_mapping,
     dict_methods,
+    enum_type_methods,
     frozenset_methods,
     get_custom_getattr,
     has_torch_function,
@@ -155,6 +156,15 @@ def is_cython_function(obj: object) -> bool:
 
 class UserDefinedVariable(VariableTracker):
     value: object
+
+    def _maybe_get_baseclass_method(self, name: str) -> Any:
+        """Get method from the base class if not overridden in value's __dict__."""
+        if name not in getattr(self.value, "__dict__", {}):
+            try:
+                return inspect.getattr_static(type(self.value), name)
+            except AttributeError:
+                pass
+        return None
 
 
 class UserDefinedClassVariable(UserDefinedVariable):
@@ -986,6 +996,45 @@ class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
         return self.value
 
 
+class UserDefinedEnumClassVariable(UserDefinedClassVariable):
+    """
+    Represents Enum class objects (the class itself, not instances).
+
+    Handles Enum metaclass methods like __contains__ by checking if the method
+    is from the standard EnumType metaclass and executing it directly.
+
+    Not yet supported:
+    - __iter__: iteration over enum members (e.g., `for x in SomeEnum`)
+    - __reversed__: reversed iteration
+    - Flag enum membership checks (e.g., `Flag.A in combined_flags`)
+    """
+
+    # pyrefly: ignore[bad-override]
+    value: type[enum.Enum]
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        method = self._maybe_get_baseclass_method(name)
+        if method in enum_type_methods:
+            if name == "__contains__" and len(args) == 1 and not kwargs:
+                arg = args[0]
+                if isinstance(arg, variables.EnumVariable):
+                    # Check if the enum value is a member of this enum class
+                    return variables.ConstantVariable.create(arg.value in self.value)
+                elif arg.is_python_constant():
+                    # Check if a constant value is in the enum
+                    return variables.ConstantVariable.create(
+                        arg.as_python_constant() in self.value
+                    )
+
+        return super().call_method(tx, name, args, kwargs)
+
+
 class NO_SUCH_SUBOBJ:
     pass
 
@@ -1156,14 +1205,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         }
         return fns
 
-    def _maybe_get_baseclass_method(self, name: str) -> set[types.FunctionType] | None:
-        if name not in getattr(self.value, "__dict__", {}):
-            try:
-                return inspect.getattr_static(type(self.value), name)
-            except AttributeError:
-                pass
-        return None
-
     def call_method(
         self,
         tx: "InstructionTranslator",
@@ -1271,20 +1312,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 func_var = VariableTracker.build(tx, setter, func_source)
                 args = [desc_var, self, value]
                 return func_var.call_function(tx, args, {})
-
-            # Check for property descriptors with fset.
-            # property.__set__ is a slot wrapper (not a Python function), so
-            # try_get_descritor_and_setter_py_func returns None.
-            # We need to handle properties specially by calling their fset.
-            property_fset = self.try_get_property_fset(name_str)
-            if property_fset is not None:
-                fset_source = None
-                if self.cls_source:
-                    desc_source = self.get_source_by_walking_mro(name_str)
-                    fset_source = AttrSource(desc_source, "fset")
-                fset_vt = VariableTracker.build(tx, property_fset, fset_source)
-                return fset_vt.call_function(tx, [self, value], {})
-
             # NOTE: else we assume the descriptor (if any) has a
             # side-effect-free `__set__` as far as Dynamo tracing is concerned.
 
@@ -1460,9 +1487,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Skip if `__set__` was traceable (no need to redo the side effect).
             if inspect.isfunction(setter):
                 return True
-            # Skip for property descriptors with fset - we trace fset directly.
-            if isinstance(descriptor, property) and descriptor.fset is not None:
-                return True
             # For untraceable `__set__` we should still skip if the attribute
             # was mutated via instance `__dict__`.
             elif attr_name in self.attrs_directly_modifed_on_dict:
@@ -1476,20 +1500,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         setter = inspect.getattr_static(type(descriptor), "__set__", None)
         if inspect.isfunction(setter):
             return (descriptor, setter)
-        return None
-
-    def try_get_property_fset(self, attr_name: str) -> types.FunctionType | None:
-        """
-        Check if attr_name corresponds to a property descriptor with an fset.
-        Returns the fset function if found, None otherwise.
-
-        This is needed because property.__set__ is a slot wrapper (C function),
-        not a Python function, so try_get_descritor_and_setter_py_func returns None
-        for properties. But property.fset IS a Python function that we can trace.
-        """
-        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
-        if isinstance(descriptor, property) and descriptor.fset is not None:
-            return descriptor.fset
         return None
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
@@ -2621,6 +2631,14 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         assert self._tuple_vt is not None
+        if name == "__eq__":
+            if len(args) != 1 or kwargs:
+                raise ValueError("Improper arguments for method.")
+            return variables.ConstantVariable(self.is_python_equal(args[0]))
+        elif name == "__ne__":
+            if len(args) != 1 or kwargs:
+                raise ValueError("Improper arguments for method.")
+            return variables.ConstantVariable(not self.is_python_equal(args[0]))
         method = self._maybe_get_baseclass_method(name)
         if method in tuple_methods:
             return self._tuple_vt.call_method(tx, name, args, kwargs)
