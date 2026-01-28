@@ -298,7 +298,7 @@ else:
         def _compute_coordinates_from_mesh(
             mesh_tensor: torch.Tensor,
             rank: int,
-        ) -> Optional[tuple[int, ...]]:
+        ) -> tuple[int, ...] | None:
             """
             Compute the coordinates of a rank within a mesh tensor.
 
@@ -1117,6 +1117,19 @@ else:
         def _is_current_rank_part_of_mesh(self) -> bool:
             """
             Return True if the current rank is part of this mesh.
+
+            When a DeviceMesh is created with a subset of ranks (a sub-mesh),
+            ranks not included in the mesh are "non-participating ranks". These
+            ranks:
+
+            - Return None from get_coordinate()
+            - Hold empty tensors as their local DTensor representation
+            - Skip computation during DTensor dispatch (returning default values)
+            - Skip collective operations during redistribute
+            - Return 0 cost for redistribute cost calculations
+
+            This allows DTensor operations to execute correctly across the entire
+            process group while only performing actual work on participating ranks.
             """
             return self._coordinate_on_dim is not None
 
@@ -1125,12 +1138,31 @@ else:
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
-            return self._coordinate_on_dim if self._coordinate_on_dim else None
+            return self._coordinate_on_dim
 
         def _sym_get_coordinate(self, index: int) -> int:
-            # This is only valid when the current rank is part of the mesh.
-            assert self._coordinate_on_dim
-            return self._coordinate_on_dim[index]
+            import torch.distributed.config as config
+            from torch._guards import detect_fake_mode
+
+            if not detect_fake_mode() or not config.compile_on_one_rank:
+                # This is only valid when the current rank is part of the mesh.
+                assert self._coordinate_on_dim is not None
+                return self._coordinate_on_dim[index]
+
+            # This will cause the ops to be registered - so don't let RUFF
+            # delete this import because it thinks it's unused...
+            from ._ops import device_mesh  # noqa: F401
+
+            # Temporarily turn off tracing while we lift the constant
+            # rank_map to a list so it can be a constant in the graph.
+            with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                rank_map_list = self._rank_map.tolist()
+            rank_map = torch.tensor(rank_map_list, device="cpu", dtype=torch.int)
+            full_mesh = self._layout.remap_to_tensor(rank_map)
+
+            return torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
+                full_mesh, index
+            )
 
         def _flatten(
             self,
@@ -1443,3 +1475,24 @@ else:
         )
 
         return device_mesh
+
+
+def _register_distributed_opaque_types():
+    """
+    Register DeviceMesh as an opaque type for torch.compile.
+    This must happen before any custom ops that use DeviceMesh in their schema.
+    Called lazily to avoid circular import issues.
+    """
+    from torch._library.opaque_object import MemberType, register_opaque_type
+
+    register_opaque_type(
+        ProcessGroup,
+        typ="reference",
+        members={
+            "size": MemberType.USE_REAL,
+            "rank": MemberType.USE_REAL,
+            "_get_backend_name": MemberType.USE_REAL,
+            "group_name": MemberType.USE_REAL,
+            "__eq__": MemberType.USE_REAL,
+        },
+    )
