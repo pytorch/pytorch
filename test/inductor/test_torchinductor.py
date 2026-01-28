@@ -9456,11 +9456,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
                 x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
+                random.seed(1234)
                 torch.manual_seed(1234)
                 a0 = fn(x).clone()
                 a1 = fn(x).clone()
                 a2 = fn(x).clone()
 
+                random.seed(1234)
                 torch.manual_seed(1234)
                 b0 = fn(x).clone()
                 b1 = fn(x).clone()
@@ -9485,11 +9487,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
             x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
+            random.seed(1234)
             torch.manual_seed(1234)
             a0 = fn(x)[0].clone()
             a1 = fn(x)[0].clone()
             a2 = fn(x)[0].clone()
 
+            random.seed(1234)
             torch.manual_seed(1234)
             b0 = fn(x)[0].clone()
             b1 = fn(x)[0].clone()
