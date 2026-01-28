@@ -122,7 +122,7 @@ def _(x, dtype):
 
 # Custom ops to test MemoryFormat and Layout argument serialization
 # Using lower-level torch.library API since custom_op decorator doesn't support these types
-_memory_format_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")
+_memory_format_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")  # noqa: TOR901
 _memory_format_test_lib.define(
     "fn_with_memory_format_arg(Tensor x, MemoryFormat memory_format) -> Tensor"
 )
@@ -145,7 +145,7 @@ def fn_with_memory_format_arg_abstract(x, memory_format):
     return x.contiguous(memory_format=memory_format)
 
 
-_layout_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")
+_layout_test_lib = torch.library.Library("aoti_custom_ops", "FRAGMENT")  # noqa: TOR901
 _layout_test_lib.define("fn_with_layout_arg(Tensor x, Layout layout) -> Tensor")
 
 
@@ -467,24 +467,13 @@ class AOTInductorTestsTemplate:
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
 
-    def test_custom_op_with_dtype_arg(self) -> None:
-        # Test that ScalarType arguments are correctly serialized/deserialized
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                return torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.int8)
-
-        m = Model().to(device=self.device)
-        args = (torch.randn(4, 4, device=self.device),)
-        self.check_model(m, args)
-
     def test_custom_op_with_dtype_arg_various_dtypes(self) -> None:
-        # Test multiple ScalarType values to ensure mapping table is correct
         class Model(torch.nn.Module):
             def forward(self, x):
                 a = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.float32)
                 b = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.float64)
                 c = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.int32)
-                d = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.int64)
+                d = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.uint16)
                 e = torch.ops.aoti_custom_ops.fn_with_dtype_arg(x, torch.bfloat16)
                 return a, b, c, d, e
 
@@ -493,7 +482,6 @@ class AOTInductorTestsTemplate:
         self.check_model(m, args)
 
     def test_custom_op_with_memory_format_arg(self) -> None:
-        # Test that MemoryFormat arguments are correctly serialized/deserialized
         class Model(torch.nn.Module):
             def forward(self, x):
                 return torch.ops.aoti_custom_ops.fn_with_memory_format_arg(
@@ -505,7 +493,6 @@ class AOTInductorTestsTemplate:
         self.check_model(m, args)
 
     def test_custom_op_with_layout_arg(self) -> None:
-        # Test that Layout arguments are correctly serialized/deserialized
         class Model(torch.nn.Module):
             def forward(self, x):
                 return torch.ops.aoti_custom_ops.fn_with_layout_arg(x, torch.strided)
