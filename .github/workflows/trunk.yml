@@ -295,7 +295,10 @@ jobs:
     secrets: inherit
 
   linux-jammy-rocm-py3_10-build:
-    if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') || (needs.job-filter.outputs.jobs != '' && contains(needs.job-filter.outputs.jobs, ' linux-jammy-rocm-py3.10 ')) }}
+    #NS: Trunk jobs should run on both PR if ciflow/trunk is added an on trunk
+    # But https://github.com/pytorch/pytorch/pull/165674 always skips them on trunk
+    if: 0
+    # if: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/trunk') || (needs.job-filter.outputs.jobs != '' && contains(needs.job-filter.outputs.jobs, ' linux-jammy-rocm-py3.10 ')) }}
     name: linux-jammy-rocm-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs:
