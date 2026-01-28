@@ -2202,6 +2202,53 @@ class AOTAutogradCacheTests(InductorTestCase):
         # Results should be different
         self.assertNotEqual(result1, result2)
 
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_dtensor_to_local_from_local_cache(self):
+        import torch.distributed as c10d
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor, Replicate
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        fake_store = FakeStore()
+        c10d.init_process_group("fake", store=fake_store, rank=0, world_size=2)
+        try:
+            mesh = init_device_mesh("cpu", (2,))
+
+            def fn(x):
+                # Convert to local, do computation, convert back
+                local = x.to_local()
+                result = local.sin() + local.cos()
+                return DTensor.from_local(result, mesh, [Replicate()])
+
+            # Create DTensor input
+            local_tensor = torch.zeros(4, 4)
+            dtensor = DTensor.from_local(local_tensor, mesh, [Replicate()])
+
+            compiled_fn = torch.compile(fn, backend="inductor")
+
+            # First call should miss
+            result1 = compiled_fn(dtensor)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            # Reset dynamo but keep cache
+            self._clear_dynamo_and_codecache()
+
+            # Second call should hit
+            result2 = compiled_fn(dtensor)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+            # Results should match
+            self.assertEqual(result1.to_local(), result2.to_local())
+        finally:
+            c10d.destroy_process_group()
+
 
 @functorch_config.patch({"bundled_autograd_cache": True})
 class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
@@ -2535,6 +2582,111 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             results[1],
             "DTensor cache keys should be identical across processes",
         )
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_dtensor_to_local_from_local_cache_key(self):
+        """
+        Test that DTensor cache keys are consistent across processes when using
+        to_local() and from_local() operations.
+
+        This ensures that functions which convert between DTensor and local tensors
+        produce deterministic cache keys for warm start cache hits.
+        """
+        ctx = multiprocessing.get_context("spawn")
+        results = []
+        for _ in range(2):
+            queue = ctx.Queue()
+            p = ctx.Process(
+                target=_subprocess_gen_dtensor_to_local_from_local_cache_key,
+                args=(queue,),
+            )
+            p.start()
+            p.join()
+
+            if p.exitcode != 0:
+                self.skipTest(f"Subprocess exited with code {p.exitcode}")
+
+            results.append(queue.get())
+
+        # Cache keys from two different processes should be identical
+        cache_key_0, graph_0 = results[0]
+        cache_key_1, graph_1 = results[1]
+
+        self.assertEqual(
+            cache_key_0,
+            cache_key_1,
+            "DTensor to_local/from_local cache keys should be identical across processes",
+        )
+
+        # Verify the graph structure
+        self.assertExpectedInline(
+            graph_0,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "DTensor(f32[4, 4], R)"):
+        l_x_ = L_x_
+
+        local: "f32[4, 4]" = torch__dynamo_variables_tensor_prim_to_local(l_x_);  l_x_ = None
+
+        sin: "f32[4, 4]" = local.sin()
+        cos: "f32[4, 4]" = local.cos();  local = None
+        result: "f32[4, 4]" = sin + cos;  sin = cos = None
+
+        prim_from_local: "DTensor(f32[4, 4], R)" = torch__dynamo_variables_torch_prim_from_local(result);  result = None
+        return (prim_from_local,)
+""",
+        )
+
+
+def _subprocess_gen_dtensor_to_local_from_local_cache_key(queue):
+    """
+    Subprocess helper to generate a DTensor cache key for a function
+    that uses to_local() and from_local().
+    Must be at module level for multiprocessing to work.
+    """
+    import torch
+    import torch._dynamo
+    import torch.distributed as c10d
+    from torch._dynamo.testing import normalize_gm
+    from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCachePickler
+    from torch.distributed.device_mesh import init_device_mesh
+    from torch.distributed.tensor import DTensor, Replicate
+    from torch.testing._internal.distributed.fake_pg import FakeStore
+
+    fake_store = FakeStore()
+    c10d.init_process_group("fake", store=fake_store, rank=0, world_size=2)
+    try:
+        mesh = init_device_mesh("cpu", (2,))
+
+        # Create DTensor
+        local_tensor = torch.zeros(4, 4)
+        dtensor = DTensor.from_local(local_tensor, mesh, [Replicate()])
+
+        def fn(x):
+            # Convert to local, do computation, convert back
+            local = x.to_local()
+            result = local.sin() + local.cos()
+            return DTensor.from_local(result, mesh, [Replicate()])
+
+        # Get dynamo output
+        torch._dynamo.reset()
+        fx_graph = None
+
+        def compiler(gm, inputs, **kwargs):
+            nonlocal fx_graph
+            fx_graph = gm
+            return gm
+
+        g = torch.compile(fn, backend=compiler, fullgraph=True)
+        g(dtensor)
+
+        pickler = AOTAutogradCachePickler(fx_graph)
+        cache_key = pickler.get_hash(dtensor)
+        graph_str = normalize_gm(fx_graph.print_readable(print_output=False))
+
+        queue.put((cache_key, graph_str))
+    finally:
+        c10d.destroy_process_group()
 
 
 def _subprocess_gen_dtensor_cache_key(queue):
