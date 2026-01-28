@@ -2905,7 +2905,7 @@ class AOTInductorTestsTemplate:
         model = _generate_qdq_linear_module(
             N=15, K=16, bias=True, example_input=example_inputs[0]
         )
-        model = torch.export.export(model, (example_inputs,), strict=True).module()
+        model = torch.export.export(model, example_inputs, strict=True).module()
         with (
             config.patch({"freezing": True, "aot_inductor.force_mmap_weights": True}),
             torch.no_grad(),
