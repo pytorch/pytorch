@@ -11405,8 +11405,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         get_mask(x, p)
 
     def test_flexible_layout_immutable_free_symbols(self):
-        import contextlib
-
         import sympy
 
         from torch._inductor.graph import GraphLowering
