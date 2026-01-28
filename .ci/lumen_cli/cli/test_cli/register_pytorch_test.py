@@ -120,8 +120,7 @@ def register_pytorch_test_commands(
         The created pytorch parser for further customization if needed.
     """
     overview = "\n".join(
-        f"  {name:12} {spec.get('help', '')}"
-        for name, spec in _PYTORCH_TARGETS.items()
+        f"  {name:12} {spec.get('help', '')}" for name, spec in _PYTORCH_TARGETS.items()
     )
     pytorch_parser = subparsers.add_parser(
         "pytorch",

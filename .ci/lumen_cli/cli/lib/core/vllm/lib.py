@@ -40,13 +40,15 @@ def _load_vllm_test_library_yaml() -> dict[str, Any]:
 
 
 _TPL_VLLM_INFO = Template(
-    textwrap.dedent("""\
+    textwrap.dedent(
+        """\
     ##  Vllm against Pytorch CI Test Summary
     **Vllm Commit**: [{{ vllm_commit }}](https://github.com/vllm-project/vllm/commit/{{ vllm_commit }})
     {%- if torch_sha %}
     **Pytorch Commit**: [{{ torch_sha }}](https://github.com/pytorch/pytorch/commit/{{ torch_sha }})
     {%- endif %}
-""")
+"""
+    )
 )
 
 

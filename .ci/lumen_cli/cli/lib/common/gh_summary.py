@@ -17,28 +17,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _TPL_CONTENT = Template(
-    textwrap.dedent("""\
+    textwrap.dedent(
+        """\
     ## {{ title }}
 
     ```{{ lang }}
     {{ content }}
     ```
-""")
+"""
+    )
 )
 
 _TPL_LIST_ITEMS = Template(
-    textwrap.dedent("""\
+    textwrap.dedent(
+        """\
     ## {{ title }}
     {% for it in items %}
     - {{ it.pkg }}: {{ it.relpath }}
     {% else %}
     _(no item found)_
     {% endfor %}
-    """)
+    """
+    )
 )
 
 _TPL_TABLE = Template(
-    textwrap.dedent("""\
+    textwrap.dedent(
+        """\
     {%- if rows %}
     | {{ cols | join(' | ') }} |
     |{%- for _ in cols %} --- |{%- endfor %}
@@ -48,7 +53,8 @@ _TPL_TABLE = Template(
     {%- else %}
     _(no data)_
     {%- endif %}
-""")
+"""
+    )
 )
 
 

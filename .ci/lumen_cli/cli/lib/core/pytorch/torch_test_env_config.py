@@ -430,8 +430,7 @@ class PytorchTestEnvironment:
     def is_benchmark_test(self) -> bool:
         """Check if running benchmark tests."""
         return any(
-            x in self.test_config
-            for x in ["torchbench", "huggingface", "timm", "perf"]
+            x in self.test_config for x in ["torchbench", "huggingface", "timm", "perf"]
         )
 
     # =========================================================================
@@ -462,7 +461,9 @@ class PytorchTestEnvironment:
 
         # Skip bazel builds entirely - torch isn't available there yet
         if self.is_bazel:
-            logger.debug("Skipping build verification (bazel build - torch not available)")
+            logger.debug(
+                "Skipping build verification (bazel build - torch not available)"
+            )
             return
 
         # First, verify PyTorch is importable and print version
@@ -495,7 +496,9 @@ class PytorchTestEnvironment:
         if self.test_config == "legacy_nvidia_driver":
             self._verify_cuda_can_be_initialized(test_dir, env)
 
-    def _verify_cuda_can_be_initialized(self, test_dir: str, env: dict[str, str]) -> None:
+    def _verify_cuda_can_be_initialized(
+        self, test_dir: str, env: dict[str, str]
+    ) -> None:
         """
         Verify that CUDA can be initialized successfully.
 
@@ -525,12 +528,6 @@ class PytorchTestEnvironment:
             )
 
         logger.info("✓ CUDA initialized successfully")
-
-
-
-
-
-
 
     def _verify_sanitizer_configuration(
         self, test_dir: str, env: dict[str, str]
