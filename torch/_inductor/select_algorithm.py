@@ -3833,6 +3833,21 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Benchmark a list of choices and return timing dict.
         """
+        from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+
+        # Reorder choices to benchmark stable kernels (ATen/cuBLAS) BEFORE potentially
+        # unstable CUTLASS kernels. This ensures we have valid fallback timings before
+        # any CUTLASS kernel can corrupt the CUDA context (issue #171094).
+        def choice_priority(c: ChoiceCaller) -> int:
+            if isinstance(c, ExternKernelCaller):
+                return 0  # ATen/cuBLAS first
+            elif isinstance(c, CUDATemplateCaller):
+                return 2  # CUTLASS last
+            else:
+                return 1  # Triton and others in the middle
+
+        choices = sorted(choices, key=choice_priority)
+
         if is_collective:
             import torch.distributed as dist
 
@@ -3922,6 +3937,26 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
                 timings.update({c: float("inf") for c in choices if c not in timings})
                 break
+
+            # If a CUTLASS choice caused a CUDA error, skip remaining CUTLASS choices
+            # to prevent further CUDA context corruption (issue #171094)
+            if not math.isfinite(timing) and isinstance(choice, CUDATemplateCaller):
+                # Check if we have at least one valid non-CUTLASS timing to fall back to
+                has_valid_fallback = any(
+                    math.isfinite(t) and not isinstance(c, CUDATemplateCaller)
+                    for c, t in timings.items()
+                )
+                if has_valid_fallback:
+                    log.warning(
+                        "CUTLASS choice %s failed during benchmarking. "
+                        "Skipping remaining CUTLASS choices to avoid CUDA context corruption.",
+                        getattr(choice, "name", "<unknown>"),
+                    )
+                    # Mark all remaining CUTLASS choices as failed and break
+                    for c in choices:
+                        if c not in timings and isinstance(c, CUDATemplateCaller):
+                            timings[c] = float("inf")
+                    break
 
         return timings
 
