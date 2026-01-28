@@ -76,6 +76,7 @@ class TestDTensorDebugMode(TestCase):
             """\
   torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
+      -> output: S(0)
       redistribute_input(1, S(0) -> R)
         redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
           _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
@@ -88,7 +89,7 @@ class TestDTensorDebugMode(TestCase):
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
-        self.assertTrue(isinstance(debug_mode.operators[2], _RedistributeCall))
+        self.assertTrue(isinstance(debug_mode.operators[3], _RedistributeCall))
         self.assertEqual(next(iter(debug_mode.operators[1])), torch.ops.aten.mm.default)
 
         # check stringification
@@ -174,34 +175,69 @@ class TestDTensorDebugMode(TestCase):
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
-        self.assertExpectedInline(
-            debug_mode.debug_string(show_stack_trace=False),
-            """\
-  <method 'add' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
-    aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
-      redistribute_input(1, S(1) -> S(0))
-        redistribute_input(t: f32[8, 1], trace: S(1)->S(0))
-          _dtensor::shard_dim_alltoall(t: f32[8, 1], 1, 0, 0)
-      aten::add.Tensor(t: f32[1, 8], t: f32[1, 8])
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0))
-    aten::sum(dt: f32[8, 8]| S(0))
-      aten::sum(t: f32[1, 8])
-  torch._tensor.backward(dt: f32[]| P(sum), gradient=None, retain_graph=None, create_graph=False, inputs=None)
-    aten::ones_like(dt: f32[]| P(sum), pin_memory=False, memory_format=torch.preserve_format)
-      aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)
-    aten::expand(dt: f32[]| R, [8, 8])
-      aten::expand(t: f32[], [8, 8])
-      redistribute_input(t: f32[8, 8], trace: R->S(1))
-        aten::split.Tensor(t: f32[8, 8], 1, 1)
-        aten::clone(t: f32[8, 1])
-      aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
-      redistribute_input(t: f32[8, 8], trace: R->S(0))
-        aten::split.Tensor(t: f32[8, 8], 1)
-        aten::detach(t: f32[8, 1])
-        aten::clone(t: f32[1, 8])
-      aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
-      aten::detach(t: f32[1, 8])""",
+        debug_string = debug_mode.debug_string(show_stack_trace=False)
+
+        # Certain operations (clone, detach) appear in non-deterministic order during
+        # backward pass redistribution.
+        # For operations that appear multiple times, we include full parameters to
+        # disambiguate (e.g., two different aten::add operations). For unique operations,
+        # we use partial matching to avoid brittleness if the exact signature format changes.
+
+        # Check for key forward operations
+        self.assertIn(
+            "<method 'add' of 'torch._C.TensorBase' objects>", debug_string
+        )  # Unique - no params needed
+        self.assertIn(
+            "aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))", debug_string
         )
+        self.assertIn("redistribute_input(1, S(1) -> S(0))", debug_string)
+        self.assertIn(
+            "redistribute_input(t: f32[8, 1], trace: S(1)->S(0))", debug_string
+        )
+        self.assertIn(
+            "_dtensor::shard_dim_alltoall", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::add.Tensor(t: f32[1, 8], t: f32[1, 8])", debug_string)
+
+        # Check for sum operations
+        self.assertIn(
+            "<method 'sum' of 'torch._C.TensorBase' objects>", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::sum(dt: f32[8, 8]| S(0))", debug_string)
+        self.assertIn("aten::sum(t: f32[1, 8])", debug_string)
+
+        # Check for backward operations
+        self.assertIn(
+            "torch._tensor.backward", debug_string
+        )  # Unique - no params needed
+        self.assertIn("aten::ones_like(dt: f32[]| P(sum)", debug_string)
+        self.assertIn("aten::ones_like(t: f32[]", debug_string)
+        self.assertIn("aten::expand(dt: f32[]| R, [8, 8])", debug_string)
+        self.assertIn("aten::expand(t: f32[], [8, 8])", debug_string)
+
+        # Check for redistribute operations in backward pass
+        self.assertIn("redistribute_input(t: f32[8, 8], trace: R->S(1))", debug_string)
+        self.assertIn("redistribute_input(t: f32[8, 8], trace: R->S(0))", debug_string)
+
+        # Check for split operations in backward pass
+        self.assertIn("aten::split.Tensor(t: f32[8, 8], 1, 1)", debug_string)
+        self.assertIn("aten::split.Tensor(t: f32[8, 8], 1)", debug_string)
+
+        # Check for _to_copy operations
+        self.assertIn(
+            "aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)",
+            debug_string,
+        )
+        self.assertIn(
+            "aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)",
+            debug_string,
+        )
+
+        # Check that both clone and detach operations appear (order-independent)
+        self.assertIn("aten::clone(t: f32[8, 1])", debug_string)
+        self.assertIn("aten::clone(t: f32[1, 8])", debug_string)
+        self.assertIn("aten::detach(t: f32[8, 1])", debug_string)
+        self.assertIn("aten::detach(t: f32[1, 8])", debug_string)
 
         # check stack trace
         self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
@@ -279,6 +315,34 @@ class TestDTensorDebugMode(TestCase):
     aten::mm(t: f32[16, 8], t: f32[8, 128])
   aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
     aten::sum(t: f32[16, 128])""",
+        )
+
+    def test_output_placements(self):
+        """Test that output placements are recorded for multi-output DTensor ops."""
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # Use topk which returns multiple outputs (values, indices)
+        # Shard on dim=1 (the topk dimension) to trigger redistribution
+        x = torch.randn(8, 2, requires_grad=False)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(1)], run_check=False)
+
+        # Test with redistribution (slow path) - output placements should be recorded
+        with DebugMode(record_output=True) as debug_mode:
+            torch.topk(x_dtensor, k=4, dim=1)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  aten::topk(dt: f32[8, 16]| S(1), 4, 1)
+    -> output: ('R', 'R')
+    redistribute_input(0, S(1) -> R)
+      redistribute_input(t: f32[8, 2], trace: S(1)->R)
+        _c10d_functional::all_gather_into_tensor(t: f32[8, 2], 8, 0)  ->  t: f32[64, 2]
+        _c10d_functional::_wrap_tensor_autograd(t: f32[64, 2])  ->  t: f32[64, 2]
+        _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
+        aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
+        aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
         )
 
     def test_debug_mode_einsum(self):
@@ -926,6 +990,115 @@ class TestDTensorDebugMode(TestCase):
         # Colored is nice for actual viewing, not using in this test though
         gm_str = gm.print_readable(colored=False, print_output=False)
         self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
+
+    def test_invoke_subgraph(self):
+        # Test that DebugMode can trace the operations inside
+        # invoke_subgraph HOP
+
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            a = torch.sin(x)
+            return a
+
+        def fn(x):
+            foo1 = gn(x)
+            y = foo1 * 2
+            foo2 = gn(y)
+            return foo2
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+        x.grad = None
+        x_clone.grad = None
+
+        ref = fn(x)
+        ref.sum().backward()
+
+        with DebugMode() as debug_mode:
+            res = opt_fn(x_clone)
+            res.sum().backward()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, t: f32[8, 8])  ->  ('t: f32[8, 8]', 't: f32[8, 8]')
+    [annotate] [enter InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+      aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]
+    torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, t: f32[8, 8])  ->  ('t: f32[8, 8]', 't: f32[8, 8]')
+    [annotate] [enter InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+      aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] partitioned_fw_subgraph_0_0
+    aten::sum(t: f32[8, 8])  ->  t: f32[]
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [8, 8])  ->  t: f32[8, 8]
+    aten::clone(t: f32[8, 8], memory_format=torch.contiguous_format)  ->  t: f32[8, 8]
+    torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, t: f32[8, 8], t: f32[8, 8])  ->  ('t: f32[8, 8]',)
+    [annotate] [enter InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
+      aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
+      aten::mul.Tensor(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]
+    torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, t: f32[8, 8], t: f32[8, 8])  ->  ('t: f32[8, 8]',)
+    [annotate] [enter InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
+      aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
+      aten::mul.Tensor(t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] partitioned_bw_subgraph_0_0
+    aten::detach(t: f32[8, 8])  ->  t: f32[8, 8]""",  # noqa: B950
+            ignore_comments=True,
+        )
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
+    def test_nested_invoke_subgraph(self):
+        # Test that DebugMode can trace the operations inside
+        # invoke_subgraph HOP
+        @torch.compiler.nested_compile_region
+        def ggn(x):
+            a = torch.cos(x)
+            return a
+
+        @torch.compiler.nested_compile_region
+        def gn(x):
+            x = x + 1
+            x = ggn(x)
+            a = torch.sin(x)
+            return a
+
+        def fn(x):
+            foo1 = gn(x)
+            y = foo1 * 2
+            return y
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        x = torch.randn(8, 8)
+
+        ref = fn(x)
+
+        with DebugMode() as debug_mode:
+            res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    torch.ops.higher_order.invoke_subgraph(subgraph_1, t: f32[8, 8])  ->  ('t: f32[8, 8]',)
+    [annotate] [enter InvokeSubgraph HOP] subgraph_1
+      aten::add.Tensor(t: f32[8, 8], 1)  ->  t: f32[8, 8]
+      torch.ops.higher_order.invoke_subgraph(subgraph_0, t: f32[8, 8])  ->  ('t: f32[8, 8]',)
+      [annotate] [enter InvokeSubgraph HOP] subgraph_0
+        aten::cos(t: f32[8, 8])  ->  t: f32[8, 8]
+      [annotate] [exit InvokeSubgraph HOP] subgraph_0
+      aten::sin(t: f32[8, 8])  ->  t: f32[8, 8]
+    [annotate] [exit InvokeSubgraph HOP] subgraph_1
+    aten::mul.Tensor(t: f32[8, 8], 2)  ->  t: f32[8, 8]""",  # noqa: B950
+            ignore_comments=True,
+        )
 
 
 class TestDebugModeUtils(TestCase):

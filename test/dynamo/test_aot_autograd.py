@@ -253,32 +253,29 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(real, optimized_mod(x, y)))
 
         # Uncomment to reproduce commented out graphs below.
-        # for gm in gms:
-        #     print("GM CODE", gm.code)
+        for gm in gms:
+            print("GM CODE", gm.code)
 
-        self.assertEqual(counter.frame_count, 4)
+        self.assertEqual(counter.frame_count, 2)
         self.assertEqual(counter.op_count, 7)
         # Graph 1
-        # def forward(self, x : torch.nn.parameter.Parameter, y : torch.Tensor):
-        #     mul = x * y;  x = y = None
-        #     return (mul,)
-        # BREAK
-        # Graph 2
-        # def forward(self, y : torch.Tensor):
-        #     getitem = y[0];  y = None
+        # def forward(self, L_x_ : torch.nn.parameter.Parameter, L_y_ : torch.Tensor):
+        #     l_x_ = L_x_
+        #     l_y_ = L_y_
+        #     a = l_x_ * l_y_;  l_x_ = l_y_ = None
+        #     getitem = a[0]
         #     getitem_1 = getitem[0];  getitem = None
         #     lt = getitem_1 < 3;  getitem_1 = None
-        #     return (lt,)
+        #     return (lt, a)
         # BREAK
-        # Graph 3
-        # def forward(self, param : torch.Tensor, y : torch.Tensor):
-        #     add = y + param;  y = param = None
-        #     return (add,)
-        # BREAK
-        # Graph 4
-        # def forward(self, _stack0 : torch.Tensor, x : torch.nn.parameter.Parameter, y : torch.Tensor):
-        #     add = x + y;  x = y = None
-        #     mul = _stack0 * add;  _stack0 = add = None
+        # Graph 2
+        # def forward(self, L_nested_frame_values_0_1_ : torch.Tensor, L_x_ : torch.nn.parameter.Parameter, L_y_ : torch.Tensor):
+        #     l_nested_frame_values_0_1_ = L_nested_frame_values_0_1_
+        #     l_x_ = L_x_
+        #     l_y_ = L_y_
+        #     a = l_nested_frame_values_0_1_ + l_nested_frame_values_0_1_;  l_nested_frame_values_0_1_ = None
+        #     b = l_x_ + l_y_;  l_x_ = l_y_ = None
+        #     mul = a * b;  a = b = None
         #     return (mul,)
 
         # Run fn with AOT
