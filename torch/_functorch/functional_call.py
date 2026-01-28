@@ -13,7 +13,7 @@ from torch._functorch.utils import exposed_in
 def functional_call(
     module: torch.nn.Module,
     parameter_and_buffer_dicts: dict[str, Tensor] | Sequence[dict[str, Tensor]],
-    args: Any | tuple[Any, ...] | None = None,
+    args: Any = None,
     kwargs: dict[str, Any] | None = None,
     *,
     tie_weights: bool = True,

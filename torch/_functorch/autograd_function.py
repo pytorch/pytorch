@@ -47,8 +47,8 @@ class CustomFunctionHigherOrderOperator(HigherOrderOperator):
     def __call__(
         self,
         autograd_function: type[torch.autograd.Function],
-        *args: Any,
-        **kwargs: Any,
+        *args: _P.args,
+        **kwargs: _P.kwargs,
     ) -> Any:
         # When custom_function_call is done dispatching through functorch,
         # it should just invoke the autograd.Function. This is consistent
@@ -861,11 +861,11 @@ autograd_function_apply = AutogradFunctionApply()
 
 class DynamoAutogradFunctionTraceHelper:
     @staticmethod
-    def fwd_trace_helper(orig_fwd: Callable[..., Any]) -> Callable[..., Any]:
+    def fwd_trace_helper(orig_fwd: Callable[_P, Any]) -> Callable[_P, Any]:
         # autograd.Function forward does more than just running the forward method. Most
         # of this logic is in C++. Here, we rewrite that functionality in python and let
         # Dynamo trace it.
-        def inner(*args: Any, **kwargs: Any) -> Any:
+        def inner(*args: _P.args, **kwargs: _P.kwargs) -> Any:
             with torch.no_grad():
                 outs = orig_fwd(*args, **kwargs)
 
