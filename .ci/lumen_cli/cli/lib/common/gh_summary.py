@@ -23,8 +23,7 @@ _TPL_CONTENT = Template(
     ```{{ lang }}
     {{ content }}
     ```
-"""
-    )
+""")
 )
 
 _TPL_LIST_ITEMS = Template(
@@ -35,8 +34,7 @@ _TPL_LIST_ITEMS = Template(
     {% else %}
     _(no item found)_
     {% endfor %}
-    """
-    )
+    """)
 )
 
 _TPL_TABLE = Template(
@@ -50,8 +48,7 @@ _TPL_TABLE = Template(
     {%- else %}
     _(no data)_
     {%- endif %}
-"""
-    )
+""")
 )
 
 

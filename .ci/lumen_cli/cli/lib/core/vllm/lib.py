@@ -46,8 +46,7 @@ _TPL_VLLM_INFO = Template(
     {%- if torch_sha %}
     **Pytorch Commit**: [{{ torch_sha }}](https://github.com/pytorch/pytorch/commit/{{ torch_sha }})
     {%- endif %}
-"""
-    )
+""")
 )
 
 
