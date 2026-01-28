@@ -1296,34 +1296,6 @@ op_db: list[OpInfo] = [
                 "test_comprehensive",
                 device_type="cuda",
             ),
-            # NotImplementedError: The operator 'aten::vdot' is not currently implemented for the MPS device
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_variant_consistency_eager",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_noncontiguous_samples",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_warning",
-                device_type="mps",
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestCommon",
-                "test_out_requires_grad_error",
-                device_type="mps",
-            ),
         ),
     ),
     OpInfo(
@@ -2925,18 +2897,20 @@ python_ref_db: list[OpInfo] = [
         torch_opinfo_name="linalg.vecdot",
         op_db=op_db,
         skips=(
-            # NotImplementedError: The operator 'aten::vdot' is not currently implemented for the MPS device
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref_torch_fallback",
                 device_type="mps",
+                dtypes=(torch.float16, torch.bfloat16),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
                 "test_python_ref",
                 device_type="mps",
+                dtypes=(torch.float16, torch.bfloat16),
             ),
         ),
     ),
