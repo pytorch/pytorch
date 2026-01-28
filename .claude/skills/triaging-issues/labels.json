@@ -8,24 +8,8 @@
       "description": "Clear what needs to be done to fix this issue"
     },
     {
-      "name": "advanced",
-      "description": "Label for advanced docathon tasks"
-    },
-    {
       "name": "better-on-discuss-forum",
       "description": ""
-    },
-    {
-      "name": "complex_autograd",
-      "description": ""
-    },
-    {
-      "name": "csprng",
-      "description": "Fix or feature required for torchcsprng"
-    },
-    {
-      "name": "detect-test-pollution-nack",
-      "description": "detect-test-pollution didn't work to identify what the problem was"
     },
     {
       "name": "dynamo-autograd-function",
@@ -36,20 +20,8 @@
       "description": "Issues related to dynamo/compile on functorch transforms"
     },
     {
-      "name": "easy",
-      "description": "label for easy docathon tasks"
-    },
-    {
-      "name": "Enable Org GHA Runners",
-      "description": ""
-    },
-    {
       "name": "enhancement",
       "description": "Not as big of a feature, but technically not a bug. Should be easy to fix"
-    },
-    {
-      "name": "executorch-needs-help",
-      "description": "Add this label to your issue/PR if you need help from the ExecuTorch team"
     },
     {
       "name": "feature",
@@ -93,14 +65,6 @@
     },
     {
       "name": "matrix multiplication",
-      "description": ""
-    },
-    {
-      "name": "medium",
-      "description": "Label for medium docathon tasks"
-    },
-    {
-      "name": "mempool-bug",
       "description": ""
     },
     {
@@ -168,10 +132,6 @@
       "description": ""
     },
     {
-      "name": "module: bazel",
-      "description": ""
-    },
-    {
       "name": "module: bc-breaking",
       "description": "Related to a BC-breaking change"
     },
@@ -188,32 +148,16 @@
       "description": "Anything related to official binaries that we release to users"
     },
     {
-      "name": "module: boolean tensor",
-      "description": ""
-    },
-    {
-      "name": "module: bootcamp",
-      "description": "We plan to do a full writeup on the issue, and then get someone to do it for onboarding"
-    },
-    {
       "name": "module: bottleneck",
       "description": "Related to torch.utils.bottleneck"
     },
     {
       "name": "module: build",
-      "description": "Build system issues"
+      "description": "Build system issues, compilation errors, including bazel build failures"
     },
     {
       "name": "module: build warnings",
       "description": "Related to warnings during build process"
-    },
-    {
-      "name": "module: c10d",
-      "description": "Issues/PRs related to collective communications and process groups"
-    },
-    {
-      "name": "module: CapabilityBasedPartitioner",
-      "description": "An FX optimization pass"
     },
     {
       "name": "module: ci",
@@ -274,10 +218,6 @@
     {
       "name": "module: cpu",
       "description": "CPU specific problem (e.g., perf, algorithm)"
-    },
-    {
-      "name": "module: CPU_tensor_apply",
-      "description": "Porting CPU_tensor_apply to TensorIterator"
     },
     {
       "name": "module: crash",
@@ -1122,14 +1062,6 @@
     {
       "name": "oncall: export",
       "description": "Add this issue/PR to Export oncall triage queue"
-    },
-    {
-      "name": "oncall: fx",
-      "description": "Add this issue/PR to FX oncall triage queue"
-    },
-    {
-      "name": "oncall: java",
-      "description": "Add this issue/PR to Java bindings oncall triage queue"
     },
     {
       "name": "oncall: jit",
