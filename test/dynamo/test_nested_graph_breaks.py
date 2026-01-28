@@ -4,69 +4,6 @@ import sys
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo import config
-from torch._dynamo.testing import make_test_cls_with_patches
-
-
-try:
-    # from . import test_ctx_manager
-    pass
-except ImportError:
-    # import test_aot_autograd
-    # import test_ctx_manager
-
-    # import test_export
-    # import test_functions
-    # import test_higher_order_ops
-    # import test_misc
-    # import test_modules
-    # import test_repros
-    # import test_sdpa
-    # import test_subgraphs
-    pass
-
-
-test_classes = {}
-
-
-def make_nested_cls(cls):
-    suffix = "_nested_graph_breaks"
-
-    cls_prefix = "NestedGraphBreaks"
-
-    test_class = make_test_cls_with_patches(
-        cls,
-        cls_prefix,
-        suffix,
-        (config, "debug_force_nested_calls", True),
-        (config, "debug_force_graph_break_on_leaf_return", True),
-        (config, "debug_disable_compile_counter", True),
-        xfail_prop="_expected_failure_nested_graph_breaks",
-    )
-
-    test_classes[test_class.__name__] = test_class
-    # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
-    # globals()[test_class.__name__] = test_class
-    test_class.__module__ = __name__
-    return test_class
-
-
-tests = [
-    # test_ctx_manager.CtxManagerTests,
-    # test_functions.FunctionTests,
-    # test_misc.MiscTests,
-    # test_repros.ReproTests,
-    # test_modules.NNModuleTests,
-    # test_subgraphs.SubGraphTests,
-    # test_higher_order_ops.HigherOrderOpTests,
-    # test_higher_order_ops.FuncTorchHigherOrderOpTests,
-    # test_aot_autograd.AotAutogradFallbackTests,
-    # test_sdpa.TestSDPA,
-]
-test = None
-for test in tests:
-    make_nested_cls(test)
-del test
 
 
 # for use in test_side_effects_globals
