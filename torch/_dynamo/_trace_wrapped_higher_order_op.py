@@ -157,6 +157,7 @@ class TraceWrapped(HigherOrderOperator):
         super().__init__("trace_wrapped")
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
 

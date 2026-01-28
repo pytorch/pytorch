@@ -22,7 +22,7 @@ from sympy.utilities.iterables import sift
 
 from torch.torch_version import TorchVersion
 
-from .numbers import int_oo
+from .numbers import int_oo, is_infinite
 
 
 if TYPE_CHECKING:
@@ -92,7 +92,8 @@ __all__ = [
 def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     # No need to check that two args are not the same, since expr is pr-optimized but we do it anyway.
     return (
-        expr.is_Add
+        isinstance(expr, sympy.Expr)
+        and expr.is_Add
         and len(expr._args) == 2
         and expr._args[0].is_symbol
         and expr._args[1].is_symbol
@@ -105,7 +106,6 @@ def _keep_float(
 ) -> Callable[[Unpack[_Ts]], _T | sympy.Float]:
     @functools.wraps(f)
     def inner(*args: Unpack[_Ts]) -> _T | sympy.Float:
-        # pyrefly: ignore [bad-argument-type]
         r: _T | sympy.Float = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -226,12 +226,7 @@ class FloorDiv(sympy.Function):
         # makes it difficult to check the types.
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
-        if base in (int_oo, -int_oo, sympy.oo, -sympy.oo) and divisor in (
-            int_oo,
-            -int_oo,
-            sympy.oo,
-            -sympy.oo,
-        ):
+        if is_infinite(base) and is_infinite(divisor):
             return sympy.nan
         if base is sympy.nan or divisor is sympy.nan:
             return sympy.nan
@@ -242,13 +237,13 @@ class FloorDiv(sympy.Function):
             return base
         if base.is_integer and equal_valued(divisor, -1):
             return sympy.Mul(base, -1)
+        if base == divisor:
+            return sympy.S.One
+
         if (
             isinstance(base, sympy.Number)
             and isinstance(divisor, sympy.Number)
-            and (
-                base in (int_oo, -int_oo, sympy.oo, -sympy.oo)
-                or divisor in (int_oo, -int_oo, sympy.oo, -sympy.oo)
-            )
+            and (is_infinite(base) or is_infinite(divisor))
         ):
             r = float(base) / float(divisor)
             if r == math.inf:
@@ -1149,10 +1144,7 @@ class IntTrueDiv(sympy.Function):
         if (
             isinstance(base, sympy.Number)
             and isinstance(divisor, sympy.Number)
-            and (
-                base in (int_oo, -int_oo, sympy.oo, -sympy.oo)
-                or divisor in (int_oo, -int_oo, sympy.oo, -sympy.oo)
-            )
+            and (is_infinite(base) or is_infinite(divisor))
         ):
             # Don't have to worry about precision here, you're getting zero or
             # inf from the division
@@ -1240,6 +1232,8 @@ class TruncToFloat(sympy.Function):
 
     @classmethod
     def eval(cls, number):
+        if number in (sympy.oo, -sympy.oo):
+            return number
         # assert number.is_integer is not True, number
         if isinstance(number, sympy.Number):
             # NB: It is safe to use truncation to integer, which is what

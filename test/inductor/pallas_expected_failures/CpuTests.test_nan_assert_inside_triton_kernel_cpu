@@ -1,5 +1,0 @@
-FAIL
-           ^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/test/inductor/test_torchinductor.py", line 14712, in test_nan_assert_inside_triton_kernel
-    self.assertTrue("'NaN or Inf found'" in code)
-AssertionError: False is not true

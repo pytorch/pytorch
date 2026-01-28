@@ -114,7 +114,7 @@ def weight_norm(module: T_module, name: str = "weight", dim: int = 0) -> T_modul
           respectively.  If this is bothering you, please comment on
           https://github.com/pytorch/pytorch/issues/102999
 
-        * To remove the weight normalization reparametrization, use
+        * To remove the weight normalization reparameterization, use
           :func:`torch.nn.utils.parametrize.remove_parametrizations`.
 
         * The weight is no longer recomputed once at module forward; instead, it will

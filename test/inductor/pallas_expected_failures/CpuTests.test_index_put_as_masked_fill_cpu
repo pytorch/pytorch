@@ -1,5 +1,0 @@
-ERROR
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/state/indexing.py", line 250, in from_indices_shape
-    raise ValueError("`indices` must not be longer than `shape`: "
-ValueError: `indices` must not be longer than `shape`: indices=(0,), shape=()

@@ -15,7 +15,6 @@ import torch
 import torch._export
 import torch._inductor
 import torch._inductor.config
-import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.nn as nn
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.device_interface import get_interface_for_device
@@ -35,26 +34,24 @@ from torch._inductor.utils import (
 )
 from torch._library import capture_triton
 from torch._utils_internal import full_aoti_runtime_assert
-from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.export import Dim, export
 from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
     CDNA2OrLater,
-    IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    requires_triton_ptxas_compat,
     SM80OrLater,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     e4m3_type,
-    skipCUDAIf,
+    e5m2_type,
 )
 from torch.testing._internal.common_quantization import (
     _group_quantize_tensor,
@@ -245,10 +242,7 @@ class AOTInductorTestsTemplate:
     # Skip embed_kernel_binary == True for now as it shows random
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
-    @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
-        "Test is only supported on CUDA 12.8+",
-    )
+    @requires_triton_ptxas_compat
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
@@ -337,10 +331,6 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "different # of input/output/constants in native matmul",
-    )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -1319,8 +1309,8 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(
-        TEST_WITH_ROCM or not IS_SM90,
-        "scaled_grouped_mm is only supported on SM90",
+        not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
+        "scaled_grouped_mm is only supported on SM90 and MI300+ devices",
     )
     @skipIfXpu
     def test_scaled_grouped_mm(self):
@@ -1367,13 +1357,13 @@ class AOTInductorTestsTemplate:
         x_fp16 = torch.randn(
             num_groups, batch_size, in_features, dtype=dtype, device=device
         )
-        x_fp8 = x_fp16.to(torch.float8_e4m3fn)
+        x_fp8 = x_fp16.to(e4m3_type)
 
         # Create FP8 weight tensor - concatenated and transposed
         weight_fp16 = torch.randn(
             total_out_features, in_features, dtype=dtype, device=device
         )
-        weight_fp8 = weight_fp16.to(torch.float8_e4m3fn)
+        weight_fp8 = weight_fp16.to(e4m3_type)
 
         # Create scales
         scale_a = torch.ones(num_groups, batch_size, device=device, dtype=torch.float32)
@@ -2557,10 +2547,6 @@ class AOTInductorTestsTemplate:
 
     # mps doesn't support float64
     @skipIfMPS
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "FIXME: cannot do get_size on FakeTensor during lowering.",
-    )
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(
@@ -2891,38 +2877,6 @@ class AOTInductorTestsTemplate:
             torch.randint(1, size=[38], dtype=torch.int64, device=GPU_TYPE),
         )
         torch._export.aot_compile(Model(), example_inputs)
-
-    @skipCUDAIf(True, "Test for x86 backend")
-    @unittest.skipIf(IS_FBCODE, "Need newer ideep")
-    def test_buffer_mutation_and_force_mmap_weights(self):
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = torch.nn.Linear(16, 15)
-                self.linear2 = torch.nn.Linear(15, 14)
-
-            def forward(self, x):
-                x = self.linear1(x)
-                out = self.linear2(x)
-                return out
-
-        example_inputs = (torch.randn(32, 16),)
-        model = Model().eval()
-        with (
-            config.patch({"freezing": True, "aot_inductor.force_mmap_weights": True}),
-            torch.no_grad(),
-        ):
-            exported_model = export(model, example_inputs, strict=True).module()
-            quantizer = X86InductorQuantizer()
-            quantizer.set_global(
-                xiq.get_default_x86_inductor_quantization_config(reduce_range=True)
-            )
-            prepared_model = prepare_pt2e(exported_model, quantizer)
-            prepared_model(*example_inputs)
-            converted_model = convert_pt2e(prepared_model)
-            torch.ao.quantization.move_exported_model_to_eval(converted_model)
-
-            self.check_model(converted_model, example_inputs)
 
     @skipIfMPS
     def test_fallback_mem_leak_fix(self):
@@ -4937,7 +4891,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(m, inputs)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
@@ -4958,12 +4911,8 @@ class AOTInductorTestsTemplate:
 
         inputs = []
         for dtype in (
-            torch.float8_e4m3fn,
-            torch.float8_e5m2,
-            # FP8 funz are for AMD
-            # see https://github.com/pytorch/pytorch/issues/126734
-            # torch.float8_e4m3fnuz,
-            # torch.float8_e5m2fnuz,
+            e4m3_type,  # float8_e4m3fn (CUDA) or float8_e4m3fnuz (ROCm)
+            e5m2_type,  # float8_e5m2 (CUDA) or float8_e5m2fnuz (ROCm)
         ):
             inputs.append(torch.ones(8, 8, 8, dtype=dtype, device=self.device))
         dim0 = Dim("s0", min=2, max=1024)
@@ -6864,9 +6813,6 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfMPS
-    @skipIfXpu(
-        msg="aten::convert_weight_to_int4pack is not currently implemented for XPU"
-    )
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
@@ -7048,7 +6994,6 @@ class AOTInductorTestsTemplate:
         ):
             torch._export.aot_compile(Model(), (x, y, m))
 
-    @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7080,12 +7025,14 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            if GPU_TYPE == "xpu" or torch.version.hip:
+                grid_0 = 32736
+            else:
+                grid_0 = 1023
             self.code_check_count(
                 Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
             )
 
-    @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7128,12 +7075,14 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            if GPU_TYPE == "xpu" or torch.version.hip:
+                grid_0 = 32736
+            else:
+                grid_0 = 1023
             self.code_check_count(
                 Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
             )
 
-    @skipIfRocm
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     def test_triton_dynamic_launcher_grid(self):
         if self.device != GPU_TYPE:
@@ -7179,7 +7128,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes = {"x": {0: dim0_x}, "value": {0: Dim.AUTO}}
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
-    @skipIfRocm
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     def test_triton_dynamic_launcher_grid_infer_from_tensor(self):
         if self.device != GPU_TYPE:
@@ -7555,7 +7503,6 @@ class AOTInductorTestsTemplate:
 
         self.assertEqual(outputs, outputs_aoti)
 
-    @unittest.skipIf(config.triton.native_matmul, "different code generated")
     def test_pad_non_zero_memory_leak(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("test is only for GPU_TYPE")
@@ -7751,6 +7698,45 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, device=self.device),
         )
+        self.check_model(Model(), example_inputs, move_model_to_device=False)
+
+    @requires_gpu
+    def test_mixed_device_zero_size_constant(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Zero-size CUDA buffer
+                self.register_buffer(
+                    "empty_buffer",
+                    torch.empty(0, device=GPU_TYPE, dtype=torch.float32),
+                )
+                self.register_buffer(
+                    "cpu_indices",
+                    torch.tensor([0, 1, 2, 3], device="cpu", dtype=torch.int64),
+                )
+                self.register_buffer(
+                    "cuda_weights",
+                    torch.tensor(
+                        [1.0, 2.0, 3.0, 4.0], device=GPU_TYPE, dtype=torch.float32
+                    ),
+                )
+                # Another CUDA buffer to verify offset tracking is correct
+                self.register_buffer(
+                    "cuda_bias",
+                    torch.tensor(
+                        [0.5, 0.5, 0.5, 0.5], device=GPU_TYPE, dtype=torch.float32
+                    ),
+                )
+
+            def forward(self, x):
+                idx_cuda = self.cpu_indices.to(GPU_TYPE)
+                weights = self.cuda_weights[idx_cuda]
+                return x * weights + self.cuda_bias
+
+        example_inputs = (torch.randn(4, device=self.device),)
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu

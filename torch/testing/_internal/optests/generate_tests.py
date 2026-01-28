@@ -555,11 +555,20 @@ class OpCheckMode(TorchFunctionMode):
         self.prev_dynamo_disable = os.environ.get("TORCHDYNAMO_DISABLE", "")
         _is_inside_opcheck_mode.value = True
         os.environ["TORCHDYNAMO_DISABLE"] = "1"
+        # When running this test mode, we want to disable
+        # default torch.compile custom op checker
+        self.prev_functorch_config_for_checking_custom_op = (
+            torch._functorch.config.check_custom_op_aliasing
+        )
+        torch._functorch.config.check_custom_op_aliasing = False
         return super().__enter__(*args, **kwargs)
 
     def __exit__(self, *args, **kwargs):
         _is_inside_opcheck_mode.value = self.prev_is_opcheck_mode
         os.environ["TORCHDYNAMO_DISABLE"] = self.prev_dynamo_disable
+        torch._functorch.config.check_custom_op_aliasing = (
+            self.prev_functorch_config_for_checking_custom_op
+        )
         try:
             self.maybe_raise_errors_on_exit()
             if should_update_failures_dict():
