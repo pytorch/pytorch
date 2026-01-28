@@ -126,8 +126,6 @@ class NotView(ViewInfo):
         return bases_list[self.base_index]
 
 
-
-
 def is_alias(base, tensor):
     from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
@@ -203,9 +201,6 @@ def write_view_information_to_args(
             raise AssertionError(f"{prefix}_slice_start already in kwargs")
         if f"{prefix}_slice_end" in kwargs:
             raise AssertionError(f"{prefix}_slice_end already in kwargs")
-
-        if f"{prefix}_dtype" in kwargs:
-            raise AssertionError(f"{prefix}_dtype already in kwargs")
 
         def use_as_strided(tensor):
             kwargs[f"{prefix}_size"] = tensor.size()
