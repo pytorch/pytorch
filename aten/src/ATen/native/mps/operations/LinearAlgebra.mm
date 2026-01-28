@@ -1345,14 +1345,13 @@ static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper
 }
 
 static void geqrf_stub_impl(const Tensor& input, const Tensor& tau) {
-
   if (input.numel() == 0) {
     return;
   }
 
   auto m = input.size(-2);
   auto n = input.size(-1);
-  
+
   // Compute batch size
   int64_t batch_size = 1;
   for (int64_t i = 0; i < input.dim() - 2; i++) {
@@ -1372,17 +1371,16 @@ static void geqrf_stub_impl(const Tensor& input, const Tensor& tau) {
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      auto pipeline_state = lib.getPipelineStateForFunc(
-          fmt::format("geqrf_{}", scalarToMetalTypeString(A_work)));
+      auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("geqrf_{}", scalarToMetalTypeString(A_work)));
       getMPSProfiler().beginProfileKernel(pipeline_state, "geqrf", {input, tau});
       [compute_encoder setComputePipelineState:pipeline_state];
       mtl_setArgs(compute_encoder, A_work, tau_work, params);
-      
+
       // One threadgroup per batch element
       MTLSize threadGroupSize = MTLSizeMake(256, 1, 1);
       MTLSize gridSize = MTLSizeMake(batch_size, 1, 1);
       [compute_encoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
-      
+
       getMPSProfiler().endProfileKernel(pipeline_state);
     }
   });
@@ -1391,8 +1389,6 @@ static void geqrf_stub_impl(const Tensor& input, const Tensor& tau) {
   input.copy_(A_work.reshape(input.sizes()));
   tau.copy_(tau_work.reshape(tau.sizes()));
 }
-
-
 
 static Tensor& orgqr_stub_impl(Tensor& self, const Tensor& tau) {
   if (self.numel() == 0) {
