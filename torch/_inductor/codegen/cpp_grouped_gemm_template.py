@@ -331,7 +331,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                     template_buffer.inputs[idx] = (
                         ir.InputsKernel.unwrap_storage_for_input(W_packed_constant)
                     )
-            # pyrefly: ignore [bad-return]
+
             return output
 
         template = DataProcessorTemplateWrapper(
@@ -370,7 +370,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         cur_idx = bias_start_idx
         for inp_idx in range(self.gemm_grouped_num):
             inp = None
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             if self.has_bias[inp_idx]:
                 inp = self.input_nodes[cur_idx]
                 cur_idx += 1
@@ -399,7 +399,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             self.n,
             self.k,
             input_dtype=X_list[0].get_dtype(),
-            # pyrefly: ignore [missing-attribute]
             input2_dtype=W_list[0].get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
@@ -437,7 +436,6 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         for x_idx in range(wgt_start_idx):
             kernel_args["X" + str(x_idx)] = act_deduplicated[x_idx]
         for w_idx in range(self.gemm_grouped_num):
-            # pyrefly: ignore [unsupported-operation]
             kernel_args["W" + str(w_idx)] = W_list[w_idx]
         for inp_idx in range(self.gemm_grouped_num):
             kernel_args["inp" + str(inp_idx)] = inp_list[inp_idx]

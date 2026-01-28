@@ -60,30 +60,30 @@ void LlgaKernel::initializeConstantInputs() {
   }
 }
 
-std::map<size_t, int64_t> LlgaKernel::initializeTensorIdToOccurence() const {
-  std::map<size_t, int64_t> tensorIdToOccurence;
+std::map<size_t, int64_t> LlgaKernel::initializeTensorIdToOccurrence() const {
+  std::map<size_t, int64_t> tensorIdToOccurrence;
   for (auto& lt : partition_.get_input_ports()) {
     auto inputId = lt.get_id();
-    std::map<size_t, int64_t>::iterator it(tensorIdToOccurence.find(inputId));
-    if (it != tensorIdToOccurence.end()) {
+    std::map<size_t, int64_t>::iterator it(tensorIdToOccurrence.find(inputId));
+    if (it != tensorIdToOccurrence.end()) {
       it->second++;
     } else {
-      tensorIdToOccurence[inputId] = 1;
+      tensorIdToOccurrence[inputId] = 1;
     }
   }
-  return tensorIdToOccurence;
+  return tensorIdToOccurrence;
 }
 
 ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   ArgSpecs inputSpecs;
   inputSpecs.reserve(nPartitionInputs_);
   GRAPH_DEBUG("Initializing graph input logical tensors");
-  std::map<size_t, int64_t> tensorIdToOccurence =
-      initializeTensorIdToOccurence();
+  std::map<size_t, int64_t> tensorIdToOccurrence =
+      initializeTensorIdToOccurrence();
   for (const auto i : c10::irange(nGraphInputs_)) {
     auto spec = ArgSpec(graph_->inputs()[i]).supplementTensorInfo(inputs[i]);
     initializedInputIds_.insert(spec.tid());
-    int64_t occurrence = tensorIdToOccurence[spec.tid()];
+    int64_t occurrence = tensorIdToOccurrence[spec.tid()];
     inputSpecs.insert(inputSpecs.end(), occurrence, spec);
     runArgsIdx_.insert(runArgsIdx_.end(), occurrence, i);
   }
@@ -126,18 +126,18 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
   for (const auto i : c10::irange(numInputs)) {
     auto spec = inputSpecs_[i];
     const auto& input = inputs[runArgsIdx_[i]];
-    runInputs.push_back(
-        {spec.logical_tensor(), Engine::getEngine(), input.data_ptr()});
+    runInputs.emplace_back(
+        spec.logical_tensor(), Engine::getEngine(), input.data_ptr());
   }
   auto numConstantInputs = constantInputs_.size();
   for (size_t i = 0; i < numConstantInputs; i++) {
     // constantInputSpecs are placed after graphInputSpecs
     auto constantInputSpecIdx = nGraphInputs_ + i;
     auto constantInputSpec = inputSpecs_[constantInputSpecIdx];
-    runInputs.push_back(
-        {constantLogicalTensors_[i],
-         Engine::getEngine(),
-         constantInputs_[i].data_ptr()});
+    runInputs.emplace_back(
+        constantLogicalTensors_[i],
+        Engine::getEngine(),
+        constantInputs_[i].data_ptr());
   }
 
   for (const auto i : c10::irange(nOutputs_)) {
@@ -174,10 +174,8 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
           }
         }
         outputs.push_back(inputTensor);
-        runOutputs.push_back(
-            {spec.logical_tensor(),
-             Engine::getEngine(),
-             inputTensor.data_ptr()});
+        runOutputs.emplace_back(
+            spec.logical_tensor(), Engine::getEngine(), inputTensor.data_ptr());
         return std::make_tuple(runInputs, runOutputs);
       }
     }
@@ -197,8 +195,8 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
 #endif
       auto tensor = at::empty_strided(spec.sizes(), spec.strides(), opt);
       outputs.push_back(tensor);
-      runOutputs.push_back(
-          {spec.logical_tensor(), Engine::getEngine(), tensor.data_ptr()});
+      runOutputs.emplace_back(
+          spec.logical_tensor(), Engine::getEngine(), tensor.data_ptr());
     }
   }
 

@@ -524,6 +524,12 @@ def with_comms(
             *args: tuple[object],
             **kwargs: dict[str, Any],  # type: ignore[misc]
         ) -> None:
+            # just passthrough if harness doesn't
+            # support init_pg e.g., DTensorOpTestBase
+            if not hasattr(self, "init_pg"):
+                func(self, *args, **kwargs)
+                return
+
             self.init_pg(eager_init, backend)
 
             try:
@@ -712,6 +718,68 @@ class DTensorConverter:
             raise RuntimeError(f"Trying to convert to DTensor, but got {type(t)}")
 
 
+class LocalDTensorOpTestBase(DTensorOpTestBase):
+    @property
+    def is_local_tensor_enabled(self) -> bool:
+        return True
+
+    def _handle_test_skip(self, msg: str) -> None:
+        self.skipTest(msg)
+
+    def _get_local_tensor_mode(self):
+        return LocalTensorMode(frozenset(range(self.world_size)))
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.autograd._enable_record_function(False)
+
+    def tearDown(self) -> None:
+        from torch.distributed.tensor import _random as random
+
+        random._rng_tracker = None
+        super().tearDown()
+        torch.autograd._enable_record_function(True)
+
+    @property
+    def rank(self):
+        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
+
+    @rank.setter
+    def rank(self, rank):
+        pass
+
+    def join_or_run(self, fn):
+        @wraps(fn)
+        def wrapper(self):
+            fn()
+
+        return types.MethodType(wrapper, self)
+
+    def build_device_mesh(self) -> DeviceMesh:
+        with maybe_disable_local_tensor_mode():
+            return super().build_device_mesh()
+
+    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+        dist.init_process_group("fake", rank=0, world_size=self.world_size)
+        self._pg = dist.distributed_c10d._get_default_group()
+
+    def destroy_pg(self, device_id: Optional[int] = None) -> None:
+        dist.destroy_process_group(self._pg)
+        self._pg = None
+
+    def _spawn_processes(self) -> None:
+        pass
+
+    def _spawn_threads(self) -> None:
+        pass
+
+    def run_test(self, test_name: str, parent_pipe) -> None:
+        getattr(self, test_name)()
+
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(0)
+
+
 class LocalDTensorTestBase(DTensorTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
@@ -790,7 +858,9 @@ def make_wrapped(fn, ctxs):
     return wrapped
 
 
-def create_local_tensor_test_class(orig_cls, skipped_tests=None):
+def create_local_tensor_test_class(
+    orig_cls, skipped_tests=None, base_class=LocalDTensorTestBase
+):
     if skipped_tests is None:
         skipped_tests = []
 
@@ -809,7 +879,7 @@ def create_local_tensor_test_class(orig_cls, skipped_tests=None):
 
     cls = type(
         orig_cls.__name__ + "WithLocalTensor",
-        (LocalDTensorTestBase,) + orig_cls.__bases__,
+        (base_class,) + orig_cls.__bases__,
         dct,
     )
     cls.__file__ = __file__
@@ -883,12 +953,15 @@ def patched_distribute_tensor(
     placements,
     shard_order,
     use_graph_based_transform=True,
+    src_data_rank: int | None = 0,
 ):
     """wrapper function to support shard_order for tensor distribution"""
     if placements is None:
         placements = shard_order_to_placement(shard_order, device_mesh)
     placements = tuple(placements)
-    tensor_dt = distribute_tensor(input_tensor, device_mesh, placements)
+    tensor_dt = distribute_tensor(
+        input_tensor, device_mesh, placements, src_data_rank=src_data_rank
+    )
     # fix the shard order
     return redistribute(
         tensor_dt, device_mesh, placements, shard_order, use_graph_based_transform
@@ -950,3 +1023,46 @@ def generate_shard_orders(mesh, tensor_rank):
                             mesh_dims[0] : mesh_dims[-1] + 1
                         ]
                     yield _convert_shard_order_dict_to_ShardOrder(shard_order)
+
+
+def validate_sharding_rule_sample(
+    op, full_args, full_kwargs, input_placements, output_placements, device_mesh
+):
+    from torch.utils import _pytree as pytree
+
+    # Extract tensors from args in order, pair with placements
+    full_tensors = [
+        a for a in pytree.tree_leaves(full_args) if isinstance(a, torch.Tensor)
+    ]
+    full_tensors += [
+        a for a in pytree.tree_leaves(full_kwargs) if isinstance(a, torch.Tensor)
+    ]
+
+    dtensors = [
+        distribute_tensor(t, device_mesh, (p,))
+        for t, p in zip(full_tensors, input_placements)
+    ]
+
+    # Build sharded args by replacing tensors with their sharded local versions
+    dtensor_idx = 0
+
+    def _to_local_shard(a):
+        nonlocal dtensor_idx
+        if isinstance(a, torch.Tensor):
+            local = dtensors[dtensor_idx].to_local()
+            dtensor_idx += 1
+            return local
+        return a
+
+    local_args, local_kwargs = pytree.tree_map(
+        _to_local_shard, (full_args, full_kwargs)
+    )
+
+    # run and compare
+    ref_output = op(*full_args, **full_kwargs)
+    local_output = op(*local_args, **local_kwargs)
+    output_dt = DTensor.from_local(local_output, device_mesh, output_placements)
+    full_output = output_dt.redistribute(device_mesh, (Replicate(),)).to_local()
+    return ref_output.shape == full_output.shape and torch.allclose(
+        ref_output, full_output, atol=1e-5, rtol=1e-5
+    )

@@ -264,6 +264,9 @@ class TORCH_API Context {
   void setSDPUseFlash(bool /*e*/);
   bool userEnabledFlashSDP() const;
 
+  void setSDPUseFA3(bool /*e*/);
+  bool userEnabledFA3SDP() const;
+
   void setSDPUseMemEfficient(bool /*e*/);
   bool userEnabledMemEfficientSDP() const;
 
@@ -382,6 +385,7 @@ class TORCH_API Context {
       bool allow_splitk = true);
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool /*b*/);
+  bool rocmAllowGroupGemmCk() const;
 
   // Matmuls can use a so-called "persistent" kernel which launches one CUDA
   // block for each SM on the GPU, and each block then iterates over multiple
@@ -461,6 +465,7 @@ class TORCH_API Context {
       at::SDPBackend::cudnn_attention,
       at::SDPBackend::overrideable};
   bool enabled_flashSDP = true;
+  bool enabled_fa3SDP = false;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
   bool enabled_cudnnSDP = true;
