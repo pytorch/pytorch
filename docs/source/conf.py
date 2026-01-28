@@ -186,7 +186,7 @@ html_theme_options = {
         },
     ],
     "navbar_align": "left",
-    "navbar_start": ["version-switcher", "navbar-logo"],
+    "navbar_start": ["navbar-logo", "version-switcher"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
     "header_links_before_dropdown": 6,
