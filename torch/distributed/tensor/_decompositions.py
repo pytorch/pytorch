@@ -18,19 +18,15 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema, OpStrategy
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
-from torch.distributed.tensor._utils import (
-    ImplicitRedistributionError,
-    try_find_mesh_from_args,
-)
+from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
-    Partial,
     Placement,
     Replicate,
     Shard,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_any, tree_flatten, tree_map
+from torch.utils._pytree import tree_any, tree_flatten, tree_map, tree_map_only
 
 
 def _extract_input_specs(op_schema: OpSchema) -> tuple[DTensorSpec | object, ...]:
@@ -65,24 +61,21 @@ class PlacementTrackingMode(TorchDispatchMode):
         output_sharding = self.sharding_prop.propagate_op_sharding(op_schema)
 
         if output_sharding.needs_redistribute:  # pyrefly: ignore [missing-attribute]
-            raise ImplicitRedistributionError(
-                f"Decomposition requires redistribution for {func}"
-            )
+            raise RuntimeError(f"Decomposition requires redistribution for {func}")
 
         out = func(*args, **kwargs)
         # pyrefly: ignore [missing-attribute]
         self._record_output_specs(out, output_sharding.output_spec)
         return out
 
-    def _record_output_specs(
-        self, output: Any, output_spec: DTensorSpec | tuple
-    ) -> None:
-        if isinstance(output_spec, DTensorSpec):
-            output._spec = output_spec
-        elif isinstance(output_spec, tuple) and isinstance(output, (tuple, list)):
+    def _record_output_specs(self, output: Any, output_spec: DTensorSpec | Any) -> None:
+        if isinstance(output, torch.Tensor) and output_spec is not None:
+            output._spec = output_spec  # pyrefly: ignore [missing-attribute]
+        elif isinstance(output, (tuple, list)) and isinstance(
+            output_spec, (tuple, list)
+        ):
             for t, s in zip(output, output_spec):
-                if s is not None and isinstance(t, torch.Tensor):
-                    t._spec = s  # pyrefly: ignore [missing-attribute]
+                self._record_output_specs(t, s)
 
 
 class DecompShardingStrategy:
@@ -117,9 +110,14 @@ class DecompShardingStrategy:
             op_schema.args_schema + tuple(op_schema.kwargs_schema.values()),
         )
 
-        # Create a fake mesh where all ranks pretend to be rank 0.
-        # This ensures identical cost computation across all ranks during
+        # Create a fake size-1 mesh where all ranks pretend to be rank 0.
+        # This ensures identical strategy computation across all ranks during
         # decomposition tracing, avoiding potential SPMD divergence.
+        #
+        # Using a fake mesh could potentially cause false negatives/positives
+        # (in terms of valid sharding strategies). The size-1 mesh attempts to avoid
+        # false negatives from unevenness (all sizes % 1 == 0), while false positives
+        # are meant to be caught when expanding to to the real, multi-dim device mesh.
         fake_mesh = DeviceMesh(mesh.device_type, [0], _init_backend=False, _rank=0)
         single_dim_strategies = []
         output_placements: list[Placement | tuple[Placement, ...]] = []
@@ -130,8 +128,9 @@ class DecompShardingStrategy:
                 )
             except NotImplementedError:
                 return None
-            except (ImplicitRedistributionError, RuntimeError, KeyError, IndexError):
-                # Runtime/KeyError/IndexError can occur in view ops
+            except (RuntimeError, KeyError, IndexError):
+                # TODO(pianpwk): RuntimeError is raised when redistribution is detected; switch to a custom error type
+                # Runtime/KeyError/IndexError can also occur in view ops
                 continue
 
             output_placements = (
@@ -208,24 +207,30 @@ class DecompShardingStrategy:
         tensor_specs = _extract_input_specs(op_schema)
         flat_specs, _ = tree_flatten(list(tensor_specs))
 
-        candidates: list[list[Placement] | list[None]] = []
+        # Step 1: Collect unique placements across all DTensorSpec inputs
+        all_placements: set[Placement] = {Replicate()}
+        tree_map_only(
+            DTensorSpec,
+            lambda spec: all_placements.update(spec.placements),
+            flat_specs,
+        )
+
+        # Step 2: For each input, use the placement set, but expand Shard/StridedShard to all tensor dims
+        candidates: list[list[Placement | None]] = []
         for spec in flat_specs:
             if not isinstance(spec, DTensorSpec):
                 candidates.append([None])
-                continue
-
-            options: set[Placement] = {Replicate()}
-            for p in spec.placements:
-                if isinstance(p, (Shard, _StridedShard)):
-                    for i in range(spec.ndim):
-                        options.add(
-                            Shard(i)
-                            if isinstance(p, Shard)
-                            else _StridedShard(i, split_factor=p.split_factor)
-                        )
-                elif isinstance(p, Partial):
-                    options.add(p)
-            candidates.append(list(options))
+            else:
+                options = set(all_placements)
+                for p in all_placements:
+                    if isinstance(p, _StridedShard):
+                        options |= {
+                            _StridedShard(i, split_factor=p.split_factor)
+                            for i in range(spec.ndim)
+                        }
+                    elif isinstance(p, Shard):
+                        options |= {Shard(i) for i in range(spec.ndim)}
+                candidates.append(list(options))
 
         # pyrefly: ignore [no-matching-overload]
         return list(itertools.product(*candidates))

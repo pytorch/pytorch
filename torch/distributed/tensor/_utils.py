@@ -30,10 +30,6 @@ def _format_implicit_redistribution_msg(schema: OpSchema) -> str:
     return f"Implicit redistribution occurred for {schema} while ExplicitRedistributionContext was active"
 
 
-class ImplicitRedistributionError(Exception):
-    pass
-
-
 class ExplicitRedistributionContext:
     """
     Within this context manager, DTensor will refuse to perform implicit redistribution,
@@ -79,7 +75,7 @@ class ExplicitRedistributionContext:
                     allowed = redistribute_cost(src_spec, dst_spec) <= 0
             if not allowed:
                 if instance._raise_on_redistribution:
-                    raise ImplicitRedistributionError(redistribution_msg)
+                    raise RuntimeError(redistribution_msg)
                 else:
                     logger.warning(redistribution_msg)
 
