@@ -1,8 +1,14 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 from __future__ import annotations
 
 import contextlib
 from functools import partial, wraps
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, overload, TYPE_CHECKING, Union
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -46,15 +52,10 @@ from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_T = TypeVar("_T")
 
 
 def lazy_dynamo_disallow(func: Callable[_P, _R]) -> Callable[_P, _R]:
@@ -89,10 +90,16 @@ def _create_differentiable(inps: Any, level: int | None = None) -> Any:
     return tree_map(create_differentiable, inps)
 
 
-def _undo_create_differentiable(inps: Any, level: int | None = None) -> Any:
-    def unwrap_tensors(x: torch.Tensor | Any) -> torch.Tensor | Any:
+_Tensors = torch.Tensor | tuple[torch.Tensor, ...]
+_TensorsT = TypeVar("_TensorsT", bound=_Tensors)
+_TensorsU = TypeVar("_TensorsU", bound=_Tensors)
+
+
+def _undo_create_differentiable(inps: _TensorsT, level: int | None = None) -> _TensorsT:
+    def unwrap_tensors(x: _TensorsU) -> _TensorsU:
         if isinstance(x, torch.Tensor):
             assert level is not None
+            # pyrefly: ignore[bad-return]
             return _unwrap_for_grad(x, level)
         # TODO: Remove the following hack for namedtuples
         if isinstance(x, tuple):
@@ -103,30 +110,39 @@ def _undo_create_differentiable(inps: Any, level: int | None = None) -> Any:
     return tree_map(unwrap_tensors, inps)
 
 
-def _is_differentiable(maybe_tensor: Any) -> bool:
+def _is_differentiable(maybe_tensor: object) -> bool:
     if not isinstance(maybe_tensor, torch.Tensor):
         return False
     return maybe_tensor.requires_grad
 
 
 def _any_differentiable(
-    tensor_or_tuple_of_tensors: torch.Tensor | tuple[torch.Tensor, ...],
+    tensor_or_tuple_of_tensors: _Tensors,
 ) -> bool:
     flat_args, _ = tree_flatten(tensor_or_tuple_of_tensors)
     return any(tuple(map(_is_differentiable, flat_args)))
 
 
-def _wrap_tensor_for_grad(maybe_tensor: Any, level: int) -> Any:
+def _wrap_tensor_for_grad(maybe_tensor: _T, level: int) -> _T:
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
+    # pyrefly: ignore[bad-return]
     return _wrap_for_grad(maybe_tensor, level)
 
 
-def _wrap_all_tensors(tensor_pytree: Any, level: int) -> Any:
+def _wrap_all_tensors(tensor_pytree: _T, level: int) -> _T:
     return tree_map(partial(_wrap_tensor_for_grad, level=level), tensor_pytree)
 
 
-def _as_tuple(val: _R | tuple[_R, ...]) -> tuple[_R, ...]:
+# TODO: this is more accurate - enable in 3.11
+# _Ts = TypeVarTuple("_Ts")
+# @overload
+# def _as_tuple(val: tuple[*_Ts]) -> tuple[*_Ts]: ...
+@overload
+def _as_tuple(val: tuple[_R, ...]) -> tuple[_R]: ...
+@overload
+def _as_tuple(val: _R) -> tuple[_R]: ...
+def _as_tuple(val: object) -> object:
     if isinstance(val, tuple):
         return val
     return (val,)
@@ -1450,6 +1466,7 @@ def grad_and_value_impl(
             grad_input = _undo_create_differentiable(grad_input, level)
             output = _undo_create_differentiable(output, level)
             if has_aux:
+                # pyrefly: ignore[bad-specialization]
                 aux = _undo_create_differentiable(aux, level)
 
         if has_aux:
