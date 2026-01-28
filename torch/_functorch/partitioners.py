@@ -203,7 +203,6 @@ class PartitionedGraphSignature:
             + fw_outputs[sym_node_start_idx:]
         )
 
-
     def bwd_graph_inputs(self) -> list[fx.Node]:
         return (
             self.saved_sym_nodes
