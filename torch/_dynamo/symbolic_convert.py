@@ -3641,9 +3641,7 @@ class InstructionTranslatorBase(
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
-        self.call_function(
-            SourcelessBuilder.create(self, str.format), [fmt_var, value], {}
-        )
+        self.call_function(BuiltinVariable(str.format), [fmt_var, value], {})
 
     def FORMAT_VALUE(self, inst: Instruction) -> None:
         flags = inst.arg
