@@ -399,7 +399,7 @@ def expand_to_full_mesh_op_strategy(
     input_args_strategy = args_strategy + kwargs_strategy
     all_strategies = []
     # Track input placements if we skip strategies due to inplace placement mismatch
-    blocking_inplace_input_placements = None
+    blocking_inplace_input_placements: tuple[Placement, ...] | None = None
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
         # Track how many non-None output specs we've seen (for output_tensor_meta indexing).
