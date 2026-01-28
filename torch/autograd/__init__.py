@@ -15,7 +15,12 @@ from typing import cast, Optional, Union
 import torch
 from torch import _vmap_internals
 from torch.overrides import handle_torch_function, has_torch_function, is_tensor_like
-from torch.types import _size, _TensorOrTensors, _TensorOrTensorsOrGradEdge
+from torch.types import (
+    _size,
+    _TensorOrTensors,
+    _TensorOrTensorsOrGradEdge,
+    _TensorOrTensorsOrNone,
+)
 
 from . import forward_ad, functional, graph
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
@@ -241,7 +246,7 @@ def _make_grads(
 
 
 def _tensor_or_tensors_to_tuple(
-    tensors: Optional[_TensorOrTensors], length: int
+    tensors: Optional[_TensorOrTensorsOrNone], length: int
 ) -> tuple[_OptionalTensor, ...]:
     if tensors is None:
         return (None,) * length
@@ -252,10 +257,10 @@ def _tensor_or_tensors_to_tuple(
 
 def backward(
     tensors: _TensorOrTensorsOrGradEdge,
-    grad_tensors: Optional[_TensorOrTensors] = None,
+    grad_tensors: Optional[_TensorOrTensorsOrNone] = None,
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
-    grad_variables: Optional[_TensorOrTensors] = None,
+    grad_variables: Optional[_TensorOrTensorsOrNone] = None,
     inputs: Optional[_TensorOrTensorsOrGradEdge] = None,
 ) -> None:
     r"""Compute the sum of gradients of given tensors with respect to graph leaves.
@@ -392,7 +397,7 @@ def backward(
 def grad(
     outputs: _TensorOrTensorsOrGradEdge,
     inputs: _TensorOrTensorsOrGradEdge,
-    grad_outputs: Optional[_TensorOrTensors] = None,
+    grad_outputs: Optional[_TensorOrTensorsOrNone] = None,
     retain_graph: Optional[bool] = None,
     create_graph: bool = False,
     only_inputs: bool = True,

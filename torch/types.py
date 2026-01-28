@@ -39,6 +39,8 @@ __all__ = ["Number", "Device", "FileLike", "Storage"]
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
 _TensorOrTensors: TypeAlias = Tensor | Sequence[Tensor]  # noqa: PYI047
+# Like _TensorOrTensors but allows None values in the sequence (e.g., for grad_outputs)
+_TensorOrTensorsOrNone: TypeAlias = Tensor | Sequence[Tensor | None]  # noqa: PYI047
 _TensorOrTensorsOrGradEdge: TypeAlias = Union[  # noqa: PYI047
     Tensor,
     Sequence[Tensor],
