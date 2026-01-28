@@ -73,7 +73,6 @@ bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
       scale.is_contiguous());
 }
 
-
 bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
