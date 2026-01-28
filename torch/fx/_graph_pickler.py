@@ -148,6 +148,113 @@ class GraphPickler(pickle.Pickler):
             unpickler = _GraphUnpickler(stream, state)
             return unpickler.load()
 
+    def debug_dumps(
+        self, obj: object, path: str = "root", _seen: Optional[set[int]] = None
+    ) -> list[str]:
+        """
+        Debug method to find non-picklable fields in an object.
+
+        Recursively explores the object and its fields using reducer_override
+        and pickle.dumps to identify which specific fields are causing pickle
+        failures.
+
+        Returns a list of paths to non-picklable fields, e.g.:
+            ["root.field1.field2: SomeType - cannot pickle 'generator' object"]
+        """
+        if _seen is None:
+            _seen = set()
+
+        obj_id = id(obj)
+        if obj_id in _seen:
+            return []
+        _seen.add(obj_id)
+
+        # Skip types that are handled specially by the graph pickler and
+        # shouldn't be traversed directly (they're part of the graph structure)
+        if isinstance(obj, (torch.fx.Node, torch.fx.Graph)):
+            return []
+
+        errors: list[str] = []
+
+        # First try to pickle this object directly using a fresh GraphPickler
+        # to avoid polluting our state
+        try:
+            with io.BytesIO() as stream:
+                test_pickler = GraphPickler(stream, self.options)
+                test_pickler.dump(obj)
+            return []
+        except Exception:
+            pass
+
+        # Check if we have a custom reduction for this object
+        try:
+            result = self.reducer_override(obj)
+        except Exception:
+            result = NotImplemented
+
+        if result is not NotImplemented:
+            # We have a custom reduction - explore the args
+            _, args = result
+            for i, arg in enumerate(args):
+                # Skip the unpickle state token - it's a special marker
+                if arg is self._unpickle_state:
+                    continue
+                sub_errors = self.debug_dumps(arg, f"{path}[reduced_{i}]", _seen)
+                errors.extend(sub_errors)
+
+        # Explore __dict__ if present
+        if hasattr(obj, "__dict__") and isinstance(obj.__dict__, dict):
+            for key, value in obj.__dict__.items():
+                sub_errors = self.debug_dumps(value, f"{path}.{key}", _seen)
+                errors.extend(sub_errors)
+
+        # Explore dataclass fields if applicable
+        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+            for field in dataclasses.fields(obj):
+                value = getattr(obj, field.name)
+                sub_errors = self.debug_dumps(value, f"{path}.{field.name}", _seen)
+                errors.extend(sub_errors)
+
+        # Explore containers
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                key_repr = repr(key) if not isinstance(key, str) else key
+                sub_errors = self.debug_dumps(value, f"{path}[{key_repr}]", _seen)
+                errors.extend(sub_errors)
+        elif isinstance(obj, (list, tuple)):
+            for i, item in enumerate(obj):
+                sub_errors = self.debug_dumps(item, f"{path}[{i}]", _seen)
+                errors.extend(sub_errors)
+
+        # If we found no sub-errors but the object itself failed to pickle,
+        # this is a leaf failure - report it
+        if not errors:
+            try:
+                with io.BytesIO() as stream:
+                    test_pickler = GraphPickler(stream, self.options)
+                    test_pickler.dump(obj)
+            except Exception as e:
+                errors.append(f"{path}: {type(obj).__name__} - {e}")
+
+        return errors
+
+    @classmethod
+    def debug_dumps_report(cls, obj: object, options: Optional[Options] = None) -> str:
+        """
+        Convenience method to get a formatted report of non-picklable fields.
+
+        Returns a human-readable string describing which fields are not
+        picklable, or a success message if the object is fully picklable.
+        """
+        with io.BytesIO() as stream:
+            pickler = cls(stream, options)
+            errors = pickler.debug_dumps(obj)
+
+        if not errors:
+            return "Object is fully picklable"
+
+        return "Non-picklable fields found:\n" + "\n".join(f"  - {e}" for e in errors)
+
 
 class _UnpickleState:
     def __init__(self, fake_mode: FakeTensorMode) -> None:
