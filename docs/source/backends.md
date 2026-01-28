@@ -173,10 +173,6 @@ These backends include:
 .. autofunction:: torch.backends.cuda.sdp_kernel
 ```
 
-```{eval-rst}
-.. autofunction:: torch.backends.cuda.is_ck_sdpa_available
-```
-
 ## torch.backends.cudnn
 
 ```{eval-rst}
