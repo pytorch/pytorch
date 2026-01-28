@@ -1114,7 +1114,6 @@ def forward(self, tangents_1, tangents_token):
             )
 
     def test_with_effects_through_functional_tensor_mode(self):
-        """Test that with_effects can flow through FunctionalTensorMode."""
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
             FunctionalTensorMode,

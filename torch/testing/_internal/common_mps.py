@@ -314,7 +314,6 @@ if torch.backends.mps.is_available():
             "put": None,
             "cholesky_solve": None,
             "frexp": None,
-            "gcd": None,
             "geqrf": None,
             "nn.functional.grid_sample": None,  # Unsupported Border padding mode
             "hash_tensor": None,
@@ -986,8 +985,6 @@ if torch.backends.mps.is_available():
             "signal.windows.kaiser": [torch.float32],
             "signal.windows.nuttall": [torch.float32],
             "eye": [torch.float16, torch.float32],
-            # topk fails with duplicate indices
-            "topk": [torch.float16],
             # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
             "to_sparse": None,
             # Exception: the derivative for '_unique2' is not implemented.
