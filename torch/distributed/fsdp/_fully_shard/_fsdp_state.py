@@ -3,7 +3,7 @@
 import functools
 import logging
 from collections.abc import Callable, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
 
 import torch
 import torch.nn as nn
@@ -34,17 +34,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
+_StateType = TypeVar("_StateType", bound="FSDPState")
 
-class FSDPStateContext:
+
+class FSDPStateContext(Generic[_StateType]):
     """This has state shared across FSDP states."""
 
     def __init__(self) -> None:
         # All FSDP states in the root state's module tree
-        self.all_states: list[FSDPState] = []
+        self.all_states: list[_StateType] = []
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
-        self.iter_forward_root: FSDPState | None = None
+        self.iter_forward_root: _StateType | None = None
         # Final callback should only be queued once per backward
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback

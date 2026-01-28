@@ -20,7 +20,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _init_param_group,
     _validate_module as _validate_module_common,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
+from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState, FSDPStateContext
 from torch.distributed.fsdp._fully_shard._fully_shard import (
     _unimplemented_deepcopy,
     FSDPModule,
@@ -38,23 +38,15 @@ cls_to_replicate_cls: dict[type, type] = {}
 logger = logging.getLogger("torch.distributed._composable.replicate_with_fsdp")
 
 
-class _ReplicateStateContext:
-    """This has state shared across Replicate states."""
+class _ReplicateStateContext(FSDPStateContext["_ReplicateState"]):
+    """
+    State shared across Replicate states.
 
-    def __init__(self) -> None:
-        # All Replicate states in the root state's module tree
-        self.all_states: list[_ReplicateState] = []
-        # Iteration's forward root runs the once-per-forward logic; this root
-        # may not be the overall root set by lazy initialization in cases where
-        # only a submodule runs forward (e.g. encoder-only for eval)
-        self.iter_forward_root: _ReplicateState | None = None
-        # Final callback should only be queued once per backward
-        self.post_backward_final_callback_queued: bool = False
-        # Whether to finalize backward in this backward's final callback
-        self.is_last_backward: bool = True
-        # Optional user-provided event recorded after optimizer for the
-        # all-gather streams to wait on in the root pre-forward
-        self.post_optim_event: torch.Event | None = None
+    This is a typed subclass of FSDPStateContext parameterized with _ReplicateState,
+    providing correct type annotations (e.g., all_states: list[_ReplicateState]).
+    It also allows call sites to differentiate between Replicate and FSDP contexts
+    via isinstance checks if needed.
+    """
 
 
 def _get_module_replicate_state(module: nn.Module) -> _ReplicateState | None:
@@ -69,10 +61,9 @@ class _ReplicateState(FSDPState):
 
     def __init__(self) -> None:
         super().__init__()
-        self._state_ctx = _ReplicateStateContext()  # type: ignore[assignment]
+        self._state_ctx = _ReplicateStateContext()
 
     def _get_state_for_module(self, module: nn.Module) -> FSDPState | None:
-        """Override to use replicate-specific state getter."""
         return _get_module_replicate_state(module)
 
     def init(
@@ -129,16 +120,17 @@ def replicate(
         >>> replicate(module)
     """
     torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
-
     _validate_module(module)
-
     mesh = mesh or _init_default_mesh(mesh_dim_names=("replicate",))
     _validate_mesh(mesh)
-
     mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
-
-    arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
+    # managed_modules (3rd return) and buffers (5th return) are unused:
+    # - managed_modules: FSDP uses this to set Dynamo-specific attributes
+    #   (_is_fsdp_managed_module, _fsdp_use_orig_params), which replicate doesn't need
+    # - buffers: already moved to device by _get_modules_and_states; replicate
+    #   doesn't need to track them separately
+    arg_module, modules, _, params, _ = _get_modules_and_states(
         module,
         device,
         ignored_params,

@@ -202,7 +202,6 @@ def fully_shard(
         reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
         mesh_info,
     )
-
     arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
         module, device, ignored_params
     )
