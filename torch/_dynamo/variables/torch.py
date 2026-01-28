@@ -2738,7 +2738,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
     ) -> VariableTracker:
         import torch.utils._pytree as pytree
         from torch._higher_order_ops.flat_apply import func_to_graphable
-        from torch._higher_order_ops.invoke_leaf_function import invoke_leaf_function
+        from torch._higher_order_ops.invoke_leaf_function import (
+            invoke_leaf_function,
+            reconstruct_original_args,
+        )
 
         from .builder import wrap_fx_proxy
         from .higher_order_ops import _make_inlined
@@ -2754,9 +2757,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 "decorator. See the leaf_function docstring for details."
             )
 
-        _, real_impl_spec = func_to_graphable(real_impl)
-        _, fake_impl_spec = func_to_graphable(fake_impl)
-
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
@@ -2770,6 +2770,29 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             input_spec_var.as_python_constant()
         )  # pyrefly: ignore [unbound-name]
 
+        def wrap_impl_for_leaf_module_state(
+            impl: Callable[..., Any],
+        ) -> Callable[..., Any]:
+            def wrapped_impl(*flat_args: Any) -> Any:
+                # NB: The flat_args contain flattened LeafModuleState objects.
+                # We need to unflatten them with input_spec then convert back to nn.Module
+                # before calling the original impl.
+                #
+                # input_spec is captured from the outer scope
+                with reconstruct_original_args(input_spec, flat_args) as (
+                    args_with_modules,
+                    kwargs_with_modules,
+                ):
+                    return impl(*args_with_modules, **kwargs_with_modules)
+
+            return wrapped_impl
+
+        wrapped_real_impl = wrap_impl_for_leaf_module_state(real_impl)
+        wrapped_fake_impl = wrap_impl_for_leaf_module_state(fake_impl)
+
+        _, real_impl_spec = func_to_graphable(wrapped_real_impl)
+        _, fake_impl_spec = func_to_graphable(wrapped_fake_impl)
+
         def make_spec_proxy(name: str, spec: Any) -> Any:
             proxy = tx.output.register_static_attr_and_return_proxy(name, spec)
             proxy.node.type = type(spec)
@@ -2777,14 +2800,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         real_impl_proxy = make_spec_proxy("real_fn", real_impl_spec)
         fake_impl_proxy = make_spec_proxy("fake_fn", fake_impl_spec)
-        input_spec_proxy = make_spec_proxy(
-            f"{decorated_fn.__name__}_input_spec", input_spec
-        )
 
         invoke_args = (
             real_impl_proxy,
             fake_impl_proxy,
-            input_spec_proxy,
             *flat_arg_proxies,
         )
         result_proxy = tx.output.create_proxy(
