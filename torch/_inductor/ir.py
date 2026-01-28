@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import contextlib
 import dataclasses
 import functools
@@ -7081,9 +7082,20 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel = kernel.fn
 
         return kernel, configs, restore_value_args, reset_to_zero_args
-
+    
+    @override
+    def get_read_writes(self) -> dependencies.ReadWrites:
+        read_writes = super().get_read_writes()
+        return read_writes
+    
     @override
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        return self._codegen(wrapper, fused_epilogues = [])
+
+    def codegen_with_fused_epilogues(self, wrapper: PythonWrapperCodegen, fused_epilogues: list[ComputedBuffer]) -> None:
+        return self._codegen(wrapper, fused_epilogues)
+
+    def _codegen(self, wrapper: PythonWrapperCodegen, fused_epilogues: list[ComputedBuffer]) -> None:
         """Overrides the parent member.
         See https://github.com/pytorch/pytorch/issues/151692"""
 
@@ -7108,10 +7120,18 @@ class UserDefinedTritonKernel(ExternKernel):
             restore_value_args,
             reset_to_zero_args,
             self.grid,
+            fused_epilogues
         )
         named_args = {
             k: self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
         }
+
+        if len(fused_epilogues) > 0:
+            assert len(self.mutable_arg_names) == 1
+            mutable_arg_name = self.mutable_arg_names[0]
+            assert mutable_arg_name in named_args.keys()
+            named_args[mutable_arg_name] = fused_epilogues[-1]
+
         arg_names = [p.name for p in kernel.params]  # type: ignore[attr-defined]
         constexprs = [p.num for p in kernel.params if p.is_constexpr]  # type: ignore[attr-defined]
         constexpr_names = OrderedSet(arg_names[i] for i in constexprs)
@@ -7232,13 +7252,15 @@ class UserDefinedTritonKernel(ExternKernel):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
         autotuned_kwargs = configs[0].kwargs if len(configs) > 0 else {}
+
+        self.mutable_arg_names = identify_mutated_tensors(
+            kernel,
+            {**kernel_args, **autotuned_kwargs},
+            tma_descriptor_metadata,
+        )
         self.mutable_args = [
             kernel_args[key]
-            for key in identify_mutated_tensors(
-                kernel,
-                {**kernel_args, **autotuned_kwargs},
-                tma_descriptor_metadata,
-            )
+            for key in self.mutable_arg_names
         ]
 
         self.mutation_outputs = [
@@ -7252,6 +7274,11 @@ class UserDefinedTritonKernel(ExternKernel):
 
     def get_device(self) -> Optional[torch.device]:
         return self.device
+    
+    def get_mutation_numel(self):
+        # TODO: this assumes this kernel is "element-wise"...probably not 100% correct
+        # might need more careful program analysis on the kernel src code
+        return math.prod(self.mutable_args[0].shape)
 
 
 class InplaceBernoulliFallback(ExternKernel):

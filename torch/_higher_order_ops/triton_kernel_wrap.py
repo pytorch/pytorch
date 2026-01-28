@@ -1042,6 +1042,92 @@ def identify_mutated_tensors(
         ]
 
 
+
+@dataclasses.dataclass
+class SourceCodeLocation:
+    # starts from 1 (as per convention used in python AST)
+    line_number: int 
+    start_in_line: int
+    end_in_line: int
+
+@dataclasses.dataclass
+class TritonStore:
+    pointer_expr: SourceCodeLocation
+    value_expr: SourceCodeLocation
+    mask_expr: Optional[SourceCodeLocation]
+
+@dataclasses.dataclass
+class TritonStores:
+    stores: list[TritonStore]
+
+
+@functools.cache
+def identify_triton_stores(source_code:str):
+    """
+    Parse Python source code of triton kernel and find all tl.store calls.
+    Returns a TritonStores object containing information about pointer, value, and mask.
+
+    tl.store signature: store(pointer, value, mask=None, boundary_check=(), ...)
+    """
+    import ast
+    tree = ast.parse(source_code)
+    stores = []
+
+    def _node_to_source_location(node):
+        return SourceCodeLocation(line_number=node.lineno, start_in_line=node.col_offset, end_in_line=node.end_col_offset) 
+
+
+    def _extract_arg(node, arg_name, positional_index):
+        """
+        Extract an argument from a Call node, checking both positional and keyword args.
+        Returns the AST node for the argument, or None if not found.
+        """
+        # Check positional args first
+        if len(node.args) > positional_index:
+            return node.args[positional_index]
+
+        # Check keyword args
+        for keyword in node.keywords:
+            if keyword.arg == arg_name:
+                return keyword.value
+
+        return None
+
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            # Check if this is a tl.store call
+            if (isinstance(node.func, ast.Attribute) and
+                isinstance(node.func.value, ast.Name) and
+                node.func.value.id == 'tl' and
+                node.func.attr == 'store'):
+
+                # Extract required arguments
+                pointer_node = _extract_arg(node, 'pointer', 0)
+                value_node = _extract_arg(node, 'value', 1)
+
+                if pointer_node is None or value_node is None:
+                    continue
+
+                # Extract optional argument
+                mask_node = _extract_arg(node, 'mask', 2)
+
+                pointer_loc = _node_to_source_location(pointer_node)
+                value_loc = _node_to_source_location(value_node)
+                mask_loc = _node_to_source_location(mask_node) if mask_node else None
+
+                stores.append(TritonStore(
+                    pointer_expr=pointer_loc,
+                    value_expr=value_loc,
+                    mask_expr=mask_loc
+                ))
+
+    return TritonStores(stores=stores)
+
+
+
+
+
 ###############################################################################
 # Triton Kernel Wrappers
 

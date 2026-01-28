@@ -307,13 +307,39 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
-def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
+def inject_user_triton_kernel_with_fused_epilogues(kernel_src:str, fused_epilogues: list[ir.ComputedBuffer]) -> str:
+    from torch._higher_order_ops.triton_kernel_wrap import identify_triton_stores
+    tl_stores = identify_triton_stores(kernel_src)
+    assert len(tl_stores.stores) == 1
+    src_lines = kernel_src.split("\n")
+    value_location = tl_stores.stores[0].value_expr
+    store_line = src_lines[value_location.line_number - 1] # src code line_number starts from 1
+    store_value_expr = store_line[value_location.start_in_line: value_location.end_in_line]
+    for epilogue in fused_epilogues:
+        assert isinstance(epilogue.data, ir.Pointwise)
+        for op in reversed(epilogue.data.origins): # `origins` contain the ops in reverse
+            if op.name == "relu":
+                store_value_expr = f"triton_helpers.maximum(0, {store_value_expr})"
+            elif op.name == "sigmoid":
+                store_value_expr = f"tl.sigmoid({store_value_expr})"
+            else:
+                raise  AssertionError("unsupported epilogue op: ", op.name)
+    store_line = store_line[:value_location.start_in_line] + store_value_expr + store_line[value_location.end_in_line:]
+    src_lines[value_location.line_number - 1] = store_line
+    kernel_src = "\n".join(src_lines)
+    return kernel_src
+    
+
+def user_defined_triton_kernel_transitive_closure_source_code(kernel, fused_epilogues: list[ir.ComputedBuffer] = []) -> str:
     """
     Given a triton kernel function pointer collect the transitive closure of
     its dependencies
     """
     compile_wrapper = IndentedBuffer()
-    compile_wrapper.splice(kernel.src, strip=True)
+    kernel_src = kernel.src
+    if len(fused_epilogues) > 0:
+        kernel_src = inject_user_triton_kernel_with_fused_epilogues(kernel_src, fused_epilogues)
+    compile_wrapper.splice(kernel_src, strip=True)
 
     # Also include any possible kernel being called indirectly
     import triton
@@ -2441,6 +2467,7 @@ class PythonWrapperCodegen(CodeGen):
         restore_value_args,
         reset_to_zero_args,
         grids: list[list[Union[int, sympy.Expr]]],
+        fused_epilogues: list[ir.ComputedBuffer]
     ):
         from ..runtime.triton_heuristics import (
             config_to_dict,
@@ -2685,7 +2712,7 @@ class PythonWrapperCodegen(CodeGen):
             @triton.jit
             """
         )
-        kernel_src = user_defined_triton_kernel_transitive_closure_source_code(kernel)
+        kernel_src = user_defined_triton_kernel_transitive_closure_source_code(kernel, fused_epilogues)
         if config.triton.unique_user_kernel_names:
             # We replace the original_name with the unique name.
             kernel_src = kernel_src.replace(f"def {original_name}(", f"def {name}(")
