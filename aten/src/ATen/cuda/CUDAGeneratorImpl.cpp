@@ -93,11 +93,6 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  * holds the GPU tensors and offset tracking for that specific capture. This design
  * supports multiple concurrent graph captures using the same generator.
  *
- * The lazy registration process (in get_or_create_capture_state()):
- * 1. Check if capture state exists for this capture_id
- * 2. If not, create a new CUDAGeneratorCaptureState
- * 3. Initialize it using a side stream so fill_ ops are not captured
- * 4. Register this state with the graph
  */
 
 /**
@@ -117,12 +112,11 @@ void CUDAGeneratorCaptureState::initialize(uint64_t seed) {
   seed_extragraph_ = at::empty({1}, options);
   offset_extragraph_ = at::empty({1}, options);
 
-  // Initialize using a side stream so the fill_ ops are not captured
+  // Initialize using a non-capturing side stream so the fill_ ops are not
+  // captured. getNonCapturingStreamFromPool iterates through the stream pool
+  // to find a stream that is not currently capturing.
   {
-    const auto side_stream = at::cuda::getStreamFromPool();
-    TORCH_INTERNAL_ASSERT(
-        !cuda::getCaptureId(side_stream).has_value(),
-        "Side stream should not be capturing");
+    const auto side_stream = at::cuda::getNonCapturingStreamFromPool();
     at::cuda::CUDAStreamGuard guard(side_stream);
     offset_intragraph_ = 0;
     seed_extragraph_.fill_(static_cast<int64_t>(seed));
@@ -226,7 +220,7 @@ void CUDAGeneratorState::increase(uint64_t increment) {
   // see Note [Why enforce RNG offset % 4 == 0?]
   increment = ((increment + 3) / 4) * 4;
 
-  auto capture_id = cuda::getCaptureId();
+  auto capture_id = c10::cuda::getStreamCaptureId();
   if (capture_id.has_value()) {
     // Get or create capture state for this capture
     auto* capture_state = get_capture_state(capture_id.value(), true);
@@ -330,7 +324,7 @@ CUDAGeneratorImpl::CUDAGeneratorImpl(
  * See Note [Acquire lock when using random generators]
  */
 void CUDAGeneratorImpl::set_current_seed(uint64_t seed) {
-  auto capture_id = cuda::getCaptureId();
+  auto capture_id = c10::cuda::getStreamCaptureId();
   if (C10_LIKELY(!capture_id.has_value())) {
     state_->seed_ = seed;
     state_->philox_offset_per_thread_ = 0;
@@ -470,7 +464,7 @@ void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   // set_philox_offset_per_thread instead of set_offset will cause the
   // cudnn RNN rng state to become stale.
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
-  auto capture_id = cuda::getCaptureId();
+  auto capture_id = c10::cuda::getStreamCaptureId();
   if (C10_LIKELY(!capture_id.has_value())) {
     state_->philox_offset_per_thread_ = offset;
   } else {
@@ -483,7 +477,7 @@ void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
  * Gets the current philox_offset_per_thread_ of CUDAGeneratorImpl.
  */
 uint64_t CUDAGeneratorImpl::philox_offset_per_thread() const {
-  auto capture_id = cuda::getCaptureId();
+  auto capture_id = c10::cuda::getStreamCaptureId();
   if (C10_LIKELY(!capture_id.has_value())) {
     return state_->philox_offset_per_thread_;
   } else {
@@ -514,7 +508,7 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() const {
  * See Note [Acquire lock when using random generators]
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
-  auto capture_id = cuda::getCaptureId();
+  auto capture_id = c10::cuda::getStreamCaptureId();
   if (capture_id.has_value()) {
     // Get or create capture state (handles lazy initialization)
     auto* capture_state = state_->get_capture_state(capture_id.value(), true);

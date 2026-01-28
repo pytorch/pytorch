@@ -129,7 +129,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*={0,0}*/, cudaStreamCaptureMode 
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
-  auto capture_id_opt = getCaptureId(stream);
+  auto capture_id_opt = c10::cuda::getStreamCaptureId(stream);
   TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
       "Stream should be actively capturing after cudaStreamBeginCapture");
   capture_id_ = capture_id_opt.value();

@@ -2291,11 +2291,12 @@ torch.cuda.synchronize()
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_graph_rng_after_failed_capture(self):
-        """Test that RNG remains usable after a failed graph capture."""
+        """Test that a stream can be captured again for RNG after a failed capture."""
         stream = torch.cuda.Stream()
         graph = torch.cuda.CUDAGraph()
         x = torch.ones(1, device="cuda")
 
+        # First, intentionally fail a capture on the stream.
         with torch.cuda.stream(stream):
             graph.capture_begin()
             # .item() triggers a sync which is illegal during capture
@@ -2307,9 +2308,24 @@ torch.cuda.synchronize()
 
         torch.cuda.current_stream().wait_stream(stream)
 
-        # RNG should remain usable after the failed capture tears down
+        # Should be able to use RNG after failed capture
         result = torch.randn(4, device="cuda")
         self.assertEqual(result.shape, (4,))
+
+        # Now, attempt to do a successful capture on the same stream
+        new_graph = torch.cuda.CUDAGraph()
+        buf = torch.empty(4, device="cuda")
+        with torch.cuda.stream(stream):
+            new_graph.capture_begin()
+            buf.copy_(torch.randn_like(buf))
+            new_graph.capture_end()
+        torch.cuda.current_stream().wait_stream(stream)
+        # Replay to ensure the capture worked
+        buf.zero_()
+        new_graph.replay()
+        torch.cuda.synchronize()
+        # buf should now be non-zero after replay
+        self.assertFalse(torch.allclose(buf, torch.zeros_like(buf)))
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"

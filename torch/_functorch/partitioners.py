@@ -1540,9 +1540,6 @@ def apply_graphsafe_rng_functionalization(
     - We save the forward RNG state
     - We update the backward Generator's state before executing backward
 
-    Before each CUDA Graph replay, replay_prologue updates captured RNG pointers with current states, ensuring backward Generator
-    changes are reflected during replay.
-
     This function modifies both forward and backward computation graphs by:
 
     Creating RNG state placeholders for both passes
