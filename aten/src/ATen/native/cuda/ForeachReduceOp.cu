@@ -155,10 +155,10 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
     }
   }
   const auto options = tensors[0].options();
-  
+
   // Initialize output_per_tensor with lowest value
   Tensor output_per_tensor;
-  
+
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
   for (const auto i : c10::irange(ntensors)) {
@@ -185,7 +185,7 @@ std::vector<Tensor> foreach_tensor_max_cuda(TensorList tensors) {
             {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
             std::numeric_limits<scalar_t>::lowest(),
             options);
-        
+
         multi_tensor_apply<1>(
             tensor_lists,
             LpMaxFunctor<scalar_t>(),
