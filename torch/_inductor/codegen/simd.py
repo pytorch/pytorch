@@ -36,7 +36,7 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash, PyCodeCache
-from ..dependencies import MemoryDep, StarDep, WeakDep
+from ..dependencies import MemoryDep, StarDep
 
 
 if TYPE_CHECKING:
@@ -52,14 +52,12 @@ from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
     expr_fits_within_32bit,
-    get_dtype_size,
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
-    unique,
 )
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
@@ -1102,72 +1100,26 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def estimate_kernel_num_bytes(self):
         """
-        Try the best to estimate the total size (in bytes) of the
-        kernel's inputs and outputs, which is used for estimating the memory
-        throughput of this kernel. This information is used for checking how
-        far we are from the peak memory bandwidth. It's important that
-        we want to avoid overestimating the sizes of the inputs and outputs,
-        because it can wrongfully give us a very large memory traffic value,
-        which may be even larger than the theoretical bandwidth and thus
-        become very misleading. This is particularly problematic for cases
-        where we slice some inputs. In those cases, we should only count
-        the size of the "slices" instead of the original inputs, because
-        only the slices contribute to the real memory traffic.
-        """
-        nbytes = []
-        ninplace_args = len(unique(self.args.inplace_buffers.values()))
-        _, call_args, _, _ = self.args.python_argdefs()
-        buf_accesses = self.features.buf_accesses()
+        Estimate the total memory traffic (bytes) for this kernel.
 
-        # For pointwise and reduction kernels, this is the upper-bound numels
-        # for the output buffer.
-        # FIXME: This is not exactly right for cases like below:
-        #    def foo(tensor0, tensor1):
-        #        x0 = narrow(tensor0)
-        #        return cat(x0, tensor1)
-        # For this example, we will end up overestimate the size for the
-        # slice s0. Potentially, we could have precise inputs information
-        # if we maintained the original inputs of the Pointwise kernel created
-        # for the "cat". However, I think it might be a bit overwhelming that
-        # we add such complexity only for handling some particular cases for
-        # benchmarking.
-        out_numel = V.graph.sizevars.size_hint(
-            sympy_product(self.numels.values()),
-            fallback=config.unbacked_symint_fallback,
-        )
-        for i, arg in enumerate(call_args):
-            # "buf" may be narrowed. In this case, the number of memory accesses
-            # should be estimated based on the reinterpreted layout.
-            # On the other hand, buf may be broadcasted. In this case,
-            # counting the size of the underline storage would give us
-            # a better estimation in terms of memory accesses.
-            if arg not in buf_accesses:
-                nbytes.append(0)
-                continue
-            arg_numel = V.graph.get_numel(arg)
-            buf_size = V.graph.sizevars.size_hint(
-                arg_numel, fallback=config.unbacked_symint_fallback
-            )
-            if buf_size > out_numel:
-                # This arg points to a buf that has been sliced.
-                # We need to count each individual slice to have
-                # a better estimation.
-                indices = OrderedSet[Any]()
-                no_index_dep_count = 0
-                for dep in buf_accesses[arg]:
-                    if isinstance(dep, (StarDep, WeakDep)):
-                        indices.add(f"no_index_dep_{no_index_dep_count}")
-                        no_index_dep_count += 1
-                    else:
-                        indices.add(dep.index)
-                numel = len(indices) * out_numel
-            else:
-                numel = buf_size
-            dtype = V.graph.get_dtype(arg)
-            dtype_size = get_dtype_size(dtype)
-            # pyrefly: ignore [bad-argument-type]
-            nbytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
-        return sum(nbytes)
+        Delegates to the FusedSchedulerNode which already handles:
+        - Buffer elimination through fusion (kernel-local buffers excluded)
+        - Proper counting of read/write accesses
+        """
+        scheduler = V.graph.scheduler
+        if not scheduler:
+            return 0
+
+        # Get any node from the schedule to look up the fused node
+        nodes = list(NodeScheduleMarker.only_nodes(self.features.node_schedule))
+        if not nodes:
+            return 0
+
+        try:
+            fused_node = scheduler.get_fused_node(nodes[0])
+            return fused_node.get_read_write_buffers_sizes()
+        except (KeyError, AttributeError):
+            return 0
 
     def warn_mix_layout(self, kernel_name):
         """
