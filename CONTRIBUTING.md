@@ -1036,7 +1036,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    nvcc flag. There is a known [issue](https://github.com/ROCm/hip/issues/374)
    that ROCm errors out on device code, which uses such STL functions.
 4. A good performance metric for a CUDA kernel is the
-   [Effective Memory Bandwidth](https://devblogs.nvidia.com/how-implement-performance-metrics-cuda-cc/).
+   [Effective Memory Bandwidth](https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/#effective_bandwidth).
    It is useful for you to measure this metric whenever you are writing/optimizing a CUDA
    kernel. Following script shows how we can measure the effective bandwidth of CUDA `uniform_`
    kernel.
