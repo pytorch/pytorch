@@ -1,5 +1,6 @@
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/CallOnce.h>
@@ -341,6 +342,60 @@ CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   initCUDAStreamsOnce();
   int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
   return getStreamFromPool(priority, device);
+}
+
+CUDAStream getNonCapturingStreamFromPool(
+    const int priority,
+    DeviceIndex device_index) {
+  initCUDAStreamsOnce();
+  if (device_index == -1) {
+    device_index = current_device();
+    c10::cuda::SetTargetDevice();
+  }
+  check_gpu(device_index);
+#if !defined(USE_ROCM)
+  // See Note [HIP Lazy Streams]
+  // CUDA-only: Initializes the stream pools (once)
+  c10::call_once(
+      device_flags[device_index], initDeviceStreamState, device_index);
+#endif
+  auto pri_idx = std::clamp(-priority, 0, max_stream_priorities - 1);
+  StreamIdType id_type = StreamIdType(pri_idx + 1);
+
+  // Try to find a non-capturing stream in the pool.
+  // We try up to kStreamsPerPool times (the size of the pool).
+  for (int attempt = 0; attempt < kStreamsPerPool; ++attempt) {
+    const auto idx = get_idx(priority_counters[pri_idx][device_index]);
+#ifdef USE_ROCM
+    // See Note [HIP Lazy Streams]
+    c10::call_once(
+        stream_flags[pri_idx][device_index][idx],
+        initSingleStream,
+        pri_idx,
+        device_index,
+        idx);
+#endif
+    cudaStream_t raw_stream = streams[pri_idx][device_index][idx];
+    if (!c10::cuda::isStreamCapturing(raw_stream)) {
+      return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
+    }
+  }
+
+  // All streams in the pool are capturing, which shouldn't happen in normal
+  // usage. This likely indicates a bug or misuse of CUDA graph capture.
+  TORCH_CHECK(
+      false,
+      "All streams in the pool are currently capturing. "
+      "Cannot obtain a non-capturing stream. This may indicate "
+      "that CUDA graph capture is being used incorrectly.");
+}
+
+CUDAStream getNonCapturingStreamFromPool(
+    const bool isHighPriority,
+    DeviceIndex device) {
+  initCUDAStreamsOnce();
+  int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
+  return getNonCapturingStreamFromPool(priority, device);
 }
 
 CUDAStream getStreamFromExternal(

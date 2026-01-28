@@ -18,20 +18,6 @@ static bool _cuda_graphs_debug = false;
 static std::mutex capture_id_to_graph_mutex;
 static ska::flat_hash_map<CaptureId_t, CUDAGraph*> capture_id_to_graph;
 
-// Helper function to get the capture ID for a stream.
-// Returns std::nullopt if the stream is not actively capturing.
-// If no stream is provided, uses the current CUDA stream.
-std::optional<CaptureId_t> getCaptureId(std::optional<cudaStream_t> stream) {
-  cudaStream_t s = stream.value_or(c10::cuda::getCurrentCUDAStream());
-  cudaStreamCaptureStatus status{};
-  CaptureId_t capture_id = 0;
-  AT_CUDA_CHECK(cudaStreamGetCaptureInfo(s, &status, &capture_id));
-  if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
-    return capture_id;
-  }
-  return std::nullopt;
-}
-
 // Get the CUDAGraph associated with a capture ID, if any.
 CUDAGraph* getGraphFromCaptureId(CaptureId_t capture_id) {
   std::lock_guard<std::mutex> lock(capture_id_to_graph_mutex);
@@ -110,7 +96,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   }
 
   auto filter = [this](cudaStream_t stream) {
-    auto stream_capture_id = getCaptureId(stream);
+    auto stream_capture_id = c10::cuda::getStreamCaptureId(stream);
     return stream_capture_id.has_value() && stream_capture_id.value() == capture_id_;
   };
 
@@ -128,7 +114,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, capture_mode));
 
-  auto capture_id_opt = getCaptureId(stream);
+  auto capture_id_opt = c10::cuda::getStreamCaptureId(stream);
   TORCH_INTERNAL_ASSERT(capture_id_opt.has_value(),
       "Stream should be actively capturing after cudaStreamBeginCapture");
   capture_id_ = capture_id_opt.value();

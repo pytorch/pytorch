@@ -7,8 +7,6 @@
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/flat_hash_map.h>
 
-#include <optional>
-
 namespace at {
 
 struct Generator;
@@ -22,12 +20,6 @@ namespace cuda {
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 struct CUDAGraph;
-
-// Helper function to get the capture ID for a stream.
-// Returns std::nullopt if the stream is not actively capturing.
-// If no stream is provided, uses the current CUDA stream.
-TORCH_CUDA_CPP_API std::optional<CaptureId_t> getCaptureId(
-    std::optional<cudaStream_t> stream = std::nullopt);
 
 // Get the CUDAGraph associated with a capture ID, if any.
 // Returns nullptr if no graph is associated with the given capture ID.

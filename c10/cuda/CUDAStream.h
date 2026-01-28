@@ -216,6 +216,25 @@ C10_API CUDAStream
 getStreamFromPool(const int priority, DeviceIndex device = -1);
 
 /**
+ * Get a stream from the pool that is guaranteed not to be capturing.
+ *
+ * This is useful when you need to perform operations during CUDA graph
+ * capture that should NOT be part of the captured graph. The function
+ * iterates through the stream pool to find a stream that is not currently
+ * capturing. If all streams in the pool are capturing, an error is thrown.
+ *
+ * You can request a stream from the high priority pool by setting
+ * isHighPriority to true, or a stream for a specific device by setting device
+ * (defaulting to the current CUDA device.)
+ */
+C10_API CUDAStream getNonCapturingStreamFromPool(
+    const bool isHighPriority = false,
+    DeviceIndex device = -1);
+// no default priority to disambiguate overloads
+C10_API CUDAStream
+getNonCapturingStreamFromPool(const int priority, DeviceIndex device = -1);
+
+/**
  * Get a CUDAStream from a externally allocated one.
  *
  * This is mainly for interoperability with different libraries where we
