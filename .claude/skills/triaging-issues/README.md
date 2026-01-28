@@ -12,4 +12,4 @@ bump this list w/ their description. I made this static because the full set of 
 3. There are hooks in `/scripts`: a pre-hook (`validate_labels.py`) that filters out labels we never want the bot to add, and a post-hook (`add_bot_triaged.py`) that automatically applies `bot-triaged` after any issue mutation.
 4. The gh action is here: `.github/workflows/claude-issue-triage.yml`. It sets up roles, checks forks, and logs usage. We are using sonnet-4.5 since from testing it is much cheaper and appears to do a more than adequate job at triaging.
 5. To disable the flow, disable the GitHub Actions workflow in the repo settings or remove/disable `.github/workflows/claude-issue-triage.yml`.
-6. If you would like to test updates before committing them upstream to pytorch, you can do that here: https://github.com/pytorch/ciforge
+6. If you would like to test updates before committing them upstream to pytorch, you can do that here: https://github.com/pytorch/ciforge @lint-ignore
