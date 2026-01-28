@@ -13,17 +13,18 @@ import torch.nn as nn
 from torch.distributed._composable import contract
 
 from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
-from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
+from ._fsdp_common import FSDPMeshInfo
 from ._fsdp_init import (
-    _apply_fsdp_to_module,
+    _apply_to_module,
     _get_device_from_mesh,
+    _get_mesh_info,
     _get_modules_and_states,
     _get_post_forward_mesh_info,
     _init_default_mesh,
     _init_param_group,
+    _validate_mesh,
     _validate_module,
 )
-from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh, Shard
+
+    from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
     "fully_shard",
@@ -189,16 +192,8 @@ def fully_shard(
     torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
     _validate_module(module, "fully_shard")
     mesh = mesh or _init_default_mesh()
-    if mesh.ndim not in (1, 2):
-        raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
-    elif mesh.ndim == 1:
-        mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
-    else:
-        if mesh.mesh_dim_names is None:
-            raise AssertionError(
-                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
-            )
-        mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+    _validate_mesh(mesh)
+    mesh_info = _get_mesh_info(mesh)
     device = _get_device_from_mesh(mesh)
     auto_reshard_after_forward = reshard_after_forward is None
     # If the user does not provide ``reshard_after_forward``, we set it to True.
@@ -231,7 +226,9 @@ def fully_shard(
         managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
-    _apply_fsdp_to_module(modules, cls_to_fsdp_cls, FSDPModule, "FSDP", _unimplemented_deepcopy)
+    _apply_to_module(
+        modules, cls_to_fsdp_cls, FSDPModule, "FSDP", _unimplemented_deepcopy
+    )
     return arg_module
 
 
@@ -388,9 +385,11 @@ class FSDPModule:
                 state = module._get_fsdp_state()
                 state._auto_reshard_after_forward = False
                 if fsdp_param_group := state._fsdp_param_group:
+                    assert isinstance(fsdp_param_group.mesh_info, FSDPMeshInfo)
                     fsdp_param_group.post_forward_mesh_info = (
                         _get_post_forward_mesh_info(
-                            reshard_after_forward, fsdp_param_group.mesh_info
+                            reshard_after_forward,
+                            fsdp_param_group.mesh_info,
                         )
                     )
 

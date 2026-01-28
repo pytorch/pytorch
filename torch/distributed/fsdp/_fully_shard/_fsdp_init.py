@@ -10,15 +10,20 @@ from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
+from ._fsdp_common import (
+    _is_composable_with_fsdp,
+    DataParallelMeshInfo,
+    FSDPMeshInfo,
+    HSDPMeshInfo,
+)
 from ._fsdp_state import _get_module_fsdp_state
 
+
 if TYPE_CHECKING:
-    from typing import Any, Callable
+    from collections.abc import Callable
+    from typing import Any
 
     from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
-    from ._fsdp_common import FSDPMeshInfo
-    from ._fsdp_param_group import FSDPParamGroup
     from ._fsdp_state import FSDPState
 
 
@@ -35,6 +40,33 @@ def _validate_module(module: nn.Module, func_name: str) -> None:
         raise ValueError(
             f"{func_name} does not support containers that do not implement forward: {module}"
         )
+
+
+def _validate_mesh(mesh: "DeviceMesh") -> None:
+    """
+    Validate that the mesh can be used with fully_shard.
+
+    Raises ValueError if the mesh is not 1D or 2D.
+    Raises AssertionError if the mesh is 2D but mesh_dim_names is not specified.
+    """
+    if mesh.ndim not in (1, 2):
+        raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
+    if mesh.ndim == 2 and mesh.mesh_dim_names is None:
+        raise AssertionError(
+            "Please init the 2D mesh for HSDP with mesh_dim_names specified"
+        )
+
+
+def _get_mesh_info(mesh: "DeviceMesh") -> "FSDPMeshInfo":
+    """
+    Get the appropriate mesh info for the given mesh.
+
+    Returns FSDPMeshInfo for 1D mesh, HSDPMeshInfo for 2D mesh.
+    """
+    if mesh.ndim == 1:
+        return FSDPMeshInfo(mesh, shard_mesh_dim=0)
+    else:
+        return HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
 
 
 def _get_post_forward_mesh_info(
@@ -195,10 +227,7 @@ def _get_managed_modules(
         """
         if not is_composable_fn(module):
             return
-        elif (
-            module not in root_modules_set
-            and get_state_fn(module) is not None
-        ):
+        elif module not in root_modules_set and get_state_fn(module) is not None:
             return  # nested `fully_shard` module
         visited_modules.add(module)
         for submodule in module.children():
@@ -292,7 +321,7 @@ def _move_states_to_device(
             tensor.data = tensor.to(device)
 
 
-def _apply_fsdp_to_module(
+def _apply_to_module(
     modules: tuple[nn.Module, ...],
     cls_to_wrapper_cls: dict[type, type],
     wrapper_module_cls: type,
@@ -314,7 +343,9 @@ def _apply_fsdp_to_module(
         new_cls = cls_to_wrapper_cls.get(cls)
         if not new_cls:
             dct = {"__deepcopy__": unimplemented_deepcopy}
-            new_cls = type(f"{wrapper_cls_prefix}{cls.__name__}", (wrapper_module_cls, cls), dct)
+            new_cls = type(
+                f"{wrapper_cls_prefix}{cls.__name__}", (wrapper_module_cls, cls), dct
+            )
             cls_to_wrapper_cls[cls] = new_cls
         module.__class__ = new_cls
 
@@ -323,8 +354,8 @@ def _init_param_group(
     state: "FSDPState",
     params: list[nn.Parameter],
     modules: tuple[nn.Module, ...],
-    mesh_info: "FSDPMeshInfo",
-    post_forward_mesh_info: "FSDPMeshInfo | None",
+    mesh_info: DataParallelMeshInfo,
+    post_forward_mesh_info: FSDPMeshInfo | None,
     device: torch.device,
     shard_placement_fn: "Callable[[nn.Parameter], Any] | None",
     mp_policy: "MixedPrecisionPolicy",
@@ -357,7 +388,13 @@ def _get_modules_and_states(
     ignored_params: set[nn.Parameter] | None,
     is_composable_fn: "Callable[[nn.Module], bool] | None" = None,
     get_state_fn: "Callable[[nn.Module], Any] | None" = None,
-) -> tuple[nn.Module, tuple[nn.Module, ...], list[nn.Module], list[nn.Parameter], list[torch.Tensor]]:
+) -> tuple[
+    nn.Module,
+    tuple[nn.Module, ...],
+    list[nn.Module],
+    list[nn.Parameter],
+    list[torch.Tensor],
+]:
     """
     Get modules tuple, managed modules, params, and buffers for FSDP/replicate initialization.
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import overload
+from typing import overload, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -13,21 +13,24 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
-    _apply_fsdp_to_module,
+    _apply_to_module,
     _get_device_from_mesh,
     _get_modules_and_states,
     _init_default_mesh,
     _init_param_group,
-    _validate_module,
+    _validate_module as _validate_module_common,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
 from torch.distributed.fsdp._fully_shard._fully_shard import (
     _unimplemented_deepcopy,
     FSDPModule,
 )
-from torch.distributed.tensor import DeviceMesh
 
 from .contract import _get_registry, contract
+
+
+if TYPE_CHECKING:
+    from torch.distributed.tensor import DeviceMesh
 
 
 cls_to_replicate_cls: dict[type, type] = {}
@@ -57,7 +60,6 @@ class _ReplicateStateContext:
 
 
 def _get_module_replicate_state(module: nn.Module) -> _ReplicateState | None:
-    """Checks if module state is ReplicateState"""
     state = _get_module_state(module)
     if isinstance(state, _ReplicateState):
         return state
@@ -65,11 +67,6 @@ def _get_module_replicate_state(module: nn.Module) -> _ReplicateState | None:
 
 
 class _ReplicateState(FSDPState):
-    """
-    Replicate state inherits from FSDP state and overrides the state name
-    and module state getter.
-    """
-
     _state_name: str = "Replicate"
 
     def __init__(self) -> None:
@@ -80,7 +77,6 @@ class _ReplicateState(FSDPState):
         """Override to use replicate-specific state getter."""
         return _get_module_replicate_state(module)
 
-    # Define a separate init since `__init__` is called in the contract
     def init(
         self,
         modules: tuple[nn.Module, ...],
@@ -136,11 +132,10 @@ def replicate(
     """
     torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
 
-    _validate_module_for_replicate(module)
+    _validate_module(module)
 
     mesh = mesh or _init_default_mesh(mesh_dim_names=("replicate",))
-    if mesh.ndim != 1:
-        raise ValueError(f"replicate expects a 1D DeviceMesh but got {mesh}")
+    _validate_mesh(mesh)
 
     mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
@@ -170,8 +165,12 @@ def replicate(
     )
 
     # Place Replicate leftmost for highest priority in the method resolution order
-    _apply_fsdp_to_module(
-        modules, cls_to_replicate_cls, ReplicateModule, "Replicate", _unimplemented_deepcopy
+    _apply_to_module(
+        modules,
+        cls_to_replicate_cls,
+        ReplicateModule,
+        "Replicate",
+        _unimplemented_deepcopy,
     )
     return arg_module
 
@@ -183,23 +182,20 @@ class ReplicateModule(FSDPModule):
 
 
 def is_composable_with_replicate(module: nn.Module) -> bool:
-    """Checks if replicate can be applied with module"""
     registry = _get_registry(module)
     if registry is None:
         return True
-    # Registry keys by function name
     return "fully_shard" not in registry
 
 
-def _validate_module_for_replicate(module: nn.Module) -> None:
-    """
-    Validate that the module can be used with replicate.
-
-    Raises RuntimeError if already managed by fully_shard.
-    Raises ValueError if the module is a container that doesn't implement forward.
-    """
+def _validate_module(module: nn.Module) -> None:
     if not is_composable_with_replicate(module):
         raise RuntimeError(
             "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
         )
-    _validate_module(module, "replicate")
+    _validate_module_common(module, "replicate")
+
+
+def _validate_mesh(mesh: DeviceMesh) -> None:
+    if mesh.ndim != 1:
+        raise ValueError(f"replicate expects a 1D DeviceMesh but got {mesh}")
