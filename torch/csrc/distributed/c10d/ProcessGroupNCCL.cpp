@@ -5859,9 +5859,9 @@ bool usePgAllocVerbose() {
 at::Tensor ProcessGroupNCCL::allocateTensor(
     long size,
     at::TensorOptions options) {
-  if (usePgAllocVerbose()) {
-    std::cout << "XXX ProcessGroupNCCL::allocateTensor size=" << size << std::endl;
-  }
+  // if (usePgAllocVerbose()) {
+  //   std::cout << "XXX ProcessGroupNCCL::allocateTensor size=" << size << std::endl;
+  // }
   // Some checks
   TORCH_CHECK_VALUE(options.has_device(), "Tensor options must include device");
   auto device = options.device();

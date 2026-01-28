@@ -31,9 +31,9 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
 }
 
 bool usePgAllocator() {
-  static const char* env = std::getenv("TORCH_C10D_FUNCTIONAL_USE_PG_ALLOC");
-  static bool enabled = env != nullptr && std::strcmp(env, "1") == 0;
-  return enabled;
+  // static const char* env = std::getenv("TORCH_C10D_FUNCTIONAL_USE_PG_ALLOC");
+  // static bool enabled = env != nullptr && std::strcmp(env, "1") == 0;
+  return true;
 }
 
 at::Tensor allocate_all_gather_output(
