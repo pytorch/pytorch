@@ -28,9 +28,10 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
     FakeTensor,
     FakeTensorMode,
-    UnsupportedFakeTensorException,
     unset_fake_temporarily,
+    UnsupportedFakeTensorException,
 )
+
 
 __all__ = [
     "FakeTensor",

@@ -667,13 +667,13 @@ class FakeTensor(Tensor):
 
         with FakeTensorMode() as fake_mode:
             # Create a fake tensor from a real one
-            real = torch.randn(10, 20, device='cpu')
+            real = torch.randn(10, 20, device="cpu")
             fake = fake_mode.from_tensor(real)
 
             # Fake tensor has all the metadata
-            print(fake.shape)       # torch.Size([10, 20])
-            print(fake.dtype)       # torch.float32
-            print(fake.device)      # cpu (the fake_device)
+            print(fake.shape)  # torch.Size([10, 20])
+            print(fake.dtype)  # torch.float32
+            print(fake.device)  # cpu (the fake_device)
             print(fake.requires_grad)  # False
 
             # But no actual data

@@ -78,11 +78,11 @@ class TestFakeTensorDocs(TestCase):
     def test_fake_tensor_submodule_import(self):
         """Test that torch.subclasses.fake_tensor imports work."""
         from torch.subclasses.fake_tensor import (
+            DynamicOutputShapeException,
             FakeTensor,
             FakeTensorMode,
-            UnsupportedFakeTensorException,
-            DynamicOutputShapeException,
             unset_fake_temporarily,
+            UnsupportedFakeTensorException,
         )
 
         # All should be importable
@@ -124,7 +124,7 @@ class TestFakeTensorDocs(TestCase):
 
     def test_fake_tensor_attributes(self):
         """Test that documented attributes exist and work."""
-        from torch.subclasses import FakeTensorMode, FakeTensor
+        from torch.subclasses import FakeTensor, FakeTensorMode
 
         fake_mode = FakeTensorMode()
         real_tensor = torch.randn(5, 5)
@@ -143,8 +143,8 @@ class TestFakeTensorDocs(TestCase):
     def test_exceptions_are_exported(self):
         """Test that documented exceptions are exported from public API."""
         from torch.subclasses import (
-            UnsupportedFakeTensorException,
             DynamicOutputShapeException,
+            UnsupportedFakeTensorException,
         )
 
         # These should be importable
