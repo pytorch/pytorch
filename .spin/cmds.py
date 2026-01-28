@@ -305,11 +305,11 @@ def _process_lintrunner_args(lintrunner_args):
     has_paths = False
     has_all_files = False
     for arg in args_iter:
-        if (_take := _check_arg("--take", arg, args_iter)):
+        if _take := _check_arg("--take", arg, args_iter):
             take = set(_take.split(","))
-        elif (_skip := _check_arg("--skip", arg, args_iter)):
+        elif _skip := _check_arg("--skip", arg, args_iter):
             skip = set(_skip.split(","))
-        elif (_tee_file := _check_arg("--tee-json", arg, args_iter)):
+        elif _tee_file := _check_arg("--tee-json", arg, args_iter):
             tee_file = _tee_file.strip()
         elif arg == "--all-files":
             has_all_files = True
