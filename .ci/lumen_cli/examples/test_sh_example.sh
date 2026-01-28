@@ -86,6 +86,8 @@ eval "$(lumen test pytorch env \
 echo "Environment variables:"
 env
 
+pip install -e .ci/lumen_cli
+
 lumen test pytorch env \
     --build-environment "$BUILD_ENVIRONMENT" \
     --test-config "${TEST_CONFIG}" \
