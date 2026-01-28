@@ -27,6 +27,8 @@ from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
     create_build_tuple,
     create_call_function,
+    create_call_method,
+    create_dup_top,
     create_instruction,
     create_rot_n,
 )
@@ -852,8 +854,23 @@ class ListVariable(CommonListMethodsVariable):
         return self.debug_repr_helper("[", "]")
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # To deal with self-referential lists
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_LIST", arg=0),
+                create_dup_top(),
+            ]
+        )
+        codegen.add_cache(self)
+
+        # Actually populate the list with the items
         codegen.foreach(self.items)
-        codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_LIST", arg=len(self.items)),
+                create_instruction("LIST_EXTEND", arg=1),
+            ]
+        )
 
     def call_method(
         self,
@@ -1040,15 +1057,33 @@ class DequeVariable(CommonListMethodsVariable):
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
+        # To deal with self-referential sets
         codegen.add_push_null(
             lambda: codegen.append_output(
                 codegen.create_load_python_module(collections.deque)  # type: ignore[arg-type]
             )
         )
-        codegen.foreach(self.items)
-        codegen.extend_output([create_instruction("BUILD_LIST", arg=len(self.items))])
+        codegen.append_output(create_instruction("BUILD_LIST", arg=0))
         codegen(self.maxlen)
-        codegen.extend_output(codegen.create_call_function_kw(2, ("maxlen",), False))
+        codegen.extend_output(
+            [
+                *codegen.create_call_function_kw(2, ("maxlen",), False),
+                create_dup_top(),
+            ]
+        )
+        codegen.add_cache(self)
+
+        codegen.append_output(create_dup_top())
+        codegen.load_method("extend")
+
+        codegen.foreach(self.items)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_LIST", arg=len(self.items)),
+                *create_call_method(1),
+                create_instruction("POP_TOP"),
+            ]
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "maxlen":

@@ -14,6 +14,7 @@ computations.
 """
 
 import collections
+import functools
 import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
@@ -213,8 +214,9 @@ def is_side_effect_safe(m: MutationType) -> bool:
 class AsPythonConstantNotImplementedError(NotImplementedError):
     vt: "VariableTracker"
 
-    def __init__(self, vt: "VariableTracker") -> None:
-        super().__init__(f"{vt} is not a constant")
+    def __init__(self, vt: "VariableTracker", msg: str | None = None) -> None:
+        msg = f"{vt} is not a constant" if msg is None else msg
+        super().__init__(msg)
         self.vt = vt
 
 
@@ -809,6 +811,71 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 # 1. one forgot to pass in a source
                 # 2. `mutation_type` is incorrect
                 assert source is not None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """
+        Wraps all subclasses' `as_python_constant` and `reconstruct` so that it cannot be
+        called twice in the same call chain - i.e. self-referential objects.
+        For `as_python_constant` - self-referential objects are NOT treated as constants.
+        For `reconstruct` - we will graph break. The graph break can be avoided if the VT subclass
+        can generate and cache itself before recursively `reconstruct`ing - see ListVariable for an example.
+        """
+        super().__init_subclass__(**kwargs)
+
+        def as_python_constant_failure(self) -> NoReturn:
+            raise AsPythonConstantNotImplementedError(
+                self, msg=f"{self} is self-referential"
+            )
+
+        VariableTracker._add_call_once_guard(
+            cls, "as_python_constant", as_python_constant_failure
+        )
+
+        def reconstruct_failure(self) -> NoReturn:
+            unimplemented(
+                gb_type="Reconstruction failure (self-referential)",
+                context=str(self),
+                explanation=f"Dynamo tried to reconstruct sourceless variable {self}, but it is self-referential. "
+                "Dynamo must manually implement reconstruction rules for self-referentiable sourceless variables.",
+                hints=[
+                    "If Dynamo is attempting to trace a return statement and your code is attempting to return a variable "
+                    "that Dynamo cannot reconstruct, then remove it from the return statement.",
+                    "Remove the self-reference in the variable. A self-referring list, for example, is `l = []; l.append(l)`.",
+                    *graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK,
+                    "Report an issue to PyTorch if you need self-referential reconstrtuction support.",
+                ],
+            )
+
+        VariableTracker._add_call_once_guard(cls, "reconstruct", reconstruct_failure)
+
+    @staticmethod
+    def _add_call_once_guard(
+        cls: type["VariableTracker"],
+        method: str,
+        callback: Callable[["VariableTracker"], Any],
+    ) -> None:
+        original_method = getattr(cls, method)
+
+        if original_method is getattr(VariableTracker, method) or hasattr(
+            original_method, "_call_once_guarded"
+        ):
+            return
+
+        guard_attr = f"_dynamo_{method}_called_once"
+
+        @functools.wraps(original_method)
+        def guarded_method(self, *args: Any, **kwargs: Any) -> VariableTracker:
+            if getattr(self, guard_attr, False):
+                callback(self)
+
+            try:
+                setattr(self, guard_attr, True)
+                return original_method(self, *args, **kwargs)
+            finally:
+                setattr(self, guard_attr, False)
+
+        guarded_method._call_once_guarded = True  # pyrefly: ignore[missing-attribute]
+        setattr(cls, method, guarded_method)
 
 
 def raise_type_error_exc(tx: Any, msg_str: str) -> NoReturn:

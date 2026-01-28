@@ -1791,15 +1791,6 @@ class VariableBuilder:
     def wrap_listlike(
         self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
     ) -> VariableTracker:
-        for item in value:
-            if item is value:
-                unimplemented(
-                    gb_type="list elements are pointing to the list itself",
-                    context="",
-                    explanation="Dynamo does not support lists whose items reference to itself",
-                    hints=["Avoid using self referential list"],
-                )
-
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value)
