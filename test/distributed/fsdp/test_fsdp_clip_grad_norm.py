@@ -337,6 +337,76 @@ class TestClipGradNorm(FSDPTest):
         self.assertEqual(total_norm.dtype, torch.float32)
         self.assertEqual(total_norm, torch.tensor(0.0, device=self.device_type))
 
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_dtype_grads(self, device):
+        # test clip_grad_norm_ with mixed-dtype gradients
+        self.run_subtests(
+            {
+                "device": [device],
+                "max_norm": [1, 2.5],
+                "norm_type": [2, float("inf")],
+                "sharding_strategy": [
+                    ShardingStrategy.FULL_SHARD,
+                    ShardingStrategy.SHARD_GRAD_OP,
+                ],
+            },
+            self._test_mixed_dtype_grads,
+        )
+
+    def _test_mixed_dtype_grads(
+        self,
+        device,
+        max_norm: Union[float, int],
+        norm_type: Union[float, int],
+        sharding_strategy: ShardingStrategy,
+    ):
+        fsdp_kwargs = {
+            "sharding_strategy": sharding_strategy,
+            "use_orig_params": True,
+            "device_id": device_type.type,
+        }
+        fsdp_model = FSDP(
+            NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                DEVICEInitMode.DEVICE_BEFORE,
+                deterministic=True,
+                fsdp_kwargs=fsdp_kwargs,
+            ),
+            **fsdp_kwargs,
+        )
+        inp = fsdp_model.module.get_input(torch.device(self.device_type))
+        out = fsdp_model(*inp)
+        out.sum().backward()
+
+        # manually convert some gradients to fp16 to simulate mixed-precision scenario
+        params_with_grad = [p for p in fsdp_model.parameters() if p.grad is not None]
+        self.assertGreaterEqual(
+            len(params_with_grad), 2, "Need at least 2 params with grads"
+        )
+
+        fp32_grad = params_with_grad[0].grad.to(torch.float32)
+        fp16_grad = params_with_grad[1].grad.to(torch.float16)
+        params_with_grad[0].grad = None
+        params_with_grad[1].grad = None
+        params_with_grad[0].grad_dtype = torch.float32
+        params_with_grad[1].grad_dtype = torch.float16
+        params_with_grad[0].grad = fp32_grad
+        params_with_grad[1].grad = fp16_grad
+
+        grad_dtypes = {p.grad.dtype for p in params_with_grad}
+        self.assertEqual(
+            len(grad_dtypes), 2, f"Expected mixed dtypes, got {grad_dtypes}"
+        )
+
+        total_norm = fsdp_model.clip_grad_norm_(max_norm=max_norm, norm_type=norm_type)
+
+        self.assertEqual(total_norm.dtype, torch.float32)
+
+        for param in params_with_grad:
+            param_norm = torch.linalg.vector_norm(param.grad.float(), norm_type).item()
+            self.assertLessEqual(param_norm, max_norm + 1e-5)
+
 
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
