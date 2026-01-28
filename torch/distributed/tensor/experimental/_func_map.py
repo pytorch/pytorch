@@ -64,9 +64,10 @@ def local_map(
             the required sharding placements before passing its local tensor to ``func``.
 
             For :class:`torch.nn.Module` inputs containing :class:`DTensor` parameters,
-            the placements will be applied to all DTensor parameters in the module. The
-            module's parameters will be converted to local tensors before being passed
-            to ``func``.
+            the placements will be applied to all DTensor parameters in the module (but
+            not to parameters in submodules). The module's parameters will be converted
+            to local tensors before being passed to ``func``, and the original DTensor
+            parameters will be restored after ``func`` completes.
 
             The only exception is when required placements are not ``None`` and the
             argument is a :class:`torch.Tensor`. In this case, the placements examination

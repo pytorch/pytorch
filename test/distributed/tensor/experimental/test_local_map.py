@@ -430,40 +430,8 @@ class TestLocalMap(DTensorTestBase):
     def test_local_map_with_nn_module(self):
         """
         test for issue #163692: local_map should support nn.Module inputs
-        containing DTensor parameters.
+        containing DTensor parameters and restore them correctly after execution.
         """
-        device_mesh = init_device_mesh(
-            device_type=self.device_type, mesh_shape=(self.world_size,)
-        )
-
-        W = torch.randn(16, 8, device=self.device_type, requires_grad=False)
-        W_dt = distribute_tensor(W, device_mesh, replicate)
-
-        X = torch.randn(4, 8, device=self.device_type, requires_grad=False)
-        X_dt = distribute_tensor(X, device_mesh, replicate)
-
-        def matmul_fn(weight, x):
-            # weight is (16, 8), x is (4, 8)
-            # result should be (4, 16)
-            return torch.mm(x, weight.t())
-
-        local_matmul = local_map(
-            matmul_fn,
-            out_placements=replicate,
-            in_placements=(replicate, replicate),
-            device_mesh=device_mesh,
-        )
-
-        Y_dt = local_matmul(W_dt, X_dt)
-
-        for placement in Y_dt.placements:
-            self.assertTrue(placement.is_replicate())
-
-        Y_expected = torch.mm(X, W.t())
-        self.assertEqual(Y_dt.full_tensor(), Y_expected)
-
-    @with_comms
-    def test_local_map_with_nn_module_actual(self):
         device_mesh = init_device_mesh(
             device_type=self.device_type, mesh_shape=(self.world_size,)
         )
@@ -472,6 +440,10 @@ class TestLocalMap(DTensorTestBase):
         weight = linear.weight.clone()
         weight_dt = distribute_tensor(linear.weight, device_mesh, replicate)
         linear.weight = torch.nn.Parameter(weight_dt)
+
+        # verify the parameter is a DTensor before local_map
+        self.assertIsInstance(linear.weight, DTensor)
+        original_weight = linear.weight
 
         X = torch.randn(4, 8, device=self.device_type, requires_grad=False)
         X_dt = distribute_tensor(X, device_mesh, replicate)
@@ -493,6 +465,55 @@ class TestLocalMap(DTensorTestBase):
 
         Y_expected = torch.nn.functional.linear(X, weight)
         self.assertEqual(Y_dt.full_tensor(), Y_expected)
+
+        # verify the parameter is still a DTensor after local_map (restoration check)
+        self.assertIsInstance(linear.weight, DTensor)
+        self.assertEqual(linear.weight, original_weight)
+
+    @with_comms
+    def test_local_map_with_nn_module_grad_placements(self):
+        """
+        test that grad_placements works correctly with nn.Module inputs
+        containing DTensor parameters.
+        """
+        device_mesh = init_device_mesh(
+            device_type=self.device_type, mesh_shape=(self.world_size,)
+        )
+
+        linear = torch.nn.Linear(8, 16, bias=False, device=self.device_type)
+        weight = linear.weight.clone()
+        weight_dt = distribute_tensor(linear.weight, device_mesh, replicate)
+        linear.weight = torch.nn.Parameter(weight_dt)
+
+        # verify the parameter is a DTensor before local_map
+        self.assertIsInstance(linear.weight, DTensor)
+        original_weight = linear.weight
+
+        X = torch.randn(4, 8, device=self.device_type, requires_grad=False)
+        X_dt = distribute_tensor(X, device_mesh, replicate)
+
+        def apply_linear(module, x):
+            return module(x)
+
+        local_apply_linear = local_map(
+            apply_linear,
+            out_placements=replicate,
+            in_placements=(replicate, replicate),
+            in_grad_placements=(replicate, replicate),
+            device_mesh=device_mesh,
+        )
+
+        Y_dt = local_apply_linear(linear, X_dt)
+
+        for placement in Y_dt.placements:
+            self.assertTrue(placement.is_replicate())
+
+        Y_expected = torch.nn.functional.linear(X, weight)
+        self.assertEqual(Y_dt.full_tensor(), Y_expected)
+
+        # verify the parameter is still a DTensor after local_map (restoration check)
+        self.assertIsInstance(linear.weight, DTensor)
+        self.assertEqual(linear.weight, original_weight)
 
 
 if __name__ == "__main__":
