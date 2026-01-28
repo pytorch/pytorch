@@ -33,7 +33,7 @@ namespace at::xpu {
 // ATen/xpu/detail/LazyLevelZero.cpp accordingly (e.g., via one of the stub
 // macros).
 
-#define AT_FORALL_L0(_)        \
+#define AT_FORALL_ZE(_)        \
   _(zeModuleCreate)            \
   _(zeKernelCreate)            \
   _(zeKernelGetProperties)     \
@@ -45,10 +45,9 @@ extern "C" typedef struct LevelZero {
 // Intel level zero is not defaultly available on Windows.
 #ifndef _WIN32
 #define CREATE_MEMBER(name) decltype(&name) name;
-  AT_FORALL_L0(CREATE_MEMBER)
+  AT_FORALL_ZE(CREATE_MEMBER)
 #undef CREATE_MEMBER
 #endif // _WIN32
 } LevelZero;
 
-extern "C" TORCH_XPU_API LevelZero* load_level_zero();
 } // namespace at::xpu
