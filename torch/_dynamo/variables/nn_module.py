@@ -566,7 +566,7 @@ class NNModuleVariable(VariableTracker):
                 else:
                     assert istype(fn, types.FunctionType)
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=fn_source),
+                    VariableTracker.build(tx, fn, source=fn_source),
                     args,
                     kwargs,
                 )
@@ -872,7 +872,7 @@ class NNModuleVariable(VariableTracker):
 
                 src = AttrSource(AttrSource(self.source, name), "__func__")  # type: ignore[arg-type]
                 return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=src),
+                    VariableTracker.build(tx, fn, source=src),
                     [self] + list(args),
                     kwargs,
                 )
@@ -1143,7 +1143,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # source=source) but that introduces guard on the
                 # `forward.__code__` object. Given that we already guard on the
                 # forward not present in generic dict, we dont need this guard.
-                return variables.UserFunctionVariable(fn, source=source).call_function(
+                return VariableTracker.build(tx, fn, source=source).call_function(
                     tx, [self] + list(args), kwargs
                 )
 
@@ -1321,7 +1321,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         directly look into the underlying datastructures. This saves a lot of
         compilation time.
         """
-        name_vt = variables.ConstantVariable(name)
+        from .builder import SourcelessBuilder
+
+        name_vt = SourcelessBuilder.create(tx, name)
         out = self.getattr_helper(tx, "_parameters", name_vt)
         if out is None:
             out = self.getattr_helper(tx, "_modules", name_vt)
