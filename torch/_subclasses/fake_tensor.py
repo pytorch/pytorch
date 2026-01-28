@@ -645,11 +645,49 @@ class SymNumberMemoDescriptor:
 
 class FakeTensor(Tensor):
     """
-    Meta tensors give you the ability to run PyTorch code without having to
-    actually do computation through tensors allocated on a `meta` device.
-    Because the device is `meta`, meta tensors do not model device propagation.
-    FakeTensor extends MetaTensors to also carry an additional `fake_device`
-    which tracks devices that would have been used.
+    A tensor subclass that represents tensor metadata without actual data.
+
+    FakeTensors are tensors that have all the metadata of a real tensor (shape,
+    dtype, device, strides, requires_grad) but no actual data storage. They are
+    backed by meta tensors internally, with additional tracking for the
+    "fake device" that represents what device the tensor would be on if it were
+    real.
+
+    FakeTensors are typically created via :class:`FakeTensorMode` rather than
+    directly instantiated. They are used primarily by PyTorch's compilation
+    infrastructure for:
+
+    - **Shape inference**: Determining output tensor shapes without computation
+    - **Memory analysis**: Understanding memory usage without allocating
+    - **Graph tracing**: Capturing tensor operations symbolically
+
+    Example::
+
+        from torch.subclasses import FakeTensorMode
+
+        with FakeTensorMode() as fake_mode:
+            # Create a fake tensor from a real one
+            real = torch.randn(10, 20, device='cpu')
+            fake = fake_mode.from_tensor(real)
+
+            # Fake tensor has all the metadata
+            print(fake.shape)       # torch.Size([10, 20])
+            print(fake.dtype)       # torch.float32
+            print(fake.device)      # cpu (the fake_device)
+            print(fake.requires_grad)  # False
+
+            # But no actual data
+            # fake.data_ptr() would raise an error
+
+    Note:
+        FakeTensors should not be mixed with real tensors in operations
+        without being inside the appropriate :class:`FakeTensorMode`.
+
+    See Also:
+        - :class:`FakeTensorMode`: The context manager for creating and using
+          fake tensors
+        - `Meta Tensors <https://pytorch.org/docs/stable/meta.html>`_: The
+          underlying meta device tensors
     """
 
     fake_device: torch.device
@@ -1222,6 +1260,62 @@ class DispatchCacheInfo:
 
 
 class FakeTensorMode(TorchDispatchMode):
+    """
+    A context manager that enables fake tensor operations.
+
+    FakeTensorMode intercepts tensor operations and converts them to operate on
+    :class:`FakeTensor` instances, which have all the metadata of real tensors
+    (shape, dtype, device, strides) but no actual data storage.
+
+    This is useful for:
+
+    - **Shape inference**: Determining output shapes without actual computation
+    - **Compilation**: Running compiler passes that need tensor metadata without
+      memory allocation
+    - **Debugging**: Testing tensor operation behavior without using GPU memory
+
+    Args:
+        allow_fallback_kernels: If True, allow operations that don't have a meta
+            kernel to fall back to running with real zero-filled tensors.
+            Default: True.
+        allow_non_fake_inputs: If True, automatically convert real tensors to
+            fake tensors when they're passed as inputs. Default: False.
+        shape_env: Optional :class:`ShapeEnv` for symbolic shape tracking.
+            If None, a new one may be created depending on static_shapes.
+        static_shapes: If True, treat all shapes as static (concrete).
+            If None, defaults to True when shape_env is None.
+
+    Example::
+
+        from torch.subclasses import FakeTensorMode
+
+        # Create a fake mode
+        fake_mode = FakeTensorMode()
+
+        # Create a real tensor
+        real_tensor = torch.randn(10, 20)
+
+        # Convert to fake tensor
+        fake_tensor = fake_mode.from_tensor(real_tensor)
+        print(fake_tensor.shape)  # torch.Size([10, 20])
+        print(fake_tensor.numel())  # 200
+
+        # Operations within the mode produce fake tensors
+        with fake_mode:
+            result = fake_tensor @ fake_tensor.T
+            print(result.shape)  # torch.Size([10, 10])
+
+    Note:
+        FakeTensor is typically used internally by PyTorch's compilation
+        infrastructure (torch.compile, torch.export). Direct usage is an
+        advanced feature.
+
+    See Also:
+        - :class:`FakeTensor`: The tensor subclass representing fake tensors
+        - :func:`~torch.subclasses.fake_tensor.unset_fake_temporarily`: Context manager to temporarily disable
+          fake tensor mode
+    """
+
     cache: dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
     cache_hits: int = 0
     cache_misses: int = 0

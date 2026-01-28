@@ -46,6 +46,7 @@ torch.distributed._symmetric_memory <symmetric_memory>
 torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
 torch.compiler <torch.compiler_api>
+torch._subclasses.FakeTensor <fake_tensor>
 torch.fft <fft>
 torch.func <func>
 futures
