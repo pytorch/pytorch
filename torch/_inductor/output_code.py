@@ -204,12 +204,21 @@ def cudagraph_post_compile(
     runs it on compiled_graph.
     Mutates the `compiled_graph.current_callable` and `cudagraphs`
     """
+    from torch._inductor.compiler_bisector import CompilerBisector
+
     assert compiled_graph.current_callable is not None
     assert compiled_graph.cudagraph_info is not None
     cached_info = compiled_graph.cudagraph_info
     cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
+
+    # Check if bisector wants to disable cudagraphs for this graph
+    if CompilerBisector.disable_subsystem("inductor", "cudagraphs"):
+        BoxedBool.disable(cudagraphs)
+        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+        log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
+        return
 
     if not cudagraph_fail_reasons:
         fx_kwargs = compiled_graph.fx_kwargs
@@ -273,6 +282,14 @@ def cudagraph_partition_post_compile(
     Assuming all partition functions are cudagraphified and share the same order
     as `compiled_graph.partition_maps`. See [Note: Graph Partition Map for CUDAGraph].
     """
+    from torch._inductor.compiler_bisector import CompilerBisector
+
+    if CompilerBisector.disable_subsystem("inductor", "cudagraphs"):
+        BoxedBool.disable(cudagraphs)
+        maybe_handle_backward_generation(compiled_graph, boxed_forward_device_index)
+        log_cudagraph_skip_and_bump_counter("skipping cudagraphs due to bisector")
+        return
+
     assert compiled_graph.cudagraph_info is not None
     cudagraph_fail_reasons = compiled_graph.cudagraph_info.cudagraph_fail_reasons
 
