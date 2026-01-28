@@ -2602,9 +2602,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestCommon",
-                "test_variant_consistency_eager",
                 device_type="mps",
-                dtypes=(torch.float32,),
             ),
         ),
     ),

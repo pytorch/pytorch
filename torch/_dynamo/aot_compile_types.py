@@ -18,14 +18,9 @@ def _serialize_triton_kernel(kernel: Any) -> tuple[str, str]:
         RuntimeError: If the kernel cannot be serialized (missing attributes).
     """
     fn = getattr(kernel, "fn", None)
-    if fn is None:
-        raise RuntimeError(
-            f"Kernel {kernel} has no 'fn' attribute. "
-            f"Cannot serialize for precompilation."
-        )
-    module_path = getattr(fn, "__module__", None)
-    func_name = getattr(fn, "__name__", None)
-    if module_path is None or func_name is None:
+    module_path = fn and getattr(fn, "__module__", None)
+    func_name = fn and getattr(fn, "__name__", None)
+    if fn is None or module_path is None or func_name is None:
         raise RuntimeError(
             f"Kernel fn missing __module__ or __name__: "
             f"module={module_path}, name={func_name}. "
