@@ -18,7 +18,12 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest, FSDPTestContinuous, get_devtype
+from torch.testing._internal.common_fsdp import (
+    _maybe_wrap_fsdp,
+    FSDPTest,
+    FSDPTestContinuous,
+    get_devtype,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,

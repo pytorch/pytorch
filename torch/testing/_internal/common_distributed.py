@@ -1887,7 +1887,7 @@ class MultiProcContinuousTest(TestCase):
         # Handle both method and string attribute for device_type
         # (instantiate_device_type_tests sets device_type as a string attribute,
         # making this compatible as a drop-in replacement for MultiProcessTestCase)
-        device_type_attr = getattr(cls, "device_type")
+        device_type_attr = cls.device_type
         if callable(device_type_attr):
             device_type = device_type_attr()
         else:
