@@ -11,8 +11,26 @@ Exit codes:
 """
 
 import json
+import os
 import re
 import sys
+from datetime import datetime
+
+
+DEBUG_LOG = os.environ.get("TRIAGE_HOOK_DEBUG_LOG", "/tmp/triage_hooks.log")
+
+
+def debug_log(msg: str, to_stderr: bool = False):
+    """Append a debug message to the log file and optionally stderr."""
+    timestamp = datetime.now().isoformat()
+    formatted = f"[{timestamp}] [PreToolUse] {msg}"
+    try:
+        with open(DEBUG_LOG, "a") as f:
+            f.write(formatted + "\n")
+    except Exception:
+        pass
+    if to_stderr or os.environ.get("TRIAGE_HOOK_VERBOSE"):
+        print(f"[DEBUG] {formatted}", file=sys.stderr)
 
 
 # Patterns that match forbidden label prefixes (case-insensitive)
@@ -46,20 +64,20 @@ def is_forbidden(label: str) -> bool:
 def main():
     try:
         data = json.load(sys.stdin)
+        debug_log(f"Hook invoked with data: {json.dumps(data, indent=2)}")
         tool_input = data.get("tool_input", {})
 
-        # Handle both possible field names for labels
         labels = tool_input.get("labels", []) or []
+        debug_log(f"Labels to validate: {labels}")
 
-        # If no labels being set, allow
         if not labels:
+            debug_log("No labels provided, allowing")
             sys.exit(0)
 
-        # Check each label
         blocked = [label for label in labels if is_forbidden(label)]
 
         if blocked:
-            # Exit code 2 blocks the tool and sends stderr as feedback to Claude
+            debug_log(f"BLOCKING - forbidden labels: {blocked}")
             print(f"BLOCKED: Cannot add forbidden labels: {blocked}", file=sys.stderr)
             print(
                 "These labels are reserved for CI/infrastructure use only.",
@@ -76,9 +94,11 @@ def main():
             )
             sys.exit(2)
 
+        debug_log(f"All labels allowed: {labels}")
         sys.exit(0)
 
     except json.JSONDecodeError as e:
+        debug_log(f"JSON decode error: {e}")
         print(f"Hook error: Invalid JSON input: {e}", file=sys.stderr)
         print("Hook was unable to validate labels; stopping triage.", file=sys.stderr)
         sys.exit(2)
