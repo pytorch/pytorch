@@ -3984,14 +3984,30 @@ class FlexibleLayout(Layout):
 
     allow_indexing = False
 
-    # WARNING!  This doesn't handle zero size tensors correctly
+    @staticmethod
+    def _stride_multiplier(size: Expr) -> Expr:
+        """
+        Get the stride multiplier for a dimension of the given size.
+        Use Max(size, 1) to handle zero-size tensors correctly, but only
+        when we can't prove size >= 1.
+        """
+        if _is_static(size) and int(size) >= 1:
+            return size
+        # For SymInt, extract the underlying sympy expression
+        size_expr = size.node.expr if isinstance(size, torch.SymInt) else size
+        if V.graph.sizevars.statically_known_geq(size_expr, 1):
+            return size
+        return sympy.Max(size, 1)
+
     @staticmethod
     def contiguous_strides(sizes: Sequence[int]) -> list[Expr]:
         if len(sizes) == 0:
             return []
         reversed_strides = [sympy.S.One]
         for size in reversed(sizes[1:]):
-            reversed_strides.append(size * reversed_strides[-1])
+            reversed_strides.append(
+                FlexibleLayout._stride_multiplier(size) * reversed_strides[-1]
+            )
         return list(reversed(reversed_strides))
 
     @staticmethod
@@ -4008,7 +4024,7 @@ class FlexibleLayout(Layout):
 
         for i in order:
             strides[i] = next_stride
-            next_stride = next_stride * sizes[i]
+            next_stride = next_stride * FlexibleLayout._stride_multiplier(sizes[i])
         return strides
 
     @staticmethod

@@ -11407,25 +11407,37 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     def test_flexible_layout_immutable_free_symbols(self):
         import sympy
 
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+
         x = sympy.Symbol("x")
         y = sympy.Symbol("y")
         z = sympy.Symbol("z")
 
-        layout = torch._inductor.ir.FlexibleLayout(
-            self.device, torch.float32, size=(x, y)
-        )
+        # Set up a graph context since FlexibleLayout needs V.graph.sizevars
+        class DummyModule(torch.nn.Module):
+            def forward(self, inp):
+                return inp * 2
 
-        # pad_strides works since it does not add new symints
-        layout.pad_strides()
+        gm = torch.fx.symbolic_trace(DummyModule())
+        graph = GraphLowering(gm)
 
-        # same symints and different order should work
-        layout.size = (y, x)
+        with V.set_graph_handler(graph):
+            layout = torch._inductor.ir.FlexibleLayout(
+                self.device, torch.float32, size=(x, y)
+            )
 
-        # adding new symints should fail
-        with self.assertRaisesRegex(
-            AssertionError, "Expected free symbols unchanged, but got"
-        ):
-            layout.size = (z,)
+            # pad_strides works since it does not add new symints
+            layout.pad_strides()
+
+            # same symints and different order should work
+            layout.size = (y, x)
+
+            # adding new symints should fail
+            with self.assertRaisesRegex(
+                AssertionError, "Expected free symbols unchanged, but got"
+            ):
+                layout.size = (z,)
 
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
@@ -14523,6 +14535,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
                 assert len(inps) == 0
 
+    @skip_if_triton_cpu  # Triton CPU libdevice lacks ceil support
     @torch._inductor.config.patch("graph_partition", True)
     def test_graph_partition_pad_dynamic(self):
         def get_same_padding(x: int, k: int, s: int, d: int):
