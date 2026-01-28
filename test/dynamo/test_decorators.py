@@ -3743,7 +3743,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return {"a": linear1(x) + 1, "b": linear2(x) + 1}
 
-        @dict_output_fn.fake_impl
+        @dict_output_fn.register_fake
         def dict_output_fn_fake(linear1, linear2, x):
             return {"a": linear1(x), "b": linear2(x)}
 
@@ -3780,7 +3780,7 @@ class GraphModule(torch.nn.Module):
                     "extra": linear3(x) + 1,
                 }
 
-        @nested_output_fn.fake_impl
+        @nested_output_fn.register_fake
         def nested_output_fn_fake(linear1, linear2, linear3, x):
             return {
                 "out": (linear1(x), linear2(x)),
@@ -3828,7 +3828,7 @@ class GraphModule(torch.nn.Module):
         def point_fn(linear, p):
             return (linear(p.x) * p.y,)
 
-        @point_fn.fake_impl
+        @point_fn.register_fake
         def point_fn_fake(linear, p):
             return (linear(p.x) * p.y,)
 
@@ -3862,7 +3862,7 @@ class GraphModule(torch.nn.Module):
             y = linear(x)
             return (y, len(x.shape), 0.5)
 
-        @fn_with_primitives.fake_impl
+        @fn_with_primitives.register_fake
         def fn_with_primitives_fake(linear, x):
             y = linear(x)
             return (y, len(x.shape), 0.5)
@@ -3899,7 +3899,7 @@ class GraphModule(torch.nn.Module):
                 else:
                     return (self.linear(x) + x,)
 
-            @forward.fake_impl
+            @forward.register_fake
             def forward_fake(self, x):
                 return (self.linear(x),)
 
@@ -3926,7 +3926,7 @@ class GraphModule(torch.nn.Module):
             def forward(self, x):
                 return (self.linear(x),)
 
-            @forward.fake_impl
+            @forward.register_fake
             def forward_fake(self, x):
                 return (self.linear(x),)
 
@@ -3972,7 +3972,7 @@ class GraphModule(torch.nn.Module):
                 else:
                     return (self.linear(x) + x,)
 
-            @compute.fake_impl
+            @compute.register_fake
             def compute_fake(self, x):
                 return (self.linear(x),)
 
@@ -3996,7 +3996,7 @@ class GraphModule(torch.nn.Module):
                 return (output[0] * 1.1,)
             return (output[0] * 0.9,)
 
-        @forward_hook.fake_impl
+        @forward_hook.register_fake
         def forward_hook_fake(module, input, output):
             return (output[0] * 1.1,)
 
@@ -4013,7 +4013,7 @@ class GraphModule(torch.nn.Module):
                     return (self.linear(x),)
                 return (self.linear(x) + 1,)
 
-            @forward.fake_impl
+            @forward.register_fake
             def forward_fake(self, x):
                 return (self.linear(x),)
 
@@ -4063,7 +4063,7 @@ class GraphModule(torch.nn.Module):
                 return (x * 1.1,)
             return (x * 0.9,)
 
-        @forward_pre_hook.fake_impl
+        @forward_pre_hook.register_fake
         def forward_pre_hook_fake(module, args):
             return (args[0] * 1.1,)
 
@@ -4077,7 +4077,7 @@ class GraphModule(torch.nn.Module):
             def forward(self, x):
                 return (self.linear(x),)
 
-            @forward.fake_impl
+            @forward.register_fake
             def forward_fake(self, x):
                 return (self.linear(x),)
 
@@ -4131,7 +4131,7 @@ class GraphModule(torch.nn.Module):
                 return tuple(g * 1.1 if g is not None else None for g in grad_input)
             return tuple(g * 0.9 if g is not None else None for g in grad_input)
 
-        @backward_hook.fake_impl
+        @backward_hook.register_fake
         def backward_hook_fake(module, grad_input, grad_output):
             # Traceable fake impl - just return scaled gradients
             return tuple(g * 1.1 if g is not None else None for g in grad_input)
@@ -4146,7 +4146,7 @@ class GraphModule(torch.nn.Module):
             def forward(self, x):
                 return (self.linear(x),)
 
-            @forward.fake_impl
+            @forward.register_fake
             def forward_fake(self, x):
                 return (self.linear(x),)
 
