@@ -3430,7 +3430,7 @@ class GraphModule(torch.nn.Module):
             else:
                 return {"a": linear1(x) + 1, "b": linear2(x) + 1}
 
-        @dict_output_fn.fake_impl
+        @dict_output_fn.register_fake
         def dict_output_fn_fake(linear1, linear2, x):
             return {"a": linear1(x), "b": linear2(x)}
 
@@ -3467,7 +3467,7 @@ class GraphModule(torch.nn.Module):
                     "extra": linear3(x) + 1,
                 }
 
-        @nested_output_fn.fake_impl
+        @nested_output_fn.register_fake
         def nested_output_fn_fake(linear1, linear2, linear3, x):
             return {
                 "out": (linear1(x), linear2(x)),
@@ -3515,7 +3515,7 @@ class GraphModule(torch.nn.Module):
         def point_fn(linear, p):
             return (linear(p.x) * p.y,)
 
-        @point_fn.fake_impl
+        @point_fn.register_fake
         def point_fn_fake(linear, p):
             return (linear(p.x) * p.y,)
 
@@ -3549,7 +3549,7 @@ class GraphModule(torch.nn.Module):
             y = linear(x)
             return (y, len(x.shape), 0.5)
 
-        @fn_with_primitives.fake_impl
+        @fn_with_primitives.register_fake
         def fn_with_primitives_fake(linear, x):
             y = linear(x)
             return (y, len(x.shape), 0.5)
