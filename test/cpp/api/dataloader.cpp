@@ -1523,6 +1523,7 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
   auto data_loader = torch::data::make_data_loader(
       torch::data::datasets::make_shared_dataset<D>(),
       {.workers = kNumberOfWorkers});
+      
   for (const auto i : c10::irange(10)) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());

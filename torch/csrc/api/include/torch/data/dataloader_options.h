@@ -48,6 +48,7 @@ struct FullDataLoaderOptions {
         timeout(options.timeout),
         enforce_ordering(options.enforce_ordering),
         drop_last(options.drop_last) {}
+        
   size_t batch_size;
   size_t workers;
   size_t max_jobs;
