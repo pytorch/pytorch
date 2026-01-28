@@ -1,6 +1,7 @@
 import dataclasses
 import importlib
 import io
+import itertools
 import pickle
 from abc import abstractmethod
 from collections.abc import Callable
@@ -136,6 +137,188 @@ class GraphPickler(pickle.Pickler):
         with io.BytesIO(data) as stream:
             unpickler = _GraphUnpickler(stream, state)
             return unpickler.load()
+
+    @classmethod
+    def debug_dumps(
+        cls,
+        obj: object,
+        options: Optional["Options"] = None,
+        *,
+        max_depth: int = 80,
+        max_iter_items: int = 50,
+        verbose: bool = True,
+    ) -> Optional[str]:
+        """
+        Find the first leaf that GraphPickler.dumps cannot serialize and return its path.
+
+        This is GraphPickler-aware and avoids infinite loops by:
+          - Traversing builtin containers directly (dict/list/tuple/set) instead of
+            exploring their __reduce_ex__ tuples.
+          - Only using __reduce_ex__ / __reduce__ for "opaque" objects.
+          - Bounding recursion depth and iterator expansion.
+
+        Args:
+            obj: The object to attempt to pickle and debug.
+            options: Optional Options instance for the GraphPickler.
+            max_depth: Maximum recursion depth before stopping traversal.
+            max_iter_items: Maximum number of items to materialize from iterators.
+            verbose: If True, prints detailed traversal information.
+
+        Returns:
+            A string representing the path to the first unpicklable leaf,
+            or None if the object is fully picklable.
+        """
+        options = options or Options()
+        pickler = cls(io.BytesIO(), options)
+
+        visited: set[tuple[int, str]] = set()
+
+        def log(msg: str) -> None:
+            if verbose:
+                print(msg)
+
+        def fail_exc(o: Any) -> Optional[BaseException]:
+            try:
+                cls.dumps(o, options)
+                return None
+            except BaseException as e:
+                return e
+
+        def walk(o: Any, path: str, depth: int) -> Optional[str]:
+            if depth > max_depth:
+                log(f"{'  '*depth}Depth limit at {path} ({type(o)})")
+                return path + " (depth_limit)"
+
+            key = (id(o), type(o).__name__)
+            if key in visited:
+                return None
+            visited.add(key)
+
+            indent = "  " * depth
+            log(f"{indent}Walking: {path} ({type(o)})")
+
+            e = fail_exc(o)
+            if e is None:
+                log(f"{indent}✓ Pickles fine alone")
+                return None
+            log(f"{indent}[FAIL pickle] {type(o)} -> {e}")
+
+            # 1) Builtin containers: walk contents directly (do NOT call __reduce_ex__)
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    bad = walk(v, f"{path}[{k!r}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if isinstance(o, (list, tuple)):
+                for i, v in enumerate(o):
+                    bad = walk(v, f"{path}[{i}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if isinstance(o, (set, frozenset)):
+                for i, v in enumerate(list(o)):
+                    bad = walk(v, f"{path}[{i}]", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            # 2) Iterator types: materialize a bounded prefix
+            if hasattr(o, "__iter__") and type(o).__name__.endswith("iterator"):
+                try:
+                    prefix = list(itertools.islice(iter(o), max_iter_items))
+                except Exception:
+                    prefix = None
+                if prefix is not None:
+                    for i, v in enumerate(prefix):
+                        bad = walk(v, f"{path}[{i}]", depth + 1)
+                        if bad:
+                            return bad
+                    return path
+
+            # 3) GraphPickler reducer_override
+            try:
+                red = pickler.reducer_override(o)
+                log(f"{indent}reducer_override -> {type(red)}")
+            except BaseException as e2:
+                log(f"{indent}💥 reducer_override crashed: {e2}")
+                return path
+
+            if red is not NotImplemented:
+                _, args = red
+                log(f"{indent}Using custom reduce, args={len(args)}")
+                for i, a in enumerate(args):
+                    bad = walk(a, f"{path}.reduce_args[{i}]", depth + 1)
+                    if bad:
+                        return bad
+
+            # 4) Dataclasses
+            if dataclasses.is_dataclass(o):
+                for f in dataclasses.fields(o):
+                    try:
+                        v = getattr(o, f.name)
+                    except Exception:
+                        return f"{path}.{f.name}"
+                    bad = walk(v, f"{path}.{f.name}", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            # 5) __getstate__ and __dict__/__slots__
+            getstate = getattr(o, "__getstate__", None)
+            if callable(getstate):
+                try:
+                    state = getstate()
+                    log(f"{indent}__getstate__ -> {type(state)}")
+                except BaseException as e3:
+                    log(f"{indent}💥 __getstate__ failed: {e3}")
+                    return path + ".__getstate__()"
+                bad = walk(state, path + ".__getstate__()", depth + 1)
+                if bad:
+                    return bad
+
+            if hasattr(o, "__dict__"):
+                for name, v in vars(o).items():
+                    bad = walk(v, f"{path}.{name}", depth + 1)
+                    if bad:
+                        return bad
+                return path
+
+            if hasattr(o, "__slots__"):
+                for slot in o.__slots__:
+                    if hasattr(o, slot):
+                        bad = walk(getattr(o, slot), f"{path}.{slot}", depth + 1)
+                        if bad:
+                            return bad
+                return path
+
+            # 6) Last resort: reduce protocol for non-container / opaque objects
+            reduce_tuple = None
+            try:
+                if hasattr(o, "__reduce_ex__"):
+                    reduce_tuple = o.__reduce_ex__(pickle.HIGHEST_PROTOCOL)
+                    log(f"{indent}__reduce_ex__ -> {type(reduce_tuple)}")
+                elif hasattr(o, "__reduce__"):
+                    reduce_tuple = o.__reduce__()
+                    log(f"{indent}__reduce__ -> {type(reduce_tuple)}")
+            except BaseException as e4:
+                log(f"{indent}💥 reduce protocol failed: {e4}")
+                return path
+
+            if isinstance(reduce_tuple, tuple):
+                for i, part in enumerate(reduce_tuple):
+                    if part is None:
+                        continue
+                    bad = walk(part, f"{path}.__reduce__[{i}]", depth + 1)
+                    if bad:
+                        return bad
+
+            return path
+
+        bad = walk(obj, "root", 0)
+        return bad
 
 
 class _UnpickleState:
