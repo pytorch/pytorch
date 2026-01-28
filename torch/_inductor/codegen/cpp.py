@@ -5000,6 +5000,7 @@ class CppScheduling(BaseScheduling):
         div_expr_ = None
         match_div = False
         matched_node = None
+        matched_index_size = None
 
         # Collect node info for later compatibility check
         node_bodies: list[tuple[Any, Any]] = []
@@ -5036,6 +5037,7 @@ class CppScheduling(BaseScheduling):
                         split_number = div_expr.args[1]
                         match_div = True
                         matched_node = node
+                        matched_index_size = index_size
 
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
         if not match_div:
@@ -5045,12 +5047,6 @@ class CppScheduling(BaseScheduling):
         # (same number of index dimensions). If not, bail out to avoid incompatible
         # var_ranges after loop split which would cause assertion failures in
         # simplify_and_reorder or codegen_functions.
-        assert matched_node is not None
-        matched_index_size = None
-        for node, ((index_size, _), original_body, _) in node_bodies:
-            if node == matched_node:
-                matched_index_size = index_size
-                break
         assert matched_index_size is not None
         matched_num_dims = len(matched_index_size)
 
