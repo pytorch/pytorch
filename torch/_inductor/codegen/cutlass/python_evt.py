@@ -183,11 +183,11 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
 
     @staticmethod
     def ir_to_evt_python_code(
-        cuda_template_node_name: str,
+        cutlass_template_node_name: str,
         epilogue_nodes: list[BaseSchedulerNode],
         removed_buffers: OrderedSet[str],
     ) -> tuple[list[str], list[str], dict[str, Any], str]:
-        codegen = CutlassEVTCodegen(cuda_template_node_name, removed_buffers)
+        codegen = CutlassEVTCodegen(cutlass_template_node_name, removed_buffers)
         handler = _AssignmentFormatter(codegen)
 
         with virtualized.V.set_ops_handler(handler):
