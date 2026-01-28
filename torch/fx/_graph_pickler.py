@@ -142,7 +142,7 @@ class GraphPickler(pickle.Pickler):
     def debug_dumps(
         cls,
         obj: object,
-        options: Optional["Options"] = None,
+        options: "Options | None" = None,
         *,
         max_depth: int = 80,
         max_iter_items: int = 50,
@@ -171,7 +171,7 @@ class GraphPickler(pickle.Pickler):
         options = options or Options()
         pickler = cls(io.BytesIO(), options)
 
-        visited: set[tuple[int, str]] = set()
+        visited: set[int] = set()
 
         def log(msg: str) -> None:
             if verbose:
@@ -189,7 +189,7 @@ class GraphPickler(pickle.Pickler):
                 log(f"{'  ' * depth}Depth limit at {path} ({type(o)})")
                 return path + " (depth_limit)"
 
-            key = (id(o), type(o).__name__)
+            key = id(o)
             if key in visited:
                 return None
             visited.add(key)
@@ -219,7 +219,7 @@ class GraphPickler(pickle.Pickler):
                 return path
 
             if isinstance(o, (set, frozenset)):
-                for i, v in enumerate(list(o)):
+                for i, v in enumerate(o):
                     bad = walk(v, f"{path}[{i}]", depth + 1)
                     if bad:
                         return bad
@@ -228,10 +228,16 @@ class GraphPickler(pickle.Pickler):
             # 2) Iterator types: materialize a bounded prefix
             if hasattr(o, "__iter__") and type(o).__name__.endswith("iterator"):
                 try:
-                    prefix = list(itertools.islice(iter(o), max_iter_items))
+                    prefix = list(itertools.islice(iter(o), max_iter_items + 1))
                 except Exception:
                     prefix = None
                 if prefix is not None:
+                    if len(prefix) > max_iter_items:
+                        log(
+                            f"{indent}⚠ Iterator has more than {max_iter_items} items, "
+                            f"only checking first {max_iter_items}"
+                        )
+                        prefix = prefix[:max_iter_items]
                     for i, v in enumerate(prefix):
                         bad = walk(v, f"{path}[{i}]", depth + 1)
                         if bad:
