@@ -3275,16 +3275,22 @@ class AlgorithmSelectorCache(PersistentCache):
                 is_collective=is_collective,
             )
 
-        def profiler_bench_function():
+        def profiler_bench_function(choices_override=None):
             # we're not running through the normal caching autotuner method here because we want to avoid returning
             # the cached value.
             # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
             # should use the profiler.
+            # If choices_override is provided, only benchmark those choices instead of all choices.
+            choices_to_benchmark = (
+                choices_override if choices_override is not None else choices
+            )
             with config.patch(
                 profile_bandwidth_with_do_bench_using_profiling=True,
                 autotune_in_subproc=False,
             ):
-                return self.benchmark(choices, input_nodes, layout, input_gen_fns)
+                return self.benchmark(
+                    choices_to_benchmark, input_nodes, layout, input_gen_fns
+                )
 
         for feedback_fn in self.feedback_saver_fns:
             # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
