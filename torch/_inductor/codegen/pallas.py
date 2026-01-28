@@ -1532,6 +1532,16 @@ class PallasKernel(SIMDKernel):
         """
         if needs_flatten:
             # Flatten then index for non-contiguous access (gather operation)
+            # Optimization: If index is just a loop variable (identity map), skip gather
+            is_identity_gather = False
+            if self.range_tree_nodes:
+                iter_vars = {str(k) for k in self.range_tree_nodes.keys()}
+                if all(part in iter_vars for part in index_str.split()):
+                    is_identity_gather = True
+            
+            if is_identity_gather:
+                return f"{buf}[...].flatten()"
+
             has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
             idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
             return f"{buf}[...].flatten()[{idx}]"
@@ -2527,6 +2537,33 @@ class PallasKernel(SIMDKernel):
         Returns:
             str: Complete Python source code for the Pallas kernel
         """
+        # --- DEBUG PRINT START ---
+        print("\n" + "="*40 + " INDUCTOR KERNEL IR STATE " + "="*40)
+        print(f"Kernel Name: {name or 'Pending...'}")
+        
+        print("\n[1] Range Tree Nodes (Iteration Space):")
+        if hasattr(self, 'range_tree_nodes') and self.range_tree_nodes:
+            for var, entry in self.range_tree_nodes.items():
+                print(f"  {var}: {entry}")
+        else:
+            print("  (None or Empty)")
+
+        print("\n[2] Compute Buffer (IR Operations):")
+        if hasattr(self, 'compute'):
+            print(str(self.compute))
+        else:
+            print("  (None)")
+            
+        print("\n[3] Input/Output Args:")
+        try:
+            arg_defs, _, _, _ = self.args.python_argdefs()
+            for arg in arg_defs:
+                print(f"  {arg.name}: {arg}")
+        except Exception as e:
+            print(f"  (Error inspecting args: {e})")
+            
+        print("="*106 + "\n")
+        # --- DEBUG PRINT END ---
         code = IndentedBuffer()
 
         # Define the Pallas kernel: accepts refs, uses broadcasted expressions
@@ -2934,24 +2971,18 @@ from torch._inductor.runtime.runtime_utils import (
 
         # Now emit the kernel function with the correct signature
         if self.is_tpu:
-            if len(output_params) == 1:
-                propagate_lambda = (
-                    "lambda *args: tpu_torch_compile.placeholder_like(args[-1])"
-                )
-            else:
-                propagate_lambda = (
-                    f"lambda *args: tuple(tpu_torch_compile.placeholder_like(a) "
-                    f"for a in args[-{len(output_params)}:])"
-                )
-            code.writeline(f"@tpu_pallas.custom_kernel(propagate={propagate_lambda})")
-
+            # We need to capture all non-output params (including scalars/sizevars)
+            # Separate scalars and tensors. Put scalars at the START to support positional partial application.
+            tensor_input_params = [p for p in kernel_input_params if p not in size_var_names]
+            scalar_params = size_var_params
+            
             sig_template_refs = [
                 f"template_{p}" for p in output_params
-            ]  # Unused, just for matching
-            # We need to capture all non-output params (including scalars/sizevars)
-            kernel_input_params = [p for p in kernel_params if p not in output_params]
-            full_sig = kernel_input_params + sig_template_refs + output_params
-            kernel_signature = f"def {kernel_name}_kernel({', '.join(full_sig)}):"
+            ]
+
+            # Construct signature: scalars + tensors + templates + outputs
+            full_sig = scalar_params + tensor_input_params + sig_template_refs + output_params
+            kernel_signature = f"def {kernel_name}_kernel_impl({', '.join(full_sig)}):"
         else:
             kernel_signature = (
                 f"def {kernel_name}_kernel({', '.join(full_kernel_params)}):"
@@ -2982,14 +3013,41 @@ from torch._inductor.runtime.runtime_utils import (
                 f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
             )
             with code.indent():
-                code.writeline("# Enable JAX x64 mode for float64/int64 support")
-                code.writeline("jax.config.update('jax_enable_x64', True)")
                 code.writeline("jax.clear_caches()")
                 code.writeline("if torch_tpu is None:")
                 code.writeline("    raise RuntimeError('torch_tpu not installed')")
-                code.writeline(
-                    f"res = {kernel_name}_kernel({', '.join(kernel_input_params + output_params)})"
-                )
+
+                # Separate runtime arguments into tensors and scalars
+                code.writeline("# Separate scalar args for partial application")
+
+                # We need to reconstruct which runtime args correspond to scalars/tensors
+                # full_kernel_params contains everything.
+                scalar_args = [p for p in full_kernel_params if p in size_var_names]
+                tensor_args = [p for p in full_kernel_params if p not in size_var_names]
+
+                # Logic for propagate lambda (needs to match wrapper's *args)
+                # Wrapper is called with (tensor_inputs..., outputs...)
+                # So args[-len(output_params):] correctly identifies outputs.
+                if len(output_params) == 1:
+                    propagate_lambda = (
+                        "lambda *args: tpu_torch_compile.placeholder_like(args[-1])"
+                    )
+                else:
+                    propagate_lambda = (
+                        f"lambda *args: tuple(tpu_torch_compile.placeholder_like(a) "
+                        f"for a in args[-{len(output_params)}:])"
+                    )
+
+                if scalar_args:
+                    # Bind scalars positionally at the start
+                    code.writeline(f"kernel_fn = functools.partial({kernel_name}_kernel_impl, {', '.join(scalar_args)})")
+                    code.writeline(f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})(kernel_fn)")
+                else:
+                    code.writeline(f"decorated_kernel = tpu_pallas.custom_kernel(propagate={propagate_lambda})({kernel_name}_kernel_impl)")
+
+                # Call with tensor arguments only (inputs + outputs)
+                code.writeline(f"res = decorated_kernel({', '.join(tensor_args)})")
+
                 if len(output_params) == 1:
                     code.writeline(f"{output_params[0]}.copy_(res)")
                 else:
@@ -3401,6 +3459,13 @@ class PallasScheduling(SIMDScheduling):
         node_schedule: Sequence[BaseSchedulerNode],
         kernel: PallasKernel,
     ) -> str:  # type: ignore[override]
+        print("*" * 12, "In define_kernel: src_code = [", src_code, "]")
+        print("=" * 40 + " INDUCTOR IR NODES " + "=" * 40)
+        for node in node_schedule:
+            print(f"Node: {node}")
+            if hasattr(node, 'node'): # Access the underlying IRNode if available
+                print(f"  IRNode: {node.node}")
+        print("=" * 105)
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             return wrapper.src_to_kernel[src_code]

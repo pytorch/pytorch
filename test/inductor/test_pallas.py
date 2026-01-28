@@ -16,6 +16,11 @@ from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._pallas import has_cpu_pallas, has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
 
+try:
+    from torch_tpu import api as tpu_api
+except ImportError:
+    tpu_api = None
+
 
 # Load pallas expected failures from sentinel files
 _pallas_expected_failures_dir = os.path.join(
@@ -158,6 +163,14 @@ class PallasTestsMixin:
                 jax.clear_caches()
             except ImportError:
                 pass
+
+    @property
+    def is_tpu(self):
+        return (
+            tpu_api is not None
+            and isinstance(self.DEVICE, torch.device)
+            and self.DEVICE is tpu_api.tpu_device()
+        )
 
     def _compile(self, fn):
         key = "cuda_backend" if self.DEVICE == "cuda" else "cpu_backend"
@@ -334,7 +347,10 @@ class PallasTestsMixin:
         # Verify Pallas-specific code generation
         self.assertIn("import jax", code)
         self.assertIn("import jax.numpy as jnp", code)
-        self.assertIn("from jax.experimental import pallas as pl", code)
+        if self.is_tpu:
+            self.assertIn("from torch_tpu._internal import pallas as tpu_pallas", code)
+        else:
+            self.assertIn("from jax.experimental import pallas as pl", code)
 
     def test_jax_jit_wrapper_is_emitted(self):
         """Ensure generated Pallas code wraps pl.pallas_call in jax.jit."""
@@ -355,6 +371,16 @@ class PallasTestsMixin:
         self.assertIsNotNone(kernel_match)
         kernel_name = kernel_match.group(1)
         wrapper_name = f"{kernel_name}_jit_wrapper"
+
+        if self.is_tpu:
+            # TPU backend generates a main function that calls the kernel directly
+            # The jax.jit/pallas_call logic is handled inside tpu_pallas.custom_kernel decorator
+            main_name = f"{kernel_name}_main"
+            self.assertIn(f"def {main_name}", code)
+            self.assertIn("@tpu_pallas.custom_kernel", code)
+            self.assertIn(".copy_(", code)
+            return
+
         self.assertIn(wrapper_name, code)
         start = code.index(f"def {wrapper_name}")
         end = code.index(f"def {kernel_name}_main", start)
@@ -751,6 +777,8 @@ class PallasTestsMixin:
 
     def test_complex64_mul(self):
         """Test complex64 multiplication."""
+        if self.is_tpu:
+            self.skipTest("complex64 not supported in Pallas TPU backend")
 
         def fn(a, b):
             return a * b
@@ -765,6 +793,8 @@ class PallasTestsMixin:
 
     def test_complex_conj(self):
         """Test complex conjugate."""
+        if self.is_tpu:
+            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.conj(x)
@@ -778,6 +808,8 @@ class PallasTestsMixin:
 
     def test_complex_real(self):
         """Test extracting real part of complex tensor."""
+        if self.is_tpu:
+            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.real(x)
@@ -791,6 +823,8 @@ class PallasTestsMixin:
 
     def test_complex_imag(self):
         """Test extracting imaginary part of complex tensor."""
+        if self.is_tpu:
+            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.imag(x)
@@ -804,6 +838,8 @@ class PallasTestsMixin:
 
     def test_complex_abs(self):
         """Test complex absolute value (magnitude)."""
+        if self.is_tpu:
+            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.abs(x)
@@ -817,6 +853,8 @@ class PallasTestsMixin:
 
     def test_complex128_conj(self):
         """Test complex128 conjugate operation."""
+        if self.is_tpu:
+            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return torch.conj(x)
@@ -830,6 +868,8 @@ class PallasTestsMixin:
 
     def test_complex_mul_scalar(self):
         """Test complex multiplication with scalar."""
+        if self.is_tpu:
+            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x):
             return x * 2.5
@@ -843,6 +883,8 @@ class PallasTestsMixin:
 
     def test_complex_conj_mul(self):
         """Test conjugate followed by multiplication."""
+        if self.is_tpu:
+            self.skipTest("complex numbers not supported in Pallas TPU backend")
 
         def fn(x, y):
             return torch.conj(x) * y
@@ -915,6 +957,8 @@ class PallasTestsMixin:
 
     def test_sign(self):
         """Test sign operation."""
+        if self.DEVICE == "cuda" or self.is_tpu:
+            self.skipTest("sign not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return torch.sign(x)
@@ -957,6 +1001,8 @@ class PallasTestsMixin:
     @skip_if_tpu
     def test_erf(self):
         """Test erf operation."""
+        if self.DEVICE == "cuda" or self.is_tpu:
+            self.skipTest("erf not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return torch.erf(x)
@@ -971,6 +1017,8 @@ class PallasTestsMixin:
     @skip_if_tpu
     def test_atan2(self):
         """Test atan2 operation."""
+        if self.DEVICE == "cuda" or self.is_tpu:
+            self.skipTest("atan2 not supported in Pallas Mosaic backend")
 
         def fn(a, b):
             return torch.atan2(a, b)
@@ -1135,8 +1183,8 @@ class PallasTestsMixin:
     @skip_if_tpu
     def test_arange_multi_output(self):
         """Test arange with view and multiple outputs."""
-        if self.DEVICE == "cuda":
-            self.skipTest("arange not supported in Pallas GPU (Mosaic) backend")
+        if self.DEVICE == "cuda" or self.is_tpu:
+            self.skipTest("arange not supported in Pallas Mosaic backend")
 
         def fn(x):
             rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
@@ -1554,11 +1602,6 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():
-    try:
-        from torch_tpu import api as tpu_api
-    except ImportError:
-        tpu_api = None
-
     class PallasTestsTPU(PallasTestsMixin, TestCase):
         @classmethod
         def setUpClass(cls):

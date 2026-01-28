@@ -564,6 +564,149 @@ class MpsInterface(DeviceInterface):
             return 0
 
 
+class TpuInterface(DeviceInterface):
+    class Event(torch.Event):
+        def __init__(self, enable_timing: bool = False, blocking: bool = False, interprocess: bool = False) -> None:
+            pass
+
+        def record(self, stream: Any = None) -> None:
+            pass
+
+        def wait(self, stream: Any = None) -> None:
+            pass
+
+        def query(self) -> bool:
+            return True
+
+        def elapsed_time(self, other: Any) -> float:
+            return 0.0
+
+        def synchronize(self) -> None:
+            pass
+
+    class Stream(torch.Stream):
+        def __new__(cls, device: Any = None, priority: int = 0, **kwargs: Any) -> Any:
+            return super().__new__(cls)
+
+        def __init__(self, device: Any = None, priority: int = 0, **kwargs: Any) -> None:
+            pass
+
+        def wait_event(self, event: Any) -> None:
+            pass
+
+        def wait_stream(self, stream: Any) -> None:
+            pass
+
+        def record_event(self, event: Any = None) -> Any:
+            if event is None:
+                return TpuInterface.Event()
+            return event
+
+        def query(self) -> bool:
+            return True
+
+        def synchronize(self) -> None:
+            pass
+
+    class Worker:
+        @staticmethod
+        def set_device(device: int) -> None:
+            caching_worker_current_devices["tpu"] = device
+
+        @staticmethod
+        def current_device() -> int:
+            if "tpu" in caching_worker_current_devices:
+                return caching_worker_current_devices["tpu"]
+            return torch_tpu.current_device()
+
+        @staticmethod
+        def get_device_properties(device: torch.types.Device = None) -> Any:
+            # Dummy properties for reductions
+            return namedtuple("TpuProperties", ["multi_processor_count", "total_memory", "major", "minor"])(
+                multi_processor_count=8,
+                total_memory=16 * 1024**3,
+                major=1,
+                minor=0
+            )
+
+    @staticmethod
+    def current_device() -> int:
+        from torch.utils._pallas import is_torch_tpu_available
+
+        if is_torch_tpu_available():
+            import torch_tpu
+
+            return torch_tpu.current_device()
+        return 0
+
+    @staticmethod
+    def set_device(device: torch.types.Device) -> None:
+        pass
+
+    @staticmethod
+    def maybe_exchange_device(device: int) -> int:
+        return 0
+
+    @staticmethod
+    def exchange_device(device: int) -> int:
+        return 0
+
+    @staticmethod
+    def device_count() -> int:
+        from torch.utils._pallas import is_torch_tpu_available
+
+        if is_torch_tpu_available():
+            import torch_tpu
+
+            return torch_tpu.device_count()
+        return 1
+
+    @staticmethod
+    def is_available() -> bool:
+        from torch.utils._pallas import is_torch_tpu_available
+
+        return is_torch_tpu_available()
+
+    @staticmethod
+    def stream(stream: torch.Stream) -> Any:
+        class DummyContext:
+            def __enter__(self): pass
+            def __exit__(self, *args): pass
+        return DummyContext()
+
+    @staticmethod
+    def current_stream() -> torch.Stream:
+        return TpuInterface.Stream()
+
+    @staticmethod
+    def set_stream(stream: torch.Stream) -> None:
+        pass
+
+    @staticmethod
+    def _set_stream_by_id(stream_id: int, device_index: int, device_type: int) -> None:
+        pass
+
+    @staticmethod
+    def get_raw_stream(device_idx: int) -> int:
+        return 0
+
+    @staticmethod
+    def synchronize(device: torch.types.Device = None) -> None:
+        pass
+
+    @staticmethod
+    def get_compute_capability(device: torch.types.Device = None) -> Any:
+        return "1.0"
+
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False) -> bool:
+        return True
+
+    @staticmethod
+    def memory_allocated(device: torch.types.Device = None) -> int:
+        return 0
+
+
 device_interfaces: dict[str, type[DeviceInterface]] = {}
 _device_initialized = False
 
@@ -608,5 +751,6 @@ def init_device_reg() -> None:
 
     register_interface_for_device("cpu", CpuInterface)
     register_interface_for_device("mps", MpsInterface)
+    register_interface_for_device("tpu", TpuInterface)
 
     _device_initialized = True
