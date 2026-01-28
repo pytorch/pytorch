@@ -1545,6 +1545,9 @@ class IndentedBuffer:
                 buf.write("\n")
         return buf.getvalue()
 
+    def get_lines_ref(self):
+        return self._lines
+
     def clear(self) -> None:
         self._lines.clear()
 
