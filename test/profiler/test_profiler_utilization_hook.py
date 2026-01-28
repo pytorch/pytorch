@@ -8,7 +8,10 @@ import os
 import tempfile
 
 import torch
-from torch.profiler import register_export_chrome_trace_callback, _export_chrome_trace_callbacks
+from torch.profiler import (
+    _export_chrome_trace_callbacks,
+    register_export_chrome_trace_callback,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
