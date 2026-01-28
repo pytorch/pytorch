@@ -3325,7 +3325,11 @@ class Scheduler:
                             continue
 
                         assert isinstance(user.node, BaseSchedulerNode)
-                        for other_name in user.node.get_buffer_names():
+                        for out_buf in user.node.get_outputs():
+                            # Only add WeakDep if this output aliases the buffer being mutated.
+                            if alt_name not in out_buf.get_aliases():
+                                continue
+                            other_name = out_buf.get_name()
                             # this node must run after all prior readers
                             other_name = rename(other_name)
                             node.add_fake_dep(
