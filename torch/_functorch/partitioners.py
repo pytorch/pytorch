@@ -200,6 +200,12 @@ class PartitionedGraphSignature:
             + self.backward_state_inputs
         )
 
+    def bwd_graph_outputs(self) -> list[fx.Node]:
+        return self.bwd_outputs
+
+    def bwd_graph_outputs_descs(self) -> list[AOTOutput]:
+        return self.bwd_outputs_descs
+
 
 class PartitionedGraphSignatureBuilder:
     """
