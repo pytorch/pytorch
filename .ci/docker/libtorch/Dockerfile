@@ -95,6 +95,7 @@ ENV ROCM_PATH /opt/rocm
 #ADD ./common/install_rocm.sh install_rocm.sh
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
+ADD ./common/install_rocSHMEM.sh install_rocSHMEM.sh
 # gfortran and python needed for building magma from source for ROCm
 RUN apt-get update -y && \
     apt-get install gfortran -y && \
@@ -103,6 +104,7 @@ RUN apt-get update -y && \
 
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
 RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
+RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION} && rm install_rocSHMEM.sh
 
 FROM ${BASE_TARGET} as final
 COPY --from=openssl            /opt/openssl           /opt/openssl

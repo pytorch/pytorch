@@ -587,7 +587,6 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     ]
 )
 
-
 CUDA_INCLUDE_MAP = collections.OrderedDict(
     [
         # since pytorch uses "\b{pattern}\b" as the actual re pattern,
@@ -8367,7 +8366,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     ]
 )
 
-
 CUDA_SPECIAL_MAP = collections.OrderedDict(
     [
         # SPARSE
@@ -8711,6 +8709,7 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("cusolverDnCreateSyevjInfo", ("hipsolverDnCreateSyevjInfo", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusolverDnXsyevjSetSortEig", ("hipsolverDnXsyevjSetSortEig", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusolverDnDestroySyevjInfo", ("hipsolverDnDestroySyevjInfo", CONV_MATH_FUNC, API_SPECIAL)),
+
 
         ("gesvdjInfo_t", ("hipsolverGesvdjInfo_t", CONV_TYPE, API_SPECIAL)),
         ("cusolverDnCreateGesvdjInfo", ("hipsolverDnCreateGesvdjInfo", CONV_MATH_FUNC, API_SPECIAL)),
@@ -9344,6 +9343,36 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("CUDNN_GRU", ("miopenGRU", API_PYTORCH)),
         ("cudnnRNNMode_t", ("miopenRNNMode_t", API_PYTORCH)),
         ("magma_queue_create_from_cuda", ("magma_queue_create_from_hip", API_PYTORCH)),
+
+        # NVSHMEM mappings
+        ("NVSHMEM_TEAM_INVALID", ("ROCSHMEM_TEAM_INVALID", API_PYTORCH)),
+        ("NVSHMEM_TEAM_WORLD", ("ROCSHMEM_TEAM_WORLD", API_PYTORCH)),
+        ("NVSHMEM_CMP_EQ", ("ROCSHMEM_CMP_EQ", API_PYTORCH)),
+        ("NVSHMEM_SIGNAL_SET", ("ROCSHMEM_SIGNAL_SET", API_PYTORCH)),
+        ("NVSHMEMX_INIT_WITH_UNIQUEID", ("ROCSHMEM_INIT_WITH_UNIQUEID", API_PYTORCH)),
+
+        ("nvshmem_quiet", ("rocshmem_quiet", API_PYTORCH)),
+        ("nvshmem_malloc", ("rocshmem_malloc", API_PYTORCH)),
+        ("nvshmem_free", ("rocshmem_free", API_PYTORCH)),
+        ("nvshmem_ptr", ("rocshmem_ptr", API_PYTORCH)),
+        ("nvshmem_team_t", ("rocshmem_team_t", API_PYTORCH)),
+        ("nvshmem_team_split_strided", ("rocshmem_team_split_strided", API_PYTORCH)),
+        ("nvshmem_init", ("rocshmem_init", API_PYTORCH)),
+        ("nvshmem_team_n_pes", ("rocshmem_team_n_pes", API_PYTORCH)),
+        ("nvshmem_team_my_pe", ("rocshmem_team_my_pe", API_PYTORCH)),
+        ("nvshmem_team_translate_pe", ("rocshmem_team_translate_pe", API_PYTORCH)),
+
+        ("nvshmemx_uniqueid_t", ("rocshmem_uniqueid_t", API_PYTORCH)),
+        ("nvshmemx_get_uniqueid", ("rocshmem_get_uniqueid", API_PYTORCH)),
+        ("nvshmemx_init_attr", ("rocshmem_init_attr", API_PYTORCH)),
+        ("nvshmemx_init_attr_t", ("rocshmem_init_attr_t", API_PYTORCH)),
+        ("nvshmemx_set_attr_uniqueid_args", ("rocshmem_set_attr_uniqueid_args", API_PYTORCH)),
+        ("nvshmemx_signal_wait_until_on_stream", ("rocshmem_signal_wait_until_on_stream", API_PYTORCH)),
+        ("nvshmemx_alltoallmem_on_stream", ("rocshmem_alltoallmem_on_stream", API_PYTORCH)),
+        ("nvshmemx_broadcastmem_on_stream", ("rocshmem_broadcastmem_on_stream", API_PYTORCH)),
+        ("nvshmemx_getmem_on_stream", ("rocshmem_getmem_on_stream", API_PYTORCH)),
+        ("nvshmemx_putmem_on_stream", ("rocshmem_putmem_on_stream", API_PYTORCH)),
+        ("nvshmemx_putmem_signal_on_stream", ("rocshmem_putmem_signal_on_stream", API_PYTORCH)),
     ]
 )
 

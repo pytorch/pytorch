@@ -66,6 +66,9 @@ RUN rm -r ci_commit_pins
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
 RUN rm install_rocm_magma.sh
+COPY ./common/install_rocSHMEM.sh install_rocSHMEM.sh
+RUN bash ./install_rocSHMEM.sh ${ROCM_VERSION}
+RUN rm install_rocSHMEM.sh
 COPY ./common/install_amdsmi.sh install_amdsmi.sh
 RUN bash ./install_amdsmi.sh
 RUN rm install_amdsmi.sh
