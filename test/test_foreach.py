@@ -1119,7 +1119,8 @@ class TestForeach(TestCase):
         empty_tensor = torch.empty(0, dtype=dtype, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "max\\(\\): Expected reduction dim to be specified for input\\.numel\\(\\) == 0\\. Specify the reduction dim with the 'dim' argument\\.",
+            "max\\(\\): Expected reduction dim to be specified for input\\.numel\\(\\) == 0\\."
+            " Specify the reduction dim with the 'dim' argument\\.",
         ):
             torch._foreach_max([empty_tensor])
 
@@ -1127,7 +1128,8 @@ class TestForeach(TestCase):
         non_empty_tensor = make_tensor((4,), dtype=dtype, device=device)
         with self.assertRaisesRegex(
             RuntimeError,
-            "max\\(\\): Expected reduction dim to be specified for input\\.numel\\(\\) == 0\\. Specify the reduction dim with the 'dim' argument\\.",
+            "max\\(\\): Expected reduction dim to be specified for input\\.numel\\(\\) == 0\\."
+            " Specify the reduction dim with the 'dim' argument\\.",
         ):
             torch._foreach_max([empty_tensor, non_empty_tensor])
 
