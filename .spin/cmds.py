@@ -369,6 +369,10 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
+    if not lint_found_all:
+        if write_json_output:
+            Path(tee_file).write_text(json_output_all or "")
+        raise SystemExit(1)
     lint_found_changed, json_output_changed = _run_lintrunner(
         changed_files_linters,
         take=take,
