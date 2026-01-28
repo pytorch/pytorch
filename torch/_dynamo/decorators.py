@@ -509,10 +509,10 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
           Bad::
 
-              @leaf_function
-              def my_leaf_fn(x):
-                  x.add_(1)  # Will raise: "In-place mutation detected"
-                  return (x,)
+            >>> @leaf_function
+            >>> def my_leaf_fn(x):
+            >>>     x.add_(1)  # Will raise: "In-place mutation detected"
+            >>>     return (x,)
 
         - **Closures in fake implementation**: Tensors or modules captured from enclosing scopes
           in the fake implementation will cause compilation errors. The real function can
