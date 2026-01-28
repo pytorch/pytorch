@@ -121,7 +121,9 @@ bool check_rowwise_recipe(
 
 /**
  * Both inputs must be fp8
- * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B: {Blockwise_128x128 (float)
+ * A, B must only have 1 scale each,
+ * A: {Blockwise_1x128 (float),
+ * B: {Blockwise_128x128 (float)
  * or other DeepSeek-style blockwise scaling combinations
  */
 bool check_deepseek_recipe(
