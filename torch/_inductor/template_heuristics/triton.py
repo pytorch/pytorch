@@ -83,7 +83,8 @@ class BlackwellGPUGemmConfig(GemmConfig):
     targeting Nvidia Blackwell GPUs
     """
 
-    epilogue_subtile: bool = dataclasses.field(kw_only=True, default=False)
+    # epilogue_subtile must be a power of 2 (1 means no subtiling)
+    epilogue_subtile: int = dataclasses.field(kw_only=True, default=1)
     warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
     flatten: bool = dataclasses.field(kw_only=True, default=True)
 
@@ -332,7 +333,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 4,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -342,7 +343,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -352,7 +353,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 2,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -362,7 +363,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -372,7 +373,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 4,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -382,7 +383,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -392,7 +393,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -403,7 +404,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 64,
                 3,
                 8,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -413,31 +414,62 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 128,
                 3,
                 8,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            # Include subtile=4. Always required for testing.
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                4,
+                8,
+                epilogue_subtile=4,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                128,
+                128,
+                128,
+                4,
+                8,
+                epilogue_subtile=4,
                 warp_specialize=True,
                 flatten=True,
             ),
         ]
 
         self.blackwell_persistent_addmm_configs: list[BaseConfig] = [
+            # Include each subtiling factor for testing.
             BlackwellGPUGemmConfig(
                 256,
                 128,
                 64,
                 2,
                 4,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             ),
-            # Ensure we can test at least 1 non-subtiled version.
             BlackwellGPUGemmConfig(
                 256,
                 128,
                 64,
                 2,
                 4,
-                epilogue_subtile=False,
+                epilogue_subtile=1,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                2,
+                4,
+                epilogue_subtile=4,
                 warp_specialize=True,
                 flatten=True,
             ),
@@ -576,7 +608,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 num_warps=c.num_warps,
                 hint_override=c.hint_override,
                 group_m=8,
-                epilogue_subtile=True,
+                epilogue_subtile=2,
                 warp_specialize=True,
                 flatten=True,
             )
@@ -695,6 +727,17 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if isinstance(conf, BlackwellGPUGemmConfig):
                 key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
 
+            # Add TlxGemmConfig specific fields to key if present
+            if config.is_fbcode() and config.triton.enable_tlx_templates:
+                from torch._inductor.fb.tlx_templates.registry import (
+                    get_tlx_config_key_and_kwargs,
+                )
+
+                tlx_key_fields, tlx_kwargs = get_tlx_config_key_and_kwargs(conf)
+                key += tlx_key_fields
+            else:
+                tlx_kwargs = {}
+
             if key not in used and (
                 max_mm_configs is None or len(used) < max_mm_configs
             ):
@@ -713,6 +756,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                     kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
                     kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
                     kwargs["FLATTEN"] = conf.flatten
+
+                # Add TlxGemmConfig specific fields if present
+                kwargs.update(tlx_kwargs)
 
                 yield self.triton_config(conf.num_stages, num_warps, **kwargs)
 
@@ -741,9 +787,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         for hint_override in [None] + config.multi_kernel_hints:
             m_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         m,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -751,9 +796,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             n_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         n,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -761,9 +805,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             k_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         k,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -2077,7 +2120,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             for num_stages in [2, 3, 4, 5, 6]:
                 # AutoWS doesn't work with num_warps < 4
                 for num_warps in [4, 8]:
-                    for EPILOGUE_SUBTILE in [True, False]:
+                    for EPILOGUE_SUBTILE in [1, 2, 4]:
                         configs.append(
                             BlackwellGPUGemmConfig(
                                 block_m=BLOCK_M,

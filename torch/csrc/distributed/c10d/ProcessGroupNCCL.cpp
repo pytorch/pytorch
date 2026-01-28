@@ -288,10 +288,10 @@ static std::mutex ncclCommMemPoolMapMutex;
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
 static void cacheAllocatorRegisterHook(
-    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+    const c10::CachingDeviceAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
   if (te.action_ !=
-      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
+      c10::CachingDeviceAllocator::TraceEntry::Action::SEGMENT_ALLOC) {
     return;
   }
 
@@ -321,10 +321,10 @@ static void cacheAllocatorRegisterHook(
 }
 
 static void cacheAllocatorDeregisterHook(
-    const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
+    const c10::CachingDeviceAllocator::TraceEntry& te) {
   // deregister before SEGMENT_FREE
   if (te.action_ !=
-      c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) {
+      c10::CachingDeviceAllocator::TraceEntry::Action::SEGMENT_FREE) {
     return;
   }
 
@@ -993,19 +993,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", SPLIT_COLOR: " << options_->split_color
             << ", PG Name: " << options_->group_name;
 
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
-            << "NCCL version: " << ncclVersion
-            << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
-            << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
-            << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
+  if (local_id_ == 0) {
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
+              << "NCCL version: " << ncclVersion
+              << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+              << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
+              << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
+              << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
-            << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
-            << shouldAllCommunicatorsRegisterAllTensors()
+              << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+              << shouldAllCommunicatorsRegisterAllTensors()
 #endif // NCCL_HAS_COMM_REGISTER
-            << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
-            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
-            << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
+              << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
+              << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
+              << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
+  }
 
   getGlobalRankStartAndStride(
       options_->global_ranks_in_group,
@@ -1715,16 +1717,18 @@ ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
       getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true);
 
   // print out ENV settings for the heartbeat monitor thread.
-  LOG(INFO)
-      << pg_->logPrefix() << "HeartbeatMonitor environments: "
-      << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
-      << watchdogHeartbeatMonitorEnabled_
-      << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
-      << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
-      << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-      << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-      << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
-      << logCppStackOnUncleanShutdown_;
+  if (pg_->getUid() == 0) {
+    LOG(INFO)
+        << pg_->logPrefix() << "HeartbeatMonitor environments: "
+        << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
+        << watchdogHeartbeatMonitorEnabled_
+        << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
+        << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
+        << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+        << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
+        << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
+        << logCppStackOnUncleanShutdown_;
+  }
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::stop() {
@@ -2046,10 +2050,12 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
       (pg_->dist_debug_level_ >= DebugLevel::Detail);
 
   // print out ENV settings for the watchdog thread.
-  LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
-            << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
-            << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
-            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
+  if (pg_->getUid() == 0) {
+    LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
+              << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
+              << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
+              << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
+  }
 
   // Enable Desync Debugger per user setting
   if (desyncDebug_) {
