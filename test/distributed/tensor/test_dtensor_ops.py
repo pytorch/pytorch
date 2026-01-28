@@ -6,8 +6,6 @@ import re
 import unittest
 import warnings
 
-from test_ops_unbacked import ops_dde_xfail, ops_skip
-
 import torch
 import torch._dynamo
 import torch.distributed as dist
@@ -21,7 +19,6 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
-from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -841,47 +838,398 @@ class TestLocalDTensorOps(TestDTensorOps):
 
 # Ops where DTensor shard prop has DDEs with unbacked (base tensor passes)
 ops_unbacked_dtensor_dde = {
+    xfail("__radd__"),
+    xfail("__rdiv__"),
     xfail("__rmatmul__"),
+    xfail("__rmod__"),
+    xfail("__rmul__"),
+    xfail("__rpow__"),
+    xfail("_softmax_backward_data"),
+    xfail("_upsample_bilinear2d_aa"),
+    xfail("abs"),
+    xfail("acos"),
+    xfail("acosh"),
+    xfail("add"),
+    xfail("addcdiv"),
+    xfail("addcmul"),
+    xfail("addmm"),
+    xfail("addmm", "decomposed"),
+    xfail("addmv"),
+    xfail("angle"),
     xfail("argmax"),
     xfail("argmin"),
     xfail("argsort"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
+    xfail("as_strided_scatter"),
+    xfail("asin"),
+    xfail("asinh"),
+    xfail("atan"),
+    xfail("atan2"),
+    xfail("atanh"),
+    xfail("atleast_1d"),
+    xfail("atleast_2d"),
+    xfail("atleast_3d"),
+    xfail("baddbmm"),
+    xfail("bmm"),
     xfail("broadcast_tensors"),
+    xfail("broadcast_to"),
+    xfail("bucketize"),
     xfail("cartesian_prod"),
+    xfail("cat"),
+    xfail("cdist"),
+    xfail("ceil"),
+    xfail("chunk"),
+    xfail("clamp"),
+    xfail("clamp_max"),
+    xfail("clamp_min"),
+    xfail("clone"),
+    xfail("column_stack"),
+    xfail("conj"),
+    xfail("conj_physical"),
+    xfail("constant_pad_nd"),
+    xfail("contiguous"),
+    xfail("copysign"),
+    xfail("corrcoef"),
+    xfail("cos"),
+    xfail("cosh"),
+    xfail("cov"),
+    xfail("cross"),
+    xfail("cummax"),
+    xfail("cummin"),
+    xfail("cumsum"),
+    xfail("cumulative_trapezoid"),
+    xfail("deg2rad"),
+    xfail("diag"),
     xfail("diagflat"),
+    xfail("diagonal"),
+    xfail("diagonal_copy"),
+    xfail("diagonal_scatter"),
+    xfail("diff"),
+    xfail("digamma"),
+    xfail("dist"),
+    xfail("div", "floor_rounding"),
+    xfail("div", "no_rounding_mode"),
+    xfail("div", "trunc_rounding"),
+    xfail("dot"),
+    xfail("dsplit"),
+    xfail("dstack"),
+    xfail("einsum"),
+    xfail("eq"),
+    xfail("equal"),
+    xfail("erf"),
+    xfail("erfc"),
+    xfail("erfinv"),
+    xfail("exp"),
+    xfail("exp2"),
+    xfail("expand"),
     xfail("expand_as"),
+    xfail("expm1"),
+    xfail("fft.fft"),
+    xfail("fft.fft2"),
+    xfail("fft.fftn"),
+    xfail("fft.fftshift"),
+    xfail("fft.hfft"),
+    xfail("fft.hfft2"),
+    xfail("fft.hfftn"),
+    xfail("fft.ifft"),
+    xfail("fft.ifft2"),
+    xfail("fft.ifftn"),
+    xfail("fft.ifftshift"),
+    xfail("fft.ihfft"),
+    xfail("fft.ihfft2"),
+    xfail("fft.ihfftn"),
+    xfail("fft.irfft"),
+    xfail("fft.irfft2"),
+    xfail("fft.irfftn"),
+    xfail("fft.rfft"),
+    xfail("fft.rfft2"),
+    xfail("fft.rfftn"),
     xfail("flatten"),
+    xfail("float"),
+    xfail("float_power"),
+    xfail("floor"),
+    xfail("fmax"),
+    xfail("fmin"),
+    xfail("fmod"),
+    xfail("frac"),
     xfail("gather"),
+    xfail("ge"),
+    xfail("gradient"),
+    xfail("grid_sampler_2d"),
+    xfail("gt"),
+    xfail("H"),
+    xfail("hash_tensor"),
+    xfail("heaviside"),
+    xfail("histc"),
+    xfail("hsplit"),
+    xfail("hstack"),
+    xfail("hypot"),
+    xfail("igamma"),
+    xfail("igammac"),
+    xfail("index_fill"),
+    xfail("index_put"),
+    xfail("inner"),
+    xfail("kron"),
+    xfail("ldexp"),
+    xfail("le"),
+    xfail("lerp"),
+    xfail("lgamma"),
+    xfail("linalg.cross"),
+    xfail("linalg.diagonal"),
+    xfail("linalg.multi_dot"),
+    xfail("linalg.vander"),
+    xfail("linalg.vector_norm"),
+    xfail("log"),
+    xfail("log10"),
+    xfail("log1p"),
+    xfail("log2"),
+    xfail("logaddexp"),
+    xfail("logaddexp2"),
+    xfail("logical_and"),
+    xfail("logical_not"),
+    xfail("logical_or"),
+    xfail("logical_xor"),
+    xfail("logit"),
+    xfail("logsumexp"),
+    xfail("lt"),
+    xfail("masked.amax"),
+    xfail("masked.amin"),
     xfail("masked.argmax"),
     xfail("masked.argmin"),
+    xfail("masked.cumprod"),
+    xfail("masked.cumsum"),
+    xfail("masked.log_softmax"),
+    xfail("masked.logaddexp"),
+    xfail("masked.logsumexp"),
+    xfail("masked.norm"),
     xfail("masked.normalize"),
+    xfail("masked.prod"),
+    xfail("masked.softmax"),
+    xfail("masked.softmin"),
     xfail("masked.std"),
+    xfail("masked.sum"),
     xfail("masked.var"),
+    xfail("masked_fill"),
     xfail("matmul"),
+    xfail("matrix_exp"),
+    xfail("max", "binary"),
+    xfail("max", "reduction_no_dim"),
+    xfail("max", "reduction_with_dim"),
+    xfail("max_pool2d_with_indices_backward"),
+    xfail("maximum"),
     xfail("meshgrid", "list_of_tensors"),
     xfail("meshgrid", "variadic_tensors"),
+    xfail("mH"),
+    xfail("min", "binary"),
+    xfail("min", "reduction_no_dim"),
+    xfail("min", "reduction_with_dim"),
+    xfail("minimum"),
+    xfail("mm"),
+    xfail("movedim"),
     xfail("msort"),
+    xfail("mT"),
+    xfail("mul"),
+    xfail("mvlgamma", "mvlgamma_p_1"),
+    xfail("mvlgamma", "mvlgamma_p_3"),
+    xfail("mvlgamma", "mvlgamma_p_5"),
+    xfail("nan_to_num"),
+    xfail("narrow"),
+    xfail("native_dropout_backward"),
+    xfail("neg"),
     xfail("new_empty"),
     xfail("new_empty_strided"),
     xfail("new_full"),
     xfail("new_ones"),
     xfail("new_zeros"),
+    xfail("nextafter"),
+    xfail("nn.functional.adaptive_max_pool1d"),
+    xfail("nn.functional.adaptive_max_pool2d"),
+    xfail("nn.functional.adaptive_max_pool3d"),
+    xfail("nn.functional.avg_pool1d"),
+    xfail("nn.functional.avg_pool2d"),
+    xfail("nn.functional.avg_pool3d"),
+    xfail("nn.functional.batch_norm"),
+    xfail("nn.functional.bilinear"),
+    xfail("nn.functional.binary_cross_entropy"),
+    xfail("nn.functional.binary_cross_entropy_with_logits"),
+    xfail("nn.functional.channel_shuffle"),
+    xfail("nn.functional.conv1d"),
+    xfail("nn.functional.conv2d"),
+    xfail("nn.functional.conv3d"),
+    xfail("nn.functional.conv_transpose1d"),
+    xfail("nn.functional.conv_transpose2d"),
+    xfail("nn.functional.conv_transpose3d"),
+    xfail("nn.functional.cosine_embedding_loss"),
+    xfail("nn.functional.cosine_similarity"),
+    xfail("nn.functional.cross_entropy"),
+    xfail("nn.functional.dropout2d"),
+    xfail("nn.functional.dropout3d"),
     xfail("nn.functional.embedding"),
+    xfail("nn.functional.embedding_bag"),
+    xfail("nn.functional.gaussian_nll_loss"),
+    xfail("nn.functional.grid_sample"),
+    xfail("nn.functional.group_norm"),
+    xfail("nn.functional.huber_loss"),
+    xfail("nn.functional.instance_norm"),
+    xfail("nn.functional.interpolate", "bicubic"),
+    xfail("nn.functional.interpolate", "bilinear"),
+    xfail("nn.functional.interpolate", "linear"),
+    xfail("nn.functional.interpolate", "trilinear"),
+    xfail("nn.functional.l1_loss"),
     xfail("nn.functional.linear"),
+    xfail("nn.functional.local_response_norm"),
+    xfail("nn.functional.margin_ranking_loss"),
+    xfail("nn.functional.max_pool1d"),
+    xfail("nn.functional.max_pool2d"),
+    xfail("nn.functional.max_pool3d"),
+    xfail("nn.functional.max_unpool1d"),
+    xfail("nn.functional.max_unpool1d", "grad"),
+    xfail("nn.functional.max_unpool2d"),
+    xfail("nn.functional.max_unpool2d", "grad"),
+    xfail("nn.functional.max_unpool3d"),
+    xfail("nn.functional.max_unpool3d", "grad"),
+    xfail("nn.functional.mse_loss"),
+    xfail("nn.functional.multi_head_attention_forward"),
     xfail("nn.functional.multi_margin_loss"),
+    xfail("nn.functional.multilabel_margin_loss"),
+    xfail("nn.functional.nll_loss"),
     xfail("nn.functional.normalize"),
+    xfail("nn.functional.pad", "circular"),
+    xfail("nn.functional.pad", "reflect"),
+    xfail("nn.functional.pad", "replicate_negative"),
+    xfail("nn.functional.pad", "constant"),
+    xfail("nn.functional.pixel_shuffle"),
+    xfail("nn.functional.poisson_nll_loss"),
+    xfail("nn.functional.relu"),
+    xfail("nn.functional.silu"),
+    xfail("nn.functional.smooth_l1_loss"),
+    xfail("nn.functional.softsign"),
+    xfail("nn.functional.tanhshrink"),
+    xfail("nn.functional.triplet_margin_loss"),
+    xfail("nn.functional.triplet_margin_with_distance_loss"),
+    xfail("nn.functional.unfold"),
+    xfail("nn.functional.upsample_bilinear"),
+    xfail("nonzero_static"),
+    xfail("norm"),
+    xfail("norm", "fro"),
+    xfail("norm", "inf"),
     xfail("outer"),
+    xfail("permute"),
+    xfail("positive"),
+    xfail("pow"),
+    xfail("rad2deg"),
     xfail("ravel"),
+    xfail("real"),
+    xfail("reciprocal"),
+    xfail("remainder"),
     xfail("repeat_interleave"),
     xfail("reshape"),
     xfail("reshape_as"),
+    xfail("resolve_conj"),
+    xfail("resolve_neg"),
+    xfail("roll"),
+    xfail("round"),
+    xfail("round", "decimals_0"),
+    xfail("round", "decimals_3"),
+    xfail("round", "decimals_neg_3"),
+    xfail("rsqrt"),
+    xfail("scatter"),
+    xfail("scatter_add"),
+    xfail("scatter_reduce", "amax"),
+    xfail("scatter_reduce", "amin"),
+    xfail("scatter_reduce", "mean"),
+    xfail("scatter_reduce", "prod"),
+    xfail("scatter_reduce", "sum"),
+    xfail("select"),
+    xfail("sgn"),
+    xfail("sigmoid"),
+    xfail("sign"),
+    xfail("signbit"),
+    xfail("sin"),
+    xfail("sinc"),
+    xfail("sinh"),
+    xfail("slice"),
     xfail("slice_scatter"),
     xfail("sort"),
+    xfail("sparse.mm", "reduce"),
+    xfail("special.ndtr"),
+    xfail("split"),
+    xfail("split", "list_args"),
+    xfail("split_with_sizes"),
+    xfail("split_with_sizes_copy"),
+    xfail("sqrt"),
+    xfail("square"),
     xfail("squeeze"),
+    xfail("std"),
+    xfail("std", "unbiased"),
+    xfail("stft"),
+    xfail("sub"),
+    xfail("sum_to_size"),
+    xfail("T"),
+    xfail("take"),
+    xfail("take_along_dim"),
+    xfail("tan"),
+    xfail("tanh"),
+    xfail("tensor_split"),
+    xfail("tensordot"),
+    xfail("to"),
     xfail("topk"),
+    xfail("torch.ops.aten._safe_softmax.default"),
+    xfail("transpose_copy"),
+    xfail("trapezoid"),
+    xfail("trapz"),
+    xfail("tril"),
+    xfail("triu"),
+    xfail("true_divide"),
+    xfail("trunc"),
+    xfail("unbind"),
+    xfail("unbind_copy"),
+    xfail("unsafe_chunk"),
+    xfail("unsafe_split"),
+    xfail("unsqueeze"),
+    xfail("unsqueeze_copy"),
+    xfail("var"),
+    xfail("var", "unbiased"),
     xfail("view"),
     xfail("view_as"),
+    xfail("view_as_complex"),
+    xfail("vsplit"),
+    xfail("vstack"),
+    xfail("where"),
+    xfail("xlogy"),
+}
+
+# Ops that skip for unbacked DTensor tests (no valid samples with markable dims)
+ops_unbacked_skip = {
+    skip("arange"),
+    skip("broadcast_shapes"),
+    skip("empty"),
+    skip("empty_permuted"),
+    skip("empty_strided"),
+    skip("eye"),
+    skip("full"),
+    skip("item"),
+    skip("linspace"),
+    skip("linspace", "tensor_overload"),
+    skip("logspace"),
+    skip("logspace", "tensor_overload"),
+    skip("ones"),
+    skip("randint"),
+    skip("randn"),
+    skip("scalar_tensor"),
+    skip("signal.windows.bartlett"),
+    skip("signal.windows.blackman"),
+    skip("signal.windows.cosine"),
+    skip("signal.windows.exponential"),
+    skip("signal.windows.gaussian"),
+    skip("signal.windows.general_cosine"),
+    skip("signal.windows.general_hamming"),
+    skip("signal.windows.hamming"),
+    skip("signal.windows.hann"),
+    skip("signal.windows.kaiser"),
+    skip("signal.windows.nuttall"),
+    skip("zeros"),
 }
 
 
@@ -889,8 +1237,12 @@ class TestUnbackedDTensorOps(TestDTensorOps):
     """
     Test suite for DTensor ops with unbacked symints.
 
-    This test marks tensor dimensions as unbacked and verifies that ops
-    can be compiled with fullgraph=True without data-dependent errors.
+    This runs the same correctness tests as TestLocalDTensorOps, but with
+    tensor dimensions marked as unbacked and the op compiled with fullgraph=True.
+    This catches data-dependent errors (DDEs) that occur during tracing.
+
+    The test expects all ops that fail in dtensor_fails to also fail here,
+    plus additional ops that have DDEs with unbacked dimensions.
     """
 
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestUnbackedDTensorOps")
@@ -902,6 +1254,10 @@ class TestUnbackedDTensorOps(TestDTensorOps):
 
     def tearDown(self):
         super().tearDown()
+        # Clear sharding propagation cache to avoid stale mesh references
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
         try:
             dist.destroy_process_group()
         except AssertionError:
@@ -927,56 +1283,77 @@ class TestUnbackedDTensorOps(TestDTensorOps):
             if t.shape[i] >= 2:
                 torch._dynamo.decorators.mark_unbacked(t, i)
 
-    def _run_unbacked_dtensor_test(self, func, args, kwargs):
+    def run_dtensor_crossref(self, func, args, kwargs):
         """
-        Run DTensor op with unbacked dims and fullgraph compile.
-        Tests ALL placement combinations and fails if ANY has a DDE.
-        Returns (success, error_msg) tuple.
+        Override to add unbacked marking and fullgraph compilation.
+
+        Same as parent but:
+        1. Marks DTensor dimensions as unbacked before running
+        2. Wraps the op in @torch.compile(backend="eager", fullgraph=True)
         """
-        torch._dynamo.reset()
-        dtc = DTensorConverter(self.mesh, args, kwargs)
+        to_dtensor = DTensorConverter(self.mesh, args, kwargs)
 
-        any_tested = False
-        for d_args, d_kwargs in dtc:
-            if not dtc.successful():
-                continue
+        def concat_res_if_necessary(func, res: object) -> object:
+            if (resolve_name(func) is not None) and ("split" in resolve_name(func)):
+                dim = args[2] if len(args) == 3 else 0
+                return torch.cat(res, dim=dim)
+            return res
 
-            any_tested = True
+        op_args, op_kwargs = reconcile_args(args, kwargs)
+        rs = func(*op_args, **op_kwargs)
+        rs = concat_res_if_necessary(func, rs)
 
-            # Need fresh copies for each placement since mark_unbacked mutates
-            d_args_copy = copy.deepcopy(d_args)
-            d_kwargs_copy = copy.deepcopy(d_kwargs)
+        def to_replicate(e: object) -> object:
+            return e.full_tensor() if isinstance(e, DTensor) else e
 
-            def mark_unbacked_tree(x):
-                if isinstance(x, DTensor) and self._has_valid_unbacked_dims(x):
-                    self._mark_unbacked(x)
-                return x
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for dtensor_args, dtensor_kwargs in to_dtensor:
+                try:
+                    if not to_dtensor.successful():
+                        raise RuntimeError(
+                            f"Failed to convert args to DTensor; "
+                            f"originally (*{args}, **{kwargs})"
+                        )
 
-            tree_map(mark_unbacked_tree, d_args_copy)
-            tree_map(mark_unbacked_tree, d_kwargs_copy)
+                    # Mark DTensor dimensions as unbacked
+                    def mark_unbacked_tree(x):
+                        if isinstance(x, DTensor) and self._has_valid_unbacked_dims(x):
+                            self._mark_unbacked(x)
+                        return x
 
-            @torch.compile(backend="eager", fullgraph=True)
-            def compiled_func(*a, **kw):
-                return func(*a, **kw)
+                    tree_map(mark_unbacked_tree, dtensor_args)
+                    tree_map(mark_unbacked_tree, dtensor_kwargs)
 
-            try:
-                torch._dynamo.reset()
-                compiled_func(*d_args_copy, **d_kwargs_copy)
-            except GuardOnDataDependentSymNode as e:
-                return False, f"DDE: {str(e)[:200]}"
-            except Exception as e:
-                err_str = str(e)
-                if (
-                    "Could not guard on data-dependent" in err_str
-                    or "Could not extract" in err_str
-                ):
-                    return False, f"DDE: {err_str[:200]}"
-                # Other errors are not DDEs, continue testing other placements
-                continue
+                    # Compile with fullgraph=True to catch DDEs
+                    torch._dynamo.reset()
 
-        if not any_tested:
-            return None, "No valid dtensor conversion"
-        return True, None  # All placements passed
+                    @torch.compile(backend="eager", fullgraph=True)
+                    def compiled_func(*a, **kw):
+                        return func(*a, **kw)
+
+                    dtensor_rs = compiled_func(*dtensor_args, **dtensor_kwargs)
+
+                    flat_args = pytree.tree_leaves(dtensor_rs)
+                    if any(
+                        isinstance(e, torch.Tensor) and e.numel() == 0
+                        for e in flat_args
+                    ):
+                        continue
+
+                    dtensor_rs = tree_map(to_replicate, dtensor_rs)
+                    dtensor_rs = concat_res_if_necessary(func, dtensor_rs)
+
+                    # Skip backward for unbacked test (complex interaction with compile)
+
+                    self.assert_ref_dtensor_equal(dtensor_rs, rs)
+
+                except Exception as e:
+                    raise RuntimeError(
+                        f"{str(e)}\n\nFailed to run: {resolve_name(func)}, "
+                        f"with (*{dtensor_args}, **{dtensor_kwargs})"
+                    ) from e
+        return rs
 
     @suppress_warnings
     @ops(_op_db, allowed_dtypes=(torch.float,))
@@ -984,31 +1361,16 @@ class TestUnbackedDTensorOps(TestDTensorOps):
         _op_db,
         "TestUnbackedDTensorOps",
         "test_unbacked_dtensor_op_db",
-        dtensor_fails | ops_dde_xfail | ops_unbacked_dtensor_dde | ops_skip,
+        dtensor_fails | ops_unbacked_dtensor_dde | ops_unbacked_skip,
     )
     def test_unbacked_dtensor_op_db(self, dtype, op):
-        any_tested = False
-
-        for args, kwargs in self.iter_valid_samples(
-            op,
+        # Filter to samples with valid unbacked dimensions
+        self.run_opinfo_test(
             dtype,
+            op,
             requires_grad=False,
             sample_filter=self._sample_has_valid_unbacked_dims,
-            needs_deepcopy=True,
-        ):
-            any_tested = True
-
-            # Run the DTensor test with unbacked dims - must pass ALL placements
-            success, err = self._run_unbacked_dtensor_test(op.op, args, kwargs)
-            if success is False:
-                self.fail(
-                    f"{op.name}: DTensor has DDE, should be in ops_unbacked_dtensor_dde. {err}"
-                )
-            elif success is True:
-                return  # All placements passed for this sample
-
-        if not any_tested:
-            self.fail(f"{op.name}: no valid samples found, should be in ops_skip")
+        )
 
 
 class TestSingleDimStrategies(DTensorOpTestBase):
