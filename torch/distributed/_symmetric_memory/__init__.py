@@ -1879,6 +1879,26 @@ if TYPE_CHECKING:
     from torch.types import _device, _dtype, _int
 
 
+_use_implicit_mempool: bool | None = None  # type: ignore[assignment]
+
+
+def _should_use_implicit_mempool() -> bool:
+    r"""
+    Check if the implicit memory pool should be used for symmetric memory allocations.
+
+    Returns:
+        bool: True if the implicit memory pool should be used, False otherwise.
+
+    By default, use implicit memory pool for `symm_mem.empty`.  Users can
+    disable this by setting the environment variable `TORCH_SYMMMEM_IMPLICIT_POOL` to `0`.
+    """
+    global _use_implicit_mempool
+    if _use_implicit_mempool is None:
+        _use_implicit_mempool = os.getenv("TORCH_SYMMMEM_IMPLICIT_POOL", "1") == "1"
+
+    return _use_implicit_mempool
+
+
 @overload
 def empty(
     *size: _int, dtype: _dtype | None = None, device: _device | None = None
@@ -1927,13 +1947,20 @@ def empty(  # type: ignore[misc]
 
     if device is None:
         device = torch.get_default_device()
+    else:
+        device = torch.device(device)
 
-    return _SymmetricMemory.empty_strided_p2p(
-        size=size,
-        stride=torch._prims_common.make_contiguous_strides_for(size),
-        dtype=dtype,
-        device=torch.device(device),
-    )
+    stride = torch._prims_common.make_contiguous_strides_for(size)
+
+    if _should_use_implicit_mempool() and device.type == "cuda":
+        # Allocate tensor from an implicit memory pool
+        mempool = get_mem_pool(device)
+        # TODO: this path can be made device-agnostic if `use_mem_pool` is
+        # elevated from torch.cuda to torch accelerator.
+        with torch.cuda.use_mem_pool(mempool):
+            return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
+    else:
+        return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
 
 def rendezvous(
