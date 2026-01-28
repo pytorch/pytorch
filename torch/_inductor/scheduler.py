@@ -5337,7 +5337,7 @@ class Scheduler:
                 # This is an atomic/scatter operation
                 # Don't allow fusion with subsequent reads
                 return False
-            
+
             return (
                 read.index == write.index
                 and len(read.size) >= len(write.size)
