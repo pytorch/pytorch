@@ -2187,16 +2187,14 @@ class TestBinaryUfuncs(TestCase):
 
         # Test with different dtype combinations
         test_cases = [
-            # (tensor1, tensor2, expected_max, expected_min)
+            # (tensor1, tensor2)
             (torch.tensor([5], dtype=torch.uint8, device=device),
-             torch.tensor([-3], dtype=torch.int32, device=device),
-             5, -3),
+             torch.tensor([-3], dtype=torch.int32, device=device)),
             (torch.tensor([100], dtype=torch.int16, device=device),
-             torch.tensor([200], dtype=torch.int64, device=device),
-             200, 100),
+             torch.tensor([200], dtype=torch.int64, device=device)),
         ]
 
-        for t1, t2, exp_max, exp_min in test_cases:
+        for t1, t2 in test_cases:
             out_max = torch.empty(1, dtype=t1.dtype, device=device)
             out_min = torch.empty(1, dtype=t1.dtype, device=device)
 
