@@ -17,8 +17,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _TPL_CONTENT = Template(
-    textwrap.dedent(
-        """\
+    textwrap.dedent("""\
     ## {{ title }}
 
     ```{{ lang }}
@@ -29,8 +28,7 @@ _TPL_CONTENT = Template(
 )
 
 _TPL_LIST_ITEMS = Template(
-    textwrap.dedent(
-        """\
+    textwrap.dedent("""\
     ## {{ title }}
     {% for it in items %}
     - {{ it.pkg }}: {{ it.relpath }}
@@ -42,8 +40,7 @@ _TPL_LIST_ITEMS = Template(
 )
 
 _TPL_TABLE = Template(
-    textwrap.dedent(
-        """\
+    textwrap.dedent("""\
     {%- if rows %}
     | {{ cols | join(' | ') }} |
     |{%- for _ in cols %} --- |{%- endfor %}
