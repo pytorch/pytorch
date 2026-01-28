@@ -1,7 +1,10 @@
 #pragma once
 
 #include <c10/macros/Export.h>
+
+#ifndef _WIN32
 #include <level_zero/ze_api.h>
+#endif
 
 namespace at::xpu {
 
@@ -39,9 +42,12 @@ namespace at::xpu {
   _(zeModuleBuildLogDestroy)
 
 extern "C" typedef struct LevelZero {
+// Intel level zero is not defaultly available on Windows.
+#ifndef _WIN32
 #define CREATE_MEMBER(name) decltype(&name) name;
   AT_FORALL_L0(CREATE_MEMBER)
 #undef CREATE_MEMBER
+#endif // _WIN32
 } LevelZero;
 
 extern "C" TORCH_XPU_API LevelZero* load_level_zero();
