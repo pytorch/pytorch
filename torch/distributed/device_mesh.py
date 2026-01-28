@@ -70,7 +70,14 @@ else:
     BackendConfig = tuple[str | None, C10dBackend.Options | None]
     torch.serialization.add_safe_globals([_MeshLayout])
 
-    def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> Optional[ProcessGroup]:
+    def _get_pg_from_name(mesh: "DeviceMesh", name: str) -> ProcessGroup | None:
+        """
+        This method allows us to torch.compile through DeviceMesh and lift its
+        PGs a inputs to the graph since all PGs will have a source from the
+        DeviceMesh through the `_pg_registry`.
+        This will be moved to the DeviceMesh backend object once we separate
+        DeviceMesh into the frontend and backend.
+        """
         if torch.compiler.is_compiling():
             return mesh._pg_registry.get(name)
         else:
@@ -367,7 +374,11 @@ else:
                             self._pg_registry[name] = pg
                     except RuntimeError:
                         # Note: process groups may not exist if loading in a different process
-                        pass
+                        logger.warning(
+                            "It seems like pickling/unpickling of the DeviceMesh "
+                            "occurred before the PGs were created. This will cause PG "
+                            "lookup to fail when torch.compile is enabled"
+                        )
 
         @property
         def device_type(self) -> str:
@@ -1164,6 +1175,19 @@ else:
         def _is_current_rank_part_of_mesh(self) -> bool:
             """
             Return True if the current rank is part of this mesh.
+
+            When a DeviceMesh is created with a subset of ranks (a sub-mesh),
+            ranks not included in the mesh are "non-participating ranks". These
+            ranks:
+
+            - Return None from get_coordinate()
+            - Hold empty tensors as their local DTensor representation
+            - Skip computation during DTensor dispatch (returning default values)
+            - Skip collective operations during redistribute
+            - Return 0 cost for redistribute cost calculations
+
+            This allows DTensor operations to execute correctly across the entire
+            process group while only performing actual work on participating ranks.
             """
             return self._coordinate_on_dim is not None
 
@@ -1515,3 +1539,24 @@ else:
         )
 
         return device_mesh
+
+
+def _register_distributed_opaque_types():
+    """
+    Register DeviceMesh as an opaque type for torch.compile.
+    This must happen before any custom ops that use DeviceMesh in their schema.
+    Called lazily to avoid circular import issues.
+    """
+    from torch._library.opaque_object import MemberType, register_opaque_type
+
+    register_opaque_type(
+        ProcessGroup,
+        typ="reference",
+        members={
+            "size": MemberType.USE_REAL,
+            "rank": MemberType.USE_REAL,
+            "_get_backend_name": MemberType.USE_REAL,
+            "group_name": MemberType.USE_REAL,
+            "__eq__": MemberType.USE_REAL,
+        },
+    )
