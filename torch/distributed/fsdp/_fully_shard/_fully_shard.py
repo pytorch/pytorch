@@ -13,7 +13,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import contract
-from torch.distributed.utils import _get_root_modules
 
 from ._fsdp_api import AllGather, MixedPrecisionPolicy, OffloadPolicy, ReduceScatter
 from ._fsdp_common import (
@@ -23,14 +22,16 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
 )
 from ._fsdp_init import (
+    _apply_to_module,
     _get_device_from_mesh,
-    _get_managed_modules,
-    _get_managed_states,
+    _get_mesh_info,
+    _get_modules_and_states,
     _get_post_forward_mesh_info,
-    _init_default_fully_shard_mesh,
-    _move_states_to_device,
+    _init_default_mesh,
+    _init_param_group,
+    _validate_mesh,
+    _validate_module,
 )
-from ._fsdp_param_group import FSDPParamGroup
 from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
@@ -38,6 +39,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh
+
+    from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
     "fully_shard",
@@ -211,37 +214,20 @@ def fully_shard(
         FSDPModule: The module with FSDP applied (in-place).
     """
     torch._C._log_api_usage_once("torch.distributed.fsdp.fully_shard")
-    if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
-        raise ValueError(
-            f"fully_shard does not support containers that do not implement forward: {module}"
-        )
-    mesh = mesh or _init_default_fully_shard_mesh()
-    if mesh.ndim not in (1, 2):
-        raise ValueError(f"fully_shard expects a 1D or 2D DeviceMesh but got {mesh}")
-    elif mesh.ndim == 1:
-        mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
-    else:
-        if mesh.mesh_dim_names is None:
-            raise AssertionError(
-                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
-            )
-        mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+    _validate_module(module, "fully_shard")
+    mesh = mesh or _init_default_mesh()
+    _validate_mesh(mesh)
+    mesh_info = _get_mesh_info(mesh)
     device = _get_device_from_mesh(mesh)
     auto_reshard_after_forward = reshard_after_forward is None
     # If the user does not provide ``reshard_after_forward``, we set it to True.
     # During lazy_init, we identify which module is the root and override its value to False
-
-    arg_module = module
-    modules = (
-        (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
+    arg_module, modules, managed_modules, params, buffers = _get_modules_and_states(
+        module, device, ignored_params
     )
-    state = fully_shard.state(modules[0])  # type: ignore[attr-defined] # see [1]
+    state = fully_shard.state(modules[0])  # type: ignore[attr-defined]
     state.init(modules, device, mp_policy, auto_reshard_after_forward)
 
-    managed_modules = _get_managed_modules(modules, ignored_params)
-    params, buffers = _get_managed_states(managed_modules, ignored_params)
-
-    _move_states_to_device(params, buffers, device)
     if params:
         # Group params by their mesh_info (using process groups as key).
         # This allows supporting different meshes for different params,
@@ -297,14 +283,9 @@ def fully_shard(
         managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
-    for module in modules:
-        cls = module.__class__
-        new_cls = cls_to_fsdp_cls.get(cls)
-        if not new_cls:
-            dct = {"__deepcopy__": _unimplemented_deepcopy}
-            new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
-            cls_to_fsdp_cls[cls] = new_cls
-        module.__class__ = new_cls
+    _apply_to_module(
+        modules, cls_to_fsdp_cls, FSDPModule, "FSDP", _unimplemented_deepcopy
+    )
     return arg_module
 
 
@@ -328,14 +309,17 @@ def disable_fsdp_module_new_init() -> Iterator[None]:
 
 
 class FSDPModule:
+    # Index in MRO where the original class is found.
+    # For FSDP: [FSDP<Orig>, FSDPModule, Orig, ...] -> index 2
+    # Subclasses like ReplicateModule override this.
+    _orig_cls_mro_index: int = 2
+
     def __new__(cls, *args, **kwargs):
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
         """
-        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
-        # and index 1 is the `FSDPModule` class itself
-        orig_cls = cls.__mro__[2]
+        orig_cls = cls.__mro__[cls._orig_cls_mro_index]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         if _enable_fsdp_module_new_init:
             self.__init__(*args, **kwargs)
@@ -462,7 +446,8 @@ class FSDPModule:
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.post_forward_mesh_info = (
                         _get_post_forward_mesh_info(
-                            reshard_after_forward, fsdp_param_group.mesh_info
+                            reshard_after_forward,
+                            fsdp_param_group.mesh_info,
                         )
                     )
 
