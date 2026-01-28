@@ -3250,18 +3250,30 @@ def _generate_qdq_linear_module(N, K, bias, example_input):
     class Model(torch.nn.Module):
         def __init__(self, N, K, bias, example_input):
             super().__init__()
-            self.x_scale, self.x_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(example_input, 0, 127, torch.finfo(torch.float32).eps, torch.uint8)
+            self.x_scale, self.x_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(
+                example_input, 0, 127, torch.finfo(torch.float32).eps, torch.uint8
+            )
             self.x_scale, self.x_zp = self.x_scale.detach().item(), self.x_zp.detach().item()
             self.linear = torch.nn.Linear(K, N, bias)
-            self.w_scales, self.w_zps = torch.ops.quantized_decomposed.choose_qparams_per_token(self.linear.weight, torch.int8)
+            self.w_scales, self.w_zps = torch.ops.quantized_decomposed.choose_qparams_per_token(
+                self.linear.weight, torch.int8
+            )
             self.w_scales = self.w_scales.detach().to(torch.float32).squeeze()
             self.w_zps = self.w_zps.detach().to(torch.int64).squeeze()
-            self.qw = torch.ops.quantized_decomposed.quantize_per_channel.default(self.linear.weight, self.w_scales, self.w_zps, 0, -128, 127, torch.int8)
+            self.qw = torch.ops.quantized_decomposed.quantize_per_channel.default(
+                self.linear.weight, self.w_scales, self.w_zps, 0, -128, 127, torch.int8
+            )
 
         def forward(self, x):
-            dqw = torch.ops.quantized_decomposed.dequantize_per_channel.default(self.qw, self.w_scales, self.w_zps, 0, -128, 127, torch.int8)
-            quantize_per_tensor_default = torch.ops.quantized_decomposed.quantize_per_tensor.default(x, self.x_scale, self.x_zp, 0, 127, torch.uint8)
-            dequantize_per_tensor_default = torch.ops.quantized_decomposed.dequantize_per_tensor.default(quantize_per_tensor_default, self.x_scale, self.x_zp, 0, 127, torch.uint8)
+            dqw = torch.ops.quantized_decomposed.dequantize_per_channel.default(
+                self.qw, self.w_scales, self.w_zps, 0, -128, 127, torch.int8
+            )
+            quantize_per_tensor_default = torch.ops.quantized_decomposed.quantize_per_tensor.default(
+                x, self.x_scale, self.x_zp, 0, 127, torch.uint8
+            )
+            dequantize_per_tensor_default = torch.ops.quantized_decomposed.dequantize_per_tensor.default(
+                quantize_per_tensor_default, self.x_scale, self.x_zp, 0, 127, torch.uint8
+            )
             linear = torch.ops.aten.linear.default(dequantize_per_tensor_default, dqw, self.linear.bias)
             return linear
 

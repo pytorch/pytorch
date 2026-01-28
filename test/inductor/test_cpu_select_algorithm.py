@@ -1356,7 +1356,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         counters.clear()
         ref_quantized_mod = M(bias=bias).eval()
-        print(ref_quantized_mod)
+        ref_quantized_mod = torch.export.export(
+            ref_quantized_mod, (input,), strict=True
+        ).module()
 
         atol, rtol = 1e-3, 1e-3
         if dtype == torch.bfloat16:
@@ -1430,12 +1432,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M(torch.nn.Module):
             def __init__(self, bias, input_3d):
                 super().__init__()
-                # self.linear = torch.nn.Linear(in_features, out_features, bias)
                 self.linear = _generate_qdq_linear_module(
                     N=out_features, K=in_features, bias=bias, example_input=input
                 )
                 self.epilogue = _get_epilogue(epilogue)
-                # self.linear2 = torch.nn.Linear(out_features, out_features, bias)
                 example_input = self.epilogue(self.linear(input) + other)
                 self.linear2 = _generate_qdq_linear_module(
                     N=out_features,
@@ -1459,12 +1459,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         class M2(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                # self.linear = torch.nn.Linear(in_features, out_features, bias)
                 self.linear = _generate_qdq_linear_module(
                     N=out_features, K=in_features, bias=bias, example_input=input2
                 )
                 self.epilogue = _get_epilogue(epilogue)
-                # self.linear2 = torch.nn.Linear(out_features, out_features, bias)
                 self.linear2 = _generate_qdq_linear_module(
                     N=out_features, K=out_features, bias=bias, example_input=input3
                 )
@@ -1477,20 +1475,28 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 return res
 
         counters.clear()
+        inputs = (input, other, other2)
+        inputs2 = (input2, input3, other_clone)
         ref_quantized_mod = M(bias=bias, input_3d=input_3d).eval()
         ref_quantized_mod2 = M2(bias=bias).eval()
+        ref_quantized_mod = torch.export.export(
+            ref_quantized_mod, inputs, strict=True
+        ).module()
+        ref_quantized_mod2 = torch.export.export(
+            ref_quantized_mod2, inputs2, strict=True
+        ).module()
         atol, rtol = 5e-2, 5e-2
         with (
             patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)),
             torch.no_grad(),
             torch.autocast("cpu", enabled=int8_mixed_bf16, dtype=torch.bfloat16),
         ):
-            ref_res = ref_quantized_mod(input, other, other2)
+            ref_res = ref_quantized_mod(*inputs)
             cfn = torch.compile(ref_quantized_mod)
-            ref_res2 = ref_quantized_mod2(input2, input3, other_clone)
+            ref_res2 = ref_quantized_mod2(*inputs2)
             cfn2 = torch.compile(ref_quantized_mod2)
 
-            res = cfn(input, other, other2)
+            res = cfn(*inputs)
             self.assertEqual(
                 res,
                 ref_res,
@@ -1500,7 +1506,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 exact_dtype=True,
             )
 
-            res2 = cfn2(input2, input3, other_clone)
+            res2 = cfn2(*inputs2)
             self.assertEqual(
                 res2,
                 ref_res2,
@@ -1542,6 +1548,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         counters.clear()
         ref_quantized_mod = M(bias=bias).eval()
+        ref_quantized_mod = torch.export.export(
+            ref_quantized_mod, (v,), strict=True
+        ).module()
         atol, rtol = 1e-2, 1e-2
         with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
             self.common(ref_quantized_mod, (v,), atol=atol, rtol=rtol)

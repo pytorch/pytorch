@@ -5742,7 +5742,8 @@ class CPUReproTests(TestCase):
                 return layer_output
 
         example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
-        model = Model(example_batch[0])
+        model = Model(example_batch[0]).eval()
+        model = torch.export.export(model, example_batch, strict=True).module()
 
         with torch.no_grad():
             metrics.reset()

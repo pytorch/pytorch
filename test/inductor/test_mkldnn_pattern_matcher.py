@@ -1717,7 +1717,7 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
         def matcher_check_fn():
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                0 if TEST_ACL else 7,
+                0 if TEST_ACL else 9,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
