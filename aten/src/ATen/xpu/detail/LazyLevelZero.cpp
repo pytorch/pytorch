@@ -7,7 +7,7 @@
 namespace at::xpu::detail {
 namespace _stubs {
 
-at::DynamicLibrary& getXPULibrary() {
+at::DynamicLibrary& getZELibrary() {
 #if defined(_WIN32)
   static at::DynamicLibrary lib("ze_loader.dll");
 #else
@@ -66,45 +66,44 @@ at::DynamicLibrary& getXPULibrary() {
     return fn(a1, a2, a3, a4, a5);                                            \
   }
 
-#define L0_STUB1(NAME, A1) _STUB_1(XPU, NAME, ze_result_t ZE_APICALL, A1)
-#define L0_STUB2(NAME, A1, A2) \
-  _STUB_2(XPU, NAME, ze_result_t ZE_APICALL, A1, A2)
-#define L0_STUB3(NAME, A1, A2, A3) \
-  _STUB_3(XPU, NAME, ze_result_t ZE_APICALL, A1, A2, A3)
-#define L0_STUB4(NAME, A1, A2, A3, A4) \
-  _STUB_4(XPU, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4)
-#define L0_STUB5(NAME, A1, A2, A3, A4, A5) \
-  _STUB_5(XPU, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4, A5)
+#define ZE_STUB1(NAME, A1) _STUB_1(ZE, NAME, ze_result_t ZE_APICALL, A1)
+#define ZE_STUB2(NAME, A1, A2) _STUB_2(ZE, NAME, ze_result_t ZE_APICALL, A1, A2)
+#define ZE_STUB3(NAME, A1, A2, A3) \
+  _STUB_3(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3)
+#define ZE_STUB4(NAME, A1, A2, A3, A4) \
+  _STUB_4(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4)
+#define ZE_STUB5(NAME, A1, A2, A3, A4, A5) \
+  _STUB_5(ZE, NAME, ze_result_t ZE_APICALL, A1, A2, A3, A4, A5)
 
 // Intel level zero is not defaultly available on Windows.
 #ifndef _WIN32
-L0_STUB5(
+ZE_STUB5(
     zeModuleCreate,
     ze_context_handle_t,
     ze_device_handle_t,
     const ze_module_desc_t*,
     ze_module_handle_t*,
     ze_module_build_log_handle_t*)
-L0_STUB3(
+ZE_STUB3(
     zeKernelCreate,
     ze_module_handle_t,
     const ze_kernel_desc_t*,
     ze_kernel_handle_t*)
-L0_STUB2(zeKernelGetProperties, ze_kernel_handle_t, ze_kernel_properties_t*)
-L0_STUB4(
+ZE_STUB2(zeKernelGetProperties, ze_kernel_handle_t, ze_kernel_properties_t*)
+ZE_STUB4(
     zeMemGetAllocProperties,
     ze_context_handle_t,
     const void*,
     ze_memory_allocation_properties_t*,
     ze_device_handle_t*)
-L0_STUB3(
+ZE_STUB3(
     zeModuleBuildLogGetString,
     ze_module_build_log_handle_t,
     size_t*,
     char*)
-L0_STUB1(zeModuleBuildLogDestroy, ze_module_build_log_handle_t)
+ZE_STUB1(zeModuleBuildLogDestroy, ze_module_build_log_handle_t)
 
-#endif // _WIN32
+#endif
 
 } // namespace _stubs
 
@@ -112,8 +111,8 @@ LevelZero lazyLevelZero = {
 // Intel level zero is not defaultly available on Windows.
 #ifndef _WIN32
 #define _REFERENCE_MEMBER(name) _stubs::name,
-    AT_FORALL_L0(_REFERENCE_MEMBER)
+    AT_FORALL_ZE(_REFERENCE_MEMBER)
 #undef _REFERENCE_MEMBER
-#endif // _WIN32
+#endif
 };
 } // namespace at::xpu::detail
