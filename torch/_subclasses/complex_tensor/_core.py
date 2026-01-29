@@ -58,16 +58,16 @@ class ComplexTensor(Tensor):
         layout = real.layout
         pin_memory = real.is_pinned()
 
-        assert shape == imag.shape, f"Expected imag shape {shape}, got {imag.shape}"
-        assert device == imag.device, (
-            f"Expected imag device {device}, got {imag.device}"
-        )
-        assert real.dtype == imag.dtype, (
-            f"Expected imag dtype {real.dtype}, got {imag.dtype}"
-        )
-        assert pin_memory == imag.is_pinned(), (
-            f"Expected imag pinning {pin_memory}, got {imag.is_pinned()}"
-        )
+        if shape != imag.shape:
+            raise AssertionError(f"Expected imag shape {shape}, got {imag.shape}")
+        if device != imag.device:
+            raise AssertionError(f"Expected imag device {device}, got {imag.device}")
+        if real.dtype != imag.dtype:
+            raise AssertionError(f"Expected imag dtype {real.dtype}, got {imag.dtype}")
+        if pin_memory != imag.is_pinned():
+            raise AssertionError(
+                f"Expected imag pinning {pin_memory}, got {imag.is_pinned()}"
+            )
 
         res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
@@ -127,7 +127,8 @@ class ComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
-        assert meta is None
+        if meta is not None:
+            raise AssertionError(f"meta must be None, got {meta}")
         re, im = inner_tensors["re"], inner_tensors["im"]
         return ComplexTensor(re, im)
 

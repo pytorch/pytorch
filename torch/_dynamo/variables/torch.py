@@ -43,7 +43,7 @@ from torch._C import DispatchKeySet
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
-from torch._guards import Source, TracingContext
+from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
@@ -61,8 +61,9 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    GlobalStateSource,
+    ImportSource,
     SyntheticLocalSource,
-    TorchSource,
 )
 from ..utils import (
     check_unspec_or_constant_args,
@@ -82,9 +83,10 @@ from .ctx_manager import (
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
-from .distributed import DistributedVariable, ProcessGroupVariable
+from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
+from .script_object import TorchScriptObjectVariable
 from .torch_function import (
     can_dispatch_torch_function,
     dispatch_torch_function,
@@ -106,6 +108,7 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._library.opaque_object import OpaqueType
     from torch.utils._pytree import TreeSpec
 
 
@@ -275,7 +278,7 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
     grad_fns: set[torch.autograd.graph.Node] = set()
 
-    plain_tensors: list[torch.SymInt | torch.Tensor | int] = []
+    plain_tensors: list[torch.SymInt | torch.Tensor | int | OpaqueType] = []
     # Get all plain tensors (handles nested subclasses)
     if is_traceable_wrapper_subclass(tensor):
         get_plain_tensors(tensor, out=plain_tensors)
@@ -649,7 +652,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         from . import (
             ConstantVariable,
-            DeterministicAlgorithmsVariable,
             GradModeVariable,
             StreamContextVariable,
             SymNodeVariable,
@@ -912,13 +914,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return DeterministicAlgorithmsVariable.create(tx, mode.as_python_constant())
+
+            value = mode.as_python_constant()
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            )
+            torch._C._set_deterministic_algorithms(value)
+            return ConstantVariable.create(None)
 
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
             self, tx: "InstructionTranslator"
         ) -> ConstantVariable:
-            install_guard(DeterministicAlgorithmsVariable._guards_singleton)
+            guard = Guard(
+                GlobalStateSource(),
+                GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
+            )
+            install_guard(guard)
             return ConstantVariable.create(torch.are_deterministic_algorithms_enabled())
 
         @register(torch._C._is_torch_function_enabled)
@@ -1207,6 +1219,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
+                get_rank,
+                get_world_size,
             )
             from torch.distributed.tensor import DTensor
 
@@ -1216,20 +1230,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _rank_not_in_group,
                 get_process_group_ranks,
                 _resolve_group_name_by_ranks_and_tag,
+                get_rank,
+                get_world_size,
             )
             def handle_constant_processgroup_functions(
                 self, tx: "InstructionTranslator", *args: VariableTracker
             ) -> VariableTracker:
-                # because the input is a "ProcessGroupVariable", we'll be guarding on its
-                # ID_MATCH based on how it was constructed.
-
                 # We desugar it at trace-time into ranks by directly calling util
                 # bake the result into the trace
-                if len(args) == 1:
+                if len(args) == 0:
+                    # get_rank() or get_world_size() with no args (uses default group)
+                    pass
+                elif len(args) == 1:
                     # group or group name
-                    assert (
-                        isinstance(args[0], ProcessGroupVariable)
-                        or args[0].is_python_constant()
+                    assert args[0].is_python_constant() or (
+                        isinstance(args[0], TorchScriptObjectVariable)
+                        and args[  # pyrefly: ignore[missing-attribute]
+                            0
+                        ].value.script_class_name  # pyrefly: ignore[missing-attribute]
+                        == "torch.distributed.distributed_c10d.ProcessGroup"
                     )
                 elif len(args) == 2:
                     # ranks + tag
@@ -1242,7 +1261,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"Invalid group value ({args}) for constant pg "
                         f"function {self.value}"
                     )
-                args_as_value = [arg.as_python_constant() for arg in args]
+
+                def get_arg_value(arg: VariableTracker) -> Any:
+                    # TorchScriptObjectVariable for ProcessGroup doesn't support
+                    # as_python_constant(), so extract real_obj directly
+                    if isinstance(arg, TorchScriptObjectVariable):
+                        return arg.value.real_obj  # pyrefly: ignore[missing-attribute]
+                    return arg.as_python_constant()
+
+                args_as_value = [get_arg_value(arg) for arg in args]
                 invocation_result = self.value(*args_as_value)
 
                 # Note - while we *could* cook up sources around invocations, like a FunctionSource
@@ -1364,7 +1391,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
-        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
+        @register(torch.fx.experimental.symbolic_shapes.size_hint)
+        def handle_size_hint(
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
+            fallback: Optional[VariableTracker] = None,
+        ) -> VariableTracker | None:
+            fallback_int = fallback.as_python_constant() if fallback else None
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.size_hint(
+                        expr.sym_num, fallback_int
+                    )
+                )
+            elif expr.is_python_constant():
+                return expr
+            else:
+                return None
+
+        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
         ) -> VariableTracker | None:
@@ -1372,7 +1418,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
-                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(
+                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(  # type: ignore[deprecated]
                         expr.sym_num
                     )
                 )
@@ -1688,7 +1734,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
             new_source = AttrSource(
-                TorchSource(),
+                ImportSource("torch"),
                 # pyrefly: ignore [unbound-name]
                 module.__name__.rsplit(".", maxsplit=1)[-1],
             )
@@ -1838,6 +1884,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         @register(torch.autograd.grad)
+        # pyrefly: ignore[implicit-any]
         def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
             """
             Handle torch.autograd.grad() calls within compiled regions.

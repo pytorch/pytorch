@@ -1,6 +1,6 @@
 import logging
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 import torch
@@ -8,6 +8,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._logging import LazyString
 from torch._prims_common import ShapeType
+from torch.distributed import RankType
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import redistribute_cost
@@ -141,7 +142,7 @@ def compute_local_shape_and_global_offset(
         return ((0,), empty_offset)
 
     return _compute_local_shape_and_global_offset(
-        global_shape, mesh.shape, mesh.get_coordinate(), placements, skip_offset
+        global_shape, mesh.shape, mesh._sym_get_coordinate, placements, skip_offset
     )
 
 
@@ -149,7 +150,7 @@ def compute_local_shape_and_global_offset(
 def _get_shard_size_and_offsets(
     curr_local_size: int,
     mesh_dim_size: int,
-    rank: int,
+    rank: RankType,
     placement: Shard | _StridedShard,
     previous_offsets,
     zero_global_offset: int,
@@ -188,7 +189,7 @@ def _get_first_offset(offsets: torch.Tensor) -> int:
 def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
     mesh_shape: ShapeType,
-    my_coordinate: list[int] | None,
+    my_coordinate: list[int] | Callable[[int], RankType] | None,
     placements: Sequence[Placement],
     skip_offset: bool = False,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -224,6 +225,15 @@ def _compute_local_shape_and_global_offset(
               empty tuple.
     """
 
+    if isinstance(my_coordinate, (list, tuple)):
+        _coord: list | tuple = my_coordinate
+
+        def coordinate_lookup(dim: int) -> RankType:
+            return _coord[dim]
+    else:
+        assert my_coordinate is not None
+        coordinate_lookup = my_coordinate
+
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
     #   global tensor: [0, 1, 2, 3, 4, 5, 6, 7]
@@ -247,11 +257,10 @@ def _compute_local_shape_and_global_offset(
             f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
         )
         previous_offsets = shard_dim_to_global_offsets.get(shard_dim)
-        assert my_coordinate is not None
         shard_size, shard_offsets = _get_shard_size_and_offsets(
             local_shape[shard_dim],
             mesh_shape[mesh_dim],
-            my_coordinate[mesh_dim],
+            coordinate_lookup(mesh_dim),
             placement,
             previous_offsets,
             zero_global_offset,
@@ -469,3 +478,40 @@ def normalize_to_torch_size(size) -> torch.Size:  # type: ignore[no-untyped-def]
     else:
         torch_size = list(size)
     return torch.Size(torch_size)
+
+
+def assert_no_mixed_partial_types(placements: Sequence[Placement]) -> None:
+    """
+    Assert that a placement list doesn't contain mixed Partial reduce types.
+
+    Mixed Partial types (e.g., ``Partial("sum")`` and ``Partial("max")`` together in the
+    same placement list) are not supported and will raise a ``ValueError``. This restriction
+    exists because nonlinear reductions (e.g., max) don't commute with linear reductions
+    (e.g., sum), which means the relative ordering of different partial types would be
+    semantically critical during redistribution. Rather than introducing complex ordering
+    constraints, we prohibit mixing different Partial reduce types.
+
+    Note: Partial("sum") and Partial("avg") DO commute with each other, so they can be ordered
+    arbitrarily, and we allow this.
+
+    This function is called internally by public APIs like :meth:`DTensor.from_local` and
+    :func:`distribute_tensor` to validate placements early, before DTensor construction.
+
+    Args:
+        placements (Sequence[:class:`Placement`]): A sequence of placement specifications
+            to validate.
+
+    Raises:
+        ValueError: If the placements contain more than one distinct Partial reduce type.
+    """
+    partial_reduce_ops: set[str] = set()
+    for p in placements:
+        if isinstance(p, Partial):
+            partial_reduce_ops.add(p.reduce_op)
+
+    if len(partial_reduce_ops) > 1 and partial_reduce_ops != {"sum", "avg"}:
+        raise ValueError(
+            f"Mixed Partial reduce types are not supported in the same placement list. "
+            f"Found reduce ops: {partial_reduce_ops}. "
+            f"Please ensure all Partial placements use the same reduce operation."
+        )
