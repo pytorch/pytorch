@@ -4568,43 +4568,30 @@ class InstructionTranslatorBase(
         """
         assert sys.version_info >= (3, 12)
 
+        from .bytecode_transformation import create_dup_top, create_instruction, create_load_const
+        from .codegen import PyCodegen
+        from .source import LocalSource
+        from .utils import is_safe_constant
+        from .variables.misc import UnknownVariable
+        from .variables.tensor import SymNodeVariable, TensorVariable
+
         analysis = self._analyze_comprehension()
 
         assert self.instruction_pointer is not None
-        start_ip = (
-            self.instruction_pointer - 1
-        )  # Current instruction (BUILD_LIST/BUILD_MAP)
+        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
 
         reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
         log.debug("comprehension triggered compile")
 
-        # Calculate stack_pops: 1 for iterator + len(iterator_vars) for saved values
         stack_pops = 1 + len(analysis.iterator_vars)
 
-        # Handle captured variables BEFORE compile_subgraph.
-        # For mutable objects (lists, dicts) that are captured by the comprehension,
-        # we need to ensure object identity is preserved - the same object must be:
-        # 1. Stored to the local slot (for comprehension access via LOAD_FAST)
-        # 2. Passed to the resume function (so mutations are visible)
-        #
-        # For variables without LocalSource, compile_subgraph would reconstruct them
-        # (creating a NEW object), and we'd also reconstruct them here (another new
-        # object). These would be different objects, breaking mutation semantics.
-        #
-        # Solution: For captured variables without LocalSource, we:
-        # 1. Reconstruct them ONCE and store to local slot (before compile_subgraph)
-        # 2. Set their source to LocalSource so compile_subgraph loads from local slot
-        # This ensures the same object is used everywhere.
+        # Ensure object identity preservation for captured mutable variables:
+        # Reconstruct them once, store to local slots, and set LocalSource so
+        # compile_subgraph loads from the same slots instead of reconstructing.
         pre_subgraph_insts = []
         if analysis.captured_vars:
-            from .bytecode_transformation import create_instruction, create_load_const
-            from .codegen import PyCodegen
-            from .source import LocalSource
-            from .utils import is_safe_constant
-            from .variables.tensor import SymNodeVariable, TensorVariable
-
-            cg = PyCodegen(self)
-            cg.value_from_source = False  # Don't try to load from source
+            captured_vars_cg = PyCodegen(self)
+            captured_vars_cg.value_from_source = False
 
             for var_name in analysis.captured_vars:
                 if var_name in self.symbolic_locals:
@@ -4613,34 +4600,27 @@ class InstructionTranslatorBase(
                     if isinstance(var, (TensorVariable, SymNodeVariable)):
                         continue
 
-                    if (
-                        isinstance(var.source, LocalSource)
-                        and var.source.local_name == var_name
-                    ):
+                    if isinstance(var.source, LocalSource) and var.source.local_name == var_name:
                         continue
 
                     # For python constants, use create_load_const directly
                     if var.is_python_constant():
                         const_val = var.as_python_constant()
                         if is_safe_constant(const_val):
-                            cg.append_output(create_load_const(const_val))
-                            cg.append_output(
+                            captured_vars_cg.append_output(create_load_const(const_val))
+                            captured_vars_cg.append_output(
                                 create_instruction("STORE_FAST", argval=var_name)
                             )
-                            # Set LocalSource so compile_subgraph loads from local slot
                             var.source = LocalSource(var_name)
                             continue
 
-                    # For other variable types (lists, dicts, etc.)
-                    # Reconstruct once, store to local slot, set LocalSource
-                    cg(var)
-                    cg.append_output(create_instruction("STORE_FAST", argval=var_name))
-                    # Update source so compile_subgraph loads from local slot
+                    # For other variable types, reconstruct and store to local slot
+                    captured_vars_cg(var)
+                    captured_vars_cg.append_output(create_instruction("STORE_FAST", argval=var_name))
                     var.source = LocalSource(var_name)
 
-            pre_subgraph_insts = cg.get_instructions()
+            pre_subgraph_insts = captured_vars_cg.get_instructions()
 
-        # Add pre-subgraph instructions that store captured variables to local slots
         if pre_subgraph_insts:
             self.output.add_output_instructions(pre_subgraph_insts)
 
@@ -4650,7 +4630,6 @@ class InstructionTranslatorBase(
             stack_pops=stack_pops,
         )
 
-        # Now pop from symbolic stack (matching stack_pops)
         self.popn(stack_pops)
 
         # Copy comprehension bytecode to output (runs eagerly)
@@ -4660,7 +4639,7 @@ class InstructionTranslatorBase(
         for ip in range(start_ip, analysis.end_ip):
             original_inst = self.instructions[ip]
             copied_inst = copy.copy(original_inst)
-            copied_inst.exn_tab_entry = None  # Clear exception table
+            copied_inst.exn_tab_entry = None
             inst_map[original_inst] = copied_inst
             copied_insts.append(copied_inst)
 
@@ -4672,26 +4651,13 @@ class InstructionTranslatorBase(
 
         meta = all_stack_locals_metadata[0]
 
-        from .variables.misc import UnknownVariable
+        # Variables to pass to resume function
+        vars_to_pass = (
+            [analysis.result_var] if analysis.result_disposition == "stored" and analysis.result_var else []
+        ) + analysis.walrus_vars
 
-        vars_to_pass: list[str] = []
-        if analysis.result_disposition == "stored" and analysis.result_var is not None:
-            vars_to_pass.append(analysis.result_var)
-        vars_to_pass.extend(analysis.walrus_vars)
-
-        if analysis.result_disposition == "discarded":
-            # Result is discarded (POP_TOP) - nothing to pass to resume
-            pass
-
-        elif analysis.result_disposition == "returned":
-            # Result is returned directly - the comprehension bytecode leaves result on stack
-            # and the resume instruction is RETURN_VALUE which will return it.
-            # Push a placeholder onto the symbolic stack to represent the result.
-            self.push(UnknownVariable())
-
-        elif analysis.result_disposition == "consumed":
-            # Result stays on stack and is consumed by next instruction (e.g., CALL)
-            # Push a placeholder onto the symbolic stack to represent the result.
+        # If result stays on stack, push placeholder for resume function
+        if analysis.result_on_stack:
             self.push(UnknownVariable())
 
         for var_name in vars_to_pass:
@@ -4699,29 +4665,17 @@ class InstructionTranslatorBase(
                 meta.locals_names[var_name] = len(meta.locals_names)
             self.symbolic_locals[var_name] = UnknownVariable()
 
-        from .bytecode_transformation import create_dup_top, create_instruction
-        from .codegen import PyCodegen
-
-        cg = PyCodegen(self)
-
+        # Generate code to pass variables to resume function
+        resume_cg = PyCodegen(self)
         for var_name in vars_to_pass:
-            # Stack: [..., frame_values_list]
-            cg.append_output(create_dup_top())
-            # Stack: [..., frame_values_list, frame_values_list]
-            cg.append_output(cg.create_load_const(0))
-            # Stack: [..., frame_values_list, frame_values_list, 0]
-            cg.append_output(cg.create_binary_subscr())
-            # Stack: [..., frame_values_list, frame_values_list[0]]
-            cg.append_output(create_instruction("LOAD_FAST", argval=var_name))
-            # Stack: [..., frame_values_list, frame_values_list[0], value]
-            # LIST_APPEND: append TOS to TOS[-2], pops TOS
-            cg.append_output(create_instruction("LIST_APPEND", arg=1))
-            # Stack: [..., frame_values_list, frame_values_list[0]]
-            # Pop the frame_values_list[0] reference
-            cg.append_output(create_instruction("POP_TOP"))
-            # Stack: [..., frame_values_list]
+            resume_cg.append_output(create_dup_top())
+            resume_cg.append_output(resume_cg.create_load_const(0))
+            resume_cg.append_output(resume_cg.create_binary_subscr())
+            resume_cg.append_output(create_instruction("LOAD_FAST", argval=var_name))
+            resume_cg.append_output(create_instruction("LIST_APPEND", arg=1))
+            resume_cg.append_output(create_instruction("POP_TOP"))
 
-        self.output.add_output_instructions(cg.get_instructions())
+        self.output.add_output_instructions(resume_cg.get_instructions())
 
         resume_inst = self.instructions[analysis.end_ip]
         self.output.add_output_instructions(
