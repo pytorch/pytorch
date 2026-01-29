@@ -237,7 +237,7 @@ def _create_partial_input(
         local_tensors = {}
         flat = tensor.flatten()
         # Use tensor_idx to shift the pattern
-        mask = (torch.arange(flat.numel()) + tensor_idx) % 2 == 0
+        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
             if r == 0:
                 # Rank 0: add offset where mask is False (min on rank 1)
@@ -252,7 +252,7 @@ def _create_partial_input(
         # Create element-wise variation based on tensor_idx
         local_tensors = {}
         flat = tensor.flatten()
-        mask = (torch.arange(flat.numel()) + tensor_idx) % 2 == 0
+        mask = (torch.arange(flat.numel(), device=tensor.device) + tensor_idx) % 2 == 0
         for r in range(world_size):
             if r == 0:
                 # Rank 0: subtract offset where mask is False (max on rank 1)
@@ -293,8 +293,9 @@ def validate_combination(
     """
     try:
         with LocalTensorMode(frozenset(range(world_size))):
-            # Create a 1-D device mesh
-            mesh = init_device_mesh("cpu", (world_size,))
+            # Create a 1-D device mesh matching input tensor device
+            device = tensors[0][1].device.type if tensors else "cpu"
+            mesh = init_device_mesh(device, (world_size,))
 
             # Distribute input tensors according to placements, then get local tensors
             local_tensors = []
