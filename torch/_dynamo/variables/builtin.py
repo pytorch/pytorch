@@ -1646,6 +1646,9 @@ class BuiltinVariable(VariableTracker):
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
+        if isinstance(arg, variables.UserDefinedClassVariable):
+            if type(arg.value).__repr__ is type.__repr__:
+                return variables.ConstantVariable.create(repr(arg.value))
         return None
 
     def call_str(
