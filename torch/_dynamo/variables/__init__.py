@@ -45,6 +45,7 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
+    DictItemsVariable,
     DictKeySetVariable,
     FrozensetVariable,
     MappingProxyVariable,
