@@ -646,11 +646,14 @@ class TestExport(TestCase):
         # should not be copied to other nodes
         counter = 0
         for node in new_ep.graph.nodes:
-            if "custom" in node.meta:
+            if node.target == torch.ops.aten.linear.default:
+                self.assertTrue("custom" in node.meta)
                 counter += 1
                 self.assertTrue(node.meta["custom"]["quantization_tag"] == "foo")
-                self.assertTrue(node.target == torch.ops.aten.linear.default)
-
+            else:
+                # other annotation such as '_torchdynamo_disable' might be added
+                if "custom" in node.meta:
+                    self.assertTrue("quantization_tag" not in node.meta["custom"])
         self.assertEqual(counter, 1)
 
     @testing.expectedFailureSerDer  # can't serialize functorch ops

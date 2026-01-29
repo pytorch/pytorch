@@ -1114,7 +1114,7 @@ class inner_f(torch.nn.Module):
         self.assertEqual(len(add_nodes), 1)
         gradient_acc_node = add_nodes[0]
         self.assertTrue(gradient_acc_node.meta["is_gradient_acc"])
-        self.assertEqual(gradient_acc_node.meta.get("custom", {}), {})
+        self.assertTrue("test" not in gradient_acc_node.meta.get("custom", {}))
         custom_metadata = fx_traceback._get_custom_metadata(graph_module)
         self.assertExpectedInline(
             str(custom_metadata),
@@ -1142,6 +1142,63 @@ class inner_f(torch.nn.Module):
 ('call_function', 'view_1', {'test': 1})
 ('call_function', 't_9', {'test': 1})""",
         )
+
+    def test_annotate_rqn(self):
+        class Bar(nn.Module):
+            def forward(self, x):
+                with fx_traceback.annotate_rqn("bar"):
+                    return x * 1
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                with fx_traceback.annotate_rqn("foo"):
+                    y = self.bar(x)
+                    return y * 2
+
+        class MyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                with fx_traceback.annotate_rqn("my_mod"):
+                    x = x / 2
+                    y = self.foo(x)
+                return y - 1
+
+        inputs = (torch.randn(4, 3),)
+        model = MyMod()
+
+        for with_export in [False, True]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_annotated_rqn_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 'div', 'my_mod')
+('call_function', 'mul', 'my_mod.foo.bar')
+('call_function', 'mul_1', 'my_mod.foo')""",
+            )
+
+        # Now test with require gradients
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        for with_export in [False, True]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_annotated_rqn_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 'div', 'my_mod')
+('call_function', 'mul', 'my_mod.foo.bar')
+('call_function', 'mul_1', 'my_mod.foo')
+('call_function', 'mul_2', 'my_mod.foo')
+('call_function', 'mul_3', 'my_mod.foo.bar')
+('call_function', 'div_1', 'my_mod')""",
+            )
 
 
 if __name__ == "__main__":

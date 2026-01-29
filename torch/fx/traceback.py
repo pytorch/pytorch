@@ -2,6 +2,7 @@
 import copy
 import logging
 import traceback
+import warnings
 from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Optional, Union
@@ -19,6 +20,8 @@ log = logging.getLogger(__name__)
 __all__ = [
     "annotate",
     "annotate_fn",
+    "annotate_rqn",
+    "annotate_rqn_fn",
     "preserve_node_meta",
     "has_preserved_node_meta",
     "set_stack_trace",
@@ -32,11 +35,27 @@ __all__ = [
     "get_graph_provenance_json",
     "set_current_replay_node",
     "get_current_replay_node",
+    "get_current_rqn",
+    "reset_current_annotation",
 ]
 
 current_meta: dict[str, Any] = {}
 current_replay_node: Optional[Node] = None
 should_preserve_node_meta = False
+
+
+# If you change the key here, you should also change
+# _COPY_META_FIELDS in torch/fx/proxy.py
+
+# RQN stands for relative qualified name. The qualified name is relative to a root.
+RQN_ANNOTATION_KEY = "annotated_rqn"
+COMPILE_RQN_ANNOTATION_KEY = "_pt2_compiled_region"
+RQN_DELIMITER = "."
+
+# List of metadata keys used for annotations
+# These keys are propagated through various compilation passes
+ANNOTATION_META_KEYS = ["custom", RQN_ANNOTATION_KEY]
+
 
 GRADIENT_ACC_SPECIAL_STACK = (
     "Gradient addition node due to multiple use of tensor around:"
@@ -268,6 +287,39 @@ def set_stack_trace(stack: list[str]):
         current_meta["stack_trace"] = "".join(stack)
 
 
+def _enter_annotation(annotation_dict: dict) -> tuple[bool, dict]:
+    """
+    Core function to enter an annotation context.
+    Returns (had_custom, old_custom) for restoration.
+    """
+    global current_meta
+
+    has_custom = "custom" in current_meta
+    old_custom = copy.copy(current_meta.get("custom", {}))
+
+    if not has_custom:
+        current_meta["custom"] = {}
+
+    new_custom = copy.copy(current_meta["custom"])
+    new_custom.update(annotation_dict)
+    current_meta["custom"] = new_custom
+
+    return (has_custom, old_custom)
+
+
+def _exit_annotation(saved_state: tuple[bool, dict]) -> None:
+    """
+    Core function to exit an annotation context.
+    """
+    global current_meta
+
+    has_custom, old_custom = saved_state
+    if has_custom:
+        current_meta["custom"] = old_custom
+    else:
+        del current_meta["custom"]
+
+
 @compatibility(is_backward_compatible=False)
 @contextmanager
 def annotate(annotation_dict: dict):
@@ -284,6 +336,10 @@ def annotate(annotation_dict: dict):
 
     This is intended for advanced users who need to attach additional metadata to the fx nodes
     (e.g., for debugging, analysis, or external tooling) during export tracing.
+
+    When nested, annotations with the same keys are overridden by the innermost context,
+    while annotations with different keys are merged. Upon exiting each nested context,
+    the annotations are restored to their previous state.
 
     Note:
         This API is **not backward compatible** and may evolve in future releases.
@@ -302,25 +358,61 @@ def annotate(annotation_dict: dict):
         >>> with annotate({"source": "custom_pass", "tag": 42}):
         ...     pass  # Your computation here
     """
-
-    global current_meta
-
-    has_custom = "custom" in current_meta
-    old_custom = copy.copy(current_meta.get("custom", {}))
-
+    saved_state = _enter_annotation(annotation_dict)
     try:
-        if not has_custom:
-            current_meta["custom"] = {}
-
-        # Update with all key-value pairs from the input dict
-        current_meta["custom"].update(annotation_dict)
         yield
     finally:
-        if has_custom:
-            # Restore the original custom dict
-            current_meta["custom"] = old_custom
+        _exit_annotation(saved_state)
+
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def annotate_rqn(rqn: str):
+    """
+    Temporarily adds a relatively qualified name (RQN) annotation to the current tracing context.
+    FX nodes will have the annotation in node.metadata["annotated_rqn"].
+
+    When nested, RQN annotations are automatically concatenated with dots ('.') to create
+    a hierarchical path (e.g., "model.encoder.layer1").
+
+    Note:
+        This API is **not backward compatible** and may evolve in future releases.
+
+    Note:
+        This API is not compatible with fx.symbolic_trace or jit.trace. It's intended
+        to be used with PT2 family of tracers, e.g. torch.export and dynamo.
+
+    Args:
+        rqn (str): Relatively qualified name to inject into FX trace metadata. Avoid using dots ('.').
+
+    Example:
+        >>> with annotate_rqn("model"):
+        ...     with annotate_rqn("encoder"):
+        ...         x = y + z  # annotated_rqn="model.encoder"
+    """
+    if RQN_DELIMITER in rqn:
+        warnings.warn(
+            f"annotate_rqn {rqn} contains '{RQN_DELIMITER}'. "
+            f"'{RQN_DELIMITER}' is used as the delimiter. "
+            f"Consider using a different rqn annotation."
+        )
+    global current_meta
+
+    has_scope_annotation = RQN_ANNOTATION_KEY in current_meta
+    old_rqn = current_meta.get(RQN_ANNOTATION_KEY, "")
+
+    try:
+        if not has_scope_annotation:
+            current_meta[RQN_ANNOTATION_KEY] = rqn
         else:
-            del current_meta["custom"]
+            current_meta[RQN_ANNOTATION_KEY] = old_rqn + RQN_DELIMITER + rqn
+        yield
+    finally:
+        if has_scope_annotation:
+            # Restore the original custom dict
+            current_meta[RQN_ANNOTATION_KEY] = old_rqn
+        else:
+            del current_meta[RQN_ANNOTATION_KEY]
 
 
 @compatibility(is_backward_compatible=False)
@@ -358,6 +450,66 @@ def annotate_fn(annotation_dict: dict):
         return wrapper
 
     return decorator
+
+
+@compatibility(is_backward_compatible=False)
+def annotate_rqn_fn(rqn: str):
+    """
+    A decorator that wraps a function with the annotate_rqn context manager.
+    Use this when you want to annotate an entire function with a relatively qualified name
+    instead of a specific code block.
+
+    Note:
+        This API is **not backward compatible** and may evolve in future releases.
+
+    Note:
+        This API is not compatible with fx.symbolic_trace or jit.trace. It's intended
+        to be used with PT2 family of tracers, e.g. torch.export and dynamo.
+
+    Args:
+        rqn (str): A relatively qualified name string to inject into the FX trace metadata
+            for all operations in the function.
+
+    Example:
+        All operations in my_function will have annotated_rqn metadata.
+
+        >>> @annotate_rqn_fn("my_module.my_function")
+        ... def my_function(x):
+        ...     return x + 1
+    """
+    from functools import wraps
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with annotate_rqn(rqn):
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+@compatibility(is_backward_compatible=False)
+@contextmanager
+def reset_current_annotation():
+    global current_meta
+    saved_rqn = current_meta.get(RQN_ANNOTATION_KEY)
+    saved_custom = current_meta.get("custom", {})
+    try:
+        if RQN_ANNOTATION_KEY in current_meta:
+            del current_meta[RQN_ANNOTATION_KEY]
+
+        if "custom" in current_meta:
+            current_meta["custom"] = {}
+
+        yield
+    finally:
+        if saved_rqn:
+            current_meta[RQN_ANNOTATION_KEY] = saved_rqn
+
+        if saved_custom:
+            current_meta["custom"] = saved_custom
 
 
 @compatibility(is_backward_compatible=False)
@@ -431,6 +583,11 @@ def get_current_meta() -> dict[str, Any]:
 
 
 @compatibility(is_backward_compatible=False)
+def get_current_rqn() -> str:
+    return current_meta.get(RQN_ANNOTATION_KEY, "")
+
+
+@compatibility(is_backward_compatible=False)
 @contextmanager
 def set_current_replay_node(node):
     """
@@ -485,18 +642,93 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
         return {}
 
 
-def _get_custom_metadata(gm: GraphModule) -> str:
+def _get_annotation_metadata(
+    gm: GraphModule, key: str, ignore_compile_rqn_annotation_key: bool = True
+) -> str:
+    """
+    Generic helper to extract annotation metadata for a given key from a GraphModule.
+
+    Args:
+        gm: The GraphModule to extract metadata from
+        key: The metadata key to extract (e.g., "custom", "annotated_rqn")
+        ignore_compile_rqn_annotation_key: If True (default), exclude the internal
+            COMPILE_RQN_ANNOTATION_KEY from the output when key is "custom"
+
+    Returns:
+        A string representation of all nodes with the specified metadata key
+    """
     assert isinstance(gm, GraphModule)
 
     def helper(gm: GraphModule):
-        custom_metadata = []
+        metadata = []
         for node in gm.graph.nodes:
-            if hasattr(node, "meta") and node.meta.get("custom", None):
-                custom_metadata.append((node.op, node.name, node.meta["custom"]))
+            if hasattr(node, "meta") and node.meta.get(key, None):
+                node_meta = node.meta[key]
+                # Filter out COMPILE_RQN_ANNOTATION_KEY if requested
+                if (
+                    ignore_compile_rqn_annotation_key
+                    and key == "custom"
+                    and isinstance(node_meta, dict)
+                ):
+                    node_meta = {
+                        k: v
+                        for k, v in node_meta.items()
+                        if k != COMPILE_RQN_ANNOTATION_KEY
+                    }
+                    if not node_meta:
+                        continue
+                metadata.append((node.op, node.name, node_meta))
             if node.op == "get_attr" and isinstance(
                 getattr(gm, node.target), GraphModule
             ):
-                custom_metadata.append(helper(getattr(gm, node.target)))
-        return custom_metadata
+                metadata.append(helper(getattr(gm, node.target)))
+        return metadata
 
     return "\n".join(str(x) for x in helper(gm))
+
+
+def _get_custom_metadata(gm: GraphModule) -> str:
+    """
+    Extract custom annotation metadata from a GraphModule.
+    This function maintains backward compatibility.
+
+    Args:
+        gm: The GraphModule to extract metadata from
+
+    Returns:
+        A string representation of all nodes with custom metadata
+    """
+    return _get_annotation_metadata(gm, "custom")
+
+
+def _get_annotated_rqn_metadata(gm: GraphModule) -> str:
+    """
+    Extract annotated_rqn metadata from a GraphModule.
+
+    Args:
+        gm: The GraphModule to extract metadata from
+
+    Returns:
+        A string representation of all nodes with annotated_rqn metadata
+    """
+    return _get_annotation_metadata(gm, "annotated_rqn")
+
+
+def _remove_rqn_metadata_prefix(subgraph: GraphModule, prefix: str):
+    """
+    Remove `prefix` from the prefix of node's RQN metadata along with the first delimiter.
+    """
+    if prefix:
+        for node in subgraph.graph.nodes:
+            if RQN_ANNOTATION_KEY in node.meta:
+                rqn = node.meta[RQN_ANNOTATION_KEY]
+                new_rqn = rqn.removeprefix(prefix).removeprefix(RQN_DELIMITER)
+                node.meta[RQN_ANNOTATION_KEY] = new_rqn
+
+
+def _get_compile_rqn_annotation():
+    """
+    Get the current RQN annotation for the current compilation.
+    """
+    global current_meta, COMPILE_RQN_ANNOTATION_KEY
+    return current_meta.get("custom", {}).get(COMPILE_RQN_ANNOTATION_KEY, "")

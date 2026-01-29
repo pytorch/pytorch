@@ -892,9 +892,16 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
 
         with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
             subgraph_decomp_table = _extract_nested_region_config(subgraph)
-            graph = reenter_make_fx(
-                subgraph, subgraph_decomp_table=subgraph_decomp_table
-            )(*operands)
+
+            # NB: annotation in invoke_subgraph
+            # The subgraph should not inherit the annotation from parent context.
+            # We trace the subgraph once and the subgraph can be used in different calls,
+            # so the parent annotation is not well-defined.
+            # This resets both annotate() and annotate_rqn().
+            with torch.fx.traceback.reset_current_annotation():
+                graph = reenter_make_fx(
+                    subgraph, subgraph_decomp_table=subgraph_decomp_table
+                )(*operands)
 
         from torch._guards import detect_fake_mode
 

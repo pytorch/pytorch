@@ -1098,6 +1098,16 @@
       ]
     }
   ],
+  "GB7894": [
+    {
+      "Gb_type": "annotation context manager torch.fx.traceback.{fn_name} escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph break on torch.fx.traceback.{fn_name}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0096": [
     {
       "Gb_type": "Should not compile partial graph (STORE_ATTR)",

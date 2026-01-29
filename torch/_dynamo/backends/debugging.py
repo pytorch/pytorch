@@ -160,6 +160,15 @@ def invoke_subgraph_inner_compiler(
     from torch._dynamo import disable
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
 
+    # See NB annotation in invoke_subgraph
+    compiled_region_rqn = torch.fx.traceback._get_compile_rqn_annotation()
+    torch.fx.traceback._remove_rqn_metadata_prefix(subgraph, compiled_region_rqn)
+
+    for node in subgraph.graph.nodes:
+        # remove the compiled RQN annotation key because it's different for each trace
+        if torch.fx.traceback.COMPILE_RQN_ANNOTATION_KEY in node.meta.get("custom", {}):
+            del node.meta["custom"][torch.fx.traceback.COMPILE_RQN_ANNOTATION_KEY]
+
     @disable
     @torch._dynamo.allow_in_graph
     def invoke_subgraph_wrapper_unboxed(*operands: Any) -> Any:

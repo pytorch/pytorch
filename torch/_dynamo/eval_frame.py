@@ -986,6 +986,13 @@ class _TorchDynamoContext:
                     torch._C._functorch.get_dynamic_layer_stack_depth()
                 )
 
+                # Set up compile region annotation BEFORE enabling the callback
+                # to avoid contextlib frames being traced by Dynamo
+                current_rqn = torch.fx.traceback.get_current_rqn()
+                saved_compile_region = torch.fx.traceback._enter_annotation(
+                    {torch.fx.traceback.COMPILE_RQN_ANNOTATION_KEY: current_rqn}
+                )
+
                 _maybe_set_eval_frame(_callback_from_stance(callback))
 
                 try:
@@ -1016,6 +1023,7 @@ class _TorchDynamoContext:
                     set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
                     for cleanup in cleanups:
                         cleanup()
+                    torch.fx.traceback._exit_annotation(saved_compile_region)
             finally:
                 _maybe_set_eval_frame(prior)
 

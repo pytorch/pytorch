@@ -640,9 +640,28 @@ class CodeGen:
 
             if node.op not in {"placeholder", "output"}:
                 annotation_str = ""
-                annotation = node.meta.get("custom", {})
-                if annotation:
-                    annotation_str = f" Annotation: {annotation}"
+                # Collect all annotation metadata
+                annotation_parts = []
+
+                # Handle custom annotation with label
+                custom = node.meta.get("custom", {})
+                # Filter out internal COMPILE_RQN_ANNOTATION_KEY
+                if custom:
+                    custom = {
+                        k: v
+                        for k, v in custom.items()
+                        if k != torch.fx.traceback.COMPILE_RQN_ANNOTATION_KEY
+                    }
+                if custom:
+                    annotation_parts.append(f"Annotation: {custom}")
+
+                # Handle annotated_rqn with label
+                annotated_rqn = node.meta.get("annotated_rqn", None)
+                if annotated_rqn:
+                    annotation_parts.append(f"RQN: '{annotated_rqn}'")
+
+                if annotation_parts:
+                    annotation_str = " " + ", ".join(annotation_parts)
 
                 stack_trace_str = "No stacktrace found for following nodes"
                 if stack_trace := node.stack_trace:

@@ -9,6 +9,7 @@ import dataclasses
 from typing import Any, Optional
 
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch._dispatch.python import enable_python_dispatcher
@@ -256,12 +257,15 @@ def aot_dispatch_base_graph(
         updated_flat_args_subclasses_desugared_descs
     )
 
-    fw_module = _create_graph(
-        fn_to_trace,
-        updated_flat_args_subclasses_desugared,
-        updated_flat_args_subclasses_desugared_descs,
-        aot_config=aot_config,
-    )
+    # need preserve_node_meta so we have annotation from fx.traceback.annotate
+    # on the graph
+    with fx_traceback.preserve_node_meta():
+        fw_module = _create_graph(
+            fn_to_trace,
+            updated_flat_args_subclasses_desugared,
+            updated_flat_args_subclasses_desugared_descs,
+            aot_config=aot_config,
+        )
 
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # We update metadata to consider any assigned buffers as buffer mutations.
