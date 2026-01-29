@@ -11,7 +11,7 @@ if [[ ${CUDA_VERSION:0:4} =~ ^12\.[1-4]$ ]]; then
     if [ ${TARGETARCH} = 'amd64' ] || [ "${TARGETARCH}" = 'x86_64' ]; then
         arch_path='x86_64'
     fi
-    CUDSS_NAME="libcudss-linux-${arch_path}-0.3.0.9_cuda12-archive"
+    CUDSS_NAME="libcudss-linux-${arch_path}-0.7.1.4_cuda12-archive"
     curl --retry 3 -OLs https://developer.download.nvidia.com/compute/cudss/redist/libcudss/linux-${arch_path}/${CUDSS_NAME}.tar.xz
 
     # only for cuda 12
