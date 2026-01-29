@@ -2867,7 +2867,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if mm_file_name := get_mm_log_filename():
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
-            append_to_log(mm_file_name, {"invoke": str((M, K, N))})
+            append_to_log(mm_file_name, {"invoke": str((M, K, N)), "kernel_type": name})
 
         if len(choices) == 0:
             raise self.create_no_valid_choices(name, "No choices exist for backend.")
@@ -4300,7 +4300,10 @@ class AlgorithmSelectorCache(PersistentCache):
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
 
-            out_dict = {str((M, K, N)): [get_choice_info(choice) for choice in timings]}
+            out_dict = {
+                str((M, K, N)): [get_choice_info(choice) for choice in timings],
+                "kernel_type": name,
+            }
 
             append_to_log(mm_filename, out_dict)
 
