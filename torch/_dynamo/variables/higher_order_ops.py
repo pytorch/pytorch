@@ -241,7 +241,10 @@ def _make_inlined(
     def inline_call(
         *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker:
-        return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+        from torch._dynamo.trace_rules import _force_inline
+
+        with _force_inline():
+            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
 
     return inline_call
 
