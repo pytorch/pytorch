@@ -534,6 +534,12 @@ class SideEffects:
             obj = base_cls.__new__(user_cls)
         return obj
 
+    def track_eagerly_created_new_user_defined_object(self, variable):
+        obj = variable.value
+        self.id_to_variable[id(obj)] = variable
+        self.keepalive.append(obj)
+        return variable
+
     def track_new_user_defined_object(
         self,
         base_cls_vt: VariableTracker,
@@ -771,6 +777,41 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
+            elif (
+                isinstance(var, variables.UserDefinedObjectVariable)
+                and var.constructed_with_eager_fallback_fn
+            ):
+                assert var.mutation_type.cls_source is not None
+
+                # Wrap the eager fallback fn with torch._dynamo.disable to prevent
+                # Dynamo from retracing inside it.
+                # Step 1: Create wrapped_fn = torch._dynamo.disable(original_fn)
+                cg.add_push_null(
+                    lambda: cg.load_import_from("torch._dynamo", "disable")
+                )
+                cg(var.constructed_with_eager_fallback_fn)
+                cg.extend_output(create_call_function(1, False))
+
+                # Step 2: Store wrapped_fn in a temp var
+                wrapped_fn_var = cg.new_var()
+                cg._output.append(cg.create_store(wrapped_fn_var))
+
+                # Step 3: Push NULL and load wrapped_fn for the actual call
+                cg.add_push_null(
+                    lambda wrapped_fn_var=wrapped_fn_var: cg._output.append(
+                        cg.create_load(wrapped_fn_var)
+                    )
+                )
+
+                # Generate the args to the __new__ method
+                for arg in var.init_args:  # type: ignore[attr-defined]
+                    cg(arg)
+
+                # Call the wrapped __new__ method
+                cg.extend_output(create_call_function(len(var.init_args), False))  # type: ignore[attr-defined]
+
+                cg.add_cache(var)
+                var.source = TempLocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)
