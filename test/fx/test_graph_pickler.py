@@ -8,6 +8,7 @@ import contextlib
 import importlib
 import os
 import sys
+import unittest
 from unittest.mock import patch
 
 import torch
@@ -15,6 +16,11 @@ import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.utils._import_utils import import_dill
+
+
+dill = import_dill()
+HAS_DILL = dill is not None
 
 
 # Make the helper files in test/ importable
@@ -54,7 +60,7 @@ def make_test_cls(cls, xfail_prop="_expected_failure_graph_pickler"):
 GraphPicklerCommonTemplate = make_test_cls(CommonTemplate)
 
 
-if HAS_CPU:
+if HAS_CPU and HAS_DILL:
 
     class GraphPicklerCpuTests(TestCase):
         common = check_model
@@ -63,6 +69,7 @@ if HAS_CPU:
     copy_tests(GraphPicklerCommonTemplate, GraphPicklerCpuTests, "cpu", test_failures)
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestGraphPickler(TestCase):
     def setUp(self):
         torch._dynamo.reset()
@@ -91,6 +98,7 @@ class TestGraphPickler(TestCase):
         check_model(self, fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestDebugDumps(TestCase):
     """Tests for GraphPickler.debug_dumps debugging utility."""
 
@@ -238,6 +246,7 @@ class TestDebugDumps(TestCase):
         self.assertIn("data", result)
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestHigherOrderOperatorPickle(TestCase):
     """Tests for HigherOrderOperator pickling support in GraphPickler."""
 
@@ -304,6 +313,7 @@ class TestHigherOrderOperatorPickle(TestCase):
         self.assertIn("not found", str(cm.exception))
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestHopSchemaPickle(TestCase):
     """Tests for HopSchema pickling support."""
 
@@ -363,6 +373,7 @@ class TestHopSchemaPickle(TestCase):
         self.assertEqual(unpickled.is_varret, True)
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestSerializedGraphModule(TestCase):
     """Tests for SerializedGraphModule using GraphPickler."""
 
@@ -409,6 +420,7 @@ class TestSerializedGraphModule(TestCase):
         self.assertEqual(gm(x, y), deserialized(x, y))
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestGraphModuleGetState(TestCase):
     """Tests that _GraphModulePickleData respects custom __getstate__ methods."""
 
@@ -479,6 +491,7 @@ class TestGraphModuleGetState(TestCase):
         )
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestDillSerializationFeatures(TestCase):
     """
     Tests for dill-enabled serialization features in GraphPickler.
@@ -698,6 +711,7 @@ class TestDillSerializationFeatures(TestCase):
             self.assertEqual(node.meta["fn_with_defaults"](10), 10 + 6)
 
 
+@unittest.skipUnless(HAS_DILL, "dill not available")
 class TestNodeMetadataKeyFilter(TestCase):
     """Tests for the node_metadata_key_filter option in GraphPickler."""
 
