@@ -17,6 +17,12 @@ inline namespace CPU_CAPABILITY {
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
+#ifdef __AVX10_2__
+  // It takes effect only with compatible compiler and hardware in Inductor CPP
+  // backend. No effect on eager mode.
+  __m256h f16_vec = _mm256_cvthf8_ph(a);
+  o = _mm512_cvtph_ps(_mm256_castph_si256(f16_vec));
+#else
   // Zero Extend
   __m512i x = _mm512_cvtepu8_epi32(a);
   __m512i val = _mm512_and_epi32(
@@ -92,6 +98,7 @@ static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
   val = _mm512_or_si512(val, _mm512_slli_epi32(sign, 24));
 
   o = _mm512_castsi512_ps(val);
+#endif
 }
 
 static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
