@@ -116,6 +116,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+          checkout-mode: treeless
 
       - name: Setup Python
         if: contains(matrix.runner, 'b200')
