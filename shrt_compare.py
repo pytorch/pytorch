@@ -118,64 +118,56 @@ def get_dtensor_strategies_for_op(op_overload, input_specs, mesh):
     return None, "not_registered"
 
 
-def get_aten_op_for_opinfo(opinfo):
-    """
-    Get the aten op that corresponds to this opinfo.
-    Uses the opinfo's aten_name or falls back to name mapping.
-    """
-    aten = torch.ops.aten
+class _CaptureAtenOp(torch.utils._python_dispatch.TorchDispatchMode):
+    """Dispatch mode that captures the first aten op called and its args."""
 
-    # Check if opinfo has aten_name attribute
-    if hasattr(opinfo, 'aten_name') and opinfo.aten_name:
-        name = opinfo.aten_name
-    else:
-        name = opinfo.name
+    def __init__(self):
+        self.captured_op = None
+        self.captured_args = None
+        self.captured_kwargs = None
 
-    # Common op name mappings to aten ops
-    op_mappings = {
-        'add': aten.add.Tensor,
-        'sub': aten.sub.Tensor,
-        'mul': aten.mul.Tensor,
-        'div': aten.div.Tensor,
-        'matmul': aten.matmul.default,
-        'mm': aten.mm.default,
-        'bmm': aten.bmm.default,
-        'addmm': aten.addmm.default,
-        'neg': aten.neg.default,
-        'abs': aten.abs.default,
-        'exp': aten.exp.default,
-        'log': aten.log.default,
-        'sqrt': aten.sqrt.default,
-        'relu': aten.relu.default,
-        'sigmoid': aten.sigmoid.default,
-        'tanh': aten.tanh.default,
-        'sum': aten.sum.default,
-        'mean': aten.mean.default,
-        'max': aten.max.default,
-        'min': aten.min.default,
-        'cat': aten.cat.default,
-        'stack': aten.stack.default,
-        'view': aten.view.default,
-        'reshape': aten.reshape.default,
-        'transpose': aten.transpose.int,
-        'permute': aten.permute.default,
-        'contiguous': aten.contiguous.default,
-        'clone': aten.clone.default,
-        't': aten.t.default,
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        if self.captured_op is None and func.namespace == "aten":
+            self.captured_op = func
+            self.captured_args = args
+            self.captured_kwargs = kwargs
+        return func(*args, **kwargs)
+
+
+def get_aten_op_for_sample(op, sample):
+    """
+    Determine the actual aten op that will be dispatched for a given sample.
+
+    Runs the operation through a capture mode to see which aten overload
+    is actually used (e.g., sum.default vs sum.dim_IntList).
+
+    Returns (aten_op, non_tensor_args, non_tensor_kwargs) where the args/kwargs
+    are the actual values passed to the aten op (with tensors removed).
+    """
+    with _CaptureAtenOp() as capture:
+        try:
+            if isinstance(sample.input, torch.Tensor):
+                op(sample.input, *sample.args, **sample.kwargs)
+            else:
+                op(*sample.input, *sample.args, **sample.kwargs)
+        except Exception:
+            pass
+
+    if capture.captured_op is None:
+        return None, (), {}
+
+    # Extract non-tensor args and kwargs from what was actually passed to aten op
+    non_tensor_args = tuple(
+        a for a in capture.captured_args if not isinstance(a, torch.Tensor)
+    )
+    non_tensor_kwargs = {
+        k: v for k, v in capture.captured_kwargs.items()
+        if not isinstance(v, torch.Tensor)
     }
 
-    if name in op_mappings:
-        return op_mappings[name]
-
-    # Try to find it dynamically
-    if hasattr(aten, name):
-        op_packet = getattr(aten, name)
-        # Try common overloads
-        for overload in ['default', 'Tensor', 'out']:
-            if hasattr(op_packet, overload):
-                return getattr(op_packet, overload)
-
-    return None
+    return capture.captured_op, non_tensor_args, non_tensor_kwargs
 
 
 def query_single_dim_strategy(op_overload, tensors, mesh):
@@ -315,7 +307,7 @@ def compare_operator(
             output_placement_options = get_1d_output_placements_for_tensor(ground_truth)
 
             # Query DTensor's single-dim strategy (if available)
-            aten_op = get_aten_op_for_opinfo(opinfo)
+            aten_op, non_tensor_args, non_tensor_kwargs = get_aten_op_for_sample(op, sample)
 
             from torch.distributed.tensor._api import DTensor
             propagator = DTensor._op_dispatcher.sharding_propagator
@@ -340,7 +332,7 @@ def compare_operator(
                             ))
 
             elif aten_op and aten_op in propagator.op_strategy_funcs:
-                # Query op_strategy_funcs for ops like mm, bmm
+                # Query op_strategy_funcs for ops like mm, bmm, sum
                 # These take OpSchema with input OpStrategies and return output OpStrategy
                 from torch.distributed.tensor._op_schema import OpSchema, OpStrategy, OpSpec, DTensorSpec
                 from torch.distributed.tensor._dtensor_spec import TensorMeta
@@ -363,8 +355,11 @@ def compare_operator(
                             specs.append(OpSpec(output_specs=spec, input_specs=tuple()))
                         input_strategies.append(OpStrategy(specs))
 
-                    # Build OpSchema
-                    op_schema = OpSchema(aten_op, tuple(input_strategies), {})
+                    # Build args_schema: tensor strategies + captured non-tensor args
+                    args_schema = list(input_strategies) + list(non_tensor_args)
+
+                    # Build OpSchema with captured non-tensor kwargs
+                    op_schema = OpSchema(aten_op, tuple(args_schema), non_tensor_kwargs)
 
                     # Call strategy function
                     strategy_func = propagator.op_strategy_funcs[aten_op]
