@@ -319,17 +319,10 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         to trace through and potentially optimize the code.
 
     Usage:
-        **Supported Inputs**:
-        - Inputs must use pytree-compatible types: tensors, Python primitives
-        (int, float, bool, str), and built-in containers (list, tuple, dict).
-        User-defined classes must be registered as pytree nodes via
-        :func:`torch.utils.pytree.register_pytree_node`.
-        - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers are
-        tracked for autograd. The module must exist outside the compile region.
-
-        **Supported Outputs**: Must be a tuple of tensors: ``return (tensor,)`` for one tensor,
-        ``return (a, b)`` for multiple. Primitive types (int, float, bool, str) can also be
-        included in outputs.
+        **Inputs and Outputs**:
+        - Both inputs and outputs must use pytree-compatible types.
+        Tensors, Python primitives (int, float, bool, str), and built-in containers
+        (list, tuple, dict) are supported by default.
 
         Note: We recommend leaf_functions only accept and return tensors. Though primitive
         types (int, float, bool, str) are supported in inputs and outputs, they may cause
@@ -356,7 +349,33 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             >>> # At runtime: real function runs (counter increments to 1, 2, 3, ...)
             >>> # But returned count is always 999 (from fake implementation at compile time)
 
-        **register_fake (required)**: Since the function body is not traced, you must
+            # BAD: primitive output varies at runtime
+            counter = 0
+
+
+            @leaf_function
+            def count_calls(x):
+                global counter
+                counter += 1
+                return (x, counter)
+
+
+            @count_calls.register_fake
+            def count_calls_fake(x):
+                return (x, 999)  # placeholder value
+
+
+            # At runtime: real function runs (counter increments to 1, 2, 3, ...)
+            # But returned count is always 999 (from register_fake at compile time)
+
+        - User-defined classes must be registered via :func:`torch.utils._pytree.register_pytree_node`,
+        :func:`torch.utils._pytree.register_dataclass`, or :func:`torch.utils._pytree.register_constant`.
+
+        - :class:`torch.nn.Module` can also be passed as input; its parameters and buffers
+        are tracked for autograd. The module must exist outside the compile region.
+
+        **register_fake (required)**:
+        Since the function body is not traced, you must
         provide a shape-inference function via ``@fn.register_fake``. It runs at compile
         time with FakeTensor inputs (tensors with no data, only metadata) and must
         satisfy the following requirements:

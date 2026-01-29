@@ -477,13 +477,6 @@ def _validate_outputs_match(
     fake_output: Any,
     real_output: Any,
 ) -> None:
-    """
-    Validate that fake_fn and real_fn outputs have matching pytree structure,
-    shapes, and dtypes.
-
-    Raises:
-        RuntimeError: If outputs don't match with detailed error message.
-    """
     fake_flat, fake_spec = pytree.tree_flatten(fake_output)
     real_flat, real_spec = pytree.tree_flatten(real_output)
 
@@ -498,8 +491,8 @@ def _validate_outputs_match(
     if len(fake_flat) != len(real_flat):
         raise RuntimeError(
             f"Output count mismatch in @leaf_function decorator.\n"
-            f"fake_impl returned {len(fake_flat)} values\n"
-            f"real_impl returned {len(real_flat)} values"
+            f"fake_impl returned {len(fake_output)} values\n"
+            f"real_impl returned {len(real_output)} values"
         )
 
     for i, (fake_val, real_val) in enumerate(zip(fake_flat, real_flat)):

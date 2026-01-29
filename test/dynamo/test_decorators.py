@@ -3417,6 +3417,157 @@ class GraphModule(torch.nn.Module):
             def bad_fn2(x):
                 return (x,)
 
+    def test_leaf_function_dict_output(self):
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def dict_output_fn(linear1, linear2, x):
+            if x.sum() > 0:
+                return {"a": linear1(x), "b": linear2(x)}
+            else:
+                return {"a": linear1(x) + 1, "b": linear2(x) + 1}
+
+        @dict_output_fn.register_fake
+        def dict_output_fn_fake(linear1, linear2, x):
+            return {"a": linear1(x), "b": linear2(x)}
+
+        class DictOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return dict_output_fn(self.linear1, self.linear2, x)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out["a"].sum() + out["b"].sum()
+
+        self._test_leaf_function_helper(DictOutputModule, args_fn, loss_fn)
+
+    def test_leaf_function_nested_output(self):
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def nested_output_fn(linear1, linear2, linear3, x):
+            if x.sum() > 0:
+                return {
+                    "out": (linear1(x), linear2(x)),
+                    "extra": linear3(x),
+                }
+            else:
+                return {
+                    "out": (linear1(x) + 1, linear2(x) + 1),
+                    "extra": linear3(x) + 1,
+                }
+
+        @nested_output_fn.register_fake
+        def nested_output_fn_fake(linear1, linear2, linear3, x):
+            return {
+                "out": (linear1(x), linear2(x)),
+                "extra": linear3(x),
+            }
+
+        class NestedOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.linear3 = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return nested_output_fn(self.linear1, self.linear2, self.linear3, x)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out["out"][0].sum() + out["out"][1].sum() + out["extra"].sum()
+
+        self._test_leaf_function_helper(NestedOutputModule, args_fn, loss_fn)
+
+    def test_leaf_function_custom_pytree_input(self):
+        """Test leaf_function with custom pytree class input."""
+        from torch._dynamo.decorators import leaf_function
+
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        self.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
+        )
+
+        @leaf_function
+        def point_fn(linear, p):
+            return (linear(p.x) * p.y,)
+
+        @point_fn.register_fake
+        def point_fn_fake(linear, p):
+            return (linear(p.x) * p.y,)
+
+        class PointModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, p):
+                return point_fn(self.linear, p)
+
+        def args_fn():
+            return (
+                Point(
+                    torch.randn(3, 3, requires_grad=True),
+                    torch.randn(3, 3, requires_grad=True),
+                ),
+            )
+
+        def loss_fn(out):
+            return out[0].sum()
+
+        self._test_leaf_function_helper(PointModule, args_fn, loss_fn)
+
+    def test_leaf_function_primitive_output(self):
+        """Test leaf_function with primitive type outputs (int, float)."""
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def fn_with_primitives(linear, x):
+            y = linear(x)
+            return (y, len(x.shape), 0.5)
+
+        @fn_with_primitives.register_fake
+        def fn_with_primitives_fake(linear, x):
+            y = linear(x)
+            return (y, len(x.shape), 0.5)
+
+        class PrimitiveOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                y, n, f = fn_with_primitives(self.linear, x)
+                return y * n + f
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out.sum()
+
+        self._test_leaf_function_helper(PrimitiveOutputModule, args_fn, loss_fn)
+
 
 instantiate_parametrized_tests(DecoratorTests)
 
