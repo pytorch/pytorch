@@ -2757,6 +2757,9 @@ Tensor backward_analytic_function_of_a_matrix(
     const Tensor& self, const Tensor& grad,
     const func_t& function_of_a_matrix
   ) {
+  TORCH_CHECK(
+      self.dim() >= 2,
+      "backward_analytic_function_of_a_matrix: The input tensor must have at least 2 dimensions.");
   auto self_transposed = self.mH();
   auto self_transposed_sizes = self_transposed.sizes().vec();
   self_transposed_sizes[self.dim() - 2] <<= 1;
