@@ -1025,9 +1025,10 @@ inductor_skip_exact_stride = {
 # tensor strides compared to eager mode, so exact stride checks are relaxed
 # for certain ops.
 inductor_skip_exact_stride_xpu = {
+    "nn.functional.conv2d",
+    "nn.functional.conv_transpose2d",
     "nn.functional.max_unpool2d",
     "nn.functional.max_unpool2d.grad",
-    "nn.functional.conv_transpose2d",
 }
 
 # Custom replacements for assertEquals, in cases where a difference in value
