@@ -84,7 +84,6 @@ from .ctx_manager import (
     ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
-from .dicts import ConstDictVariable
 from .distributed import DistributedVariable
 from .functions import bind_args_cached, NestedUserFunctionVariable
 from .lists import ListVariable, NamedTupleVariable, TupleVariable
@@ -2461,21 +2460,19 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         from .base import AsPythonConstantNotImplementedError
         from .builder import wrap_fx_proxy
+        from .higher_order_ops import _make_inlined
+
+        # Extract nn.Module states before flattening (converts modules to LeafModuleState)
+        args_with_states, kwargs_with_states = self._extract_nn_module_states(
+            tx, args, kwargs
+        )
 
         # 1. Convert `args, kwargs` into pytree-flattened proxy forms.
         #
-        # Rather than reconstructing `args, kwargs` into python objects and
-        # then tree_flatten them, we just let Dynamo symbolically interpret
-        # `tree_flatten((args, kwargs))`. This saves us from having to
-        # worry about the reconstruction logic, side effects, and guards.
-        packed_input_vt = TupleVariable.build(
-            tx, (TupleVariable.build(tx, args), ConstDictVariable.build(tx, kwargs))
-        )
-        out_vt = variables.UserFunctionVariable(tree_flatten).call_function(  # type: ignore[arg-type]
-            tx, [packed_input_vt], {}
-        )
-        assert isinstance(out_vt, TupleVariable) and len(out_vt.items) == 2
-        flat_args_vts, input_spec_vt = out_vt.items
+        # Use _make_inlined to symbolically trace the tree_flatten operation.
+        flat_args_vts, input_spec_vt = _make_inlined(tx, tree_flatten)(
+            VariableTracker.build(tx, (args_with_states, kwargs_with_states))
+        ).unpack_var_sequence(tx)
         assert isinstance(flat_args_vts, ListVariable)
 
         # Handle the case when the input contains a non-graphable type.
@@ -2787,11 +2784,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
-        flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
+        flat_args_vts, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
             VariableTracker.build(tx, (args_with_states, kwargs_with_states))
         ).unpack_var_sequence(tx)
         flat_arg_proxies = [
-            arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
+            arg.as_proxy() for arg in flat_args_vts.unpack_var_sequence(tx)
         ]
         input_spec = (
             input_spec_var.as_python_constant()
