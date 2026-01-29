@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import itertools
 import json
 import logging
 import os
@@ -274,7 +275,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
             if not hasattr(toplevel, part):
                 _raise_resolution_error(code, toplevel)
             toplevel = getattr(toplevel, part)
-            if inspect.isfunction(toplevel):
+            if inspect.isfunction(toplevel) or inspect.ismethod(toplevel):
                 break
     seen = set()
 
@@ -294,6 +295,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                 if (res := _find_code_source(const)) is not None:
                     return f".co_consts[{i}]{res}"
 
+        if inspect.ismethod(obj):
+            if (res := _find_code_source(obj.__func__)) is not None:
+                toplevel = obj
+                return f".__func__{res}"
+
         if inspect.isfunction(obj):
             if (res := _find_code_source(obj.__code__)) is not None:
                 toplevel = obj
@@ -307,6 +313,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                     if not (
                         inspect.isfunction(cell_contents)
                         or inspect.iscode(cell_contents)
+                        or inspect.ismethod(cell_contents)
                     ):
                         continue
                     if (res := _find_code_source(cell_contents)) is not None:
@@ -316,15 +323,26 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
         if sys.version_info < (3, 11):
             if inspect.ismodule(obj):
                 for value in obj.__dict__.values():
-                    if not (inspect.isfunction(value) or inspect.isclass(value)):
+                    if not (
+                        inspect.isfunction(value)
+                        or inspect.isclass(value)
+                        or inspect.ismethod(value)
+                    ):
                         continue
                     if (res := _find_code_source(value)) is not None:
                         return res
 
             if inspect.isclass(obj):
-                for name, value in obj.__dict__.items():
-                    value = getattr(obj, name)
-                    if not (inspect.isfunction(value) or inspect.isclass(value)):
+                for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
+                    try:
+                        value = getattr(obj, name)
+                    except AttributeError:
+                        continue
+                    if not (
+                        inspect.isfunction(value)
+                        or inspect.isclass(value)
+                        or inspect.ismethod(value)
+                    ):
                         continue
                     if (res := _find_code_source(value)) is not None:
                         if value.__name__ != name:
