@@ -11,7 +11,8 @@ import torch
 # Verifies each given dtype is a torch.dtype
 def _validate_dtypes(*dtypes):
     for dtype in dtypes:
-        assert isinstance(dtype, torch.dtype)
+        if not isinstance(dtype, torch.dtype):
+            raise TypeError(f"Expected torch.dtype, got {type(dtype).__name__}")
     return dtypes
 
 
@@ -20,7 +21,8 @@ class _dispatch_dtypes(tuple):
     __slots__ = ()
 
     def __add__(self, other):
-        assert isinstance(other, tuple)
+        if not isinstance(other, tuple):
+            raise TypeError(f"Expected tuple, got {type(other).__name__}")
         return _dispatch_dtypes(tuple.__add__(self, other))
 
 

@@ -54,9 +54,11 @@ def _requantize(x, multiplier, zero_point, qmin=0, qmax=255, qtype=np.uint8):
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False, qscheme=torch.per_tensor_affine):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
-    assert qscheme in (torch.per_tensor_affine, torch.per_tensor_symmetric)
+    if qscheme not in (torch.per_tensor_affine, torch.per_tensor_symmetric):
+        raise AssertionError(f"qscheme must be per_tensor_affine or per_tensor_symmetric, got {qscheme}")
     if qscheme == torch.per_tensor_symmetric:
-        assert dtype == torch.qint8
+        if dtype != torch.qint8:
+            raise AssertionError("dtype must be torch.qint8 for per_tensor_symmetric qscheme")
     if isinstance(X, torch.Tensor):
         X = X.numpy()
     if dtype == torch.qint8:
@@ -130,7 +132,8 @@ def _snr(x, x_hat):
         signal, noise, SNR(in dB): Either floats or a nested list of floats
     """
     if isinstance(x, (list, tuple)):
-        assert len(x) == len(x_hat)
+        if len(x) != len(x_hat):
+            raise AssertionError(f"x and x_hat must have same length: len(x)={len(x)}, len(x_hat)={len(x_hat)}")
         res = [_snr(x[idx], x_hat[idx]) for idx in range(len(x))]
         return res
     if x_hat.is_quantized:
@@ -256,8 +259,10 @@ def _f32_to_floatx_unpacked(x: Tensor, ebits: int, mbits: int) -> Tensor:
     Background 1: last answer in https://stackoverflow.com/q/8981913
     Background 2: Computer Organization and Design, RISC-V edition, Chapter 3.5
     """
-    assert x.dtype == torch.float
-    assert 1 + ebits + mbits <= 8
+    if x.dtype != torch.float:
+        raise AssertionError(f"x.dtype must be torch.float, got {x.dtype}")
+    if 1 + ebits + mbits > 8:
+        raise AssertionError(f"1 + ebits + mbits must be <= 8, got {1 + ebits + mbits}")
 
     # calculate constants
     exp_bias = _n_ones(ebits - 1)
@@ -367,8 +372,10 @@ def _floatx_unpacked_to_f32(x: Tensor, ebits: int, mbits: int) -> Tensor:
       fp6: bits 0-1 empty and bits 2-7 in fp6_e2m3 or fp6_e3m2 encoding
     Output: torch.Tensor of dtype fp32 with the dequantized value
     """
-    assert x.dtype == torch.uint8
-    assert 1 + ebits + mbits <= 8
+    if x.dtype != torch.uint8:
+        raise AssertionError(f"x.dtype must be torch.uint8, got {x.dtype}")
+    if 1 + ebits + mbits > 8:
+        raise AssertionError(f"1 + ebits + mbits must be <= 8, got {1 + ebits + mbits}")
 
     sign_mask = 1 << (ebits + mbits)
     exp_bias = _n_ones(ebits - 1)
@@ -536,14 +543,16 @@ def to_blocked(input_matrix) -> torch.Tensor:
 
 
 def down_size(size):
-    assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
+    if size[-1] % 2:
+        raise AssertionError(f"{size} last dim not divisible by two")
     return (*size[:-1], size[-1] // 2)
 
 
 def pack_uint4(uint8_data) -> torch.Tensor:
     # converting to uint8 for operations
     shape = uint8_data.shape
-    assert shape[-1] % 2 == 0
+    if shape[-1] % 2:
+        raise AssertionError(f"Last dimension of shape must be divisible by 2, got shape={shape}")
     uint8_data = uint8_data.contiguous().view(-1)
     return (uint8_data[1::2] << 4 | uint8_data[::2]).view(down_size(shape))
 
@@ -553,7 +562,8 @@ FP4_EBITS, FP4_MBITS = 2, 1
 
 
 def _bfloat16_to_float4_e2m1fn_x2(x):
-    assert x.dtype == torch.bfloat16
+    if x.dtype != torch.bfloat16:
+        raise AssertionError(f"x.dtype must be torch.bfloat16, got {x.dtype}")
     x = _f32_to_floatx_unpacked(x.float(), FP4_EBITS, FP4_MBITS)
     x = pack_uint4(x)
     x = x.view(torch.float4_e2m1fn_x2)
@@ -566,14 +576,15 @@ def to_mxfp(
     block_size: int = 32,
     format: str = "mxfp8",
 ):
-    assert data_hp.dtype in (
+    if data_hp.dtype not in (
         torch.bfloat16,
         torch.float,
-    ), f"{data_hp.dtype} is not supported yet"
-    assert (
-        data_hp.shape[-1] % block_size == 0
-    ), f"the last dimension of shape {data_hp.shape} must be divisible by block_size {block_size}"
-    assert data_hp.is_contiguous(), "unsupported"
+    ):
+        raise AssertionError(f"{data_hp.dtype} is not supported yet")
+    if data_hp.shape[-1] % block_size:
+        raise AssertionError(f"the last dimension of shape {data_hp.shape} must be divisible by block_size {block_size}")
+    if not data_hp.is_contiguous():
+        raise AssertionError("data_hp must be contiguous")
 
     orig_shape = data_hp.shape
     data_hp = data_hp.reshape(
