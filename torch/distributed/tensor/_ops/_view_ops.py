@@ -24,6 +24,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -796,3 +797,5 @@ register_op_strategy_map(
 )
 register_op_strategy_map(aten.view_as_complex.default, torch.view_as_complex)
 register_op_strategy_map(aten.view_as_real.default, torch.view_as_real)
+
+
