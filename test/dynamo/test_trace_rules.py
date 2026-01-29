@@ -48,6 +48,7 @@ ignored_c_binding_in_graph_function_names = {
     "torch.sparse_csc_tensor",
     "torch.sparse_csr_tensor",
     "torch.cuda._get_device_properties",
+    "torch.xpu._get_device_properties",
     # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
