@@ -273,7 +273,7 @@ void CPUGeneratorImpl::set_next_double_normal_sample(std::optional<double> randn
 /**
  * Get the engine of the CPUGeneratorImpl
  */
-at::mt19937 CPUGeneratorImpl::engine() {
+at::mt19937& CPUGeneratorImpl::engine() {
   return engine_;
 }
 
