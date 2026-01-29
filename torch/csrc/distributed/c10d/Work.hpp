@@ -31,6 +31,7 @@ enum class OpType : std::uint8_t {
   _REDUCE_SCATTER_BASE = 16,
   COALESCED = 17,
   _ALLREDUCE_SPARSE = 18,
+  REDUCE_SCATTER_TENSOR_COALESCED = 19,
   UNKNOWN = 100,
 };
 
