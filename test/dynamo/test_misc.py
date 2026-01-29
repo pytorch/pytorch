@@ -13645,11 +13645,27 @@ fn
             with torch._functorch.config.patch(
                 check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
             ):
-                with self.assertWarnsRegex(
-                    UserWarning,
-                    "The output of this custom operator \(1\) must not also be an input",
-                ):
+                import warnings
+
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
                     _ = compiled_fn(x)
+                    aliasing_warnings = [
+                        x for x in w if "may not alias any inputs" in str(x.message)
+                    ]
+                    self.assertEqual(len(aliasing_warnings), 1)
+                    msg = str(aliasing_warnings[0].message)
+                    self.assertEqual(
+                        msg,
+                        "mylib::alias_op2 (with implementation in ???): "
+                        "The output of this custom operator (1) must not also be an input "
+                        "to this custom operator and (2) may not alias any inputs to this "
+                        "custom operator or other returns. The most common way to trigger "
+                        "this error is if we have y = custom_op(x) and y and x are the same "
+                        "Tensor. Please instead return a clone of the offending output "
+                        "tensor(s) (e.g. return x.clone()) or refactor the custom operator "
+                        "to not return y. This will become an error in PyTorch 2.12 or later.",
+                    )
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

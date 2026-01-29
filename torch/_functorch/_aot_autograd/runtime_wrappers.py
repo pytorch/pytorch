@@ -332,7 +332,8 @@ def _check_custom_op_aliasing(name, args, kwargs, result):
         if config.error_on_custom_op_aliasing:
             raise
         else:
-            warnings.warn(str(e), UserWarning, stacklevel=3)
+            msg = f"{e} This will become an error in PyTorch 2.12 or later."
+            warnings.warn(msg, UserWarning, stacklevel=3)
 
 
 @functools.lru_cache(None)
