@@ -1,15 +1,11 @@
 class OpaqueBaseMeta(type):
     def __instancecheck__(cls, instance):
-        if super().__instancecheck__(instance):
-            return True
+        from torch._library.fake_class_registry import FakeScriptObject
 
-        if hasattr(instance, "real_obj"):
-            from torch._library.fake_class_registry import FakeScriptObject
-
-            if isinstance(instance, FakeScriptObject):
-                return super().__instancecheck__(instance.real_obj)
-
-        return False
+        return super().__instancecheck__(instance) or (
+            isinstance(instance, FakeScriptObject)
+            and super().__instancecheck__(instance.real_obj)
+        )
 
 
 class OpaqueBase(metaclass=OpaqueBaseMeta):

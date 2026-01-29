@@ -2024,6 +2024,8 @@ class BuiltinVariable(VariableTracker):
                 variables.ConstDictVariable,
                 variables.NNModuleVariable,
                 variables.TensorVariable,
+                variables.TupleVariable,
+                variables.DictItemsVariable,
             ),
         ):
             return obj.call_method(tx, "__iter__", [], {})
@@ -2738,6 +2740,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
+                variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
