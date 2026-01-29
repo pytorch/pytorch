@@ -548,11 +548,14 @@ def get_comprehension_result_patterns() -> dict[str, dict[str, list[str]]]:
     def fn_returned() -> list[int]:
         return [i for i in range(1)]  # noqa: C416
 
+    def fn_consumed() -> int:
+        return sum([i for i in range(1)])  # noqa: C416
+
     def extract_sequences(fn: Callable[..., Any]) -> tuple[list[str], list[str]]:
         """Extract (prefix, postfix) from function bytecode.
 
         prefix: all opcodes from END_FOR+1 until first STORE_FAST
-        postfix: just the first opcode after all STORE_FASTs (for disambiguation)
+        postfix: all opcodes from the last contiguous STORE_FAST after the first STORE_FAST until the end
         """
         insts = list(dis.get_instructions(fn))
 
@@ -568,35 +571,35 @@ def get_comprehension_result_patterns() -> dict[str, dict[str, list[str]]]:
                     end_for_idx = i
                     break
 
-        if end_for_idx == -1:
+        if end_for_idx == -1:  # TODO: xgz2 this feels like it should be an assertion.
             return [], []
 
-        # Extract prefix: ALL opcodes from END_FOR+1 until first STORE_FAST
         prefix: list[str] = []
         idx = end_for_idx + 1
         while idx < len(insts) and insts[idx].opname != "STORE_FAST":
             prefix.append(insts[idx].opname)
             idx += 1
 
-        # Consume all STORE_FASTs to find postfix start
         while idx < len(insts) and insts[idx].opname == "STORE_FAST":
             idx += 1
 
-        # Extract postfix: just the first opcode (for returned vs consumed)
         postfix: list[str] = []
-        if idx < len(insts):
+        while idx < len(insts) and insts[idx].opname != "CALL":
             postfix.append(insts[idx].opname)
+            idx += 1
 
         return prefix, postfix
 
     stored_prefix, stored_postfix = extract_sequences(fn_stored)
     discarded_prefix, discarded_postfix = extract_sequences(fn_discarded)
     returned_prefix, returned_postfix = extract_sequences(fn_returned)
+    consumed_prefix, consumed_postfix = extract_sequences(fn_consumed)
 
     return {
-        "stored": {"prefix": stored_prefix, "postfix": []},  # postfix ignored
-        "discarded": {"prefix": discarded_prefix, "postfix": []},  # postfix ignored
+        "stored": {"prefix": stored_prefix, "postfix": []},
+        "discarded": {"prefix": discarded_prefix, "postfix": []},
         "returned": {"prefix": returned_prefix, "postfix": returned_postfix},
+        "consumed": {"prefix": consumed_prefix, "postfix": consumed_postfix}
     }
 
 
@@ -4510,8 +4513,7 @@ class InstructionTranslatorBase(
                     break
             ip += 1
 
-        if end_for_ip == -1:
-            raise AssertionError("Could not find END_FOR for comprehension")
+        assert end_for_ip >= 0
 
         # Scan loop body for COPY + STORE_FAST walrus pattern
         # Walrus operators compile to: COPY 1 followed by STORE_FAST <varname>
@@ -4523,8 +4525,10 @@ class InstructionTranslatorBase(
             if self.instructions[scan_ip].opname == "FOR_ITER":
                 for_iter_ip = scan_ip
                 break
+        
+        assert for_iter_ip >= 0
 
-        if for_iter_ip >= 0:
+        if for_iter_ip >= 0:  # TODO xgz2: do we need this check here? or should we assert that for_iter exists
             scan_ip = for_iter_ip + 1
             while scan_ip < end_for_ip:
                 inst = self.instructions[scan_ip]
@@ -4543,7 +4547,7 @@ class InstructionTranslatorBase(
                     continue
 
                 # Detect walrus pattern: COPY 1 followed by STORE_FAST
-                if inst.opname == "COPY" and inst.arg == 1:
+                if inst.opname == "COPY" and inst.arg == 1:  # TODO: xgz2 do we need to also get these for nested comprehensions? Should add a test for nested comp w/ walrus
                     if scan_ip + 1 < end_for_ip:
                         next_inst = self.instructions[scan_ip + 1]
                         if next_inst.opname == "STORE_FAST":
@@ -4562,8 +4566,8 @@ class InstructionTranslatorBase(
         captured_vars: list[str] = []
         defined_inside: set[str] = set(iterator_vars) | set(walrus_vars)
 
-        if for_iter_ip >= 0:
-            scan_ip = for_iter_ip + 1
+        if for_iter_ip >= 0:  # TODO xgz2: do we need this check here? or should we assert that for_iter exists
+            scan_ip = for_iter_ip + 1  # TODO xgz2: also why don't we just combine this with the above block?
             while scan_ip < end_for_ip:
                 inst = self.instructions[scan_ip]
 
@@ -4615,7 +4619,6 @@ class InstructionTranslatorBase(
 
         store_fast_start_ip = ip
 
-        # Consume all STORE_FASTs to find postfix start
         while (
             ip < len(self.instructions)
             and self.instructions[ip].opname == "STORE_FAST"
@@ -4624,15 +4627,47 @@ class InstructionTranslatorBase(
 
         postfix_start_ip = ip
 
-        # Extract first postfix opcode (for returned vs consumed disambiguation)
-        first_postfix_opcode = None
-        if postfix_start_ip < len(self.instructions):
-            first_postfix_opcode = self.instructions[postfix_start_ip].opname
+        def matches_pattern(disposition: str) -> bool:
+            pattern = patterns[disposition]
+            postfix_len = len(pattern["postfix"])
+            postfix = self.instructions[postfix_start_ip : postfix_start_ip + postfix_len]
+            return prefix == pattern["prefix"] and postfix == pattern["postfix"]
 
-        # Check STORED: prefix matches stored pattern
-        if prefix == patterns["stored"]["prefix"]:
+        if matches_pattern("discarded"):
+            return ComprehensionAnalysis(
+                end_ip=postfix_start_ip,
+                result_var=None,
+                result_on_stack=False,
+                result_disposition="discarded",
+                iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
+            )
+
+        if matches_pattern("returned"):
+            return ComprehensionAnalysis(
+                end_ip=postfix_start_ip,
+                result_var=None,
+                result_on_stack=True,
+                result_disposition="returned",
+                iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
+            )
+
+        if matches_pattern("consumed"):
+            return ComprehensionAnalysis(
+                end_ip=postfix_start_ip,
+                result_var=None,
+                result_on_stack=True,
+                result_disposition="consumed",
+                iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
+            )
+
+        if matches_pattern("stored"):
             result_var = self.instructions[store_fast_start_ip].argval
-            # end_ip is after all STORE_FASTs
             end_ip = store_fast_start_ip + 1
             while (
                 end_ip < len(self.instructions)
@@ -4649,53 +4684,7 @@ class InstructionTranslatorBase(
                 captured_vars=captured_vars,
             )
 
-        # Check DISCARDED: prefix matches discarded pattern
-        if prefix == patterns["discarded"]["prefix"]:
-            return ComprehensionAnalysis(
-                end_ip=postfix_start_ip,
-                result_var=None,
-                result_on_stack=False,
-                result_disposition="discarded",
-                iterator_vars=iterator_vars,
-                walrus_vars=walrus_vars,
-                captured_vars=captured_vars,
-            )
-
-        # Check RETURNED: prefix matches returned pattern AND first postfix is RETURN
-        returned_postfix = patterns["returned"]["postfix"]
-        if prefix == patterns["returned"]["prefix"]:
-            if returned_postfix and first_postfix_opcode == returned_postfix[0]:
-                return ComprehensionAnalysis(
-                    end_ip=postfix_start_ip,  # At RETURN_VALUE
-                    result_var=None,
-                    result_on_stack=True,
-                    result_disposition="returned",
-                    iterator_vars=iterator_vars,
-                    walrus_vars=walrus_vars,
-                    captured_vars=captured_vars,
-                )
-            else:
-                # CONSUMED: prefix matches but postfix doesn't match RETURN
-                return ComprehensionAnalysis(
-                    end_ip=postfix_start_ip,  # At consuming instruction
-                    result_var=None,
-                    result_on_stack=True,
-                    result_disposition="consumed",
-                    iterator_vars=iterator_vars,
-                    walrus_vars=walrus_vars,
-                    captured_vars=captured_vars,
-                )
-
-        # Fallback for completely unexpected patterns
-        return ComprehensionAnalysis(
-            end_ip=postfix_start_ip,
-            result_var=None,
-            result_on_stack=False,
-            result_disposition="stored",
-            iterator_vars=iterator_vars,
-            walrus_vars=walrus_vars,
-            captured_vars=captured_vars,
-        )
+        raise AssertionError("Comprehension does not match any known pattern")
 
     def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
         """Handle graph break for a comprehension by skipping the comprehension bytecode.
