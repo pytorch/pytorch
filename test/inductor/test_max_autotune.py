@@ -3248,7 +3248,9 @@ class TestTuningProcessPool(TestCase):
         # Create a simple feedback saver function
         feedback_calls = []
 
-        def simple_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+        def simple_feedback_saver(
+            timings, name, input_nodes, choices, profiled_time, precompile_times
+        ):
             feedback_calls.append(
                 {
                     "name": name,
@@ -3267,7 +3269,9 @@ class TestTuningProcessPool(TestCase):
         self.assertEqual(cache.feedback_saver_fns[0], simple_feedback_saver)
 
         # Test that we can add multiple feedback savers
-        def another_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+        def another_feedback_saver(
+            timings, name, input_nodes, choices, profiled_time, precompile_times
+        ):
             pass
 
         add_feedback_saver(another_feedback_saver)
@@ -3281,10 +3285,14 @@ class TestTuningProcessPool(TestCase):
         from torch._inductor.select_algorithm import get_algorithm_selector_cache
 
         # Add some feedback savers first
-        def feedback_saver1(timings, name, input_nodes, choices, profiled_time):
+        def feedback_saver1(
+            timings, name, input_nodes, choices, profiled_time, precompile_times
+        ):
             pass
 
-        def feedback_saver2(timings, name, input_nodes, choices, profiled_time):
+        def feedback_saver2(
+            timings, name, input_nodes, choices, profiled_time, precompile_times
+        ):
             pass
 
         add_feedback_saver(feedback_saver1)
@@ -3307,7 +3315,9 @@ class TestTuningProcessPool(TestCase):
 
         feedback_calls = []
 
-        def test_feedback_saver(timings, name, input_nodes, choices, profiled_time):
+        def test_feedback_saver(
+            timings, name, input_nodes, choices, profiled_time, precompile_times
+        ):
             # Store information about the call for verification
             feedback_calls.append(
                 {
