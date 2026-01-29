@@ -115,4 +115,7 @@ class Beta(ExponentialFamily):
 
     # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x, y):
-        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
+        return torch.special.betaln(x, y)
+
+    def cdf(self, x):
+        return torch.special.betainc(self.concentration1, self.concentration0, x)
