@@ -504,19 +504,31 @@ def compare_operator(
         print(f"  - Strategy query time: {strategy_query_time:.2f}s ({100*strategy_query_time/elapsed_time:.1f}%)")
         print(f"  - Ground truth time: {ground_truth_time:.2f}s ({100*ground_truth_time/elapsed_time:.1f}%)")
     print()
+
+    # Count distinct rules (unique placement combinations)
+    fp_rules = set((d.input_placements, d.output_placement) for d in stats.false_positives)
+    fn_rules = set((d.input_placements, d.output_placement) for d in stats.false_negatives)
+
     print(f"True positives (both agree valid): {stats.true_positives}")
-    print(f"False positives (DTensor has rule, ground truth invalid): {len(stats.false_positives)}")
-    print(f"False negatives (ground truth valid, DTensor missing): {len(stats.false_negatives)}")
+    if stats.false_positives:
+        print(f"DTensor incorrect: {len(fp_rules)} rules over {len(stats.false_positives)} samples")
+    else:
+        print(f"DTensor incorrect: 0")
+    if stats.false_negatives:
+        print(f"DTensor missing: {len(fn_rules)} rules over {len(stats.false_negatives)} samples")
+    else:
+        print(f"DTensor missing: 0")
 
     if stats.false_positives:
-        print("\n--- FALSE POSITIVES (DTensor has incorrect rules) ---")
+        print("\n--- DTENSOR INCORRECT (has rule but ground truth invalid) ---")
         by_combo = defaultdict(list)
         for d in stats.false_positives:
             key = (d.input_placements, d.output_placement)
             by_combo[key].append(d)
 
         for (inp, out), discrepancies in sorted(by_combo.items(), key=str):
-            print(f"\n  inputs={inp}, output={out}")
+            inp_str = ", ".join(inp)
+            print(f"\n  {inp_str} -> {out}")
             for d in discrepancies[:3]:
                 extra = ""
                 if d.scalar_args or d.scalar_kwargs:
@@ -531,14 +543,15 @@ def compare_operator(
                 print(f"    ... and {len(discrepancies) - 3} more")
 
     if stats.false_negatives:
-        print("\n--- FALSE NEGATIVES (DTensor missing valid rules) ---")
+        print("\n--- DTENSOR MISSING (ground truth valid but no rule) ---")
         by_combo = defaultdict(list)
         for d in stats.false_negatives:
             key = (d.input_placements, d.output_placement)
             by_combo[key].append(d)
 
         for (inp, out), discrepancies in sorted(by_combo.items(), key=str):
-            print(f"\n  inputs={inp}, output={out}")
+            inp_str = ", ".join(inp)
+            print(f"\n  {inp_str} -> {out}")
             for d in discrepancies[:3]:
                 extra = ""
                 if d.scalar_args or d.scalar_kwargs:
