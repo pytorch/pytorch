@@ -50,6 +50,20 @@ from shrt_validate import (
     is_fully_replicated,
 )
 
+# Ops to skip in validation because ground truth comparison is not meaningful.
+# These produce non-deterministic or uninitialized outputs.
+SKIP_OPS = frozenset([
+    "bernoulli",      # Random sampling
+    "empty_like",     # Uninitialized memory
+    "new_empty",      # Uninitialized memory
+    "new_empty_strided",  # Uninitialized memory
+    "normal",         # Random sampling
+    "rand_like",      # Random sampling
+    "randint_like",   # Random sampling
+    "randn_like",     # Random sampling
+    "uniform",        # Random sampling
+])
+
 
 @dataclass
 class Discrepancy:
@@ -246,6 +260,11 @@ def compare_operator(
     """
     Compare DTensor's sharding rules against ground truth for an operator.
     """
+    # Check if op should be skipped
+    if op_name in SKIP_OPS:
+        print(f"Skipping '{op_name}' (non-deterministic or uninitialized output)")
+        return ComparisonStats()
+
     # Initialize fake process group for LocalTensorMode
     if not dist.is_initialized():
         dist.init_process_group("fake", rank=0, world_size=world_size)
