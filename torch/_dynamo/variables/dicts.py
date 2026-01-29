@@ -1439,7 +1439,6 @@ class FrozensetVariable(SetVariable):
         return frozenset({k.vt.as_python_constant() for k in self.set_items})
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.foreach([x.vt for x in self.set_items])
         codegen.add_push_null(
             lambda: codegen.extend_output(
                 [
@@ -1447,7 +1446,13 @@ class FrozensetVariable(SetVariable):
                 ]
             )
         )
-        codegen.extend_output(create_call_function(0, False))
+        codegen.foreach([x.vt for x in self.set_items])
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_LIST", arg=len(self.set_items)),
+                *create_call_function(1, False),
+            ]
+        )
 
     def call_method(
         self,
@@ -1682,6 +1687,12 @@ class DictItemsVariable(DictViewVariable):
             if isinstance(args[0], DictItemsVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
             return ConstantVariable.create(False)
+        elif name == "__iter__":
+            from .lists import ListIteratorVariable
+
+            return ListIteratorVariable(
+                self.view_items_vt, mutation_type=ValueMutationNew()
+            )
         return super().call_method(tx, name, args, kwargs)
 
     def is_python_hashable(self) -> Literal[False]:
