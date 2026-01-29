@@ -223,8 +223,13 @@ class UniformValueConstantFolder(ConstantFolder):
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
 
-        # symint -> node mapping, populated in _deduce_value as we encounter symints
+        # initialize symint -> node mapping so that we can
+        # use symint nodes in full constructors
         self.symint_nodes = _SymHashingDict()
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
+            if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
+                if n.meta["val"] not in self.symint_nodes:
+                    self.symint_nodes[n.meta["val"]] = n
 
         # reference from torch/_funtorch/partitioners.py:get_default_op_list
         self.view_op_packets = [
@@ -307,6 +312,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # otherwise, stop deduce value and return unknown value
 
         # TODO: cat, more indexing
+        # TODO - do on cpu to avoid syncs
 
         # single-elem attrs
         if node.op == "get_attr" or (
@@ -315,15 +321,13 @@ class UniformValueConstantFolder(ConstantFolder):
         ):
             out = super(ConstantFolder, self).run_node(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:
-                # Move to CPU to avoid CUDA syncs during constant folding
-                return out.to("cpu")
+                return out
 
-        # handle device_put op - just return the input since we're folding on CPU
+        # handle device_put op
         if node.target == prims.device_put.default:
-            assert isinstance(node.args[0], torch.fx.Node)
-            return self.env[node.args[0]]
+            return super(ConstantFolder, self).run_node(node)
 
-        # constructors ops - always create on CPU to avoid CUDA syncs
+        # constructors ops
         if (
             node.op == "call_function"
             and node.target is aten.full.default
@@ -334,10 +338,7 @@ class UniformValueConstantFolder(ConstantFolder):
             # Don't specialize symbolic value.
             if not isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 new_args = [[1], value]
-                # Override device to CPU
-                cpu_kwargs = dict(node.kwargs)
-                cpu_kwargs["device"] = "cpu"
-                return aten.full.default(*new_args, **cpu_kwargs)
+                return aten.full.default(*new_args, **node.kwargs)
 
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
@@ -364,25 +365,12 @@ class UniformValueConstantFolder(ConstantFolder):
         # if we see them in a pointwise node (e.g., tensor * symint)
         # we will bail
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymInt):
-            # Populate symint_nodes mapping so we can use symint nodes in full constructors
-            if node.meta["val"] not in self.symint_nodes:
-                self.symint_nodes[node.meta["val"]] = node
             return node.meta["val"]
 
-        # scalar_tensor constructor - create on CPU to avoid CUDA syncs
-        if node.target is torch.ops.aten.scalar_tensor.default:
-            args, kwargs = self.fetch_args_kwargs_from_env(node)
-            value = args[0]
-            # Don't specialize symbolic value.
-            if isinstance(value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                return self.unknown_value
-            cpu_kwargs = dict(kwargs)
-            cpu_kwargs["device"] = "cpu"
-            return node.target(value, **cpu_kwargs)
-
-        # pointwise ops - inputs are already on CPU from earlier folding
+        # pointwise ops
         if isinstance(node.target, torch._ops.OpOverload) and (
             torch.Tag.pointwise in node.target.tags
+            or node.target is torch.ops.aten.scalar_tensor.default
         ):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
             flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
@@ -393,9 +381,6 @@ class UniformValueConstantFolder(ConstantFolder):
             # we run the ops with dim 1, so remove memory_format to avoid error
             kwargs = dict(kwargs)
             kwargs.pop("memory_format", None)
-            # Ensure we run on CPU to avoid CUDA syncs
-            if "device" in kwargs:
-                kwargs["device"] = "cpu"
 
             return node.target(*args, **kwargs)
 
