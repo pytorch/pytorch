@@ -30,6 +30,7 @@ from .graph import (
     Graph,
     PythonCode,
 )
+from .node import Node
 
 
 __all__ = [
@@ -322,6 +323,7 @@ def _print_readable(
     include_device=False,
     colored=False,
     expanded_def=False,
+    node_info=None,
 ):
     graph = module.graph
     assert graph is not None and isinstance(graph, torch.fx.Graph), (
@@ -335,6 +337,7 @@ def _print_readable(
         include_device=include_device,
         colored=colored,
         expanded_def=expanded_def,
+        node_info=node_info,
     )
     module_code = verbose_python_code.src
     module_code = module_code.lstrip("\n")
@@ -352,6 +355,7 @@ def _print_readable(
                     include_stride=include_stride,
                     include_device=include_device,
                     colored=colored,
+                    node_info=node_info,
                 )
             )
     submodule_code = "\n".join(submodule_code_list)
@@ -1048,9 +1052,26 @@ class {module_name}(torch.nn.Module):
         # but may result in less-readable output.
         fast_sympy_print: bool = False,
         expanded_def: bool = False,
+        node_info: Optional[Union[Callable[[Node], str], list[str]]] = None,
     ):
         """
-        Return the Python code generated for current GraphModule and its children GraphModules
+        Return the Python code generated for current GraphModule and its children GraphModules.
+
+        Args:
+            node_info: Optional extra info for nodes. Can be either:
+                - A callable that takes a Node and returns a string to prepend to
+                  the node's comment line.
+                - A list of strings representing meta keys to include. For each key
+                  in the list, if it exists in node.meta, its value will be shown
+                  in the format "key: value".
+
+                Examples:
+
+                # Using a callable to annotate nodes with their names
+                gm.print_readable(node_info=lambda n: f"[{n.name}]")
+
+                # Using a list of meta keys to show seq_nr values
+                gm.print_readable(node_info=["seq_nr"])
         """
         ctx_mgr = contextlib.ExitStack()
         with ctx_mgr:
@@ -1070,6 +1091,7 @@ class {module_name}(torch.nn.Module):
                 include_device,
                 colored,
                 expanded_def,
+                node_info,
             )
             return r
 
