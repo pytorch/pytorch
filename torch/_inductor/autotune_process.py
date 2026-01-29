@@ -946,6 +946,24 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Serialize state for pickling, excluding non-serializable DLL and workspace."""
+        state = self.__dict__.copy()
+        # DLL contains ctypes function pointers that can't be pickled.
+        # The subprocess will reload the DLL via ensure_dll_loaded().
+        state["DLL"] = None
+        # Workspace is a CUDA tensor that can't be pickled.
+        state["workspace"] = None
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore state after unpickling."""
+        self.__dict__.update(state)
+        # DLL and workspace will be reinitialized when needed
+        self.DLL = None
+        self.workspace = None
+        self._workspace_size_updated = False
+
 
 class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
     # Important: Instances of this class have to be serializable
