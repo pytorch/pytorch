@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/PadNd.h>
 #include <ATen/core/Tensor.h>
+#include <cmath>
 
 #include <c10/util/irange.h>
 
@@ -29,6 +30,17 @@ namespace at::native {
 Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value) {
     TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
              pad.size());
+
+  // Prevent silent precision loss for int64 padding values (Issue #170798)
+  if (self.scalar_type() == at::kLong && value.isIntegral(false)) {
+      const int64_t v = value.toLong();
+      constexpr int64_t kMaxExactInt = (1LL << 53);
+
+      TORCH_CHECK(
+          std::llabs(v) <= kMaxExactInt,
+          "torch.nn.functional.pad: padding value for int64 tensors must be "
+          "<= 2^53 in magnitude to avoid silent precision loss. Got value=", v);
+  }
 
     auto input_sizes = self.sizes();
     auto l_inp = self.dim();
