@@ -160,7 +160,7 @@ device 1:
 
   auto options =
     torch::TensorOptions()
-      .dtype(torch::kFloat32)
+      .dtype(torch::kFloat64)
       .layout(torch::kStrided)
       .device(torch::kCUDA, 1)
       .requires_grad(true);
@@ -175,7 +175,7 @@ properties:
 
   torch::Tensor tensor = torch::full({3, 4}, /*value=*/123, options);
 
-  assert(tensor.dtype() == torch::kFloat32);
+  assert(tensor.dtype() == torch::kFloat64);
   assert(tensor.layout() == torch::kStrided);
   assert(tensor.device().type() == torch::kCUDA); // or device().is_cuda()
   assert(tensor.device().index() == 1);
