@@ -830,7 +830,7 @@ def _allow_in_graph_einops() -> None:
         if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
             # trigger backend registration up front to avoid a later guard failure
             # that would otherwise cause a recompilation
-            einops.einops.get_backend(torch.tensor(1))
+            einops.rearrange("i -> i", torch.tensor(1))
 
         # einops 0.8.2+ don't need explicit allow_in_graph calls
         return

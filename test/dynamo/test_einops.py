@@ -195,10 +195,6 @@ print(normalize_gm(graph.print_readable(print_output=False)))
         ["reduce", "repeat", "pack", "unpack", "einsum", "rearrange"],
         name_fn=lambda f: f,
     )
-    # @parametrize("flag", [True, False], name_fn=lambda f: f)
-    # @unittest.skipIf(
-    #     einops_version_sanitized != "0.6.1", "Skipping for einops != 0.6.1"
-    # )
     def test_einops_method(self, method):
         flag = einops.__version__ >= "0.8.2"
         if not hasattr(einops, method):
