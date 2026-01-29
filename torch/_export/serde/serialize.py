@@ -996,37 +996,50 @@ class GraphModuleSerializer(metaclass=Final):
     def serialize_metadata(self, node: torch.fx.Node) -> dict[str, str]:
         ret = {}
 
-        if stack_trace := node.meta.get("stack_trace"):
+        stack_trace = node.meta.get("stack_trace")
+        if stack_trace:
             ret["stack_trace"] = stack_trace
 
-        if nn_module_stack := node.meta.get("nn_module_stack"):
+        nn_module_stack = node.meta.get("nn_module_stack")
+        if nn_module_stack:
+            # Serialize each entry as a small JSON array: [key, path, type_str]
+            # and join entries with `ST_DELIMITER`. This avoids fragile
+            # comma-splitting when `path` or `type_str` contain commas.
+            nn_module_list = []
+            for k, v in nn_module_stack.items():
+                # Accept both (path: str, ty: str) and (path, ty_class) where
+                # `ty` may be a class object. Convert to stable string form.
+                assert isinstance(v, tuple) and len(v) == 2
+                path, ty = v
+                # Normalize path to string (empty -> "")
+                if path is None:
+                    path = ""
+                else:
+                    path = str(path)
 
-            def export_nn_module_stack(val):
-                assert isinstance(val, tuple) and len(val) == 2
-                path, ty = val
+                # If ty is a class, convert to its fully-qualified name.
+                if inspect.isclass(ty):
+                    ty = ty.__module__ + "." + ty.__qualname__
+                else:
+                    ty = str(ty)
 
-                assert isinstance(path, str)
-                assert isinstance(ty, str)
-
-                return path + "," + ty
-
-            # Serialize to "key,orig_path,type_str"
-            nn_module_list = [
-                f"{k},{export_nn_module_stack(v)}" for k, v in nn_module_stack.items()
-            ]
+                nn_module_list.append(json.dumps([k, path, ty], ensure_ascii=False))
             ret["nn_module_stack"] = ST_DELIMITER.join(nn_module_list)
 
-        if source_fn_st := node.meta.get("source_fn_stack"):
+        source_fn_st = node.meta.get("source_fn_stack")
+        if source_fn_st:
             source_fn_list = [
                 f"{source_fn[0]},{self.serialize_operator(source_fn[1])}"
                 for source_fn in source_fn_st
             ]
             ret["source_fn_stack"] = ST_DELIMITER.join(source_fn_list)
 
-        if torch_fn := node.meta.get("torch_fn"):
+        torch_fn = node.meta.get("torch_fn")
+        if torch_fn:
             ret["torch_fn"] = ST_DELIMITER.join(list(torch_fn))
 
-        if custom := node.meta.get("custom"):
+        custom = node.meta.get("custom")
+        if custom:
             try:
                 ret["custom"] = json.dumps(custom)
             except Exception as e:
@@ -3121,31 +3134,62 @@ class GraphModuleDeserializer(metaclass=Final):
             return target
 
         if nn_module_stack_str := metadata.get("nn_module_stack"):
-            # Originally serialized to "key,orig_path,type_str"
-            def import_nn_module_stack(key, path, ty):
-                return key, (path, ty)
+            # Entries are JSON arrays [key, path, type_str] joined by `ST_DELIMITER`.
+            nn_module_stack: dict[str, tuple[str, str]] = {}
 
-            # Helper function to split string by commas, accounting for nested parentheses/brackets
-            def metadata_split(metadata):
-                out = []
-                start, n = 0, 0
-                a, b = "[(", ")]"
-                for end, c in enumerate(metadata):
-                    if c in a:
-                        n += 1
-                    elif c in b:
-                        n -= 1
-                    elif c == "," and n == 0:
-                        out.append(metadata[start:end])
-                        start = end + 1
-                out.append(metadata[start:])
-                assert len(out) == 3
-                return out
+            # Try JSON-parsing each joined entry. Fall back to the historical
+            # comma-splitting logic for backward compatibility.
+            def _parse_old_entry(item: str):
+                # Historically entries were serialized as `key,orig_path,type_str`.
+                # The original deserializer had a helper that split commas while
+                # accounting for parentheses/brackets. Reuse that approach here.
+                def metadata_split(metadata):
+                    out = []
+                    start, n = 0, 0
+                    a, b = "[(", ")]"
+                    for end, c in enumerate(metadata):
+                        if c in a:
+                            n += 1
+                        elif c in b:
+                            n -= 1
+                        elif c == "," and n == 0:
+                            out.append(metadata[start:end])
+                            start = end + 1
+                    out.append(metadata[start:])
+                    return out
 
-            nn_module_stack = dict(
-                import_nn_module_stack(*metadata_split(item))
-                for item in nn_module_stack_str.split(ST_DELIMITER)
-            )
+                parts = metadata_split(item)
+                if len(parts) != 3:
+                    raise ValueError(f"old nn_module_stack entry has unexpected parts: {parts}")
+                return parts[0], parts[1], parts[2]
+
+            for item in nn_module_stack_str.split(ST_DELIMITER):
+                if not item:
+                    continue
+                parsed = False
+                # First try JSON
+                try:
+                    obj = json.loads(item)
+                    if (
+                        isinstance(obj, list)
+                        and len(obj) == 3
+                        and isinstance(obj[0], str)
+                        and isinstance(obj[1], str)
+                        and isinstance(obj[2], str)
+                    ):
+                        k, path, ty = obj
+                        nn_module_stack[k] = (path, ty)
+                        parsed = True
+                except Exception:
+                    parsed = False
+
+                if not parsed:
+                    try:
+                        k, path, ty = _parse_old_entry(item)
+                        nn_module_stack[k] = (path, ty)
+                        parsed = True
+                    except Exception as e:
+                        raise SerializeError(f"Failed to parse nn_module_stack metadata entry: {item}: {e}") from e
             ret["nn_module_stack"] = nn_module_stack
 
         if source_fn_st_str := metadata.get("source_fn_stack"):
