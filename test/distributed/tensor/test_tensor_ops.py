@@ -900,6 +900,22 @@ class DistTensorOpsTest(DTensorTestBase):
         )
 
     @with_comms
+    def test_kron(self):
+        # Test kron with sharding on first input
+        # Only S(0),R->S(0) works - other strategies fail due to internal view ops
+        mesh = self.build_device_mesh()
+        a = torch.randn(8, 4, device=self.device_type)
+        b = torch.randn(4, 4, device=self.device_type)
+
+        # S(0), R -> S(0)
+        a_dt = distribute_tensor(a, mesh, [Shard(0)])
+        b_dt = distribute_tensor(b, mesh, [Replicate()])
+        result_dt = torch.kron(a_dt, b_dt)
+        expected = torch.kron(a, b)
+        self.assertEqual(result_dt.full_tensor(), expected)
+        self.assertEqual(result_dt.placements, (Shard(0),))
+
+    @with_comms
     def test_unbind(self):
         device_mesh = self.build_device_mesh()
         shard_dims = [0, 1]
