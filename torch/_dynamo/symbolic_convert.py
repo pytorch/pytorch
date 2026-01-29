@@ -552,7 +552,6 @@ def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
         """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
         insts = list(dis.get_instructions(fn))
 
-        # Find END_FOR (sample functions have no nested loops)
         end_for_idx = [inst.opname for inst in insts].index("END_FOR")
 
         # Extract pre_store_ops: opcodes from END_FOR+1 until first STORE_FAST
