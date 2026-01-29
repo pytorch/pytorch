@@ -3663,7 +3663,6 @@ def empty_strided(
 ):
     assert isinstance(size, (list, tuple))
     assert isinstance(stride, (list, tuple, type(None)))
-    assert_nyi(not pin_memory, "pin_memory")
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     # pyrefly: ignore [bad-argument-type]
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
@@ -3686,6 +3685,7 @@ def empty_strided(
         dtype=dtype,
         size=size,
         stride=stride,
+        is_pinned=pin_memory or False,
     )
     return pointwise
 
