@@ -69,6 +69,86 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
+class PytreeTuple(torch._opaque_base.OpaqueBase):
+    """
+    Tuple-like values that are treated as leaves of a PyTree.
+    """
+
+    def __init__(self, *values):
+        self._values = tuple(values)
+
+    def __repr__(self):
+        pr = repr(self._values)[1:-1]
+        return f"{type(self).__name__}({pr})"
+
+    def __getitem__(self, i):
+        return self._values[i]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, self.__class__):
+            return self._values == other._values
+        elif isinstance(other, tuple):
+            return self._values == other
+        return False
+
+    def __hash__(self) -> int:
+        return hash(self._values)
+
+    def __add__(self, other):
+        if isinstance(other, (self.__class__, tuple)):
+            return self.__class__(*self, *other)
+        raise NotImplementedError(type(other))
+
+    def __radd__(self, other):
+        if isinstance(other, (self.__class__, tuple)):
+            return self.__class__(*other, *self)
+        raise NotImplementedError(type(other))
+
+    def index(self, value):
+        return self._values.index(value)
+
+    def count(self, value):
+        return self._values.count(value)
+
+    def __fx_repr__(self) -> tuple[str, dict[str, type]]:
+        # Return a repr string that can reconstruct this object and the types needed
+        # Collect all types used in the values
+        types_dict: dict[str, type] = {"PytreeTuple": PytreeTuple}
+        for val in self._values:
+            val_type = type(val)
+            types_dict[val_type.__name__] = val_type
+            # Also handle nested types (e.g., Shard inside a list)
+            if hasattr(val, "__iter__") and not isinstance(val, str):
+                for item in val:
+                    item_type = type(item)
+                    types_dict[item_type.__name__] = item_type
+        return repr(self), types_dict
+
+
+# Register PytreeTuple as an opaque value type to enable Dynamo to handle
+# instances created during tracing
+from torch._library.opaque_object import MemberType, register_opaque_type
+
+
+register_opaque_type(
+    PytreeTuple,
+    typ="value",
+    members={
+        "__getitem__": MemberType.USE_REAL,
+        "__iter__": MemberType.USE_REAL,
+        "__len__": MemberType.USE_REAL,
+        "__eq__": MemberType.USE_REAL,
+        "__hash__": MemberType.USE_REAL,
+    },
+)
+
+
 class SimpleModel(nn.Module):
     def __init__(self, device):
         super().__init__()
@@ -239,15 +319,15 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             str(gm.code).strip(),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_self_buffers_buffer_ , L_x_ , L_mesh_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_self_buffers_buffer_ , L_x_ , L_mesh_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_self_buffers_buffer_ = L_self_buffers_buffer_
     l_x_ = L_x_
     l_mesh_ = L_mesh_
     from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, to_local), self._out_spec)""",  # noqa: B950
+    return self._dynamo_bytecode_unflatten((to_local,), _fn_args)""",  # noqa: B950
         )
 
         with tracing(tracing_context):
@@ -910,7 +990,7 @@ def forward(self, arg0_1, arg1_1):
         out_dt.to_local().sum().backward()
 
     def test_dynamo_to_local_grad_placements_sequence(self):
-        placements = [Shard(0)]
+        placements = PytreeTuple([Shard(0)])
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -929,7 +1009,7 @@ def forward(self, arg0_1, arg1_1):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
-            placements = [Shard(0)]
+            placements = PytreeTuple([Shard(0)])
             return dt.to_local(grad_placements=placements) + 2
 
         fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
@@ -943,7 +1023,7 @@ def forward(self, arg0_1, arg1_1):
     def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = [Shard(0)]
+        placements = PytreeTuple(Shard(0))
 
         def fn(x):
             dt = DTensor.from_local(
@@ -964,7 +1044,7 @@ def forward(self, arg0_1, arg1_1):
     def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = [Shard(0)]
+        placements = PytreeTuple(Shard(0))
 
         def fn(x):
             dt = DTensor.from_local(
@@ -1427,13 +1507,14 @@ class outer_fn(torch.nn.Module):
         add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
         view: "f32[4, 4]" = torch.ops.aten.view.default(add, [4, 4]);  add = None
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view);  repeated_subgraph0 = view = None
+        _opaque_obj0 = self._opaque_obj0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view, _opaque_obj0);  repeated_subgraph0 = view = _opaque_obj0 = None
         getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
         view_1: "f32[8, 4]" = torch.ops.aten.view.default(getitem, [8, 4]);  getitem = None
         return view_1
 
     class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[4, 4]"):
+        def forward(self, arg0_1: "f32[4, 4]", arg1_1):
             # No stacktrace found for following nodes
             all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
             wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
