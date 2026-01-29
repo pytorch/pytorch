@@ -73,6 +73,7 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
+    get_op_names,
     GraphPartitionMap,
     IndentedBuffer,
     is_collective,
@@ -253,7 +254,7 @@ class MixOrderReduction:
     @classmethod
     def get_numel(cls, node: BaseSchedulerNode) -> int:
         g1 = cls.get_numel_rnumel(node)
-        return V.graph.sizevars.size_hint(g1[0] * g1[1], fallback=0)
+        return V.graph.sizevars.optimization_hint(g1[0] * g1[1], fallback=0)
 
     @classmethod
     def get_fusion_score(
@@ -315,26 +316,31 @@ class MixOrderReduction:
             # Call evaluate_expr rather than statically_known_geq since nrow can
             # have dynamic shape in real models.
             # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
+            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow * ncol, size_thres)):
                 return False
 
             # We require more more row than columns since
             # 1, we prefer doing persistent reduction for each row
             # 2, we will split the reduction across the rows
-            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
+            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, ncol * 2)):
                 return False
 
             # When nrow is small, ncol should also be small (due to the check
             # above). Thus the entire tensor should be well cached in L2.
             # Mix order reduction is less beneficial.
-            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
+            if not V.graph.sizevars.guard_or_true(sympy.Ge(nrow, 4096)):
                 return False
 
-        contiguous_node, other_node = (
-            (node1, node2)
-            if V.graph.sizevars.evaluate_expr(sympy.Eq(g1[1], ncol))
-            else (node2, node1)
-        )
+        # Determine which node is contiguous. If we can't determine this
+        # statically (e.g., due to unbacked symbols), skip the fusion.
+        eq_expr = sympy.Eq(g1[1], ncol)
+        if V.graph.sizevars.guard_or_false(eq_expr):
+            contiguous_node, other_node = (node1, node2)
+        elif V.graph.sizevars.guard_or_false(sympy.Not(eq_expr)):
+            contiguous_node, other_node = (node2, node1)
+        else:
+            # Can't statically determine which node is contiguous, skip fusion
+            return False
 
         # We previously only check the contiguous_node has contiguous
         # access to common_reads. But that turns out to be not enough.
@@ -1063,7 +1069,7 @@ class BaseSchedulerNode:
             return {}
 
         def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.size_hint(s, fallback=0)
+            return V.graph.sizevars.optimization_hint(s, fallback=0)
 
         if isinstance(self, SchedulerNode):
             node_numel = try_size_hint(
@@ -1175,7 +1181,7 @@ class BaseSchedulerNode:
         if isinstance(flops, torch.SymInt):
             flops = flops.node.expr
 
-        resolved_flops = V.graph.sizevars.size_hint(flops, fallback=0)
+        resolved_flops = V.graph.sizevars.optimization_hint(flops, fallback=0)
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops
 
@@ -5824,12 +5830,7 @@ class Scheduler:
         if isinstance(ir_node, torch._inductor.ir.FallbackKernel) and (
             op := ir_node.op_overload
         ):
-            op_overload_packet_name = op.name()
-            op_overload_name = (
-                f"{op_overload_packet_name}.{op._overloadname}"
-                if isinstance(op, torch._ops.OpOverload)
-                else op_overload_packet_name
-            )
+            op_overload_packet_name, op_overload_name = get_op_names(op)
             if (
                 op_overload_packet_name in config.custom_should_partition_ops
                 or op_overload_name in config.custom_should_partition_ops
@@ -5870,10 +5871,66 @@ class Scheduler:
         if is_cudagraph_unsafe_op(node.node):
             return "CUDAGraph-unsafe custom ops"
 
+        if reason := self._uses_cudagraph_unsafe_unbacked_symint(node):
+            return reason
+
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
             if get_scheduler_node_symbol_uses(node):
                 return "dynamic shape ops"
+
+        return None
+
+    @cache_on_self
+    def _get_cudagraph_unsafe_unbacked_symints(self) -> OrderedSet[sympy.Symbol]:
+        """
+        Collect output unbacked symints from ops in config.cudagraph_unsafe_unbacked_ops.
+        """
+        unsafe_symints: OrderedSet[sympy.Symbol] = OrderedSet()
+
+        if not config.cudagraph_unsafe_unbacked_ops:
+            return unsafe_symints
+
+        for node in self.nodes:
+            ir_node = node.node
+            if ir_node is None:
+                continue
+
+            if not isinstance(ir_node, torch._inductor.ir.FallbackKernel):
+                continue
+
+            op = ir_node.op_overload
+            if op is None:
+                continue
+
+            op_overload_packet_name, op_overload_name = get_op_names(op)
+            if (
+                op_overload_packet_name not in config.cudagraph_unsafe_unbacked_ops
+                and op_overload_name not in config.cudagraph_unsafe_unbacked_ops
+            ):
+                continue
+
+            for sym in ir_node.get_unbacked_symbol_defs():
+                sym = V.graph.sizevars.simplify(sym)
+                if symbol_is_type(sym, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
+                    unsafe_symints.add(sym)
+
+        return unsafe_symints
+
+    def _uses_cudagraph_unsafe_unbacked_symint(
+        self, node: BaseSchedulerNode
+    ) -> Optional[str]:
+        unsafe_symints = self._get_cudagraph_unsafe_unbacked_symints()
+        if not unsafe_symints:
+            return None
+
+        node_symbols = get_scheduler_node_symbol_uses(node)
+
+        for sym in node_symbols:
+            simplified_sym = V.graph.sizevars.simplify(sym)
+            for free_sym in simplified_sym.free_symbols:
+                if free_sym in unsafe_symints:
+                    return f"uses cudagraph-unsafe unbacked symint: {free_sym}"
 
         return None
 
