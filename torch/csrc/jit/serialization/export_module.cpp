@@ -966,13 +966,13 @@ void BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
   emitBytecodeDefaultInputs = enabled;
 }
 
-static thread_local bool emitDefautlArgsWithOutArgs =
+static thread_local bool emitDefaultArgsWithOutArgs =
     caffe2::serialize::kProducedBytecodeVersion <= 6 ? false : true;
 bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
-  return emitDefautlArgsWithOutArgs;
+  return emitDefaultArgsWithOutArgs;
 }
 void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
-  emitDefautlArgsWithOutArgs = enabled;
+  emitDefaultArgsWithOutArgs = enabled;
 }
 
 static thread_local bool emitDefaultEmitPromotedOps =
