@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import operator
 from collections import Counter, defaultdict
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -11,6 +12,7 @@ from torch._inductor.fx_passes.bucketing import (
     _schedulable_wait_node,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
+    is_wait_tensor,
     merge_all_gather_bucket,
     merge_reduce_scatter_bucket,
 )
@@ -54,26 +56,36 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         self.node_users = node_users
         self.node_to_wait_map: dict[fx.Node, fx.Node] = defaultdict()
 
-    def _check_recursive_dep(
-        self,
-        node: fx.Node,
-        target_op: str,
-        dep_dict: dict[torch.fx.Node, OrderedSet[torch.fx.Node]],
-    ) -> bool:
-        """
-        Check if the node is directly used for fetch parameters/gradients
+    def _is_collective_related_op(self, node: fx.Node) -> bool:
+        if is_wait_tensor(node):
+            return True
 
-        TODO (ruisizhang123): currently, we assume the node only pre-fetch/update one parameter/gradient
-            We should handle multiple parameters/gradients update case by checking if there are non closure
-            computes along the path from primal/output to coll_node
-        """
-        deps: OrderedSet[fx.Node] = dep_dict[node]
-        seen_target_op = 0
-        for d in deps:
-            if d.op == target_op:
-                seen_target_op += 1
+        if node.target in (
+            operator.getitem,
+            torch.ops.aten.cat.default,
+            torch.ops.aten.slice.Tensor,
+            torch.ops.aten.split.Tensor,
+            torch.ops.aten._to_copy.default,
+        ):
+            return True
 
-        return seen_target_op == 1
+        return False
+
+    def _is_fsdp_all_gather(self, node: fx.Node) -> bool:
+        for ancestor in self.node_ancestors[node]:
+            if ancestor.op == "placeholder":
+                continue
+            elif not self._is_collective_related_op(ancestor):
+                return False
+        return True
+
+    def _is_fsdp_reduce_scatter(self, node: fx.Node) -> bool:
+        for user in self.node_users[node]:
+            if user.op == "output":
+                continue
+            elif not self._is_collective_related_op(user):
+                return False
+        return True
 
     def _bucket_group(self, coll_nodes: list[fx.Node]) -> None:
         assert len(coll_nodes) > 0, "bucketed coll_nodes should have nonzero node"
@@ -143,20 +155,14 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             key = bucket_key(node)
             if not (is_all_gather(node) or is_reduce_scatter(node)):
                 continue
-            # We only want to bucket all-gather/reduce-scatter that
-            # 1. all_gather that have ancestors dependent only on input placeholder(parameters)
-            # 2. reduce scatter that the wait user node is returned as output(gradients)
-            if is_all_gather(node) and not self._check_recursive_dep(
-                node, "placeholder", self.node_ancestors
-            ):
+            # An all-gather comes from fsdp when its recursive ancestors up to placeholders contain
+            # only collective related ops but no compute ops
+            if is_all_gather(node) and not self._is_fsdp_all_gather(node):
                 continue
-            if is_reduce_scatter(node):
-                wait_node = self.collective_info[node].wait_node
-                if not (
-                    len(wait_node.users) == 1
-                    and self._check_recursive_dep(wait_node, "output", self.node_users)
-                ):
-                    continue
+            # A reduce-scatter comes from fsdp when its recursive users up to outputs contain
+            # only collective related ops but no compute ops
+            if is_reduce_scatter(node) and not self._is_fsdp_reduce_scatter(node):
+                continue
             if key is not None:
                 grouped_collectives[key].add(node)
 
@@ -300,12 +306,8 @@ class ManualOverlapScheduler(OverlapScheduler):
                     delayed_rs_wait_nodes.clear()
                     current_rs_start_nodes.clear()
                 delayed_rs_wait_nodes.append(node)
-                continue
 
             self._schedule(node)
-
-        for delayed in delayed_rs_wait_nodes:
-            self._schedule(delayed)
 
         self.scheduled = OrderedSet(reversed(list(self.scheduled)))
         picked_ag: list[fx.Node] = []
@@ -356,7 +358,7 @@ class ManualOverlapScheduler(OverlapScheduler):
     def _collect_node_users(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """Collect all users for each node."""
         node_users: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-        for node in self.nodes:
+        for node in reversed(self.nodes):
             for output_node in list(node.users.keys()):
                 node_users[node].add(output_node)
                 node_users[node] |= node_users[output_node]
