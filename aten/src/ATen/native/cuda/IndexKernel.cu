@@ -211,6 +211,18 @@ void index_put_kernel_impl(TensorIterator& iter, const IntArrayRef index_size, c
   }, false);
 }
 
+// Kernel for index_put with accumulate=true using atomic operations.
+// This provides a fast non-deterministic path for accumulating into tensors
+// with potentially duplicate indices (e.g., embedding gradients).
+// See https://github.com/pytorch/pytorch/issues/41162
+template <typename scalar_t>
+void index_put_accumulate_kernel_impl(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride) {
+  gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* const out_data, const char* const in_data, const int64_t offset) {
+    const scalar_t value = *reinterpret_cast<const scalar_t*>(in_data);
+    gpuAtomicAddNoReturn(reinterpret_cast<scalar_t*>(out_data + offset), value);
+  }, false);
+}
+
 static void index_kernel(
     TensorIteratorBase& iter,
     const IntArrayRef index_size,
@@ -264,20 +276,32 @@ static void index_copy_kernel(
 
 
 static void index_put_kernel(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const bool accumulate) {
-  TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
-  AT_DISPATCH_V2(
-    iter.dtype(),
-    "index_put",
-    AT_WRAP([&] {
-      using dtype = OpaqueType<sizeof(scalar_t)>;
-      index_put_kernel_impl<dtype>(iter, index_size, index_stride);
-    }),
-    AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-    AT_EXPAND(AT_FLOAT8_TYPES),
-    kComplexHalf,
-    kHalf,
-    kBool,
-    kBFloat16);
+  if (accumulate) {
+    // See Note [Writing Nondeterministic Operations]
+    // Using atomic operations for accumulation is non-deterministic when
+    // indices contain duplicates. This kernel is only called when
+    // deterministic algorithms are not required.
+    // See https://github.com/pytorch/pytorch/issues/41162
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      iter.dtype(), "index_put_accumulate_cuda", [&] {
+        index_put_accumulate_kernel_impl<scalar_t>(iter, index_size, index_stride);
+      });
+  } else {
+    AT_DISPATCH_V2(
+      iter.dtype(),
+      "index_put",
+      AT_WRAP([&] {
+        using dtype = OpaqueType<sizeof(scalar_t)>;
+        index_put_kernel_impl<dtype>(iter, index_size, index_stride);
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_FLOAT8_TYPES),
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16);
+  }
 }
 
 void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef index_size, const IntArrayRef index_stride, const bool accumulate, const double scale, const int zero_point) {
