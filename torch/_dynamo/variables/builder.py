@@ -4211,6 +4211,16 @@ class SourcelessBuilder:
         handlers[collections.OrderedDict] = handlers[dict]
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
+        handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
+            ConstDictVariable(
+                {create(tx, k): create(tx, v) for k, v in value.items()},
+                dict,
+                mutation_type=ValueMutationNew(),
+            ),
+        )
+        handlers[types.GetSetDescriptorType] = (
+            lambda tx, value: GetSetDescriptorVariable(value)
+        )
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
