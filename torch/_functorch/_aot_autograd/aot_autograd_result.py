@@ -295,54 +295,23 @@ class BundledCompiledBackward(
 
 @dataclass
 class SerializedGraphModule:
-    """
-    Serializes a GraphModule using GraphPickler to avoid issues with
-    HigherOrderOperators during deserialization.
-
-    The legacy approach used gm.__reduce__() which relies on symbolic tracing
-    during deserialization. This fails when the graph contains HigherOrderOperators
-    like triton_kernel_wrapper_functional because the FX tracer cannot handle them.
-
-    GraphPickler serializes the graph structure directly (nodes, ops, args) and
-    reconstructs it without tracing, avoiding this issue.
-    """
-
-    _serialized_bytes: bytes
+    fn: Callable[[dict[Any, Any], str], torch.nn.Module]
+    args: tuple[Any, ...]
 
     def __init__(self, gm: torch.fx.GraphModule):
-        from torch.fx._graph_pickler import GraphPickler, Options
-
-        # Clear metadata to avoid serializing unpicklable objects
-        gm.meta = {}
-        for node in gm.graph.nodes:
-            node.meta = {}
-
-        # Use GraphPickler which handles HigherOrderOperators correctly
-        # by serializing the graph structure directly instead of relying
-        # on symbolic tracing during deserialization.
-        # ops_filter=None allows all ops (including HigherOrderOperators)
-        self._serialized_bytes = GraphPickler.dumps(
-            gm,
-            options=Options(ops_filter=None),
-        )
+        self.fn, self.args = gm.__reduce__()
 
     def deserialize(self) -> torch.fx.GraphModule:
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx._graph_pickler import GraphPickler
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        # Create a fresh FakeTensorMode for deserialization.
-        # This is needed by GraphPickler to properly reconstruct FakeTensors.
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        gm = GraphPickler.loads(self._serialized_bytes, fake_mode)
+        gm = self.fn(*self.args)
         assert isinstance(gm, torch.fx.GraphModule)
-        gm.recompile()
         return gm
 
 
 def serialize_graph_module(gm: torch.fx.GraphModule) -> SerializedGraphModule:
-    # NOTE: The mutation of gm.meta and node.meta is now done inside
-    # SerializedGraphModule.__init__ to keep the logic together.
+    # NOTE: mutates the graph module
+    gm.meta = {}
+    for node in gm.graph.nodes:
+        node.meta = {}
     return SerializedGraphModule(gm)
 
 
