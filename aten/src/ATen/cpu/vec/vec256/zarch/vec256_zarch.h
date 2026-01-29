@@ -774,6 +774,43 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return {(vtype)vec_nor(vecb0(), vecb0()), (vtype)vec_nor(vecb1(), vecb1())};
   }
 
+  // Comparison operators are provided as members to support VectorizedN<T, N>
+  // which invokes them via `a.op(b)` lambdas. The implementations mirror the
+  // existing free-function overloads defined below.
+  Vectorized<T> C10_ALWAYS_INLINE operator==(const Vectorized<T>& other) const {
+    return {
+        (vtype)vec_cmpeq(_vec0, other._vec0),
+        (vtype)vec_cmpeq(_vec1, other._vec1)};
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator!=(const Vectorized<T>& other) const {
+    return operator==(other)._not();
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator>(const Vectorized<T>& other) const {
+    return {
+        (vtype)vec_cmpgt(_vec0, other._vec0),
+        (vtype)vec_cmpgt(_vec1, other._vec1)};
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator>=(const Vectorized<T>& other) const {
+    return {
+        (vtype)vec_cmpge(_vec0, other._vec0),
+        (vtype)vec_cmpge(_vec1, other._vec1)};
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator<(const Vectorized<T>& other) const {
+    return {
+        (vtype)vec_cmplt(_vec0, other._vec0),
+        (vtype)vec_cmplt(_vec1, other._vec1)};
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator<=(const Vectorized<T>& other) const {
+    return {
+        (vtype)vec_cmple(_vec0, other._vec0),
+        (vtype)vec_cmple(_vec1, other._vec1)};
+  }
+
   Vectorized<T> C10_ALWAYS_INLINE eq(const Vectorized<T>& other) const {
     return (*this == other) & Vectorized<T>((T)1.0);
   }
@@ -1355,43 +1392,6 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return Vectorized<typex>{                                           \
         (Vectorized<typex>::vtype)(a.vecb0() ^ b.vecb0()),              \
         (Vectorized<typex>::vtype)(a.vecb1() ^ b.vecb1())};             \
-  }                                                                     \
-                                                                        \
-  Vectorized<typex> C10_ALWAYS_INLINE operator==(                       \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {         \
-    return Vectorized<typex>{                                           \
-        vec_cmpeq(a.vec0(), b.vec0()), vec_cmpeq(a.vec1(), b.vec1())};  \
-  }                                                                     \
-                                                                        \
-  Vectorized<typex> C10_ALWAYS_INLINE operator!=(                       \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {         \
-    return Vectorized<typex>{                                           \
-        vec_cmpeq(a.vec0(), b.vec0()), vec_cmpeq(a.vec1(), b.vec1())}   \
-        ._not();                                                        \
-  }                                                                     \
-                                                                        \
-  Vectorized<typex> C10_ALWAYS_INLINE operator>(                        \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {         \
-    return Vectorized<typex>{                                           \
-        vec_cmpgt(a.vec0(), b.vec0()), vec_cmpgt(a.vec1(), b.vec1())};  \
-  }                                                                     \
-                                                                        \
-  Vectorized<typex> C10_ALWAYS_INLINE operator>=(                       \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {         \
-    return Vectorized<typex>{                                           \
-        vec_cmpge(a.vec0(), b.vec0()), vec_cmpge(a.vec1(), b.vec1())};  \
-  }                                                                     \
-                                                                        \
-  Vectorized<typex> C10_ALWAYS_INLINE operator<(                        \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {         \
-    return Vectorized<typex>{                                           \
-        vec_cmplt(a.vec0(), b.vec0()), vec_cmplt(a.vec1(), b.vec1())};  \
-  }                                                                     \
-                                                                        \
-  Vectorized<typex> C10_ALWAYS_INLINE operator<=(                       \
-      const Vectorized<typex>& a, const Vectorized<typex>& b) {         \
-    return Vectorized<typex>{                                           \
-        vec_cmple(a.vec0(), b.vec0()), vec_cmple(a.vec1(), b.vec1())};  \
   }
 
 ZVECTOR_OPERATORS(float)
@@ -1788,6 +1788,27 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
 
   C10_ALWAYS_INLINE const vinner_type& vec() const {
     return _vec;
+  }
+
+  // Comparison operators (member) to avoid overload ambiguity with generic
+  // free functions and to support VectorizedN lambdas.
+  Vectorized<T> C10_ALWAYS_INLINE operator==(const Vectorized<T>& other) const {
+    return Vectorized<T>{_vec == other._vec};
+  }
+  Vectorized<T> C10_ALWAYS_INLINE operator!=(const Vectorized<T>& other) const {
+    return Vectorized<T>{_vec != other._vec};
+  }
+  Vectorized<T> C10_ALWAYS_INLINE operator>(const Vectorized<T>& other) const {
+    return Vectorized<T>{_vec > other._vec};
+  }
+  Vectorized<T> C10_ALWAYS_INLINE operator>=(const Vectorized<T>& other) const {
+    return Vectorized<T>{_vec >= other._vec};
+  }
+  Vectorized<T> C10_ALWAYS_INLINE operator<(const Vectorized<T>& other) const {
+    return Vectorized<T>{_vec < other._vec};
+  }
+  Vectorized<T> C10_ALWAYS_INLINE operator<=(const Vectorized<T>& other) const {
+    return Vectorized<T>{_vec <= other._vec};
   }
 
   template <typename U>
