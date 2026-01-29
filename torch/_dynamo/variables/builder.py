@@ -641,7 +641,9 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
+        def build_key_value(
+            k: Any, v: Any
+        ) -> tuple[VariableTracker, LazyVariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -814,7 +816,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[VariableTracker, VariableTracker]:
+            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1613,7 +1615,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[VariableTracker, VariableTracker]:
+            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -4187,6 +4189,21 @@ class SourcelessBuilder:
         handlers[collections.OrderedDict] = handlers[dict]
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
+        # Sourceless MappingProxyType object can be encountered while tracing
+        # type.__dict__["__dict__"].__get__
+        handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
+            ConstDictVariable(
+                {create(tx, k): create(tx, v) for k, v in value.items()},
+                dict,
+                mutation_type=ValueMutationNew(),
+            ),
+        )
+        handlers[types.GetSetDescriptorType] = (
+            lambda tx, value: GetSetDescriptorVariable(value)
+        )
+        handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
+            value, mutation_type=ValueMutationNew()
+        )
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
