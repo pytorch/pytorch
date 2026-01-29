@@ -2708,7 +2708,7 @@ class GuardBuilder(GuardBuilderBase):
                 names: dict[str, tuple[int, int]] = {}
                 source_pairs: list[tuple[Source, Source]] = []
                 derived_equalities: list[  # type: ignore[type-arg]
-                    tuple[Source, Union[Source, Symbol], Callable]
+                    tuple[Source, Union[Source, Symbol], Callable[..., Any]]
                 ] = []
                 phantom_symbols: dict[str, Symbol] = {}
                 relaxed_sources: set[Source] = set()
@@ -4202,8 +4202,8 @@ class CheckFunctionManager:
 
         guards_log.debug("GUARDS:")
 
-        code_parts = []
-        verbose_code_parts = []
+        code_parts: list[str] = []
+        verbose_code_parts: list[str] = []
         structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
 
         # Add compile id info in the guard manager for debugging purpose
@@ -4568,7 +4568,7 @@ def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
     compile_id: Optional[CompileId],
-    backend: Optional[Callable],
+    backend: Optional[Callable[..., Any]],
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -4675,7 +4675,7 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
-    backend: Callable,
+    backend: Callable[..., Any],
     skip_logging: bool = False,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
@@ -4703,7 +4703,7 @@ def get_guard_fail_reason(
 def get_and_maybe_log_recompilation_reasons(
     cache_entry: Optional[CacheEntry],
     frame: DynamoFrameType,
-    backend: Callable,
+    backend: Callable[..., Any],
     skip_logging: bool = False,
 ) -> list[str]:
     """
@@ -4711,7 +4711,7 @@ def get_and_maybe_log_recompilation_reasons(
     Logs the recompilation reason if `recompiles` logging is enabled.
     Raises a RecompileError if `config.error_on_recompile` is enabled.
     """
-    reasons = []
+    reasons: list[str] = []
     while cache_entry is not None:
         reason = get_guard_fail_reason(
             cache_entry.guard_manager,

@@ -100,7 +100,7 @@ class GraphIdFilter:
         return False
 
     def __repr__(self) -> str:
-        parts = []
+        parts: list[str] = []
         if self._explicit_ids:
             parts.append(f"ids={sorted(self._explicit_ids)}")
         if self._conditions:

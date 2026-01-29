@@ -252,6 +252,7 @@ def set_update(set1: set[T], *others: Iterable[T]) -> set[T]:
         for x in set2:
             if x not in set1:
                 set1.add(x)
+    return set1
 
 
 def set_difference(

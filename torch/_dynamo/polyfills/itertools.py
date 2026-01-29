@@ -98,7 +98,7 @@ def cycle(iterable: Iterable[_T]) -> Iterator[_T]:
     iterator = iter(iterable)
 
     def _cycle(iterator: Iterator[_T]) -> Iterator[_T]:
-        saved = []
+        saved: list[_T] = []
         for element in iterable:
             yield element
             saved.append(element)

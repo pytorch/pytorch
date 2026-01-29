@@ -331,7 +331,7 @@ class GraphRegionTracker:
         # the reason for this is that we will necessarily create the largest groups first.
         for group in self.hash_to_duplicates.values():
             if len(group) > 1:
-                region_group = []
+                region_group: list[list[torch.fx.Node]] = []
                 min_rank = math.inf
 
                 for node in group:

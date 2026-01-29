@@ -3876,7 +3876,7 @@ class InstructionTranslatorBase(
         else:
             if isinstance(contents[0], NullVariable):
                 fn = contents[1]
-                args = []
+                args: list[Any] = []
             else:
                 fn = contents[0]
                 args = [contents[1]]
@@ -3891,7 +3891,7 @@ class InstructionTranslatorBase(
             assert len(kwargs) == len(kw_names)
         else:
             args = args + contents[2:]
-            kwargs = {}
+            kwargs: dict[str, Any] = {}
 
         try:
             # if call_function fails, need to set kw_names to None, otherwise
@@ -5112,7 +5112,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                args = []
+                args: list[Any] = []
                 if not self.symbolic_result.is_constant_none():
                     args = [self.symbolic_result]
                 exc.raise_observed_exception(StopIteration, self, args=args)

@@ -1348,7 +1348,7 @@ class OutputGraph(OutputGraphCommon):
                 needs_alias[stolen_name] = []
             needs_alias[stolen_name].append(x)
 
-        visited = {}
+        visited: dict[Any, Any] = {}
         overridden_sources: dict[Source, Source] = {}
         for arg in self.graphargs:
             if not (
@@ -1704,7 +1704,7 @@ class OutputGraph(OutputGraphCommon):
             # temporary local source. This (a). speeds up loading VTs with long
             # chained source, and (b). avoids redundantly saving single-user VT
             # into a temporary local.
-            tempvars = {}  # type: ignore[var-annotated]
+            tempvars: dict[Any, Any] = {}
             for val, count in pass1.uses.items():
                 # If it's already a local source, no need to cache it
                 if count > 1 and not istype(val, (SyntheticLocalSource, LocalSource)):
@@ -1923,7 +1923,7 @@ class OutputGraph(OutputGraphCommon):
                             var.value, _ExportModuleSpecTrackerDict
                         ):
                             for k, v in var.items.items():
-                                specs = {}
+                                specs: dict[Any, Any] = {}
                                 # pyrefly: ignore[missing-attribute]
                                 for k_spec, val in v.items.items():
                                     specs[k_spec.vt.as_python_constant()] = (

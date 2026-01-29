@@ -152,7 +152,7 @@ try:
     else:
         NP_SUPPORTED_MODULES = ()
 
-        NP_TO_TNP_MODULE = {}
+        NP_TO_TNP_MODULE: dict[Any, Any] = {}
     from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 except ImportError:
     pass
@@ -238,7 +238,7 @@ def tabulate(
     headers: Union[tuple[str, ...], list[str]],
 ) -> str:
     try:
-        import tabulate
+        import tabulate  # pyrefly: ignore [missing-import]
 
         return tabulate.tabulate(rows, headers=headers)
     except ImportError:
@@ -1991,7 +1991,7 @@ class ChromiumEventLogger:
             event_metadata = all_event_data[event_name]
             del all_event_data[event_name]
         else:
-            event_metadata = {}
+            event_metadata: dict[str, Any] = {}
         # Add the passed in metadata
         event_metadata.update(metadata)
 
@@ -3558,8 +3558,8 @@ def get_fake_value(
             id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
         }
     else:
-        flat_args_kwargs = []
-        id_to_initial_version = {}
+        flat_args_kwargs: list[Any] = []
+        id_to_initial_version: dict[int, int] = {}
 
     nnmodule = None
     fake_mode = tx.fake_mode
@@ -3791,7 +3791,7 @@ def run_node(
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented
 
-            hints = []
+            hints: list[str] = []
             if isinstance(e, NotImplementedError):
                 hints = [
                     "If the op is a PyTorch op, please file an issue to PyTorch.",
@@ -3985,7 +3985,7 @@ def tensor_always_has_static_shape(
 def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
     def inner() -> str:
         try:
-            from tabulate import tabulate  # TODO: Check that this is installed
+            from tabulate import tabulate  # pyrefly: ignore [missing-import]
         except ImportError:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"

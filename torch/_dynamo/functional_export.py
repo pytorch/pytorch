@@ -137,8 +137,8 @@ def clean_nn_module_stack_and_source_fn(
                     # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append(item)
             else:
-                cleaned_stack.append(item)
-        return cleaned_stack
+                cleaned_stack.append(item)  # pyrefly: ignore[bad-argument-type]
+        return cleaned_stack  # pyrefly: ignore[bad-return]
 
     for node in graph_module.graph.nodes:
         if "nn_module_stack" in node.meta:
