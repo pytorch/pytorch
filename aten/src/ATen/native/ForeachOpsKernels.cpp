@@ -500,6 +500,9 @@ std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors) {
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
+    TORCH_CHECK(
+        t.numel() > 0,
+        "max(): Expected reduction dim to be specified for input.numel() == 0. Specify the reduction dim with the 'dim' argument.");
     result.emplace_back(at::max(t));
   }
   return result;
