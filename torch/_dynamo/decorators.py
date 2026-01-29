@@ -385,7 +385,7 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         satisfy the following requirements:
 
         - Must have the same input and output signature (e.g., same pytree structure, same tensor metadata
-          such as shapes, dtypes, device, strides) as the real function
+          such as shapes, dtypes, device, strides, requires_grad) as the real function
         - Must be runnable with FakeTensor inputs
         - Must only use its explicit arguments (no closures over tensors or modules)
 
