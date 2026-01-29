@@ -1911,10 +1911,14 @@ def can_use_tma(
         strides: Sequence[_IntLike],
         dtype: torch.dtype,
     ) -> bool:
-        # Make sure the last dimension is contiguous
-        last_stride = strides[-1]
-        last_stride_hint = V.graph.sizevars.symbolic_hint(last_stride)
-        if not V.graph.sizevars.statically_known_equals(last_stride_hint, 1):
+        # Make sure only 1 dimension is contiguous
+        strides_i = [V.graph.sizevars.symbolic_hint(st) for st in strides]
+        inner = [
+            i
+            for i, st in enumerate(strides_i)
+            if V.graph.sizevars.statically_known_equals(st, 1)
+        ]
+        if len(inner) != 1:
             return False
 
         # Triton's type of index is uint32, so all dimensions must fit in uint32
