@@ -522,19 +522,12 @@ def get_comprehension_bytecode_prefix() -> list[str]:
 
 
 @functools.cache
-def get_comprehension_result_patterns() -> dict[str, dict[str, list[str]]]:
-    """Discover bytecode sequence patterns for comprehension result handling.
+def get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
+    """Discover bytecode patterns for comprehension result handling.
 
-    Returns dict mapping disposition names to pattern info with full sequences:
-        - "stored": {"prefix": list[str], "postfix": list[str]}
-        - "discarded": {"prefix": list[str], "postfix": list[str]}
-        - "returned": {"prefix": list[str], "postfix": list[str]}
-
-    The structure after END_FOR is: PREFIX + STORE_FASTs + POSTFIX
-    We compare prefix sequences to determine the disposition.
-    For returned vs consumed, we also check if postfix starts with RETURN.
+    Analyzes sample functions to extract the opcode sequences that appear
+    after END_FOR for each result disposition (stored, discarded, returned, consumed).
     """
-
     assert sys.version_info >= (3, 12)
 
     def fn_stored() -> list[int]:
@@ -551,55 +544,32 @@ def get_comprehension_result_patterns() -> dict[str, dict[str, list[str]]]:
     def fn_consumed() -> int:
         return sum([i for i in range(1)])  # noqa: C416
 
-    def extract_sequences(fn: Callable[..., Any]) -> tuple[list[str], list[str]]:
-        """Extract (prefix, postfix) from function bytecode.
-
-        prefix: all opcodes from END_FOR+1 until first STORE_FAST
-        postfix: all opcodes from the last contiguous STORE_FAST after the first STORE_FAST until the end
-        """
+    def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], Optional[str]]:
+        """Extract (prefix, first_postfix_opcode) from comprehension bytecode."""
         insts = list(dis.get_instructions(fn))
 
-        # Find outermost END_FOR (handle nested comprehensions)
-        depth = 0
-        end_for_idx = -1
-        for i, inst in enumerate(insts):
-            if inst.opname == "FOR_ITER":
-                depth += 1
-            elif inst.opname == "END_FOR":
-                depth -= 1
-                if depth == 0:
-                    end_for_idx = i
-                    break
+        # Find END_FOR (sample functions have no nested loops)
+        end_for_idx = [inst.opname for inst in insts].index("END_FOR")
 
-        if end_for_idx == -1:  # TODO: xgz2 this feels like it should be an assertion.
-            return [], []
-
-        prefix: list[str] = []
+        # Extract prefix: opcodes from END_FOR+1 until first STORE_FAST
         idx = end_for_idx + 1
+        prefix = []
         while idx < len(insts) and insts[idx].opname != "STORE_FAST":
             prefix.append(insts[idx].opname)
             idx += 1
 
+        # Skip all STORE_FASTs to find first postfix opcode
         while idx < len(insts) and insts[idx].opname == "STORE_FAST":
             idx += 1
 
-        postfix: list[str] = []
-        while idx < len(insts) and insts[idx].opname != "CALL":
-            postfix.append(insts[idx].opname)
-            idx += 1
-
+        postfix = insts[idx].opname if idx < len(insts) else None
         return prefix, postfix
 
-    stored_prefix, stored_postfix = extract_sequences(fn_stored)
-    discarded_prefix, discarded_postfix = extract_sequences(fn_discarded)
-    returned_prefix, returned_postfix = extract_sequences(fn_returned)
-    consumed_prefix, consumed_postfix = extract_sequences(fn_consumed)
-
     return {
-        "stored": {"prefix": stored_prefix, "postfix": []},
-        "discarded": {"prefix": discarded_prefix, "postfix": []},
-        "returned": {"prefix": returned_prefix, "postfix": returned_postfix},
-        "consumed": {"prefix": consumed_prefix, "postfix": consumed_postfix}
+        "stored": {"prefix": extract_pattern(fn_stored)[0], "postfix": None},
+        "discarded": {"prefix": extract_pattern(fn_discarded)[0], "postfix": None},
+        "returned": {"prefix": extract_pattern(fn_returned)[0], "postfix": extract_pattern(fn_returned)[1]},
+        "consumed": {"prefix": extract_pattern(fn_consumed)[0], "postfix": extract_pattern(fn_consumed)[1]},
     }
 
 
@@ -620,7 +590,7 @@ class ComprehensionAnalysis:
     end_ip: int
     result_var: Optional[str]
     result_on_stack: bool
-    result_disposition: str  # "stored", "discarded", "returned", "consumed"
+    result_disposition: str
     iterator_vars: list[str]
     walrus_vars: list[str]
     captured_vars: list[str]
@@ -4463,8 +4433,7 @@ class InstructionTranslatorBase(
         In Python 3.12+, comprehensions are inlined with a bytecode pattern that
         precedes BUILD_LIST/BUILD_MAP.
         """
-        if sys.version_info < (3, 12):
-            return False
+        assert sys.version_info >= (3, 12)
 
         assert self.instruction_pointer is not None
         ip = self.instruction_pointer - 1
@@ -4515,97 +4484,65 @@ class InstructionTranslatorBase(
 
         assert end_for_ip >= 0
 
-        # Scan loop body for COPY + STORE_FAST walrus pattern
-        # Walrus operators compile to: COPY 1 followed by STORE_FAST <varname>
-        walrus_vars: list[str] = []
-
         # Find first FOR_ITER to know where loop body starts
         for_iter_ip = -1
         for scan_ip in range(start_ip, end_for_ip):
             if self.instructions[scan_ip].opname == "FOR_ITER":
                 for_iter_ip = scan_ip
                 break
-        
+
         assert for_iter_ip >= 0
 
-        if for_iter_ip >= 0:  # TODO xgz2: do we need this check here? or should we assert that for_iter exists
-            scan_ip = for_iter_ip + 1
-            while scan_ip < end_for_ip:
-                inst = self.instructions[scan_ip]
-
-                # Skip nested loops to only capture outermost comprehension
-                if inst.opname == "FOR_ITER":
-                    nested_depth = 1
-                    while nested_depth > 0 and scan_ip < end_for_ip:
-                        scan_ip += 1
-                        nested_inst = self.instructions[scan_ip]
-                        if nested_inst.opname == "FOR_ITER":
-                            nested_depth += 1
-                        elif nested_inst.opname == "END_FOR":
-                            nested_depth -= 1
-                    scan_ip += 1
-                    continue
-
-                # Detect walrus pattern: COPY 1 followed by STORE_FAST
-                if inst.opname == "COPY" and inst.arg == 1:  # TODO: xgz2 do we need to also get these for nested comprehensions? Should add a test for nested comp w/ walrus
-                    if scan_ip + 1 < end_for_ip:
-                        next_inst = self.instructions[scan_ip + 1]
-                        if next_inst.opname == "STORE_FAST":
-                            var_name = next_inst.argval
-                            # Exclude iterator variables and deduplicate
-                            if (
-                                var_name not in iterator_vars
-                                and var_name not in walrus_vars
-                            ):
-                                walrus_vars.append(var_name)
-
-                scan_ip += 1
-
-        # Scan loop body for LOAD_FAST instructions that reference outer scope variables
-        # These are variables accessed from the enclosing function scope
+        # Single pass to detect walrus variables and captured outer variables
         captured_vars: list[str] = []
-        defined_inside: set[str] = set(iterator_vars) | set(walrus_vars)
+        defined_inside: set[str] = set(iterator_vars)
+        # Walrus operators compile to: COPY 1 followed by STORE_FAST <varname>
+        walrus_vars: list[str] = []
 
-        if for_iter_ip >= 0:  # TODO xgz2: do we need this check here? or should we assert that for_iter exists
-            scan_ip = for_iter_ip + 1  # TODO xgz2: also why don't we just combine this with the above block?
-            while scan_ip < end_for_ip:
-                inst = self.instructions[scan_ip]
+        scan_ip = for_iter_ip + 1
+        while scan_ip < end_for_ip:
+            inst = self.instructions[scan_ip]
 
-                # Skip nested loops
-                if inst.opname == "FOR_ITER":
-                    nested_depth = 1
-                    while nested_depth > 0 and scan_ip < end_for_ip:
-                        scan_ip += 1
-                        nested_inst = self.instructions[scan_ip]
-                        if nested_inst.opname == "FOR_ITER":
-                            nested_depth += 1
-                        elif nested_inst.opname == "END_FOR":
-                            nested_depth -= 1
+            # Skip nested loops to only process outermost comprehension
+            if inst.opname == "FOR_ITER":
+                nested_depth = 1
+                while nested_depth > 0 and scan_ip < end_for_ip:
                     scan_ip += 1
-                    continue
-
-                # Track variables defined inside the loop via STORE_FAST
-                if inst.opname == "STORE_FAST":
-                    defined_inside.add(inst.argval)
-                # Detect LOAD_FAST instructions that reference outer variables
-                # Python 3.14+ uses LOAD_FAST_BORROW and combined opcodes
-                elif inst.opname.startswith("LOAD_FAST"):
-                    # Handle combined opcodes like LOAD_FAST_BORROW_LOAD_FAST_BORROW
-                    # which have tuple argval
-                    var_names = (
-                        inst.argval
-                        if isinstance(inst.argval, tuple)
-                        else (inst.argval,)
-                    )
-                    for var_name in var_names:
-                        # Skip if it's defined inside the comprehension or already captured
-                        if (
-                            var_name not in defined_inside
-                            and var_name not in captured_vars
-                        ):
-                            captured_vars.append(var_name)
-
+                    nested_inst = self.instructions[scan_ip]
+                    if nested_inst.opname == "FOR_ITER":
+                        nested_depth += 1
+                    elif nested_inst.opname == "END_FOR":
+                        nested_depth -= 1
                 scan_ip += 1
+                continue
+
+            # Detect walrus pattern: COPY 1 followed by STORE_FAST
+            if inst.opname == "COPY" and inst.arg == 1:
+                if scan_ip + 1 < end_for_ip:
+                    next_inst = self.instructions[scan_ip + 1]
+                    if next_inst.opname == "STORE_FAST":
+                        var_name = next_inst.argval
+                        if var_name not in iterator_vars and var_name not in walrus_vars:
+                            walrus_vars.append(var_name)
+                            defined_inside.add(var_name)
+
+            # Track variables defined inside the loop
+            if inst.opname == "STORE_FAST":
+                defined_inside.add(inst.argval)
+
+            # Detect LOAD_FAST that reference outer variables
+            # Python 3.14+ uses LOAD_FAST_BORROW and combined opcodes
+            elif inst.opname.startswith("LOAD_FAST"):
+                var_names = (
+                    inst.argval
+                    if isinstance(inst.argval, tuple)
+                    else (inst.argval,)
+                )
+                for var_name in var_names:
+                    if var_name not in defined_inside and var_name not in captured_vars:
+                        captured_vars.append(var_name)
+
+            scan_ip += 1
 
         # Extract prefix: all opcodes from END_FOR+1 until first STORE_FAST
         ip = end_for_ip + 1
@@ -4626,54 +4563,38 @@ class InstructionTranslatorBase(
             ip += 1
 
         postfix_start_ip = ip
+        first_postfix = (
+            self.instructions[postfix_start_ip].opname
+            if postfix_start_ip < len(self.instructions)
+            else None
+        )
 
-        def matches_pattern(disposition: str) -> bool:
-            pattern = patterns[disposition]
-            postfix_len = len(pattern["postfix"])
-            postfix = self.instructions[postfix_start_ip : postfix_start_ip + postfix_len]
-            return prefix == pattern["prefix"] and postfix == pattern["postfix"]
+        def matches(disposition: str) -> bool:
+            p = patterns[disposition]
+            if prefix != p["prefix"]:
+                return False
+            return p["postfix"] is None or first_postfix == p["postfix"]
 
-        if matches_pattern("discarded"):
-            return ComprehensionAnalysis(
-                end_ip=postfix_start_ip,
-                result_var=None,
-                result_on_stack=False,
-                result_disposition="discarded",
-                iterator_vars=iterator_vars,
-                walrus_vars=walrus_vars,
-                captured_vars=captured_vars,
-            )
+        # Check dispositions in order of specificity
+        for disposition, result_on_stack in [
+            ("discarded", False),
+            ("returned", True),
+            ("consumed", True),
+        ]:
+            if matches(disposition):
+                return ComprehensionAnalysis(
+                    end_ip=postfix_start_ip,
+                    result_var=None,
+                    result_on_stack=result_on_stack,
+                    result_disposition=disposition,
+                    iterator_vars=iterator_vars,
+                    walrus_vars=walrus_vars,
+                    captured_vars=captured_vars,
+                )
 
-        if matches_pattern("returned"):
-            return ComprehensionAnalysis(
-                end_ip=postfix_start_ip,
-                result_var=None,
-                result_on_stack=True,
-                result_disposition="returned",
-                iterator_vars=iterator_vars,
-                walrus_vars=walrus_vars,
-                captured_vars=captured_vars,
-            )
-
-        if matches_pattern("consumed"):
-            return ComprehensionAnalysis(
-                end_ip=postfix_start_ip,
-                result_var=None,
-                result_on_stack=True,
-                result_disposition="consumed",
-                iterator_vars=iterator_vars,
-                walrus_vars=walrus_vars,
-                captured_vars=captured_vars,
-            )
-
-        if matches_pattern("stored"):
+        if matches("stored"):
             result_var = self.instructions[store_fast_start_ip].argval
-            end_ip = store_fast_start_ip + 1
-            while (
-                end_ip < len(self.instructions)
-                and self.instructions[end_ip].opname == "STORE_FAST"
-            ):
-                end_ip += 1
+            end_ip = postfix_start_ip
             return ComprehensionAnalysis(
                 end_ip=end_ip,
                 result_var=result_var,
