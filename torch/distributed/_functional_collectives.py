@@ -203,13 +203,11 @@ def all_gather_tensor(
         self, group_size, group_name
     )
     res = _maybe_wrap_tensor(tensor)
-    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
-        # torch.cat access the data so we already need to wait here, first do wait
-        # and then chunk + cat avoid us going through ACT dispatching logic again
-        if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-
+        # The wait (if needed) is handled automatically by AsyncCollectiveTensor's
+        # __torch_dispatch__ when _maybe_view_chunk_cat calls operations that need
+        # the actual tensor data (e.g., torch.cat). For view-only transformations,
+        # the AsyncCollectiveTensor wrapper is preserved, delaying the wait.
         res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
@@ -237,13 +235,12 @@ def all_gather_tensor_autograd(
         self, group_size, group_name
     )
     res = _FromTorchTensor.apply(tensor)
-    # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
-        # torch.cat access the data so we already need to wait here, first do wait
-        # and then chunk + cat avoid us going through ACT dispatching logic again
-        if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+        # The wait (if needed) is handled automatically by AsyncCollectiveTensor's
+        # __torch_dispatch__ when _maybe_view_chunk_cat calls operations that need
+        # the actual tensor data (e.g., torch.cat). For view-only transformations,
+        # the AsyncCollectiveTensor wrapper is preserved, delaying the wait.
+        res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
 

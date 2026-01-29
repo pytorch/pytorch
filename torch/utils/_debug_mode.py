@@ -921,6 +921,7 @@ class DebugMode(TorchDispatchMode):
             self._handle_annotate(args[0])
             return
 
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
         from torch.distributed._local_tensor import LocalTensor
 
         # Record the operation with its call depth
@@ -947,6 +948,17 @@ class DebugMode(TorchDispatchMode):
         # TODO: check the context manager
         elif LocalTensor in types:
             if self.record_localtensor:
+                call = _OpCall(
+                    func,
+                    args,
+                    kwargs,
+                    self.call_depth + 1,
+                    stack=self.record_stack_trace,
+                )
+                self._record_call(call)
+        elif AsyncCollectiveTensor in types:
+            # Record AsyncCollectiveTensor operations so debugging/tracing tools can see them
+            if self.record_realtensor:
                 call = _OpCall(
                     func,
                     args,
