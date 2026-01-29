@@ -3441,10 +3441,6 @@ class InstructionTranslatorBase(
         ):
             is_comp_start = self._is_comprehension_start()
             if is_comp_start:
-                # For comprehensions, we use more permissive conditions:
-                # - We don't require > 1 calls in graph (even 0 is okay)
-                # - We skip the exception table check since comprehension exception
-                #   entries are just for cleanup, not real blocks
                 can_speculate = (
                     all(b.can_restore() for b in self.block_stack)
                     and not self.one_graph
@@ -3452,13 +3448,12 @@ class InstructionTranslatorBase(
                     and not self.is_tracing_resume_prologue
                     and not self.active_generic_context_managers
                     and self.output.current_tracer.parent is None
-                    and self.parent is None  # Not inside an inlined function
+                    and self.parent is None
                 )
                 # Only set up speculation at depth 0 (outermost comprehension)
                 if can_speculate and self._comprehension_depth == 0:
                     speculation = self.speculate()
                     if speculation.failed(self):
-                        # Graph break occurred in comprehension on previous attempt
                         self._handle_comprehension_graph_break(inst)
                         return
                     self.current_speculation = speculation
@@ -3509,10 +3504,6 @@ class InstructionTranslatorBase(
         ):
             is_comp_start = self._is_comprehension_start()
             if is_comp_start:
-                # For comprehensions, we use more permissive conditions:
-                # - We don't require > 1 calls in graph (even 0 is okay)
-                # - We skip the exception table check since comprehension exception
-                #   entries are just for cleanup, not real blocks
                 can_speculate = (
                     all(b.can_restore() for b in self.block_stack)
                     and not self.one_graph
@@ -3526,7 +3517,6 @@ class InstructionTranslatorBase(
                 if can_speculate and self._comprehension_depth == 0:
                     speculation = self.speculate()
                     if speculation.failed(self):
-                        # Graph break occurred in comprehension on previous attempt
                         self._handle_comprehension_graph_break(inst)
                         return
                     self.current_speculation = speculation
@@ -4459,11 +4449,7 @@ class InstructionTranslatorBase(
         return prefix == pattern
 
     def _analyze_comprehension(self) -> ComprehensionAnalysis:
-        """Analyze comprehension bytecode to determine result handling pattern.
-
-        Tracks FOR_ITER/END_FOR nesting depth to find the outermost END_FOR,
-        then analyzes what happens to the result using dynamically discovered patterns.
-        """
+        """Analyze comprehension bytecode to determine result handling pattern."""
         assert sys.version_info >= (3, 12)
         assert self.instruction_pointer is not None
 
