@@ -125,6 +125,9 @@ PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=o
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
 
 
+_TRY_EAGER_FALLBACK_FUNCTIONS = frozenset({inspect.signature})
+
+
 # Raised when get_function() cannot convert a nested function to a Python function.
 class ClosureConversionError(NotImplementedError):
     pass
@@ -668,6 +671,30 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         tree_map_result = self._maybe_call_tree_map_fastpath(tx, args, kwargs)
         if tree_map_result is not None:
             return tree_map_result
+
+        # not kwargs is probably fixable - we have to plumb it through to the reconstruction
+        if self.source and not kwargs and self.fn in _TRY_EAGER_FALLBACK_FUNCTIONS:
+            from torch._dynamo.variables import UserDefinedObjectVariable
+
+            try:
+                const_fn = self.as_python_constant()
+                const_args = [arg.as_python_constant() for arg in args]
+                const_kwargs = {
+                    key: val.as_python_constant() for key, val in kwargs.items()
+                }
+                out_val = const_fn(*const_args, **const_kwargs)
+                cls_source = AttrSource(ImportSource("inspect"), "Signature")
+                return tx.output.side_effects.track_eagerly_created_new_user_defined_object(
+                    UserDefinedObjectVariable(
+                        out_val,
+                        init_args=args,
+                        cls_source=cls_source,
+                        constructed_with_eager_fallback_fn=self,
+                        mutation_type=AttributeMutationNew(cls_source),
+                    )
+                )
+            except AsPythonConstantNotImplementedError:
+                pass
 
         return super().call_function(tx, args, kwargs)
 

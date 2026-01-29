@@ -4166,6 +4166,30 @@ class SourcelessBuilder:
             return SymNodeVariable.create(tx, proxy)
         elif istype(value, object):
             return ObjectVariable(value)
+        elif type(value) is types.MappingProxyType:
+            all_const = all(ConstantVariable.is_literal(k) for k in value)
+            if all_const:
+
+                def build_key_value(
+                    k: Any, v: Any
+                ) -> tuple[VariableTracker, LazyVariableTracker]:
+                    key = ConstantVariable.create(k)
+                    res_value = SourcelessBuilder.create(tx, v)
+                    return key, res_value
+
+                items = dict(build_key_value(k, v) for k, v in value.items())
+
+                # Create a dict_vt to be used in the mapping proxy variable
+                # pyrefly: ignore[bad-argument-type]
+                dict_vt = ConstDictVariable(items, source=None)
+
+                # types.MappingProxyType is a read-only proxy of the dict. If the
+                # original dict changes, the changes are reflected in proxy as well.
+                return MappingProxyVariable(dict_vt)
+        elif isinstance(value, inspect.Parameter):
+            return UserDefinedObjectVariable(value, mutation_type=ValueMutationNew())
+            # breakpoint()
+
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
