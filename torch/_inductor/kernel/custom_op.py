@@ -98,6 +98,28 @@ class RangeImplGroup:
         return self.impl_config.kwargs
 
 
+def _graph_contains_triton_op(gm: torch.fx.GraphModule) -> bool:
+    """Check if graph contains triton_op calls (torch.ops.*.* from @triton_op).
+
+    triton_op doesn't have a registered inductor lowering and falls back to
+    fallback_handler, which causes issues during inlining. When detected,
+    we skip inlining and fall back to using SubgraphBuffer.
+    """
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            target = node.target
+            # Check for triton_op calls - they appear as torch.ops.<namespace>.<name>
+            if isinstance(target, torch._ops.OpOverload):
+                # Check if this op uses fallback (no registered lowering)
+                # triton_op namespace typically starts with custom names
+                op_name = str(target)
+                # triton_op creates ops like torch.ops.triton.sdpa
+                if "triton" in op_name.lower():
+                    log.debug("Found triton_op in graph: %s", op_name)
+                    return True
+    return False
+
+
 def _detect_collective_ops(choices: list) -> bool:
     """
     Detect if choices contain collective operations.
@@ -414,6 +436,79 @@ def _create_fallback_choice(
     )
 
 
+class _ReusedExternKernelChoice:
+    """A lightweight wrapper to reuse an already-registered extern kernel.
+
+    This mimics the ExternKernelChoice interface but doesn't register a new kernel.
+    Used when the same fallback kernel needs to be added as a choice for different
+    input shapes without triggering duplicate registration errors.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        op_overload: Callable[..., Any],
+    ) -> None:
+        from torch._inductor.select_algorithm import extern_kernels
+
+        self.name = name
+        self.has_out_variant = False
+        self.op_overload = op_overload
+        self.use_fallback_kernel = True
+        self.src_hash = None
+        self.gm = None
+        self.cpp_kernel_name = None
+        self._kernel = getattr(extern_kernels, name)
+
+    def to_callable(self) -> Callable[..., Any]:
+        return self._kernel
+
+    def call_name(self) -> str:
+        return f"extern_kernels.{self.name}"
+
+    def hash_key(self) -> str:
+        """Return hash key for this choice, matching ExternKernelChoice interface."""
+        import inspect
+
+        from torch._inductor.codecache import code_hash
+
+        fn = self.to_callable()
+        parts = [
+            self.name,
+            getattr(fn, "__name__", ""),
+            getattr(fn, "__module__", ""),
+        ]
+        try:
+            parts.append(inspect.getsource(fn))
+        except Exception:
+            pass
+        return code_hash("-".join(parts))
+
+    def bind(
+        self,
+        input_nodes: list[Any],
+        layout: Any,
+        ordered_kwargs_for_cpp_kernel: tuple[Any, ...] = (),
+        **kwargs: Any,
+    ) -> Any:
+        from torch._inductor.select_algorithm import ExternKernelCaller
+
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
+        return ExternKernelCaller(
+            self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
+        )
+
+    def maybe_append_choice(
+        self,
+        choices: list[Any],
+        input_nodes: list[Any],
+        layout: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Append this choice to the choices list."""
+        choices.append(self.bind(input_nodes, layout, **kwargs))
+
+
 def autotune_custom_op(
     name: str,
     decompositions: list[Callable[..., Any]],
@@ -488,36 +583,46 @@ def autotune_custom_op(
     )
 
     # Add default implementation as fallback
+    # Note: We must always add the fallback choice for every shape, not just the first.
+    # Previously, skipping the entire block when extern_kernel was already registered
+    # caused subsequent shapes to have only decomp choices (no fallback), leading to
+    # inline failures when decomp contains triton_op.
     if op_overload and hasattr(op_overload, "_op"):
         fallback_name = f"{name}_fallback_default"
         from torch._inductor.select_algorithm import extern_kernels
 
-        # Skip if extern_kernel already registered to avoid duplicate registration error
+        with V.fake_mode:
+            # pyrefly: ignore [no-matching-overload]
+            fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
+            fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
+            fake_output = op_overload(*fake_inputs, **fallback_kwargs)
+
+        output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
+        output_stride = tuple(convert_symint_to_expr(s) for s in fake_output.stride())
+
+        # Only create ExternKernelChoice if not already registered (to avoid duplicate error)
+        # But always add the choice to choices list for current shape
         if not hasattr(extern_kernels, fallback_name):
-            with V.fake_mode:
-                # pyrefly: ignore [no-matching-overload]
-                fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
-                fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
-                fake_output = op_overload(*fake_inputs, **fallback_kwargs)
-
-            output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
-            output_stride = tuple(
-                convert_symint_to_expr(s) for s in fake_output.stride()
-            )
-
             fallback_choice = _create_fallback_choice(
                 name, op_overload, fake_output, fallback_kwargs
             )
-            fallback_choice.maybe_append_choice(
-                choices=choices,
-                input_nodes=list(inputs),
-                layout=FixedLayout(
-                    device=fake_output.device,
-                    dtype=fake_output.dtype,
-                    size=output_size,
-                    stride=output_stride,
-                ),
+        else:
+            # Reuse existing extern kernel for the fallback choice
+            fallback_choice = _ReusedExternKernelChoice(
+                name=fallback_name,
+                op_overload=op_overload,
             )
+
+        fallback_choice.maybe_append_choice(
+            choices=choices,
+            input_nodes=list(inputs),
+            layout=FixedLayout(
+                device=fake_output.device,
+                dtype=fake_output.dtype,
+                size=output_size,
+                stride=output_stride,
+            ),
+        )
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
@@ -547,11 +652,23 @@ def autotune_custom_op(
             )
             return selected_result, winning_choice
 
+        # Skip inlining if graph contains triton_op calls.
+        # triton_op doesn't have a registered inductor lowering, so it falls back
+        # to fallback_handler which causes issues. Use SubgraphBuffer instead.
+        if _graph_contains_triton_op(winning_choice.gm):
+            log.debug(
+                "Skipping inline for triton_op graph: %s (name=%s)",
+                getattr(winning_choice, "name", type(winning_choice).__name__),
+                name,
+            )
+            return selected_result
+
         log.debug(
             "Inlining winning choice: %s (name=%s)",
             getattr(winning_choice, "name", type(winning_choice).__name__),
             name,
         )
+        log.debug("Graph to inline:\n%s", winning_choice.gm.graph)
         from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
 
         result = inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
