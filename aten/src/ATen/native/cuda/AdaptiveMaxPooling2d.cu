@@ -230,7 +230,7 @@ const Tensor& indices) {
     int64_t istrideD = input.stride(0);
     int64_t istrideH = input.stride(1);
     int64_t istrideW = input.stride(2);
-            
+
       // Check if no integer overflow can happen during the output pointer calculation
     TORCH_CHECK(sizeD * osizeH * osizeW <= std::numeric_limits<int32_t>::max(), "Adaptive Pooling does not support output sizes larger than INT32_MAX")
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -277,7 +277,7 @@ const Tensor& indices) {
     int64_t istrideD = isizeH * isizeW;
     int64_t istrideH = input_.stride(2);
     int64_t istrideW = input_.stride(3);
-            
+
     // Check if no integer overflow can happen during the output pointer calculation
     TORCH_CHECK(sizeB * sizeD * osizeH * osizeW <= std::numeric_limits<int32_t>::max(), "Adaptive Pooling does not support output sizes larger than INT32_MAX")
     AT_DISPATCH_FLOATING_TYPES_AND2(
