@@ -631,6 +631,9 @@ class ComboKernel(Kernel):
             **self.triton_kernel_cls.inductor_meta_common(),
         }
 
+        # Save triton_meta for later use in generate_kernel_call (for cpp_wrapper)
+        self.triton_meta = triton_meta
+
         sub_kernel = selected_kernel
         if heuristics == "foreach":
             heuristics_line = f"""

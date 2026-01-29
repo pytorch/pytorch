@@ -7117,6 +7117,8 @@ class UserDefinedTritonKernel(ExternKernel):
         constexprs = [p.num for p in kernel.params if p.is_constexpr]  # type: ignore[attr-defined]
         constexpr_names = OrderedSet(arg_names[i] for i in constexprs)
 
+        signature = triton_meta.get("signature", {})
+
         args: list[Any] = []
         arg_types: list[Any] = []
         raw_keys_filtered: list[Any] = []
@@ -7124,7 +7126,7 @@ class UserDefinedTritonKernel(ExternKernel):
         for name, arg in itertools.chain(
             named_args.items(), zip(itertools.repeat(""), extra_launch_args)
         ):
-            if name in constexpr_names and triton_version_uses_attrs_dict():
+            if triton_version_uses_attrs_dict() and signature.get(name) == "constexpr":
                 # see #160000 - we don't pass in constexpr args to speed up runtime.
                 continue
             raw_keys_filtered.append(name)

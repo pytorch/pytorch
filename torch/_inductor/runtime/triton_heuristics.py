@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from collections import namedtuple
-from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, Literal, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch._dynamo.utils import counters, set_feature_use
@@ -3889,6 +3889,46 @@ class GridExpr:
         exec(f"grid_2 = {self.z_grid}", scope)
         return scope["grid_0"], scope["grid_1"], scope["grid_2"]
 
+    def generate_lazy(self, kernel_name: str) -> None:
+        """
+        Creates a GridExpr for lazy compile, where config values are not known
+        at codegen time and are instead referenced by variable names.
+        """
+        meta: dict[str, Any] = {
+            "XBLOCK": f"{kernel_name}_result.xblock",
+            "YBLOCK": f"{kernel_name}_result.yblock",
+            "ZBLOCK": f"{kernel_name}_result.zblock",
+            "R0_BLOCK": f"{kernel_name}_result.r0block",
+            "RSPLIT": f"{kernel_name}_result.rsplit",
+            "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
+        }
+        self.generate(meta)
+
+    @classmethod
+    def from_meta_lazy(
+        cls,
+        inductor_meta: Optional[dict[str, Any]],
+        kernel_name: str,
+    ) -> GridExpr:
+        """Factory method for lazy compile mode."""
+        grid_type = inductor_meta.get("grid_type") if inductor_meta else None
+        if grid_type is None:
+            # User-defined kernel: use extra_launcher_args or dummy values
+            grid = cls(inductor_meta=inductor_meta or {}, mode="cpp")
+            extra_args = (
+                inductor_meta.get("extra_launcher_args", []) if inductor_meta else []
+            )
+
+            grid.x_grid = extra_args[0] if len(extra_args) >= 1 else 1
+            grid.y_grid = extra_args[1] if len(extra_args) >= 2 else 1
+            grid.z_grid = extra_args[2] if len(extra_args) >= 3 else 1
+            return grid
+        grid_cls = globals()[grid_type]
+        assert issubclass(grid_cls, GridExpr)
+        grid = grid_cls(inductor_meta=inductor_meta, mode="cpp")
+        grid.generate_lazy(kernel_name)
+        return grid
+
 
 class Grid1D(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
@@ -3929,9 +3969,11 @@ class MixOrderReductionGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
         split_size = meta.get("RSPLIT_SIZE")
         xblock = meta.get("XBLOCK")
-        assert split_size, "Missing RSPLIT_SIZE"
-        assert xblock, "Missing XBLOCK"
-        assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
+        # Only assert when we have actual integer values (not in lazy mode)
+        if isinstance(split_size, int) and isinstance(xblock, int):
+            assert split_size, "Missing RSPLIT_SIZE"
+            assert xblock, "Missing XBLOCK"
+            assert split_size % xblock == 0, f"{split_size=}, {xblock=}"
         self.x_grid = self.ceildiv("xnumel", split_size)
 
 
@@ -3943,7 +3985,10 @@ class CooperativeReductionGrid(GridExpr):
 
 class SplitScanGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
-        assert meta.get("XBLOCK", 1) == 1
+        xblock = meta.get("XBLOCK", 1)
+        # Only assert when we have actual integer values (not in lazy mode)
+        if isinstance(xblock, int):
+            assert xblock == 1
         self.x_grid = self.ceildiv("r0_numel", meta.get("R0_BLOCK"))
         self.y_grid = "xnumel"
 
