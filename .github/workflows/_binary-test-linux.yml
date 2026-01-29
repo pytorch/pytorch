@@ -124,7 +124,7 @@ jobs:
           } >> "${GITHUB_ENV} }}"
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         continue-on-error: true
         with:
@@ -137,15 +137,15 @@ jobs:
           no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
 
       - name: Setup Linux
-        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel'
         uses: ./.github/actions/setup-linux
 
       - name: Login to ECR
-        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel'
         uses: ./.github/actions/ecr-login
 
       - name: Chown workspace
-        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel'
         uses: ./.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
@@ -190,7 +190,7 @@ jobs:
 
       - name: configure aws credentials
         id: aws_creds
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' && startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel' && startsWith(github.event.ref, 'refs/tags/ciflow/') }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
@@ -199,7 +199,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel' }}
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-registry: ${{ startsWith(github.event.ref, 'refs/tags/ciflow/') && '308535385114.dkr.ecr.us-east-1.amazonaws.com' || 'docker.io' }}
@@ -209,7 +209,7 @@ jobs:
           working-directory: pytorch
 
       - name: Pull Docker image
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -221,11 +221,11 @@ jobs:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || format('{0}:{1}', inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) }}
 
       - name: Teardown Linux
-        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
-        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel' && inputs.build_environment != 'linux-ppc64le-binary-manywheel'
         uses: ./pytorch/.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
