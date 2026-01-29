@@ -127,7 +127,8 @@ def _test_aot_autograd_forwards_backwards_helper(
                 # operator is a complex Tensor and autograd will yell at autograd.grad
                 # on a complex Tensor unless we manually provide the grad_output flag.
                 sm += i.sum().abs()
-        assert isinstance(sm, torch.Tensor)
+        if not isinstance(sm, torch.Tensor):
+            raise TypeError(f"Expected torch.Tensor, got {type(sm).__name__}")
         return out, torch.autograd.grad(sm, diff_args, allow_unused=True)
 
     def check(args, ignore_failure=False):

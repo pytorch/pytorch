@@ -171,7 +171,10 @@ def sample_inputs_sparse_reduction(
                 dtype=inp.dtype,
                 device=inp.device,
             )
-            assert not inp.is_coalesced()
+            if inp.is_coalesced():
+                raise AssertionError(
+                    "Input sparse tensor must be uncoalesced for this sample"
+                )
             yield SampleInput(
                 inp.requires_grad_(requires_grad),
                 args=sample_input.args,

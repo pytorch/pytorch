@@ -45,7 +45,8 @@ def autograd_registration_check(op, args, kwargs):
       AutoDispatchBelowAutograd and re-invokes the operator.
 
     """
-    assert isinstance(op, torch._ops.OpOverload)
+    if not isinstance(op, torch._ops.OpOverload):
+        raise TypeError(f"Expected torch._ops.OpOverload, got {type(op).__name__}")
     # Implementation details
     # -----------------------------------------------
     # If an operator doesn't have an autograd kernel at an autograd key,

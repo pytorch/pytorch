@@ -59,7 +59,8 @@ class _dynamic_dispatch_dtypes(_dispatch_dtypes):
 
 def get_supported_dtypes(op, sample_inputs_fn, device_type):
     # Returns the supported dtypes for the given operator and device_type pair.
-    assert device_type in ["cpu", "cuda"]
+    if device_type not in ("cpu", "cuda"):
+        raise ValueError(f"device_type must be 'cpu' or 'cuda', got {device_type!r}")
     if not TEST_CUDA and device_type == "cuda":
         warnings.warn(
             "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!",
@@ -232,7 +233,10 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         if "mask" in keys:
             mask = kwargs.pop("mask")
             if mask is not None:
-                assert mask.layout == torch.strided
+                if mask.layout != torch.strided:
+                    raise ValueError(
+                        f"mask must have strided layout, got {mask.layout}"
+                    )
                 kwargs["where"] = mask.cpu().numpy()
 
         if "identity" in keys:
