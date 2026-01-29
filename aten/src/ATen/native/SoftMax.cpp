@@ -311,6 +311,14 @@ TORCH_IMPL_FUNC(softmax_cpu_out)
     return;
   }
 
+  #if AT_MKLDNN_ENABLED() && defined(__aarch64__)
+      if(input.is_mkldnn()){
+        auto y = at::native::mkldnn_softmax(input, dim, half_to_float);
+        output.copy_(y);
+        return;
+      }
+  #endif  // if AT_MKLDNN_ENABLED() && defined(__aarch64__)
+
   auto input_ = input.contiguous();
   int64_t dim_ = maybe_wrap_dim(dim, input_.dim());
 
