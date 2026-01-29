@@ -45,7 +45,6 @@ def parse_segments(raw_segments: list[list[int]]) -> list[LlvmCoverageSegment]:
             raise AssertionError(
                 f"list is not compatible with llvmcom export: expected 5 or 6 elements, got {len(raw_segment)}"
             )
-        " Expected to have 5 or 6 elements"
         if len(raw_segment) == 5:
             ret.append(
                 LlvmCoverageSegment(
