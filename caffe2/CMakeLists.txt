@@ -912,6 +912,7 @@ if(USE_LLVM AND LLVM_FOUND)
     scalaropts transformutils ${LLVM_TARGETS_TO_BUILD} orcjit)
   target_link_libraries(torch_cpu PRIVATE ${LLVM_LINK_LIBS})
 endif(USE_LLVM AND LLVM_FOUND)
+target_link_libraries(torch_cpu PUBLIC onnx_library)
 
 # This is required for older versions of CMake, which don't allow
 # specifying add_library() without a list of source files
