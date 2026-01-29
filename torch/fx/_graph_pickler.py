@@ -370,14 +370,11 @@ class _GraphModulePickleData:
             _python_code = gm._real_recompile()
         else:
             _python_code = gm.recompile()
-        # Respect __getstate__ if defined (e.g., for _CodegenGraphModule which
-        # has unpicklable dynamic module references).
         if hasattr(gm, "__getstate__"):
             self.gm_dict = gm.__getstate__()
         else:
             self.gm_dict = gm.__dict__.copy()
-        # Ensure _graph is handled separately
-        self.gm_dict.pop("_graph", None)
+        del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph, options)
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch.fx.GraphModule:
