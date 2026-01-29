@@ -48,6 +48,7 @@
 #include <structmember.h>
 #include <cstdint>
 #include <memory>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -1132,6 +1133,29 @@ class NativeOpSchema {
     return comparison_key_;
   }
 
+  // Format schema as string for logging
+  std::string format_inputs() const {
+    std::ostringstream ss;
+    ss << op_.operator_name().name;
+    if (!op_.operator_name().overload_name.empty()) {
+      ss << "." << op_.operator_name().overload_name;
+    }
+    ss << "(";
+    bool first = true;
+    for (const auto& item : comparison_key_) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      if (item.dtensor_spec) {
+        ss << py::str(item.dtensor_spec).cast<std::string>();
+      } else if (!item.iv.isNone()) {
+        ss << item.iv;
+      }
+    }
+    ss << ")";
+    return ss.str();
+  }
+
  private:
   // It would *not* be correct to store this by reference, because we
   // have no guarantees about its lifetime. This class is cheap anyway.
@@ -1164,43 +1188,45 @@ struct hash<NativeOpSchema> {
 };
 } // namespace std
 
-// Helper to log cache hits by calling Python.
+// Helper to check if dtensor debug logging is enabled and log cache hits.
+// We cache the logger to avoid repeated Python calls.
 namespace {
-thread_local py::object log_cache_hit_fn;
-thread_local bool log_cache_hit_fn_initialized = false;
+thread_local py::object dtensor_dispatch_logger;
+thread_local bool dtensor_dispatch_logger_initialized = false;
+
+py::object get_dtensor_dispatch_logger() {
+  if (!dtensor_dispatch_logger_initialized) {
+    dtensor_dispatch_logger_initialized = true;
+    try {
+      auto logging = py::module_::import("logging");
+      dtensor_dispatch_logger =
+          logging.attr("getLogger")("torch.distributed.tensor._dispatch");
+    } catch (...) {
+      dtensor_dispatch_logger = py::none();
+    }
+  }
+  return dtensor_dispatch_logger;
+}
 
 void log_sharding_prop_cache_hit(
     const NativeOpSchema& schema,
     const py::object& cached_sharding) {
-  if (!log_cache_hit_fn_initialized) {
-    log_cache_hit_fn_initialized = true;
-    try {
-      auto dispatch_module =
-          py::module_::import("torch.distributed.tensor._dispatch");
-      log_cache_hit_fn = dispatch_module.attr("_log_sharding_prop_cache_hit");
-    } catch (...) {
-      log_cache_hit_fn = py::none();
-    }
-  }
-  if (log_cache_hit_fn.is_none()) {
+  auto logger = get_dtensor_dispatch_logger();
+  if (logger.is_none()) {
     return;
   }
-
-  // Build op name
-  std::string op_name = schema.op().operator_name().name;
-  if (!schema.op().operator_name().overload_name.empty()) {
-    op_name += "." + std::string(schema.op().operator_name().overload_name);
+  auto logging = py::module_::import("logging");
+  if (!logger.attr("isEnabledFor")(logging.attr("DEBUG")).cast<bool>()) {
+    return;
   }
-
-  // Build args list from comparison_key (only DTensorSpecs)
-  py::list args_schema;
-  for (const auto& item : schema.comparison_key()) {
-    if (item.dtensor_spec) {
-      args_schema.append(item.dtensor_spec);
-    }
+  std::ostringstream ss;
+  ss << "sharding_prop HIT (C++ fast path): ";
+  ss << schema.format_inputs();
+  auto output_spec = cached_sharding.attr("output_spec");
+  if (!output_spec.is_none()) {
+    ss << " -> " << py::str(output_spec).cast<std::string>();
   }
-
-  log_cache_hit_fn(op_name, args_schema, cached_sharding);
+  logger.attr("debug")(ss.str());
 }
 } // namespace
 

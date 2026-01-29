@@ -50,25 +50,6 @@ aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
 
-def _log_sharding_prop_cache_hit(
-    op_name: str,
-    args_schema: list[object],
-    output_sharding: object,
-) -> None:
-    """Log C++ sharding propagation cache hit. Called from C++."""
-    if not logger.isEnabledFor(logging.DEBUG):
-        return
-    output_spec = getattr(output_sharding, "output_spec", None)
-    # Replace :: with . to match Python OpSchema format
-    op_name = op_name.replace("::", ".")
-    logger.debug(
-        "sharding_prop HIT (C++ fast path): %s(%s) -> %s",
-        op_name,
-        ", ".join(str(arg) for arg in args_schema),
-        output_spec,
-    )
-
-
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
