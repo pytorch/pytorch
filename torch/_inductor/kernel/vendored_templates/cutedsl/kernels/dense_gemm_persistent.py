@@ -122,57 +122,6 @@ def _compute_stages(
 
 
 class PersistentDenseGemmKernel:
-    """This class implements batched matrix multiplication (C = A x B) with support for various data types
-    and architectural features specific to Blackwell GPUs with persistent tile scheduling and warp specialization.
-
-    :param acc_dtype: Data type for accumulation during computation
-    :type acc_dtype: type[cutlass.Numeric]
-    :param use_2cta_instrs: Whether to use CTA group 2 for advanced thread cooperation
-    :type use_2cta_instrs: bool
-    :param mma_tiler_mn: Shape of the Matrix Multiply-Accumulate (MMA) tile (M,N)
-    :type mma_tiler_mn: Tuple[int, int]
-    :param cluster_shape_mn: Cluster dimensions (M,N) for parallel processing
-    :type cluster_shape_mn: Tuple[int, int]
-    :param use_tma_store: Whether to use Tensor Memory Access (TMA) for storing results
-    :type use_tma_store: bool
-
-    :note: In current version, A and B tensor must have the same data type
-        - i.e., Float8E4M3FN for A and Float8E5M2 for B is not supported
-
-    :note: Supported A/B data types:
-        - TFloat32
-        - Float16/BFloat16
-        - Int8/Uint8
-        - Float8E4M3FN/Float8E5M2
-
-    :note: Supported accumulator data types:
-        - Float32 (for all floating point A/B data types)
-        - Float16 (only for fp16 and fp8 A/B data types)
-        - Int32 (only for uint8/int8 A/B data types)
-
-    :note: Supported C data types:
-        - Float32 (for float32 and int32 accumulator data types)
-        - Int32 (for float32 and int32 accumulator data types)
-        - Float16/BFloat16 (for fp16 and fp8 accumulator data types)
-        - Int8/Uint8 (for uint8/int8 accumulator data types)
-        - Float8E4M3FN/Float8E5M2 (for float32 accumulator data types)
-
-    :note: Constraints:
-        - MMA tiler M must be 64/128 (use_2cta_instrs=False) or 128/256 (use_2cta_instrs=True)
-        - MMA tiler N must be 32-256, step 32
-        - Cluster shape M must be multiple of 2 if use_2cta_instrs=True
-        - Cluster shape M/N must be positive and power of 2, total cluster size <= 16
-
-    **Example:**
-        gemm = PersistentDenseGemmKernel(
-            acc_dtype=cutlass.Float32,
-            use_2cta_instrs=True,
-            mma_tiler_mn=(128, 128),
-            cluster_shape_mn=(2, 2)
-        )
-        gemm(a, b, c, max_active_clusters, stream)
-    """
-
     def __init__(
         self,
         acc_dtype: Type[cutlass.Numeric],
