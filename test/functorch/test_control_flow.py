@@ -8965,12 +8965,12 @@ class GraphModule(torch.nn.Module):
         with torch.no_grad():
             expected = org_data.sin() + 2
             data = org_data.clone()
-            output = fn(predicate_false, data)
+            output = torch.compile(fn)(predicate_false, data)
             torch.testing.assert_close(output, expected)
             assert id(output) == id(data)
 
             data = org_data.clone()
-            output = fn(predicate_true, data)
+            output = torch.compile(fn)(predicate_true, data)
             torch.testing.assert_close(output, org_data + 1)
             assert id(output) != id(data)
 
@@ -9396,7 +9396,7 @@ class TestAutoFunctionalizeControlFlow(TestCase):
             "supports_input_mutation",
             True,
         ):
-            # Only suuport input mutation in inference
+            # Only support input mutation in inference
             cloned_args = [_clone(args) for _ in range(3)]
             with torch.no_grad():
                 exp = _new_fn()(*cloned_args[0])
