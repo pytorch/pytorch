@@ -41,8 +41,13 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.utils import _pytree as pytree
 
 
-# Partial reduce ops to enumerate
+# Partial reduce ops to enumerate for outputs (all types)
 PARTIAL_REDUCE_OPS = ["sum", "avg", "min", "max"]
+
+# Partial reduce ops to enumerate for inputs
+# We include min/max but use tensor index to vary the "winning rank" pattern
+# so that P(max) + P(max) -> P(max) is correctly detected as invalid.
+PARTIAL_INPUT_REDUCE_OPS = ["sum", "avg", "min", "max"]
 
 
 def get_opinfo_by_name(name: str):
@@ -60,13 +65,13 @@ def get_1d_input_placements_for_tensor(t: torch.Tensor, include_partial: bool = 
     Args:
         t: The tensor to get placements for
         include_partial: If True, include Partial placements for inputs.
-            Partial inputs are valid for some ops (e.g., add where P+P=P).
+            Only includes sum/avg (not min/max) since those compose well.
     """
     placements = [Replicate()]
     for dim in range(t.ndim):
         placements.append(Shard(dim))
     if include_partial:
-        for reduce_op in PARTIAL_REDUCE_OPS:
+        for reduce_op in PARTIAL_INPUT_REDUCE_OPS:
             placements.append(Partial(reduce_op))
     return placements
 
@@ -175,17 +180,28 @@ def generate_placement_combinations(tensors: list, output_tensor: torch.Tensor):
             yield PlacementCombination(input_combo, output_placement)
 
 
-def _create_partial_input(tensor: torch.Tensor, placement: Partial, world_size: int) -> LocalTensor:
+def _create_partial_input(
+    tensor: torch.Tensor, placement: Partial, world_size: int, tensor_idx: int = 0
+) -> LocalTensor:
     """
     Create a LocalTensor with values that reduce to the original tensor.
 
-    We use asymmetric splits (not zeros) to avoid coincidental matches with
-    min/max operations on specific input values.
+    We use asymmetric splits/offsets to avoid coincidental matches when
+    combining different Partial types.
 
     For Partial(sum): rank 0 gets 60%, rank 1 gets 40% (sum = 100%)
     For Partial(avg): rank 0 gets 60% * world_size, rank 1 gets 40% * world_size (avg = 100%)
-    For Partial(min): rank 0 holds value, others hold value + 1 (min = value)
-    For Partial(max): rank 0 holds value, others hold value - 1 (max = value)
+    For Partial(min): Element-wise variation based on tensor_idx
+    For Partial(max): Element-wise variation based on tensor_idx
+
+    Args:
+        tensor: The original tensor value
+        placement: The Partial placement to create
+        world_size: Number of ranks
+        tensor_idx: Index of this tensor among inputs (0, 1, 2, ...).
+            Used to vary the "winning rank" pattern for min/max so that
+            different inputs have different patterns, correctly detecting
+            invalid rules like P(max) + P(max) -> P(max).
     """
     reduce_op = placement.reduce_op
 
@@ -215,25 +231,36 @@ def _create_partial_input(tensor: torch.Tensor, placement: Partial, world_size: 
         return LocalTensor(local_tensors)
 
     elif reduce_op == "min":
-        # Rank 0 holds value, others hold value + 1
-        # min = value
+        # Create element-wise variation: which rank holds the min varies
+        # by element index AND tensor_idx. This ensures different input
+        # tensors have different patterns.
         local_tensors = {}
+        flat = tensor.flatten()
+        # Use tensor_idx to shift the pattern
+        mask = (torch.arange(flat.numel()) + tensor_idx) % 2 == 0
         for r in range(world_size):
             if r == 0:
-                local_tensors[r] = tensor.clone()
+                # Rank 0: add offset where mask is False (min on rank 1)
+                r_offset = torch.where(mask, torch.zeros_like(flat), torch.full_like(flat, 0.7))
             else:
-                local_tensors[r] = tensor.clone() + 1.0
+                # Rank 1: add offset where mask is True (min on rank 0)
+                r_offset = torch.where(mask, torch.full_like(flat, 0.7), torch.zeros_like(flat))
+            local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
         return LocalTensor(local_tensors)
 
     elif reduce_op == "max":
-        # Rank 0 holds value, others hold value - 1
-        # max = value
+        # Create element-wise variation based on tensor_idx
         local_tensors = {}
+        flat = tensor.flatten()
+        mask = (torch.arange(flat.numel()) + tensor_idx) % 2 == 0
         for r in range(world_size):
             if r == 0:
-                local_tensors[r] = tensor.clone()
+                # Rank 0: subtract offset where mask is False (max on rank 1)
+                r_offset = torch.where(mask, torch.zeros_like(flat), torch.full_like(flat, -1.3))
             else:
-                local_tensors[r] = tensor.clone() - 1.0
+                # Rank 1: subtract offset where mask is True (max on rank 0)
+                r_offset = torch.where(mask, torch.full_like(flat, -1.3), torch.zeros_like(flat))
+            local_tensors[r] = (flat + r_offset).reshape(tensor.shape)
         return LocalTensor(local_tensors)
 
     else:
@@ -271,10 +298,15 @@ def validate_combination(
 
             # Distribute input tensors according to placements, then get local tensors
             local_tensors = []
-            for (name, tensor), placement in zip(tensors, combination.input_placements):
+            for tensor_idx, ((name, tensor), placement) in enumerate(
+                zip(tensors, combination.input_placements)
+            ):
                 if isinstance(placement, Partial):
                     # For Partial inputs, create truly different local values
-                    local_tensor = _create_partial_input(tensor, placement, world_size)
+                    # Pass tensor_idx so different inputs get different patterns
+                    local_tensor = _create_partial_input(
+                        tensor, placement, world_size, tensor_idx
+                    )
                     local_tensors.append(local_tensor)
                 elif isinstance(placement, Replicate):
                     # For Replicate inputs, all ranks have the same value
