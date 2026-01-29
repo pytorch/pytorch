@@ -5577,10 +5577,9 @@ class WorkSharing:
         if not self.in_parallel:
             self.num_threads = threads
             self.in_parallel = True
-            if config.cpp.dynamic_threads:
-                self.code.writeline("#pragma omp parallel")
-            else:
-                self.code.writeline(f"#pragma omp parallel num_threads({threads})")
+            # Use dynamic threads to allow different thread counts at runtime
+            # This makes the cache compatible with different OMP_NUM_THREADS settings
+            self.code.writeline("#pragma omp parallel")
             self.stack.enter_context(self.code.indent())
             self.code.writeline(
                 "int tid = omp_get_thread_num();",
