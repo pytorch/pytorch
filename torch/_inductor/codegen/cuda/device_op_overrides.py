@@ -9,6 +9,7 @@ from ..common import (
     register_device_op_overrides,
     TritonScratchWorkspace,
 )
+from .cuda_env import get_cuda_arch, get_cuda_version
 
 
 class CUDADeviceOpOverrides(DeviceOpOverrides):
@@ -359,6 +360,12 @@ class CUDADeviceOpOverrides(DeviceOpOverrides):
             )
         else:
             return [f"CUdeviceptr {var_name} = 0;"], var_name
+
+    def get_device_arch(self) -> str:
+        return get_cuda_arch()
+
+    def get_toolkit_version(self) -> str:
+        return get_cuda_version()
 
 
 register_device_op_overrides("cuda", CUDADeviceOpOverrides())
