@@ -343,6 +343,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._module_fqn,
             )
 
     def wait_for_unshard(self):
