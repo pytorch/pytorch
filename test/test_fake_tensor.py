@@ -136,6 +136,37 @@ class FakeTensorTest(TestCase):
         finally:
             test_lib._destroy()
 
+    @expectedFailurePropagateRealTensors
+    def test_functorch_wrapper_in_fake_mode(self):
+        """Test that functorch wrappers (e.g., from vjp) work inside FakeTensorMode."""
+
+        @torch.library.custom_op("reproducer::simple_op", mutates_args=())
+        def simple_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.mm(x, weight)
+
+        @simple_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            def func(w: torch.Tensor) -> torch.Tensor:
+                return torch.mm(x, w)
+
+            output, vjp_fn = torch.func.vjp(func, weight)
+            return output
+
+        x = torch.randn(4, 8)
+        weight = torch.randn(8, 16)
+
+        # Eager mode result
+        eager_result = torch.ops.reproducer.simple_op(x, weight)
+
+        # Compiled result
+        @torch.compile(fullgraph=True, backend="inductor")
+        def forward(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.ops.reproducer.simple_op(x, weight)
+
+        compiled_result = forward(x, weight)
+
+        self.assertEqual(compiled_result, eager_result)
+
     def test_parameter_instantiation(self):
         with FakeTensorMode():
             x = torch.rand([4])
