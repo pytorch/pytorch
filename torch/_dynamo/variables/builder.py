@@ -4069,8 +4069,36 @@ class SourcelessBuilder:
     def __init__(self) -> None:
         raise AssertionError("Use SourcelessBuilder.create()")
 
+    @overload
     @staticmethod
-    def create(tx: "InstructionTranslator", value: Any) -> VariableTracker:
+    def create(
+        tx: "InstructionTranslatorBase", value: type[set[Any]]
+    ) -> BuiltinVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: type[dict[Any, Any]]
+    ) -> BuiltinVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: type[tuple[Any, ...]]
+    ) -> BuiltinVariable: ...
+
+    @overload
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase", value: Union[bool, int, float, str]
+    ) -> ConstantVariable: ...
+
+    @overload
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker: ...
+
+    @staticmethod
+    def create(tx: "InstructionTranslatorBase", value: Any) -> VariableTracker:
         value_type = type(value)
         # type: ignore[attr-defined]
         fast_handler = SourcelessBuilder._type_handlers.get(value_type)
@@ -4129,6 +4157,8 @@ class SourcelessBuilder:
             assert getattr(value.__self__, value.__func__.__name__) == value
             cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
             try:
+                # tx is InstructionTranslatorBase, but var_getattr needs InstructionTranslator
+                # pyrefly: ignore[bad-argument-type]
                 return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
             except NotImplementedError:
                 pass  # failthrough to unimplemented branch
