@@ -36,7 +36,7 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(c10::intrusive_ptr<LinearPackedParamsBase>)
 } // namespace caffe2
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__)
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
 CAFFE_KNOWN_TYPE(fbgemm::PackBMatrix<int8_t>)
@@ -46,7 +46,7 @@ CAFFE_KNOWN_TYPE(c10::intrusive_ptr<PackedLinearWeightFp16>)
 
 namespace at::native {
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__)
 
 Tensor fbgemm_linear_int8_weight_fp32_activation(
     const Tensor& input,
