@@ -13,6 +13,8 @@ Usage:
     python check_doc_redirects.py --base-ref origin/main --auto-fix
 """
 
+from __future__ import annotations
+
 import argparse
 import ast
 import re
