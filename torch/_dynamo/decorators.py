@@ -360,25 +360,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # At runtime: real function runs (counter increments to 1, 2, 3, ...)
             # But returned count is always 999 (from fake implementation at compile time)
 
-            # BAD: primitive output varies at runtime
-            counter = 0
-
-
-            @leaf_function
-            def count_calls(x):
-                global counter
-                counter += 1
-                return (x, counter)
-
-
-            @count_calls.register_fake
-            def count_calls_fake(x):
-                return (x, 999)  # placeholder value
-
-
-            # At runtime: real function runs (counter increments to 1, 2, 3, ...)
-            # But returned count is always 999 (from register_fake at compile time)
-
         - User-defined classes must be registered via :func:`torch.utils._pytree.register_pytree_node`,
         :func:`torch.utils._pytree.register_dataclass`, or :func:`torch.utils._pytree.register_constant`.
 
@@ -392,7 +373,7 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         satisfy the following requirements:
 
         - Must have the same input and output signature (e.g., same pytree structure, same tensor metadata
-          such as shapes, dtypes, device, strides) as the real function
+          such as shapes, dtypes, device, strides, requires_grad) as the real function
         - Must be runnable with FakeTensor inputs
         - Must only use its explicit arguments (no closures over tensors or modules)
 
@@ -534,47 +515,39 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             >>> out = compiled(x)[0]
             >>> out.sum().backward()  # Gradients flow to model.linear.weight/bias and x
 
-        # Example 3: nn.Module method calling external library
-        # External code that AOT autograd cannot trace
-        class ExternalLibModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
+        Wrapping a forward_pre_hook with runtime logging. Note that both the hook
+        and the forward method should be decorated with ``@leaf_function``::
 
-            def forward(self, x):
-                return self.process_with_external(x)
-
-            @leaf_function
-            def process_with_external(self, x):
-                out = self.linear(x)
-                # Hypothetical external library call that AOT can't trace
-                # result = external_lib.process(out)
-                return (out,)
-
-            @process_with_external.fake_impl
-            def process_with_external_fake(self, x):
-                return (self.linear(x),)
-
-        # Example 4: forward_pre_hook with runtime logging
-        # Hooks with side effects that should run at runtime
-        @leaf_function
-        def logging_pre_hook(module, args):
-            x = args[0]
-            print(f"Pre-hook: input shape={x.shape}, mean={x.mean().item():.4f}")
-            return args
-
-        @logging_pre_hook.fake_impl
-        def logging_pre_hook_fake(module, args):
-            return args
-
-        class ModuleWithHook(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-                self.register_forward_pre_hook(logging_pre_hook)
-
-            def forward(self, x):
-                return (self.linear(x),)
+            >>> import torch
+            >>> from torch._dynamo.decorators import leaf_function
+            >>>
+            >>> @leaf_function
+            ... def logging_pre_hook(module, args):
+            ...     x = args[0]
+            ...     print(f"Pre-hook: input shape={x.shape}, mean={x.mean().item():.4f}")
+            ...     return args
+            ...
+            >>> @logging_pre_hook.register_fake
+            ... def logging_pre_hook_fake(module, args):
+            ...     return args
+            ...
+            >>> class ModuleWithHook(torch.nn.Module):
+            ...     def __init__(self):
+            ...         super().__init__()
+            ...         self.linear = torch.nn.Linear(10, 10)
+            ...         self.register_forward_pre_hook(logging_pre_hook)
+            ...     @leaf_function
+            ...     def forward(self, x):
+            ...         return (self.linear(x),)
+            ...     @forward.register_fake
+            ...     def forward_fake
+            ...     def forward_fake(self, x):
+            ...         return (self.linear(x),)
+            ...
+            >>> model = ModuleWithHook()
+            >>> compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+            >>> x = torch.randn(32, 10)
+            >>> out = compiled(x)
 
     Args:
         fn: The function being decorated.

@@ -370,7 +370,7 @@ def _save_fx_default(
     current_name: str,
     folder_name: str,
     dump_example_input: bool,
-    gm: nn.Module,
+    gm: torch.fx.GraphModule,
     example_inputs: list[torch.Tensor],
 ) -> nn.Module:
     """
@@ -460,6 +460,7 @@ def _save_fx_default(
         graph_saver_helper(gm, joint_args, "joint")
         return default_partition(gm, joint_args)  # pyrefly: ignore[missing-argument]
 
+    # pyrefly: ignore[bad-return]
     return aot_module_simplified(
         gm,
         example_inputs,
