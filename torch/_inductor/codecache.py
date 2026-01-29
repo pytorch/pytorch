@@ -3865,7 +3865,16 @@ class DLLWrapper:
 
     def _dlclose(self) -> None:
         f_dlclose = None
+        # During Python interpreter shutdown, importing modules or calling
+        # dlclose is unsafe. Silently skip cleanup in that case.
+        try:
+            import sys
 
+            if sys.is_finalizing():
+                return
+        except Exception:
+            # import machinery may already be torn down
+            return
         if is_linux():
             syms = CDLL(None)
             if not hasattr(syms, "dlclose"):
