@@ -14864,6 +14864,53 @@ class SideEffectsFalsyTests(torch._dynamo.test_case.TestCase):
             mock_debug.assert_called()
 
 
+class FallbackLoggingTests(torch._dynamo.test_case.TestCase):
+    """Tests for debug logging when fallback defaults are used."""
+
+    def test_device_fallback_logs_debug(self):
+        """Test debug log is emitted when device falls back to CPU."""
+        import logging
+        from torch._dynamo.backends.common import device_from_inputs
+
+        # Enable debug logging temporarily
+        logger = logging.getLogger("torch._dynamo.backends.common")
+        with self.assertLogs(logger, level=logging.DEBUG) as log_context:
+            device = device_from_inputs([])
+            self.assertEqual(device, torch.device("cpu"))
+            self.assertTrue(
+                any("falling back to CPU" in msg for msg in log_context.output)
+            )
+
+    def test_dtype_fallback_logs_debug(self):
+        """Test debug log is emitted when dtype falls back to float32."""
+        import logging
+        from torch._dynamo.backends.common import dtype_from_inputs
+
+        logger = logging.getLogger("torch._dynamo.backends.common")
+        with self.assertLogs(logger, level=logging.DEBUG) as log_context:
+            dtype = dtype_from_inputs([])
+            self.assertEqual(dtype, torch.float32)
+            self.assertTrue(
+                any("falling back to float32" in msg for msg in log_context.output)
+            )
+
+    def test_no_log_when_device_found(self):
+        """Test no debug log when device is found in inputs."""
+        from torch._dynamo.backends.common import device_from_inputs
+
+        tensor = torch.randn(10)
+        device = device_from_inputs([tensor])
+        self.assertEqual(device, tensor.device)
+
+    def test_no_log_when_dtype_found(self):
+        """Test no debug log when dtype is found in inputs."""
+        from torch._dynamo.backends.common import dtype_from_inputs
+
+        tensor = torch.randn(10, dtype=torch.float64)
+        dtype = dtype_from_inputs([tensor])
+        self.assertEqual(dtype, torch.float64)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
