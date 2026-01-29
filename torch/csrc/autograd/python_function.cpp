@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
@@ -769,14 +770,34 @@ static void _wrap_outputs(
     } else {
       if (is_executable) {
         // If one of the grad outputs is undefined, a correctly-shaped zeros
-        // should be used instead. To construct these for NJT, zeros_like() must
-        // be used until we have factory function support.
+        // should be used instead. To construct these for NJT or DTensor,
+        // zeros_like() must be used to preserve the tensor type. Failing to
+        // do this may result in undefined errors depending on the tensor
+        // subclass's behavior. DTensor will error out due to mixing DTensor
+        // and torch.Tensor in the following computation.
+        // Note: We specifically check for DTensor rather than all tensor
+        // subclasses to avoid affecting other subclasses that may not need
+        // this behavior.
         bool is_differentiable =
             (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
                  0 &&
              isDifferentiableType(wrapped_output->scalar_type()));
-        bool use_zeros_like =
-            is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
+        bool output_is_dtensor = is_dtensor(obj);
+        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
+            (wrapped_output->is_nested() || output_is_dtensor);
+        if (use_zeros_like && output_is_dtensor) {
+          TORCH_WARN_ONCE(
+              "Autograd is calling zeros_like() on a DTensor to materialize "
+              "the gradient for an unused output in ",
+              cdata->name(),
+              ". This preserves the DTensor type but may have performance "
+              "implications. To avoid this: (1) call "
+              "ctx.set_materialize_grads(False) in forward() (only works when "
+              "the autograd.Function is not compiled with torch.compile), "
+              "(2) detach unused outputs before returning from forward() "
+              "(required if torch.compile() may be used), and (3) handle None "
+              "gradients in backward() instead of relying on zero tensors.");
+        }
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
