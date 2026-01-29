@@ -219,6 +219,11 @@ class OpDispatcher:
             "op_info.schema should not be None in sharding propagation. "
             "This function should only be called after unwrap_to_op_info."
         )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "sharding_prop MISS (C++ fast path): %s",
+                op_info.schema,
+            )
         try:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
