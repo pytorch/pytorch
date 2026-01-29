@@ -360,28 +360,38 @@ class DefaultLoadPlanner(LoadPlanner):
         )
 
         if self.replicate_group is not None:
-            self.tensors_to_broadcast = []
-            is_non_primary = self.replicate_group.rank() > 0
+            plan = self._filter_plan_for_hsdp_broadcast(plan)
 
-            if is_non_primary:
-                # Non-primary ranks skip loading non-CPU tensors from checkpoint
-                items_to_load = []
+        return plan
 
-            for item in plan.items:
-                obj = find_state_dict_object(self.state_dict, item.dest_index)
+    def _filter_plan_for_hsdp_broadcast(self, plan: LoadPlan) -> LoadPlan:
+        """Filter items so only primary rank loads GPU tensors; others receive via broadcast."""
+        if self.replicate_group is None:
+            raise AssertionError("replicate_group must be set")
 
-                if (
-                    isinstance(obj, (torch.Tensor, DTensor))
-                    and obj.device.type != "cpu"
-                ):
-                    # NOTE: check the input replicate group is a subset of hsdp replicate group
-                    _validate_hsdp_replicate_group(obj, self.replicate_group)
-                    self.tensors_to_broadcast.append(obj)
-                elif is_non_primary:
-                    items_to_load.append(item)
+        self.tensors_to_broadcast = []
+        is_non_primary = self.replicate_group.rank() > 0
 
-            if is_non_primary:
-                plan.items = items_to_load
+        if is_non_primary:
+            filtered_items = []
+
+        for item in plan.items:
+            obj = find_state_dict_object(self.state_dict, item.dest_index)
+
+            is_broadcastable = (
+                isinstance(obj, (torch.Tensor, DTensor))
+                and obj.device.type != "cpu"
+            )
+
+            if is_broadcastable:
+                # NOTE: check the input replicate group is a subset of hsdp replicate group
+                _validate_hsdp_replicate_group(obj, self.replicate_group)
+                self.tensors_to_broadcast.append(obj)
+            elif is_non_primary:
+                filtered_items.append(item)
+
+        if is_non_primary:
+            return dataclasses.replace(plan, items=filtered_items)
 
         return plan
 
