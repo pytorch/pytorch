@@ -302,7 +302,13 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         def fn(x):
             a = x + 1
             result = [
-                (outer := i * 10, [(inner := (torch._dynamo.graph_break() or j * 2)) for j in range(2)])
+                (
+                    outer := i * 10,
+                    [
+                        (inner := (torch._dynamo.graph_break() or j * 2))
+                        for j in range(2)
+                    ],
+                )
                 for i in range(3)
             ]
             b = x + 2
@@ -346,7 +352,11 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
             a = x + 1
             result = [
                 [
-                    [(w := i + j + k) for k in range(2) if torch._dynamo.graph_break() or True]
+                    [
+                        (w := i + j + k)
+                        for k in range(2)
+                        if torch._dynamo.graph_break() or True
+                    ]
                     for j in range(2)
                 ]
                 for i in range(2)
@@ -370,7 +380,11 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
             multiplier = 10
             a = x + 1
             result = {
-                i: {j: (inner_val := j * multiplier) for j in range(2) if torch._dynamo.graph_break() or True}
+                i: {
+                    j: (inner_val := j * multiplier)
+                    for j in range(2)
+                    if torch._dynamo.graph_break() or True
+                }
                 for i in range(3)
             }
             b = x + 2

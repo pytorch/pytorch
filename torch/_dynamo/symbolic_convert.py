@@ -569,10 +569,22 @@ def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
         return pre_store_ops, post_store_op
 
     return {
-        "stored": {"pre_store_ops": extract_pattern(fn_stored)[0], "post_store_op": None},
-        "discarded": {"pre_store_ops": extract_pattern(fn_discarded)[0], "post_store_op": None},
-        "returned": {"pre_store_ops": extract_pattern(fn_returned)[0], "post_store_op": extract_pattern(fn_returned)[1]},
-        "consumed": {"pre_store_ops": extract_pattern(fn_consumed)[0], "post_store_op": extract_pattern(fn_consumed)[1]},
+        "stored": {
+            "pre_store_ops": extract_pattern(fn_stored)[0],
+            "post_store_op": None,
+        },
+        "discarded": {
+            "pre_store_ops": extract_pattern(fn_discarded)[0],
+            "post_store_op": None,
+        },
+        "returned": {
+            "pre_store_ops": extract_pattern(fn_returned)[0],
+            "post_store_op": extract_pattern(fn_returned)[1],
+        },
+        "consumed": {
+            "pre_store_ops": extract_pattern(fn_consumed)[0],
+            "post_store_op": extract_pattern(fn_consumed)[1],
+        },
     }
 
 
@@ -4492,7 +4504,8 @@ class InstructionTranslatorBase(
 
         # Find first FOR_ITER to know where loop body starts
         for_iter_ip = next(
-            i for i in range(start_ip, end_for_ip)
+            i
+            for i in range(start_ip, end_for_ip)
             if self.instructions[i].opname == "FOR_ITER"
         )
 
@@ -4515,7 +4528,9 @@ class InstructionTranslatorBase(
 
             # Detect LOAD_FAST referencing outer variables
             elif inst.opname.startswith("LOAD_FAST"):
-                var_names = inst.argval if isinstance(inst.argval, tuple) else (inst.argval,)
+                var_names = (
+                    inst.argval if isinstance(inst.argval, tuple) else (inst.argval,)
+                )
                 for var_name in var_names:
                     if var_name not in defined_inside and var_name not in captured_vars:
                         captured_vars.append(var_name)
@@ -4523,21 +4538,33 @@ class InstructionTranslatorBase(
         # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
         pre_store_ops: list[str] = []
         scan_ip = end_for_ip + 1
-        while scan_ip < len(self.instructions) and self.instructions[scan_ip].opname != "STORE_FAST":
+        while (
+            scan_ip < len(self.instructions)
+            and self.instructions[scan_ip].opname != "STORE_FAST"
+        ):
             pre_store_ops.append(self.instructions[scan_ip].opname)
             scan_ip += 1
 
         store_fast_ip = scan_ip
 
         # Skip all STORE_FASTs to find post_store_op
-        while scan_ip < len(self.instructions) and self.instructions[scan_ip].opname == "STORE_FAST":
+        while (
+            scan_ip < len(self.instructions)
+            and self.instructions[scan_ip].opname == "STORE_FAST"
+        ):
             scan_ip += 1
 
-        post_store_op = self.instructions[scan_ip].opname if scan_ip < len(self.instructions) else None
+        post_store_op = (
+            self.instructions[scan_ip].opname
+            if scan_ip < len(self.instructions)
+            else None
+        )
 
         def matches(disposition: str) -> bool:
             p = patterns[disposition]
-            return pre_store_ops == p["pre_store_ops"] and (p["post_store_op"] is None or post_store_op == p["post_store_op"])
+            return pre_store_ops == p["pre_store_ops"] and (
+                p["post_store_op"] is None or post_store_op == p["post_store_op"]
+            )
 
         for disposition, result_on_stack in [
             ("discarded", False),
@@ -4548,7 +4575,9 @@ class InstructionTranslatorBase(
             if matches(disposition):
                 return ComprehensionAnalysis(
                     end_ip=scan_ip,
-                    result_var=self.instructions[store_fast_ip].argval if disposition == "stored" else None,
+                    result_var=self.instructions[store_fast_ip].argval
+                    if disposition == "stored"
+                    else None,
                     result_on_stack=result_on_stack,
                     result_disposition=disposition,
                     iterator_vars=iterator_vars,
@@ -4569,7 +4598,11 @@ class InstructionTranslatorBase(
         """
         assert sys.version_info >= (3, 12)
 
-        from .bytecode_transformation import create_dup_top, create_instruction, create_load_const
+        from .bytecode_transformation import (
+            create_dup_top,
+            create_instruction,
+            create_load_const,
+        )
         from .codegen import PyCodegen
         from .source import LocalSource
         from .utils import is_safe_constant
@@ -4601,7 +4634,10 @@ class InstructionTranslatorBase(
                     if isinstance(var, (TensorVariable, SymNodeVariable)):
                         continue
 
-                    if isinstance(var.source, LocalSource) and var.source.local_name == var_name:
+                    if (
+                        isinstance(var.source, LocalSource)
+                        and var.source.local_name == var_name
+                    ):
                         continue
 
                     # For python constants, use create_load_const directly
@@ -4617,7 +4653,9 @@ class InstructionTranslatorBase(
 
                     # For other variable types, reconstruct and store to local slot
                     captured_vars_cg(var)
-                    captured_vars_cg.append_output(create_instruction("STORE_FAST", argval=var_name))
+                    captured_vars_cg.append_output(
+                        create_instruction("STORE_FAST", argval=var_name)
+                    )
                     var.source = LocalSource(var_name)
 
             pre_subgraph_insts = captured_vars_cg.get_instructions()
@@ -4654,7 +4692,9 @@ class InstructionTranslatorBase(
 
         # Variables to pass to resume function
         vars_to_pass = (
-            [analysis.result_var] if analysis.result_disposition == "stored" and analysis.result_var else []
+            [analysis.result_var]
+            if analysis.result_disposition == "stored" and analysis.result_var
+            else []
         ) + analysis.walrus_vars
 
         # If result stays on stack, push placeholder for resume function
