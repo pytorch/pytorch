@@ -10,8 +10,8 @@ import torch.nn as nn
 from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.distributed.tensor import Shard
+from torch.distributed.utils import _apply_to_tensors
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -713,24 +713,24 @@ class FSDPParamGroup:
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
-        args_list, args_spec = tree_flatten(args)
-        kwargs_list, kwargs_spec = tree_flatten(kwargs)
-        args_kwargs_list = list(args_list) + list(kwargs_list)
-        inp_tensor_indices: list[int] = []
+        # Collect all tensors that require gradients
         inp_tensors: list[torch.Tensor] = []
-        for i, obj in enumerate(args_kwargs_list):
-            if torch.is_tensor(obj) and obj.requires_grad:
-                inp_tensor_indices.append(i)
-                inp_tensors.append(obj)
+        _apply_to_tensors(
+            lambda t: inp_tensors.append(t) or t if t.requires_grad else t,
+            (args, kwargs),
+        )
         if len(inp_tensors) == 0:
             return args, kwargs  # no tensors that require gradients
-        inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
-        for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
-            args_kwargs_list[inp_tensor_idx] = inp_tensor
-        args_list = args_kwargs_list[: len(args_list)]
-        kwargs_list = args_kwargs_list[len(args_list) :]
-        args = tree_unflatten(args_list, args_spec)
-        kwargs = tree_unflatten(kwargs_list, kwargs_spec)
+        # Apply RegisterPostBackwardFunction to all tensors at once
+        out_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
+        # Replace original tensors with transformed ones
+        out_iter = iter(out_tensors)
+        args = _apply_to_tensors(
+            lambda t: next(out_iter) if t.requires_grad else t, args
+        )
+        kwargs = _apply_to_tensors(
+            lambda t: next(out_iter) if t.requires_grad else t, kwargs
+        )
         return args, kwargs
 
     def _register_state_dict_hooks(self) -> None:
