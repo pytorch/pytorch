@@ -1,0 +1,74 @@
+name: Sonar-scan
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  sonarqube:
+    name: SonarQube
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=sait1219_pytorch
+            -Dsonar.organization=sait1219
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/*.java
+            -Dsonar.c.file.suffixes=-
+            -Dsonar.cpp.file.suffixes=-
+            -Dsonar.objc.file.suffixes=-
+
+  cpp-check:
+    name: Cppcheck Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - name: Run Cppcheck
+        run: cppcheck --enable=all --inconclusive --quiet .
+
+  java-pmd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download PMD
+        run: |
+          wget https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
+          unzip pmd-dist-7.19.0-bin.zip
+          ls -R .
+      
+      - name: Run PMD Quality Scan
+        run: |
+          ./pmd-bin-7.19.0/bin/pmd check --dir . --rulesets rulesets/java/quickstart.xml
+
+  grype:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install grype
+      run : |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
+      
+    - name: Run Grype
+      run: |
+          ./bin/grype dir:. --fail-on high
+
+     
+     
+     
+     
+     
+     
+       
+       
+
+
