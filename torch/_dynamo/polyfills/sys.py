@@ -15,7 +15,7 @@ __all__ = [
 ]
 
 
-@substitute_in_graph(sys.intern, can_constant_fold_through=True)
+@substitute_in_graph(sys.intern, can_constant_fold_through=True)  # pyrefly: ignore[bad-argument-type]
 def intern(string: str, /) -> str:
     return string
 

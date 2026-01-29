@@ -190,10 +190,10 @@ class CPythonTestCase(TestCase):
         # We want to compile only the test function, excluding any setup code
         # from unittest
 
-        method = getattr(self, self._testMethodName)
+        method = getattr(self, self._testMethodName)  # pyrefly: ignore[missing-attribute]
         method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
 
-        setattr(self, self._testMethodName, method)
+        setattr(self, self._testMethodName, method)  # pyrefly: ignore[missing-attribute]
         return fn
 
     def _dynamo_test_key(self) -> str:

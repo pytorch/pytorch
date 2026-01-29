@@ -8,10 +8,10 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING, TypeVar
 
-import optree
-import optree._C
-import optree.utils
-from optree import (
+import optree  # pyrefly: ignore[missing-import]
+import optree._C  # pyrefly: ignore[missing-import]
+import optree.utils  # pyrefly: ignore[missing-import]
+from optree import (  # pyrefly: ignore[missing-import]
     is_namedtuple,
     is_namedtuple_class,
     is_namedtuple_instance,

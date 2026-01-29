@@ -85,7 +85,7 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
 def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
     headers = ("Index", "Size (b)", "Param Names")
     rows: list[tuple[Optional[int], Optional[int], str]] = []
-    extended_buckets = []
+    extended_buckets: list[Any] = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
             rows.append((idx, bucket.size, bucket.params[0]))
@@ -116,7 +116,7 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
             )
 
         try:
-            from tabulate import tabulate
+            from tabulate import tabulate  # pyrefly: ignore[missing-import]
 
             log.debug(
                 "\nDDPOptimizer produced the following bucket assignments:\n%s",

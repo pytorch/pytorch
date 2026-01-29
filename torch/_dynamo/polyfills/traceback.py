@@ -5,6 +5,7 @@ Python polyfills for traceback
 import traceback
 from traceback import StackSummary
 from types import TracebackType
+from typing import Any
 
 from ..decorators import substitute_in_graph
 
@@ -16,7 +17,7 @@ __all__ = ["extract_tb", "clear_frames"]
 def extract_tb(tb: TracebackType | None, limit: int | None = None) -> StackSummary:
     if tb is None:
         return traceback.StackSummary.from_list([])
-    frame_summary = []
+    frame_summary: list[Any] = []
     while tb is not None:
         if limit:
             if len(frame_summary) < limit:

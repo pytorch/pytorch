@@ -156,3 +156,141 @@ matches = "torch/_functorch/_aot_autograd/collect_metadata_analysis.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/config.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/subclass_parametrization.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/descriptors.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/fx_utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/indexed_dict.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/streams.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_activation_checkpointing/ac_logging_utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_activation_checkpointing/graph_info_provider.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_activation_checkpointing/knapsack.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_activation_checkpointing/knapsack_evaluator.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/batch_norm_replacement.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/python_key.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/pytree_hacks.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_activation_offloading/activation_offloading.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_activation_checkpointing/remat_using_tags_for_fwd_loss_bwd_graph_pass.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/logging_utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/graph_capture.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/functional_utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/input_output_analysis.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/subclass_utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/utils.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+[[sub-config]]
+matches = "torch/_functorch/_aot_autograd/graph_capture_wrappers.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true

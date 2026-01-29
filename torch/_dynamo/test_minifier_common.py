@@ -203,12 +203,12 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         minifier_args: Sequence[Any] = (),
         repro_after: Optional[str] = None,
     ) -> tuple[subprocess.CompletedProcess[bytes], str]:
-        self.assertIsNotNone(repro_dir)
+        self.assertIsNotNone(repro_dir)  # pyrefly: ignore[missing-attribute]
         launch_file = _as_posix_path(os.path.join(repro_dir, "minifier_launcher.py"))
         with open(launch_file) as f:
             launch_code = f.read()
 
-        self.assertTrue(os.path.exists(launch_file))
+        self.assertTrue(os.path.exists(launch_file))  # pyrefly: ignore[missing-attribute]
 
         args = ["python3", launch_file, "minify", *minifier_args]
         if not isolate and repro_after != "aot_inductor":
@@ -220,7 +220,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         stderr = launch_proc.stderr.decode("utf-8")
         print("minifier stderr:", stderr)
 
-        self.assertNotIn("Input graph did not fail the tester", stderr)
+        self.assertNotIn("Input graph did not fail the tester", stderr)  # pyrefly: ignore[missing-attribute]
 
         return launch_proc, launch_code
 
@@ -228,12 +228,12 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     def _run_repro(
         self, repro_dir: str, *, isolate: bool = True
     ) -> tuple[subprocess.CompletedProcess[bytes], str]:
-        self.assertIsNotNone(repro_dir)
+        self.assertIsNotNone(repro_dir)  # pyrefly: ignore[missing-attribute]
         repro_file = _as_posix_path(os.path.join(repro_dir, "repro.py"))
         with open(repro_file) as f:
             repro_code = f.read()
 
-        self.assertTrue(os.path.exists(repro_file))
+        self.assertTrue(os.path.exists(repro_file))  # pyrefly: ignore[missing-attribute]
 
         repro_proc = self._maybe_subprocess_run(
             ["python3", repro_file], isolate=isolate, cwd=repro_dir
@@ -300,14 +300,14 @@ torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
             # Just check that there was no error
             self.assertEqual(test_proc.returncode, 0)
 
-            self.assertIsNone(repro_dir)
+            self.assertIsNone(repro_dir)  # pyrefly: ignore[missing-attribute]
             return None
         # NB: Intentionally do not test return code; we only care about
         # actually generating the repro, we don't have to crash
 
-        self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))
+        self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))  # pyrefly: ignore[missing-attribute]
 
-        self.assertIsNotNone(repro_dir)
+        self.assertIsNotNone(repro_dir)  # pyrefly: ignore[missing-attribute]
         print("running minifier", file=sys.stderr)
         _minifier_proc, minifier_code = self._run_minifier_launcher(
             repro_dir,
@@ -318,6 +318,6 @@ torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
         print("running repro", file=sys.stderr)
         repro_proc, repro_code = self._run_repro(repro_dir, isolate=isolate)
 
-        self.assertIn(expected_error, repro_proc.stderr.decode("utf-8"))
+        self.assertIn(expected_error, repro_proc.stderr.decode("utf-8"))  # pyrefly: ignore[missing-attribute]
         self.assertNotEqual(repro_proc.returncode, 0)
         return MinifierTestResult(minifier_code=minifier_code, repro_code=repro_code)

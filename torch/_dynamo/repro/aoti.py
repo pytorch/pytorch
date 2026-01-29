@@ -383,7 +383,7 @@ def export_for_aoti_minifier(
             if re.search(pattern, str(e)) is not None:
                 return None
         raise AOTIMinifierError(e) from e
-    # we should never reach here
+    # pyrefly: ignore[unreachable] - we should never reach here
     return None
 
 

@@ -438,7 +438,7 @@ if "__compile_source__" in globals():
     model_str += NNModuleToString.convert(gm)
 
     writer = InputWriter(save_dir, stable_hash=stable_hash)
-    used_syms = {}
+    used_syms: dict[Any, Any] = {}
 
     # Extract from graph placeholders and their corresponding arguments
     placeholder_targets = fx_placeholder_targets(gm)
