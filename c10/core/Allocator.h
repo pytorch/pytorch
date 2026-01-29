@@ -256,8 +256,7 @@ struct C10_API InefficientStdFunctionContext {
   InefficientStdFunctionContext& operator=(
       InefficientStdFunctionContext&& rhs) {
     this->~InefficientStdFunctionContext();
-    ptr_ = std::exchange(rhs.ptr_, nullptr);
-    deleter_ = std::move(rhs.deleter_);
+    new (this) InefficientStdFunctionContext(std::move(rhs));
     return *this;
   }
   ~InefficientStdFunctionContext() {
