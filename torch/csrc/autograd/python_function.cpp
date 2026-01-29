@@ -782,10 +782,10 @@ static void _wrap_outputs(
             (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
                  0 &&
              isDifferentiableType(wrapped_output->scalar_type()));
-        bool obj_is_dtensor = is_dtensor(obj);
+        bool output_is_dtensor = is_dtensor(obj);
         bool use_zeros_like = is_differentiable && num_outputs > 1 &&
-            (wrapped_output->is_nested() || obj_is_dtensor);
-        if (use_zeros_like && obj_is_dtensor) {
+            (wrapped_output->is_nested() || output_is_dtensor);
+        if (use_zeros_like && output_is_dtensor) {
           TORCH_WARN_ONCE(
               "Autograd is calling zeros_like() on a DTensor to materialize "
               "the gradient for an unused output in ",

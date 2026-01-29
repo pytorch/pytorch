@@ -638,15 +638,13 @@ class DTensorTest(DTensorTestBase):
         the gradients for unused outputs are materialized as zeros.
         These zeros should be DTensors to avoid mixing DTensor and torch.Tensor.
         """
-        from torch.autograd import Function
-
         device_mesh = self.build_device_mesh()
 
         for use_compile in [True, False]:
             with self.subTest(use_compile=use_compile):
                 grads = {}
 
-                class MultiOutputFunc(Function):
+                class MultiOutputFunc(torch.autograd.Function):
                     @staticmethod
                     def forward(ctx, x, y):
                         return x * 2, y * 3
@@ -667,34 +665,21 @@ class DTensorTest(DTensorTestBase):
                 else:
                     out1, out2 = MultiOutputFunc.apply(x, y)
 
-                self.assertIsInstance(out1, DTensor)
-                self.assertIsInstance(out2, DTensor)
-
                 # Only use out1, so out2's gradient should be zeros.
                 loss = out1.sum()
                 loss.backward()
 
-                # Both gradients should be DTensors
-                self.assertIsInstance(
-                    grads["grad_out1"],
-                    DTensor,
-                    "grad_out1 should be a DTensor",
-                )
-                self.assertIsInstance(
-                    grads["grad_out2"],
-                    DTensor,
-                    "grad_out2 should be a DTensor, not a plain Tensor",
-                )
-
-                # Verify grad_out2 is zeros (since out2 was not used)
+                gout1, gout2 = grads["grad_out1"], grads["grad_out2"]
+                self.assertIsInstance(out1, DTensor)
+                self.assertIsInstance(out2, DTensor)
+                self.assertIsInstance(gout1, DTensor, "grad_out1 should be a DTensor")
+                self.assertIsInstance(gout2, DTensor, "grad_out2 should be a DTensor")
                 self.assertTrue(
-                    torch.all(grads["grad_out2"].to_local() == 0),
+                    torch.all(gout2.to_local() == 0),
                     "grad_out2 should be all zeros since out2 was not used",
                 )
-
-                # Verify grad_out2 has the same placement as out2
                 self.assertEqual(
-                    grads["grad_out2"].placements,
+                    gout2.placements,
                     out2.placements,
                     "grad_out2 should have the same placements as out2",
                 )
