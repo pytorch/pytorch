@@ -113,6 +113,7 @@ jobs:
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
+      checkout-mode: treeless
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
