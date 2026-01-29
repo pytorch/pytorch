@@ -11,7 +11,7 @@ from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.distributed.tensor import Shard
 from torch.profiler import record_function
-from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_leaves, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -40,6 +40,12 @@ from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
+
+
+def _any_tensor_requires_grad(obj: Any) -> bool:
+    leaves = tree_leaves(obj)
+    return any(isinstance(t, torch.Tensor) and t.requires_grad for t in leaves)
+
 
 _ModuleToHandleDict = dict[nn.Module, RemovableHandle]  # for state dict
 
@@ -427,17 +433,17 @@ class FSDPParamGroup:
         if hasattr(self.comm_ctx, "all_gather_stream") and event is not None:
             self.comm_ctx.all_gather_stream.wait_event(event)
 
-    def reshard(self):
+    def reshard(self, defer_storage_free: bool = False):
         if self._training_state == TrainingState.FORWARD:
             if not self._reshard_after_forward:
                 return
             if self._use_post_forward_mesh:
-                self._to_sharded_post_forward()
+                self._to_sharded_post_forward(defer_storage_free=defer_storage_free)
                 self._reshard_after_forward_event = self.device_handle.Event()
                 if self._reshard_after_forward_event is not None:
                     self._reshard_after_forward_event.record()
                 return
-        self._to_sharded()
+        self._to_sharded(defer_storage_free=defer_storage_free)
 
     def pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -455,14 +461,18 @@ class FSDPParamGroup:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
+            # if any output requires grad defer storage freeing until post_backward
+            defer_storage_free = (
+                _any_tensor_requires_grad(output) and torch.is_grad_enabled()
+            )
             if not compiled_autograd_enabled():
                 # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
                 # it shouldn't change post_forward_order
                 if not is_bw():
-                    self.reshard()
+                    self.reshard(defer_storage_free=defer_storage_free)
                     self._record_post_forward()
             else:
-                self.reshard()
+                self.reshard(defer_storage_free=defer_storage_free)
                 self._record_post_forward()
             self._training_state = TrainingState.IDLE
             return output
@@ -499,6 +509,11 @@ class FSDPParamGroup:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_backward"))
         self._training_state = TrainingState.POST_BACKWARD
+        # free any storage that was deferred during post_forward
+        for fsdp_param in self.fsdp_params:
+            if fsdp_param._storage_free_deferred:
+                fsdp_param.free_unsharded_param()
+                fsdp_param._storage_free_deferred = False
         with record_function(self._with_fqn("FSDP::post_backward_accumulate")):
             for fsdp_param in self.fsdp_params:
                 fsdp_param.accumulate_unsharded_grad_if_needed()
@@ -665,16 +680,18 @@ class FSDPParamGroup:
             target_fsdp_param_group.unshard(async_op)
 
     # Utilities #
-    def _to_sharded(self):
+    def _to_sharded(self, defer_storage_free: bool = False):
         if not self.is_sharded:
             for fsdp_param in self.fsdp_params:
-                fsdp_param.to_sharded()
+                fsdp_param.to_sharded(defer_storage_free=defer_storage_free)
             self._sharded_state = ShardedState.SHARDED
 
-    def _to_sharded_post_forward(self):
+    def _to_sharded_post_forward(self, defer_storage_free: bool = False):
         if not self.is_sharded_post_forward:
             for fsdp_param in self.fsdp_params:
-                fsdp_param.to_sharded_post_forward()
+                fsdp_param.to_sharded_post_forward(
+                    defer_storage_free=defer_storage_free
+                )
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def _to_unsharded(self):

@@ -249,6 +249,7 @@ class FSDPParam:
         self.all_gather_outputs: list[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
         self._param_fqn: str | None = None  # prefixed from root module
+        self._storage_free_deferred: bool = False
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
         self._post_load_hook_handle = (
@@ -569,12 +570,14 @@ class FSDPParam:
             )
         )
 
-    def to_sharded(self) -> None:
+    def to_sharded(self, defer_storage_free: bool = False) -> None:
         self._setattr_on_modules(self.sharded_param)
-        self.free_unsharded_param()
+        if not defer_storage_free:
+            self.free_unsharded_param()
+        self._storage_free_deferred = defer_storage_free
         self.sharded_state = ShardedState.SHARDED
 
-    def to_sharded_post_forward(self) -> None:
+    def to_sharded_post_forward(self, defer_storage_free: bool = False) -> None:
         if self.is_dtensor:
             raise NotImplementedError(
                 "Resharding to smaller mesh with TP is not supported yet"
@@ -610,7 +613,9 @@ class FSDPParam:
             self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor)
         )
         self._setattr_on_modules(self._sharded_post_forward_param)
-        self.free_unsharded_param()
+        if not defer_storage_free:
+            self.free_unsharded_param()
+        self._storage_free_deferred = defer_storage_free
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:

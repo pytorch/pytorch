@@ -241,6 +241,50 @@ class TestFullyShardAutograd(FSDPTest):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
+    @skip_if_lt_x_gpu(2)
+    def test_escaped_tensors_via_cache(self):
+        """
+        Tests that backward works when tensors escape the forward via side
+        effects and the loss depends on those escaped tensors rather than the module's direct output.
+        See: https://github.com/pytorch/pytorch/issues/173709
+        """
+        self.run_subtests(
+            {"reshard_after_forward": [True, False]},
+            self._test_escaped_tensors_via_cache,
+        )
+
+    def _test_escaped_tensors_via_cache(self, reshard_after_forward: bool):
+        class CachingModule(nn.Module):
+            """Module that caches intermediate tensors as a side effect."""
+
+            def __init__(self, dim: int):
+                super().__init__()
+                self.linear = nn.Linear(dim, dim)
+                self.cache: list[torch.Tensor] = []
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                out = self.linear(x)
+                # cache the output as a side effect (simulates k/v caching)
+                self.cache.append(out)
+                return out
+
+        torch.manual_seed(42)
+        dim = 16
+        model = CachingModule(dim).to(device_type)
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+
+        inp = torch.randn(2, dim, device=device_type)
+        model(inp)
+
+        cached_tensor = model.cache[-1]
+        loss = cached_tensor.sum()
+        loss.backward()
+
+        self.assertIsNotNone(model.linear.weight.grad)
+        self.assertIsNotNone(model.linear.bias.grad)
+
+        model.cache.clear()
+
 
 class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
     @property
