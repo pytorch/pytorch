@@ -348,9 +348,6 @@ keep-runtime-typing = true
 "test/**" = [
     "S101"
 ]
-"torchgen/**" = [
-    "S101"
-]
 "torch/_dynamo/**" = ["S101"]
 "torch/_functorch/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
@@ -361,6 +358,8 @@ keep-runtime-typing = true
 "torch/testing/**" = ["S101"]
 "torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
 "torch/_export/db/examples/list_contains.py" = ["S101"]
+"tools/autograd/gen_variable_type.py" = []  # S101 migrated
+"tools/autograd/load_derivatives.py" = []  # S101 migrated
 "tools/**" = [
     "S101"
 ]
