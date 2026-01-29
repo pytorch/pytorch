@@ -536,5 +536,160 @@ class TestNVUniversalGemmDynamicShapes(TestCase):
                     torch.testing.assert_close(result, a @ b)
 
 
+@unittest.skipIf(
+    not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
+    "NVIDIA Universal GEMM (cutlass_api) library not available or not on Blackwell",
+)
+class TestVendoredKernelRegistration(TestCase):
+    """Test that vendored kernel wrappers are registered and used through inductor path."""
+
+    # Expected vendored kernel classes and their name prefixes in the cache
+    VENDORED_CLASSES = {
+        "VendoredDenseGemmKernel": "inductor_vendored.DenseGemmKernel_sm100_",
+        "VendoredPersistentDenseGemmKernel": "inductor_vendored.PersistentDenseGemmKernel_sm100_",
+        "VendoredPersistentDenseGemmKernelPrefetch": "inductor_vendored.PersistentDenseGemmKernelPrefetch_sm100_",
+        "VendoredDenseGemmKernelSWPipe": "inductor_vendored.DenseGemmKernelSWPipe_sm100_",
+    }
+
+    def test_vendored_kernels_in_cache(self):
+        """Verify vendored kernels are registered in the global kernel cache."""
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            clear_cache,
+            ensure_cache_initialized,
+            get_kernel_by_name,
+        )
+
+        clear_cache()
+        ensure_cache_initialized()
+
+        # Check that at least one kernel from each class is in the cache
+        for class_name, prefix in self.VENDORED_CLASSES.items():
+            # Try a common config: RRR layout, bf16 input, f32 output/acc, 1cta
+            test_name = (
+                f"{prefix}RRR_Abfloat16_Bbfloat16_outfloat32_accfloat32_"
+                "1cta_cluster1x1x1_tile128x128x64"
+            )
+            kernel = get_kernel_by_name(test_name)
+            self.assertIsNotNone(
+                kernel,
+                f"No kernel found for {class_name}. Expected '{test_name}' in cache. "
+                f"Wrapper registration may have failed.",
+            )
+
+    def test_vendored_kernels_used_through_inductor(self):
+        """Verify vendored kernels are selected for profiling during inductor autotuning.
+
+        This test:
+        1. Gets all compatible kernels to determine which vendored classes are compatible
+        2. Runs autotuning with exactly N profiling configs (N = number of compatible
+           vendored classes)
+        3. Verifies that filter_kernels returns at least one kernel from each compatible
+           vendored class (class diversity property)
+        """
+        import cutlass
+        from cutlass_api.arguments import GemmArguments
+        from cutlass_api.utils import TensorWrapper
+
+        from torch._inductor.codegen.nv_universal_gemm import kernel_cache
+        from torch._inductor.template_heuristics import (
+            nv_universal_gemm as heuristics_module,
+        )
+
+        m, n, k = 512, 512, 512
+        dtype = torch.bfloat16
+        device = "cuda"
+
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(k, n, device=device, dtype=dtype)
+        out = torch.empty(m, n, device=device, dtype=torch.float32)
+
+        kernel_cache.clear_cache()
+        args = GemmArguments.from_dense_tensors(
+            TensorWrapper(a),
+            TensorWrapper(b),
+            TensorWrapper(out),
+            acc_dtype=cutlass.Float32,
+        )
+        all_compatible = kernel_cache.get_compatible_kernels(args, cc=100)
+
+        compatible_vendored_classes: dict[str, list] = {}
+        for kernel in all_compatible:
+            class_name = kernel.metadata.kernel_class.__name__
+            if class_name in self.VENDORED_CLASSES:
+                if class_name not in compatible_vendored_classes:
+                    compatible_vendored_classes[class_name] = []
+                compatible_vendored_classes[class_name].append(kernel)
+
+        self.assertGreater(
+            len(compatible_vendored_classes),
+            0,
+            f"No vendored kernel classes compatible with {m}x{n}x{k} {dtype} GEMM. "
+            f"Total compatible kernels: {len(all_compatible)}",
+        )
+
+        def matmul(a, b):
+            return a @ b
+
+        expected = matmul(a, b)
+
+        profiled_kernels = []
+        heuristics_instance = heuristics_module.get_nvgemm_heuristics()
+        original_filter = heuristics_instance.filter_kernels
+
+        def capturing_filter(*args, **kwargs):
+            kernels = original_filter(*args, **kwargs)
+            profiled_kernels.extend(kernels)
+            return kernels
+
+        torch._dynamo.reset()
+        kernel_cache.clear_cache()
+
+        # Use exactly N profiling configs where N = number of compatible vendored classes
+        # If class diversity is correct, this should include one from each class
+        num_profiling_configs = len(compatible_vendored_classes)
+
+        with patch.object(heuristics_instance, "filter_kernels", capturing_filter):
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": num_profiling_configs,
+                }
+            ):
+                compiled_fn = torch.compile(matmul)
+                result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
+        self.assertGreater(
+            len(profiled_kernels),
+            0,
+            "No kernels captured from filter_kernels - heuristics may not have run",
+        )
+
+        profiled_by_class: dict[str, list] = {
+            name: [] for name in compatible_vendored_classes
+        }
+        for kernel in profiled_kernels:
+            class_name = kernel.metadata.kernel_class.__name__
+            if class_name in profiled_by_class:
+                profiled_by_class[class_name].append(kernel)
+
+        # Verify ALL compatible vendored classes are represented in profiled kernels
+        # This enforces the class diversity property: with N configs and N classes,
+        # each class should have exactly one kernel selected
+        missing_classes = [
+            name for name, kernels in profiled_by_class.items() if len(kernels) == 0
+        ]
+        self.assertEqual(
+            missing_classes,
+            [],
+            f"Class diversity violated: with {num_profiling_configs} profiling configs, "
+            f"these compatible vendored classes were not selected: {missing_classes}. "
+            f"Profiled {len(profiled_kernels)} kernels. "
+            f"Compatible classes: {list(compatible_vendored_classes.keys())}",
+        )
+
+
 if __name__ == "__main__":
     run_tests()
