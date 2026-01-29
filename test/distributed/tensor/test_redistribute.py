@@ -35,6 +35,7 @@ from torch.distributed.tensor._dtensor_spec import (
 from torch.distributed.tensor._redistribute import (
     _FlattenedTransformInfo,
     _gen_transform_infos,
+    _get_flattened_mesh_by_layout,
     _optimize_transform_infos,
     _TransformInfo,
     redistribute_local_tensor,
@@ -1970,6 +1971,19 @@ class OptimizeFlattenedReductionsTest(TestCase):
 
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], _TransformInfo)
+
+    def test_get_flattened_mesh_by_layout_with_submesh(self):
+        root_mesh = init_device_mesh(
+            "cpu", (2, 2, 1, 2), mesh_dim_names=("dp", "fsdp", "cp", "ep")
+        )
+
+        submesh = root_mesh["cp", "ep"]
+        submesh._flatten("cp_ep")
+
+        # mesh_dims (0, 1) are relative to submesh (which has dims "cp", "ep")
+        result = _get_flattened_mesh_by_layout(submesh, (0, 1))
+        self.assertIsNotNone(result)
+        self.assertEqual(result.mesh_dim_names, ("cp_ep",))
 
     def test_reduce_scatter_with_intervening_shard_flattened(self):
         """Reduce-scatter SHOULD be flattened when intervening shard still allows even division.
