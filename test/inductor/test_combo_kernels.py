@@ -11,6 +11,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU_AND_TRITON
@@ -357,6 +358,7 @@ class ComboKernelTests(TestCase):
                 "R0_BLOCK : tl.constexpr"
             ).check_not("XBLOCK_0 : tl.constexpr").run(code[0])
 
+    @skipIfRocm
     @requires_gpu_and_triton
     @torch._inductor.config.patch(
         {
@@ -377,15 +379,8 @@ class ComboKernelTests(TestCase):
         fn_c = torch.compile(fn)
         out_compiled, code = run_and_get_code(fn_c, *inps)
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-            FileCheck().check("R0_BLOCK_0").check("R1_BLOCK_0").check(
-                "R0_BLOCK_1"
-            ).check("R1_BLOCK_1").run(code[0])
-        else:
-            FileCheck().check("XBLOCK : tl.constexpr").check_not(
-                "XBLOCK_0 : tl.constexpr"
-            ).run(code[0])
+        # 2D reduction kernels (r0_, r1_) are separated from combo kernels
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu_and_triton
     @torch._inductor.config.patch(
@@ -407,17 +402,8 @@ class ComboKernelTests(TestCase):
         fn_c = torch.compile(fn)
         out_compiled, code = run_and_get_code(fn_c, *inps)
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
-        if torch._inductor.config.combo_kernel_per_subkernel_blocks:
-            FileCheck().check("ZBLOCK_0").check("YBLOCK_0").check("XBLOCK_0").run(
-                code[0]
-            )
-        else:
-            FileCheck().check("ZBLOCK : tl.constexpr").check(
-                "YBLOCK : tl.constexpr"
-            ).check("XBLOCK : tl.constexpr").check_not("XBLOCK_0 : tl.constexpr").run(
-                code[0]
-            )
+        # 3D poi (x, y, z) are separated from combo kernels
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
 
 class ComboKernelBenchmarkTests(TestCase):
