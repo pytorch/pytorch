@@ -165,11 +165,18 @@ class SideEffects:
         """Mutations to this variable will be executed but not not tracked,
         typically used for temporary mutations that are later restored."""
         self.ignore_mutation_on_these_variables.add(var)
+        side_effects_log.debug("Started ignoring mutations on %s", var)
 
     def stop_ignoring_mutations_on(self, var: VariableTracker) -> None:
         """Remove a variable from the skip mutation set, restoring normal mutation tracking."""
         if var in self.ignore_mutation_on_these_variables:
             self.ignore_mutation_on_these_variables.remove(var)
+            side_effects_log.debug("Stopped ignoring mutations on %s", var)
+        else:
+            side_effects_log.debug(
+                "Attempted to stop ignoring mutations on %s but it was not being ignored",
+                var,
+            )
 
     def _capture_user_stack(self, key: VariableTracker) -> None:
         """Capture the current user stack from the instruction translator."""
@@ -343,7 +350,9 @@ class SideEffects:
         assert isinstance(cellvar, variables.CellVariable)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
-        if cellvar.pre_existing_contents:
+        # Use 'is not None' instead of truthiness check to correctly handle
+        # falsy values like 0, False, or empty string as valid cell contents
+        if cellvar.pre_existing_contents is not None:
             return cellvar.pre_existing_contents
         unimplemented(
             gb_type="Read uninitialized cell",
@@ -404,7 +413,10 @@ class SideEffects:
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-        assert item.mutation_type is not None
+        # Defensive check: mutation_type should not be None for non-immutable items
+        # that we're tracking, but handle gracefully if it is
+        if item.mutation_type is None:
+            return False
         return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(

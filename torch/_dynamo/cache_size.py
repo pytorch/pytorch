@@ -123,10 +123,16 @@ def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry: Any) -> bool:
         local_name,
         weakref_from_cache_entry,
     ) in cache_entry.guard_manager.id_matched_objs.items():
-        if weakref_from_cache_entry() is not None:
+        cached_obj = weakref_from_cache_entry()
+        if cached_obj is not None:
             weakref_from_frame = _get_weakref_from_f_locals(frame, local_name)
-            if weakref_from_frame is not weakref_from_cache_entry:
+            # Compare the actual objects, not the weakref containers
+            frame_obj = weakref_from_frame() if weakref_from_frame is not None else None
+            if frame_obj is not cached_obj:
                 return False
+        # Note: if cached_obj is None (object was GC'd), we skip validation
+        # for this object. This is intentional - the guard will fail anyway
+        # when the compiled code tries to use the object.
 
     # Also covers the case where no ID_MATCH objects are saved in frame.f_locals
     return True

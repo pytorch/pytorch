@@ -44,6 +44,10 @@ class MutationTracker:
                 guarded.invalidate(ref)
 
     def track(self, guarded_code: Any) -> None:
+        # Periodically clean up dead references to prevent unbounded growth
+        # Only clean up if the list has grown significantly to amortize cost
+        if len(self.watchers) > 100:
+            self.watchers = [ref for ref in self.watchers if ref() is not None]
         self.watchers.append(weakref.ref(guarded_code))
 
 

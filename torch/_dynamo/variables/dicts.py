@@ -318,7 +318,8 @@ class ConstDictVariable(VariableTracker):
         self, value: Optional[VariableTracker], other: VariableTracker
     ) -> bool:
         # compare the id of the realized values if both values are not lazy VTs
-        if value and value.is_realized() and other.is_realized():
+        # Use 'is not None' instead of truthiness to handle falsy VariableTrackers
+        if value is not None and value.is_realized() and other.is_realized():
             return id(value.realize()) != id(other.realize())
         return id(value) != id(other)
 
