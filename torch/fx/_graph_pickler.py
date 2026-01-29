@@ -559,7 +559,10 @@ class _GraphModulePickleData:
             _python_code = gm._real_recompile()
         else:
             _python_code = gm.recompile()
-        self.gm_dict = gm.__dict__.copy()
+        if hasattr(gm, "__getstate__"):
+            self.gm_dict = gm.__getstate__()
+        else:
+            self.gm_dict = gm.__dict__.copy()
         del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph, options)
 
