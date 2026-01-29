@@ -3245,7 +3245,7 @@ def _ref_quant_linear_module(N, K, bias, example_input):
         bias: boolean flag to indicate whether linear module has bias
         example_input: example input tensor to get scale/zero point
     Return:
-        A module instance
+        An instance of the reference quantized linear module
     """
     class Model(torch.nn.Module):
         def __init__(self, N, K, bias, example_input):

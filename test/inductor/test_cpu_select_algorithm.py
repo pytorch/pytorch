@@ -1345,7 +1345,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     N=out_features,
                     K=out_features,
                     bias=bias,
-                    example_input=self.epilogue(self.linear(input)),
+                    example_input=self.epilogue(self.linear.linear(input)),
                 )
                 self.epilogue2 = _get_epilogue(epilogue)
 
@@ -1436,7 +1436,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     N=out_features, K=in_features, bias=bias, example_input=input
                 )
                 self.epilogue = _get_epilogue(epilogue)
-                example_input = self.epilogue(self.linear(input) + other)
+                example_input = self.epilogue(self.linear.linear(input) + other)
                 self.linear2 = _ref_quant_linear_module(
                     N=out_features,
                     K=out_features,
