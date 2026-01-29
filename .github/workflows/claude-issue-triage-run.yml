@@ -9,7 +9,8 @@ jobs:
   triage:
     if: |
       github.repository == 'pytorch/pytorch' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow.path == '.github/workflows/claude-issue-triage.yml'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: bedrock
@@ -31,6 +32,10 @@ jobs:
         id: issue
         run: |
           ISSUE_NUM=$(cat issue_number.txt)
+          if ! [[ "$ISSUE_NUM" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid issue number in artifact: '$ISSUE_NUM'"
+            exit 1
+          fi
           echo "number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
           echo "Triaging issue #${ISSUE_NUM}"
 
