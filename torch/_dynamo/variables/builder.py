@@ -4221,6 +4221,9 @@ class SourcelessBuilder:
         handlers[types.GetSetDescriptorType] = (
             lambda tx, value: GetSetDescriptorVariable(value)
         )
+        handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
+            value, mutation_type=ValueMutationNew()
+        )
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
