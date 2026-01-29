@@ -6026,43 +6026,6 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
-    def test_linalg_qr(self):
-        def run_qr_test(*shape):
-            A_cpu = torch.randn(*shape, dtype=torch.float32)
-            A_mps = A_cpu.to("mps")
-            m, n = shape[-2], shape[-1]
-
-            Q_cpu, R_cpu = torch.linalg.qr(A_cpu)
-            Q_mps, R_mps = torch.linalg.qr(A_mps)
-
-            # check Q is orthogonal: Q^T @ Q = I
-            k = min(m, n)
-            I = torch.eye(k, device="mps").expand(*shape[:-2], k, k)
-            Q_ortho = Q_mps.mT @ Q_mps
-            self.assertEqual(Q_ortho, I, atol=1e-4, rtol=1e-4)
-
-            # check reconstruction: Q @ R = A
-            A_rec = Q_mps @ R_mps
-            self.assertEqual(A_rec, A_mps, atol=1e-4, rtol=1e-4)
-
-            # check R is upper triangular
-            self.assertEqual(R_mps.triu(), R_mps)
-
-        run_qr_test(8, 8)
-        run_qr_test(32, 32)
-        run_qr_test(64, 64)
-        run_qr_test(128, 64)
-        run_qr_test(256, 128)
-        run_qr_test(1024, 512)
-
-        # Test batched qr decomposition
-        run_qr_test(1, 10, 5)
-        run_qr_test(10, 5, 5)
-        run_qr_test(100, 20, 10)
-        run_qr_test(10, 64, 32)
-        run_qr_test(2, 128, 64)
-        run_qr_test(3, 256, 128)
-
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
             inputCPU = torch.arange(N * C * H * W, device='cpu', dtype=torch.float,

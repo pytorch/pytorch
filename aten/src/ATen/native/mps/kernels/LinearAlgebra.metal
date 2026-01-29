@@ -1021,10 +1021,10 @@ kernel void linalg_qr_householder(
     // Step 2: compute Householder vector and tau
     if (tid == 0) {
       constexpr opmath_t eps = 1e-10;
-      // LAPACK convention: skip reflection for last row to preserve natural sign
-      // When k == m - 1, there's only one element in the column, so reflection
-      // would just flip its sign. Instead, preserve whatever value emerged from
-      // prior transformations to match LAPACK's behavior.
+      // LAPACK convention: skip reflection for last row to preserve natural
+      // sign When k == m - 1, there's only one element in the column, so
+      // reflection would just flip its sign. Instead, preserve whatever value
+      // emerged from prior transformations to match LAPACK's behavior.
       if (fabs(norm) < eps || k == m - 1) {
         tau_shared = 0.0;
       } else {
@@ -1123,7 +1123,7 @@ kernel void linalg_qr_householder(
       device T * Q [[buffer(1)]],                     \
       device T * R [[buffer(2)]],                     \
       device int* info [[buffer(3)]],                 \
-      constant QrParams& params [[buffer(4)]],      \
+      constant QrParams& params [[buffer(4)]],        \
       device T* v_work [[buffer(5)]],                 \
       uint3 tid [[thread_position_in_threadgroup]],   \
       uint3 tpg [[threads_per_threadgroup]],          \
