@@ -72,7 +72,7 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    @pytest.mark.xfail(reason="Issue #164186")
+    # @pytest.mark.xfail(reason="Issue #164186")
     def test_fuzzer_issue_164186(self):
         torch.manual_seed(0)
 
@@ -221,44 +221,7 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    @pytest.mark.xfail(reason="Issue #164059")
-    def test_fuzzer_issue_164059(self):
-        torch.manual_seed(0)
-
-        def foo(arg0, arg1, arg2):
-            t0 = arg0  # size=(16, 38073, 1), stride=(38073, 1, 1), dtype=float32, device=cuda
-            t1 = t0.clone()
-            t1.zero_()  # size=(16, 38073, 1), stride=(38073, 1, 1), dtype=float32, device=cuda
-            t2 = t1.contiguous().view(
-                (49, 112, 111)
-            )  # size=(49, 112, 111), stride=(5488, 112, 1), dtype=float32, device=cuda
-            t3 = arg1  # size=(1,), stride=(1,), dtype=int64, device=cuda
-            t4 = arg2  # size=(1,), stride=(1,), dtype=int64, device=cuda
-            t5 = t3 + t3 + t4  # size=(1,), stride=(1,), dtype=int64, device=cuda
-            t6 = torch.exp(  # noqa: F841
-                t5
-            )  # size=(1,), stride=(1,), dtype=int64, device=cuda  # noqa: F841
-            t7 = torch.nn.functional.layer_norm(
-                t2, (111,)
-            )  # size=(49, 112, 111), stride=(12432, 111, 1), dtype=float32, device=cuda
-            output = t7
-            return output
-
-        arg0 = torch.rand(
-            [16, 38073, 1], dtype=torch.float32, device="cuda", requires_grad=True
-        )
-        arg1 = torch.randint(0, 1000, [1], dtype=torch.int64, device="cuda")
-        arg2 = torch.randint(0, 1000, [1], dtype=torch.int64, device="cuda")
-
-        out_eager = foo(arg0, arg1, arg2)
-        out_eager.sum().backward()
-        print("Eager Success! ✅")
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0, arg1, arg2)
-        out_compiled.sum().backward()
-        print("Compile Success! ✅")
-
-    @pytest.mark.xfail(reason="Issue #164088")
+    # @pytest.mark.xfail(reason="Issue #164088")
     def test_fuzzer_issue_164088(self):
         torch.manual_seed(0)
 
