@@ -207,8 +207,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def_property_readonly(
           "dtype",
           [](const torch::autograd::InputMetadata& m) {
-            PyObject* raw_obj =
-                (PyObject*)torch::getTHPDtype(m.dtype().toScalarType());
+            PyObject* raw_obj = reinterpret_cast<PyObject*>(
+                torch::getTHPDtype(m.dtype().toScalarType()));
             return py::reinterpret_borrow<py::object>(raw_obj);
           })
       .def_property_readonly("device", &torch::autograd::InputMetadata::device)
@@ -303,9 +303,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
           "is_user_annotation",
           [](const KinetoEvent& e) {
             return e.activityType() ==
-                (uint8_t)libkineto::ActivityType::USER_ANNOTATION ||
+                static_cast<uint8_t>(
+                       libkineto::ActivityType::USER_ANNOTATION) ||
                 e.activityType() ==
-                (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION;
+                static_cast<uint8_t>(
+                    libkineto::ActivityType::GPU_USER_ANNOTATION);
           })
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); })
       // whether the event is hidden

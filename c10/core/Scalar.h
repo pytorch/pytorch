@@ -32,7 +32,7 @@ namespace c10 {
  */
 class C10_API Scalar {
  public:
-  Scalar() : Scalar(int64_t(0)) {}
+  Scalar() : Scalar(static_cast<int64_t>(0)) {}
 
   void destroy() {
     if (Tag::HAS_si == tag || Tag::HAS_sd == tag || Tag::HAS_sb == tag) {

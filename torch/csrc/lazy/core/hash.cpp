@@ -12,7 +12,7 @@ namespace {
 
 hash_t LoadHash(const uint8_t** data, const uint8_t* top) {
   std::ptrdiff_t size = top - (*data);
-  if (size >= (int)sizeof(hash_t)) {
+  if (size >= static_cast<int>(sizeof(hash_t))) {
     hash_t v;
     std::memcpy(&v, *data, sizeof(v));
     *data += sizeof(hash_t);
@@ -43,7 +43,7 @@ hash_t HashBlock(const void* data, size_t n, const hash_t& seed) {
 
   const uint8_t* u8_data = reinterpret_cast<const uint8_t*>(data);
   const uint8_t* top = u8_data + n;
-  hash_t h(seed ^ ((uint64_t)n * m));
+  hash_t h(seed ^ (static_cast<uint64_t>(n) * m));
   while (u8_data < top) {
     hash_t k = LoadHash(&u8_data, top);
     k *= m;
@@ -76,7 +76,9 @@ size_t StdHashCombine(uintmax_t a, uintmax_t b) {
 hash_t HashCombine(const hash_t& a, const hash_t& b) {
   static const hash_t kb(101, 0x27d4eb2f165667c5);
   return hash_t(
-      a ^ (b * kb + (uint64_t)0x9e3779b97f4a7c15 + (a << 6) + (a >> 2)));
+      a ^
+      (b * kb + static_cast<uint64_t>(0x9e3779b97f4a7c15) + (a << 6) +
+       (a >> 2)));
 }
 
 size_t HashReduce(const hash_t& a) {

@@ -44,7 +44,7 @@ static PyObject* THPStorage_New(PyTypeObject* type, c10::Storage _storage) {
   // free-threaded Python.
   PyUnstable_EnableTryIncRef(obj);
 
-  auto s = (THPStorage*)obj;
+  auto s = reinterpret_cast<THPStorage*>(obj);
   new (&s->cdata) c10::Storage(std::move(_storage));
   return obj;
 }

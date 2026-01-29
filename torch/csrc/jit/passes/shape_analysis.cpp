@@ -187,7 +187,7 @@ std::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
 
 int64_t wrapDim(int64_t dim, at::IntArrayRef sizes) {
   if (dim < 0) {
-    dim += (int64_t)sizes.size();
+    dim += static_cast<int64_t>(sizes.size());
   }
   return dim;
 }
@@ -483,7 +483,7 @@ class ShapePropagator : public PropertyPropBase {
         return false;
       std::vector<int64_t> sizes = *input_types[0]->sizes().concrete_sizes();
       const int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
-      const int64_t ndim = (int64_t)sizes.size();
+      const int64_t ndim = static_cast<int64_t>(sizes.size());
 
       if (dim < 0 || dim >= ndim)
         return false;
@@ -1476,7 +1476,8 @@ class ShapePropagator : public PropertyPropBase {
           if (auto type =
                   node->namedInput(attr::self)->type()->cast<TensorType>()) {
             if (type->dim()) {
-              return factory_like_with_ndim(node, (int)*type->dim());
+              return factory_like_with_ndim(
+                  node, static_cast<int>(*type->dim()));
             }
           }
           return {};
@@ -1503,7 +1504,7 @@ class ShapePropagator : public PropertyPropBase {
         [](Node* node) -> type_vec_t {
           if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
             return factory_with_ndim(
-                node, (int)maybe_size->size(), at::kDouble);
+                node, static_cast<int>(maybe_size->size()), at::kDouble);
           }
           return {};
         }};
@@ -1515,7 +1516,8 @@ class ShapePropagator : public PropertyPropBase {
         },
         [](Node* node) -> type_vec_t {
           if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
-            return factory_with_ndim(node, (int)maybe_size->size(), at::kLong);
+            return factory_with_ndim(
+                node, static_cast<int>(maybe_size->size()), at::kLong);
           }
           return {};
         }};
@@ -2132,7 +2134,7 @@ class ShapePropagator : public PropertyPropBase {
     } else if (node->kind() == ::c10::onnx::Shape) {
       SHAPE_ASSERT(node->inputs().size() == 1 && node->outputs().size() == 1);
       std::vector<int64_t> dim_vec = {
-          (int64_t)*tensor_types.at(0)->sizes().size()};
+          static_cast<int64_t>(*tensor_types.at(0)->sizes().size())};
       at::IntArrayRef dims(dim_vec);
       node->output()->setType(
           TensorType::createContiguous(at::kLong, at::kCPU, dims));

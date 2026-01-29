@@ -11,9 +11,9 @@ namespace torch::unwind {
 template <bool checked>
 struct LexerImpl {
   LexerImpl(void* data, void* base = nullptr, void* end = nullptr)
-      : next_((const char*)data),
+      : next_(static_cast<const char*>(data)),
         base_((int64_t)base),
-        end_((const char*)end) {}
+        end_(static_cast<const char*>(end)) {}
 
   template <typename T>
   T read() {
@@ -41,12 +41,12 @@ struct LexerImpl {
           (Shift == 63 && Slice != 0 && Slice != 0x7f)) {
         throw UnwindError("sleb128 too big for int64");
       }
-      Value |= int64_t(Slice << Shift);
+      Value |= static_cast<int64_t>(Slice << Shift);
       Shift += 7;
     } while (Byte >= 128);
     // Sign extend negative numbers if needed.
     if (Shift < 64 && (Byte & 0x40)) {
-      Value |= int64_t((-1ULL) << Shift);
+      Value |= static_cast<int64_t>((-1ULL) << Shift);
     }
     return Value;
   }

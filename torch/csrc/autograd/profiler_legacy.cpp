@@ -241,7 +241,7 @@ void ProfilerLegacyThreadLocalState::pushRange(
         fn.isAsync());
     evt.setSequenceNr(fn.seqNr());
     evt.setFwdThreadId(fn.forwardThreadId());
-    evt.setScope((uint8_t)fn.scope());
+    evt.setScope(static_cast<uint8_t>(fn.scope()));
     if (config_.with_flops) {
       evt.setExtraArgs(torch::profiler::impl::saveExtraArgs(fn));
       evt.setFlops(torch::profiler::impl::computeFlops(
@@ -523,7 +523,7 @@ void LegacyEvent::record(bool record_cuda) {
       ivalues.get(EventIValueIdx::CPU_NS).toInt(), // cpu_ns
       ivalues.get(EventIValueIdx::CUDA_RECORDED).toBool(), // was cuda recorded
       ivalues.get(EventIValueIdx::CUDA_MEM_USAGE).toInt(), // cuda memory usage
-      c10::DeviceIndex(
+      static_cast<c10::DeviceIndex>(
           ivalues.get(EventIValueIdx::CUDA_DEVICE).toInt()), // device
       static_cast<double>(
           ivalues.get(EventIValueIdx::CUDA_US).toInt()) // cuda_us

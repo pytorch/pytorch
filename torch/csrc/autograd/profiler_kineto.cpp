@@ -350,7 +350,8 @@ struct AddGenericMetadata : public MetadataBase {
   }
 
   void operator()(const ExtraFields<EventType::Allocation>& alloc) {
-    addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
+    addMetadata(
+        "Device Type", std::to_string(static_cast<int8_t>(alloc.device_type_)));
     addMetadata("Device Id", std::to_string(alloc.device_index_));
     addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(alloc.ptr_)));
     addMetadata("Bytes", std::to_string(alloc.alloc_size_));
@@ -359,7 +360,8 @@ struct AddGenericMetadata : public MetadataBase {
   }
 
   void operator()(const ExtraFields<EventType::OutOfMemory>& alloc) {
-    addMetadata("Device Type", std::to_string((int8_t)alloc.device_type_));
+    addMetadata(
+        "Device Type", std::to_string(static_cast<int8_t>(alloc.device_type_)));
     addMetadata("Device Id", std::to_string(alloc.device_index_));
     addMetadata("Bytes", std::to_string(alloc.alloc_size_));
     addMetadata("Total Allocated", std::to_string(alloc.total_allocated_));
@@ -1046,8 +1048,8 @@ int64_t KinetoEvent::cudaElapsedUs() const {
     return -1;
   }
   try {
-    return (int64_t)torch::profiler::impl::cudaStubs()->elapsed(
-        &cuda_event_start, &cuda_event_end);
+    return static_cast<int64_t>(torch::profiler::impl::cudaStubs()->elapsed(
+        &cuda_event_start, &cuda_event_end));
   } catch (std::exception& e) {
     LOG(WARNING) << "Failed to measure time between two CUDA events. "
                  << e.what();
@@ -1061,8 +1063,9 @@ int64_t KinetoEvent::privateuse1ElapsedUs() const {
   if (!privateuse1_event_start || !privateuse1_event_end) {
     return -1;
   }
-  return (int64_t)torch::profiler::impl::privateuse1Stubs()->elapsed(
-      &privateuse1_event_start, &privateuse1_event_end);
+  return static_cast<int64_t>(
+      torch::profiler::impl::privateuse1Stubs()->elapsed(
+          &privateuse1_event_start, &privateuse1_event_end));
   return -1;
 }
 

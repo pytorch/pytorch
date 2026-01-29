@@ -38,7 +38,7 @@ constexpr uint64_t kReferenceCountOne = 1;
 constexpr uint64_t kWeakReferenceCountOne = (kReferenceCountOne << 32);
 constexpr uint64_t kUniqueRef = (kReferenceCountOne | kWeakReferenceCountOne);
 // Indicates whether the object has a PyObject wrapper.
-constexpr uint64_t kHasPyObject = (uint64_t(1) << 63);
+constexpr uint64_t kHasPyObject = (static_cast<uint64_t>(1) << 63);
 
 template <class TTarget>
 struct intrusive_target_default_null_type final {
