@@ -267,10 +267,10 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     Quick Start:
         Suppose we want to log per-sample statistics during the forward pass::
 
-        >>> def compute_and_log_stats(x):
-        >>>     stats = x.mean(dim=1)
-        >>>     logger.info(f"Per-sample means: {stats}")
-        >>>     return (stats,)
+            def compute_and_log_stats(x):
+                stats = x.mean(dim=1)
+                logger.info(f"Per-sample means: {stats}")
+                return (stats,)
 
         With ``torch.compile(..., fullgraph=True)``, this fails because
         ``logger.info`` causes a graph break. To fix it, follow the steps below:
@@ -278,32 +278,32 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         1. Decorate your function with ``@leaf_function``
         2. Define a shape-inference function using ``@your_fn.register_fake``
 
-        Concrete implementation:
+        Concrete implementation::
 
-        >>> import logging
-        >>> import torch
-        >>> from torch._dynamo.decorators import leaf_function
-        >>>
-        >>> logging.basicConfig(level=logging.INFO)
-        >>> logger = logging.getLogger(__name__)
-        >>>
-        >>> @leaf_function
-        >>> def compute_and_log_stats(x):
-        >>>     stats = x.mean(dim=1)  # Shape: (x.shape[0],)
-        >>>     logger.info(f"Per-sample means: {stats}")
-        >>>     return (stats,)
-        >>>
-        >>> @compute_and_log_stats.register_fake
-        >>> def compute_and_log_stats_fake(x):
-        >>> # Match the output shape: (x.shape[0],)
-        >>>     return (x.new_empty(x.shape[0]),)
-        >>>
-        >>> def fn(x):
-        >>>     return compute_and_log_stats(x)
-        >>>
-        >>> x = torch.randn(3, 4)
-        >>> compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-        >>> out = compiled_fn(x)[0]
+            >>> import logging
+            >>> import torch
+            >>> from torch._dynamo.decorators import leaf_function
+            >>>
+            >>> logging.basicConfig(level=logging.INFO)
+            >>> logger = logging.getLogger(__name__)
+            >>>
+            >>> @leaf_function
+            ... def compute_and_log_stats(x):
+            ...     stats = x.mean(dim=1)  # Shape: (x.shape[0],)
+            ...     logger.info(f"Per-sample means: {stats}")
+            ...     return (stats,)
+            ...
+            >>> @compute_and_log_stats.register_fake
+            ... def compute_and_log_stats_fake(x):
+            ...     # Match the output shape: (x.shape[0],)
+            ...     return (x.new_empty(x.shape[0]),)
+            ...
+            >>> def fn(x):
+            ...     return compute_and_log_stats(x)
+            ...
+            >>> x = torch.randn(3, 4)
+            >>> compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+            >>> out = compiled_fn(x)[0]
 
     When to Use:
         Use ``leaf_function`` when you need eager execution semantics that tracing
@@ -333,21 +333,25 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         values from the fake implementation.
 
         Example::
-            >>> # BAD: primitive output varies at runtime
-            >>> counter = 0
-            >>>
-            >>> @leaf_function
-            >>> def count_calls(x):
-            >>>     global counter
-            >>>     counter += 1
-            >>>     return (x, counter)
-            >>>
-            >>> @count_calls.register_fake
-            >>> def count_calls_fake(x):
-            >>>     return (x, 999)  # placeholder value
-            >>>
-            >>> # At runtime: real function runs (counter increments to 1, 2, 3, ...)
-            >>> # But returned count is always 999 (from fake implementation at compile time)
+
+            # BAD: primitive output varies at runtime
+            counter = 0
+
+
+            @leaf_function
+            def count_calls(x):
+                global counter
+                counter += 1
+                return (x, counter)
+
+
+            @count_calls.register_fake
+            def count_calls_fake(x):
+                return (x, 999)  # placeholder value
+
+
+            # At runtime: real function runs (counter increments to 1, 2, 3, ...)
+            # But returned count is always 999 (from fake implementation at compile time)
 
             # BAD: primitive output varies at runtime
             counter = 0
@@ -436,12 +440,12 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
           Bad::
 
-            >>> # Compiled region
-            >>> self.counter += 1
-            >>> y = my_leaf_fn(self, x)  # Don't depend on self.counter inside leaf_fn
-            >>>
-            >>> y = my_leaf_fn(self, x)
-            >>> result = self.state  # Don't depend on state mutated by leaf_fn
+            # Compiled region
+            self.counter += 1
+            y = my_leaf_fn(self, x)  # Don't depend on self.counter inside leaf_fn
+
+            y = my_leaf_fn(self, x)
+            result = self.state  # Don't depend on state mutated by leaf_fn
 
           Logging/printing inside the leaf function is fine since it doesn't affect
           correctness.
@@ -451,10 +455,10 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
           Bad::
 
-            >>> @leaf_function
-            >>> def my_leaf_fn(x):
-            >>>     x.add_(1)  # Will raise: "In-place mutation detected"
-            >>>     return (x,)
+            @leaf_function
+            def my_leaf_fn(x):
+                x.add_(1)  # Will raise: "In-place mutation detected"
+                return (x,)
 
         - **Closures in fake implementation**: Tensors or modules captured from enclosing scopes
           in the fake implementation will cause compilation errors. The real function can
@@ -463,63 +467,65 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
           Bad::
 
-            >>>  weight = torch.randn(3, 3)
-            >>>
-            >>>  @leaf_function
-            >>>  def my_leaf_fn(x):
-            >>>      return (x @ weight,)
-            >>>
-            >>>  @my_leaf_fn.register_fake
-            >>>  def my_leaf_fn_fake(x):
-            >>>      return (x @ weight,)  # Error: weight used in fake implementation
+            weight = torch.randn(3, 3)
+
+
+            @leaf_function
+            def my_leaf_fn(x):
+                return (x @ weight,)
+
+
+            @my_leaf_fn.register_fake
+            def my_leaf_fn_fake(x):
+                return (x @ weight,)  # Error: weight used in fake implementation
 
           Good::
 
-            >>> weight = torch.randn(3, 3)
-            >>>
-            >>> @leaf_function
-            >>> def my_leaf_fn(x):
-            >>>     return (x @ weight,)  # OK: real function can use closure
-            >>>
-            >>> @my_leaf_fn.register_fake
-            >>> def my_leaf_fn_fake(x):
-            >>>     return (x @ torch.empty_like(x),)  # OK: uses only args
+            weight = torch.randn(3, 3)
+
+
+            @leaf_function
+            def my_leaf_fn(x):
+                return (x @ weight,)  # OK: real function can use closure
+
+
+            @my_leaf_fn.register_fake
+            def my_leaf_fn_fake(x):
+                return (x @ torch.empty_like(x),)  # OK: uses only args
 
     Example::
-        Wrapping an external linear function as leaf_function. It implements custom kernels via
-        :class:`torch.autograd.Function`. The library has logging logic that needs to be
-        preserved. Gradients can flow back because it defines backward logic::
+        Wrapping a linear function with logging as a leaf_function. Gradients
+        flow back because the inner operations are differentiable::
 
-        >>> @leaf_function
-        >>> def custom_forward(linear, x):
-        >>>     # Logging at runtime
-        >>>     print(f"Input: shape={x.shape}, mean={x.mean().item():.4f}")
-        >>>
-        >>>     # external_lib.linear is a torch.autograd.Function with custom
-        >>>     # kernels and backward logic defined
-        >>>     out = external_lib.linear(x, linear.weight, linear.bias)
-        >>>
-        >>>     print(f"Output: shape={out.shape}, norm={out.norm().item():.4f}")
-        >>>     return (out,)
-        >>>
-        >>> @custom_forward.register_fake
-        >>> def custom_forward_fake(linear, x):
-        >>>     # Return tensor with correct shape: (batch, out_features)
-        >>>     return (x.new_empty(x.shape[0], linear.weight.shape[0]),)
-        >>>
-        >>> class MyModel(torch.nn.Module):
-        >>>     def __init__(self):
-        >>>         super().__init__()
-        >>>         self.linear = torch.nn.Linear(10, 20)
-        >>>
-        >>>     def forward(self, x):
-        >>>         return custom_forward(self.linear, x)
-        >>>
-        >>> model = MyModel()
-        >>> compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
-        >>> x = torch.randn(32, 10, requires_grad=True)
-        >>> out = compiled(x)[0]
-        >>> out.sum().backward()  # Gradients flow to model.linear.weight/bias and x
+            >>> import torch
+            >>> import torch.nn.functional as F
+            >>> from torch._dynamo.decorators import leaf_function
+            >>>
+            >>> @leaf_function
+            ... def custom_forward(linear, x):
+            ...     # Logging at runtime
+            ...     print(f"Input: shape={x.shape}, mean={x.mean().item():.4f}")
+            ...     out = F.linear(x, linear.weight, linear.bias)
+            ...     print(f"Output: shape={out.shape}, norm={out.norm().item():.4f}")
+            ...     return (out,)
+            ...
+            >>> @custom_forward.register_fake
+            ... def custom_forward_fake(linear, x):
+            ...     # Return tensor with correct shape: (batch, out_features)
+            ...     return (x.new_empty(x.shape[0], linear.weight.shape[0]),)
+            ...
+            >>> class MyModel(torch.nn.Module):
+            ...     def __init__(self):
+            ...         super().__init__()
+            ...         self.linear = torch.nn.Linear(10, 20)
+            ...     def forward(self, x):
+            ...         return custom_forward(self.linear, x)
+            ...
+            >>> model = MyModel()
+            >>> compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+            >>> x = torch.randn(32, 10, requires_grad=True)
+            >>> out = compiled(x)[0]
+            >>> out.sum().backward()  # Gradients flow to model.linear.weight/bias and x
 
     Args:
         fn: The function being decorated.
