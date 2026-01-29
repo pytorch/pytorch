@@ -836,14 +836,6 @@ struct AttentionBackwardKernel {
       grad_value_ptr = warp_uniform(grad_value_ptr);
       grad_bias_ptr = warp_uniform(grad_bias_ptr);
 
-#if 0
-      PRINT_T0("[b:%d h:%d] dp[0]:%f Q:%f K:%f V:%f LSE:%f",
-        int(blockIdx.z), int(blockIdx.y),
-        float(delta_ptr[0]),
-        float(query_ptr[0]), float(key_ptr[0]), float(value_ptr[0]),
-        float(logsumexp_ptr[0])
-      )
-#endif
       return true;
     }
 
@@ -1686,10 +1678,6 @@ struct AttentionBackwardKernel {
           warp_id,
           lane_id,
           output_tile_coords);
-#if 0
-      auto accum_ref_attnT = shared_storage.attn_shared_storage().accum_ref();
-      PRINT_TENSOR4x4_T0_L0("attn_T", accum_ref_attnT);
-#endif
 
       // if we are using dropout, compute Zij, writing it to shared memory.
       // each element of Zij is:
@@ -1743,10 +1731,6 @@ struct AttentionBackwardKernel {
           }
         }
         __syncthreads();
-#if 0
-        PRINT_TENSOR4x4_T0_L0("zij", zij);
-        PRINT_TENSOR4x4_T0_L0_START("zij", zij, kBlockSizeJ - 4, kBlockSizeI - 4);
-#endif
 
         // Save mask for later DOIVJ matmul
 
@@ -1931,11 +1915,6 @@ struct AttentionBackwardKernel {
         }
 
         auto attn_T = shared_storage.attn_shared_storage().accum_ref();
-#if 0
-        PRINT_B0_T0("doivj_dropped");
-        print_warp_accum<LambdaIterator>(accum, lane_offset, 4, 4);
-        PRINT_TENSOR4x4_T0_L0("attn_T", attn_T)
-#endif
         accum_t current_di;
         // dSij = (dPij - Di) * Pij
         LambdaIterator::iterateRows(
@@ -1982,11 +1961,6 @@ struct AttentionBackwardKernel {
         }
 
         accum = accum * scale;
-
-#if 0
-        PRINT_B0_T0("(doivj - di) * attn * scale");
-        print_warp_accum<LambdaIterator>(accum, lane_offset, 4, 4);
-#endif
 
         __syncthreads();
         if (!MatmulGradK::DefaultMmaFromSmem::kIsTransposedA) {

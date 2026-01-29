@@ -191,18 +191,6 @@ void TestAbsValue(DeprecatedTypeProperties& type) {
   Tensor r = at::abs(at::scalar_tensor(-3, type.options()));
   ASSERT_EQ_RESOLVED(r.item<int32_t>(), 3);
 }
-/*
-   TODO(zach): operator overloads
-#if 0
-{
-std::cout << "eq (value):" << std::endl;
-Tensor a = Tensor(10.f);
-std::cout << (a == 11_i64) << " -- should be 0" << std::endl;
-std::cout << (a == 10_i64) << " -- should be 1" << std::endl;
-std::cout << (a == 10.) << " -- should be 1" << std::endl;
-}
-#endif
-*/
 
 void TestAddingAValueWithScalar(DeprecatedTypeProperties& type) {
   Tensor a = rand({4, 3}, type);
