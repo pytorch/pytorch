@@ -25,6 +25,8 @@ def _build_kernel_cache() -> dict[str, Any]:
     """Build the kernel name -> kernel object cache."""
     import cutlass_api
 
+    log.debug("Building NVGEMM kernel cache (this may take a few seconds)...")
+
     try:
         from torch._inductor.kernel.vendored_templates.cutedsl import (  # noqa: F401
             wrappers,
