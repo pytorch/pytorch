@@ -812,6 +812,49 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(misses, 2)
 
     @with_comms
+    def test_stack_hits_fast_path_with_pytree_inputs(self):
+        from torch.distributed.tensor.debug import (
+            _clear_fast_path_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
+        )
+
+        mesh = self.build_device_mesh()
+        shard_spec = [Replicate()]
+
+        # list of DTensors
+        list_inputs = [
+            distribute_tensor(
+                torch.randn(2, 2, device=self.device_type) + idx, mesh, shard_spec
+            )
+            for idx in range(2)
+        ]
+
+        _clear_fast_path_sharding_prop_cache()
+        num_iters = 5
+        for _ in range(num_iters):
+            torch.stack(list_inputs, dim=0)
+
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
+        self.assertEqual(hits, num_iters - 1)
+        self.assertEqual(misses, 1)
+
+        # tuple of DTensors
+        tuple_inputs = tuple(
+            distribute_tensor(
+                torch.randn(2, 2, device=self.device_type) + idx, mesh, shard_spec
+            )
+            for idx in range(2)
+        )
+
+        _clear_fast_path_sharding_prop_cache()
+        for _ in range(num_iters):
+            torch.stack(tuple_inputs, dim=0)
+
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
+        self.assertEqual(hits, num_iters - 1)
+        self.assertEqual(misses, 1)
+
+    @with_comms
     def test_slice(self):
         mesh = self.build_device_mesh()  # 1D mesh
         comm_mode = CommDebugMode()
