@@ -205,7 +205,7 @@ sycl::event matmul(
       pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
     }
   }
-  
+
   // STEP3: create primitive
   if (with_bias) {
     bias_md = dnnl::memory::desc(bias_dims, bias_dt, bias_strides);
