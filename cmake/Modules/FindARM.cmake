@@ -167,4 +167,20 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
 
     # Mark the SVE support variable as advanced
     mark_as_advanced(CXX_SVE_FOUND)
+
+    # Workaround for GCC 11.5.0 compiler bug with SVE intrinsics
+    # See: https://github.com/pytorch/pytorch/issues/162422
+    # GCC 11.5.0 has a regression causing internal compiler errors when
+    # compiling SVE code. Fall back to NEON for this specific version.
+    IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+      IF(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "11.5.0" AND
+         CMAKE_CXX_COMPILER_VERSION VERSION_LESS "11.6.0")
+        message(WARNING "GCC 11.5.0 detected: Disabling SVE support due to known compiler bugs. "
+                        "SVE compilation will fall back to NEON. Consider upgrading to GCC 13+ "
+                        "for optimal ARM performance. See https://github.com/pytorch/pytorch/issues/162422")
+        set(CXX_SVE_FOUND FALSE CACHE BOOL "SVE disabled for GCC 11.5.0" FORCE)
+        set(CXX_SVE256_FOUND FALSE CACHE BOOL "SVE256 disabled for GCC 11.5.0" FORCE)
+        set(CXX_ARM_BF16_FOUND FALSE CACHE BOOL "ARM_BF16 disabled for GCC 11.5.0" FORCE)
+      ENDIF()
+    ENDIF()
 ENDIF(CMAKE_SYSTEM_NAME MATCHES "Linux")
