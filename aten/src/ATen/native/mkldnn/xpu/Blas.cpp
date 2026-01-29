@@ -374,8 +374,8 @@ Tensor& addmv_out(
 
   Tensor vec_v = vec.view({vec.size(0), 1});
 
-  bool is_float64 = mat.scalar_type() == at::kDouble ||
-                    vec.scalar_type() == at::kDouble;
+  bool is_float64 =
+      mat.scalar_type() == at::kDouble || vec.scalar_type() == at::kDouble;
   bool is_inplace = self.is_same(out);
   if (is_float64 && is_inplace) {
     Tensor self_v_copy = self_v.clone();
