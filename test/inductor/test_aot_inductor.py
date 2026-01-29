@@ -7773,6 +7773,42 @@ class AOTInductorTestsTemplate:
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
 
+    def test_aoti_load_package_in_fresh_subprocess(self):
+        """
+        Test that loading an AOTI package in a fresh subprocess works correctly.
+        This catches initialization bugs that may not appear when loading in the
+        same process where the package was compiled.
+        """
+
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = SimpleModel().to(self.device)
+        example_input = (torch.randn(2, 10, device=self.device),)
+        exported = torch.export.export(model, example_input)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = pathlib.Path(tmpdir) / "model.pt2"
+            torch._inductor.aoti_compile_and_package(
+                exported, package_path=str(model_path)
+            )
+
+            # Load in a fresh subprocess to reproduce potential bugs
+            script = f"""
+import torch
+
+torch._inductor.aoti_load_package("{model_path}")
+"""
+            result = subprocess.run(
+                [sys.executable, "-c", script], capture_output=True, text=True
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"Failed to load package in subprocess: {result.stdout + result.stderr}",
+            )
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
