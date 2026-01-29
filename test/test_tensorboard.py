@@ -532,6 +532,34 @@ class TestTensorBoardSummary(BaseTestCase):
         mesh = summary.mesh("my_mesh", vertices=v, colors=c, faces=f, config_dict=None)
         self.assertProto(mesh)
 
+    def test_pr_curve_large_num_thresholds(self):
+        """
+        Test that pr_curve and pr_curve_raw accept num_thresholds > 127.
+        Previously, there was an artificial restriction that limited num_thresholds
+        to 127 due to an outdated protobuf limitation. This test verifies that
+        larger values are now accepted.
+        See https://github.com/pytorch/pytorch/issues/173311
+        """
+        # Test pr_curve with num_thresholds > 127
+        labels = np.random.randint(2, size=100)
+        predictions = np.random.rand(100)
+        result = summary.pr_curve("test_pr_curve", labels, predictions, num_thresholds=256)
+        self.assertProto(result)
+
+        # Test pr_curve_raw with num_thresholds > 127
+        num_thresholds = 256
+        tp = np.random.rand(num_thresholds)
+        fp = np.random.rand(num_thresholds)
+        tn = np.random.rand(num_thresholds)
+        fn = np.random.rand(num_thresholds)
+        precision = np.random.rand(num_thresholds)
+        recall = np.random.rand(num_thresholds)
+        result_raw = summary.pr_curve_raw(
+            "test_pr_curve_raw", tp, fp, tn, fn, precision, recall,
+            num_thresholds=num_thresholds
+        )
+        self.assertProto(result_raw)
+
     def test_scalar_new_style(self):
         scalar = summary.scalar("test_scalar", 1.0, new_style=True)
         self.assertProto(scalar)
