@@ -531,6 +531,19 @@ class Function(_SingleLevelFunction):
     """
     generate_vmap_rule = False
 
+    """
+    Bool that specifies if PyTorch should clear saved tensors after the first
+    access to ``ctx.saved_tensors``. When set to True, accessing saved_tensors
+    clears the internal references, allowing the tensors to be cleared as soon
+    as the Tensor returned by saved_tensors is deleted.
+
+    This is useful for reducing memory pressure in backward passes when you
+    only need to access saved tensors once.
+
+    Default is False.
+    """
+    clear_saved_tensors_on_access = False
+
     @staticmethod
     def vmap(info, in_dims, *args):
         r"""Define the behavior for this autograd.Function underneath :func:`torch.vmap`.
