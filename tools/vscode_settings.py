@@ -26,7 +26,10 @@ def deep_update(d: dict, u: dict) -> dict:  # type: ignore[type-arg]
         if isinstance(v, dict):
             d[k] = deep_update(d.get(k, {}), v)
         elif isinstance(v, list):
-            d[k] = d.get(k, []) + v
+            existing = d.get(k, [])
+            if isinstance(existing, list):
+                # preserve order, avoid duplicates
+                d[k] = list(dict.fromkeys(existing + v))
         else:
             d[k] = v
     return d
