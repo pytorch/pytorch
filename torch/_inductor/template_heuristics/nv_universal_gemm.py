@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch._inductor.utils import ensure_nvmatmul_heuristics_available
 from torch._logging import getArtifactLogger
+from torch.utils._ordered_set import OrderedSet
 
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 # Use autotuning artifact logger for detailed nvMatmulHeuristics logging
 # Enable with TORCH_LOGS="+autotuning"
 autotuning_log = getArtifactLogger(__name__, "autotuning")
+
 
 @dataclass
 class HeuristicConfig:
@@ -79,8 +81,11 @@ def _kernel_matches_heuristic(kernel, cfg: HeuristicConfig) -> tuple[bool, int]:
         name = field.name
         # Skip fields already handled or not config values
         if name in (
-            "tile_m", "tile_n", "tile_k",
-            "cluster_m", "cluster_n",
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "cluster_m",
+            "cluster_n",
             "estimated_runtime",
         ):
             continue
@@ -142,8 +147,16 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         layout_b = "row" if strides[inputs._mat2_idx][-1] == 1 else "col"
 
         heuristic_configs = self._get_heuristic_configs(
-            m, n, k, dtype_a, layout_a, layout_b, count, kernels,
-            accumulator_type, batch_size,
+            m,
+            n,
+            k,
+            dtype_a,
+            layout_a,
+            layout_b,
+            count,
+            kernels,
+            accumulator_type,
+            batch_size,
         )
 
         if not heuristic_configs:
@@ -197,7 +210,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         for i, (kernel, runtime, missing) in enumerate(selected):
             design = kernel.metadata.design  # pyrefly: ignore[missing-attribute]
             # Log fields the kernel supports
-            field_strs = []
+            field_strs: list[str] = []
             for field in dataclasses.fields(HeuristicConfig):
                 name = field.name
                 if name == "estimated_runtime":
@@ -235,17 +248,19 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         matching the available kernel tile/cluster shapes.
         """
         # Build set of (tile_m, tile_n, tile_k, cluster_m, cluster_n) tuples
-        valid_shapes: set[tuple[int, int, int, int, int]] = set()
+        valid_shapes: OrderedSet[tuple[int, int, int, int, int]] = OrderedSet()
         for kernel in kernels:
             design = kernel.metadata.design
             if hasattr(design, "tile_shape") and hasattr(design, "cluster_shape"):
-                valid_shapes.add((
-                    design.tile_shape[0],
-                    design.tile_shape[1],
-                    design.tile_shape[2],
-                    design.cluster_shape[0],
-                    design.cluster_shape[1],
-                ))
+                valid_shapes.add(
+                    (
+                        design.tile_shape[0],
+                        design.tile_shape[1],
+                        design.tile_shape[2],
+                        design.cluster_shape[0],
+                        design.cluster_shape[1],
+                    )
+                )
 
         def validity_check(kernel_config_ptr, problem_ptr):
             k = kernel_config_ptr.contents
