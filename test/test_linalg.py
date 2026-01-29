@@ -610,7 +610,7 @@ class TestLinalg(TestCase):
                 torch.linalg.lstsq(a, b, driver='fictitious_driver')
 
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky(self, device, dtype):
@@ -656,7 +656,7 @@ class TestLinalg(TestCase):
         actual = torch.linalg.cholesky(A, upper=True)
         self.assertEqual(expected, actual)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_errors_and_warnings(self, device, dtype):
@@ -720,7 +720,7 @@ class TestLinalg(TestCase):
 
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
     @slowTest
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_old_cholesky_batched_many_batches(self, device, dtype):
@@ -744,7 +744,7 @@ class TestLinalg(TestCase):
             cholesky_test_helper(2, batchsize, device, upper)
 
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_old_cholesky_batched(self, device, dtype):
@@ -761,7 +761,7 @@ class TestLinalg(TestCase):
 
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
     @skipIfRocmArch(MI300_ARCH)
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @tf32_on_and_off(0.01)
@@ -786,7 +786,7 @@ class TestLinalg(TestCase):
         B = torch.mm(L, L.t().conj())
         self.assertEqual(A, B, atol=1e-14, rtol=0, msg='cholesky (lower) did not allow rebuilding the original matrix')
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_old_cholesky_empty(self, device, dtype):
@@ -803,7 +803,7 @@ class TestLinalg(TestCase):
     # torch.cholesky with upper=True for batched CUDA inputs was wrong
     # it was using the lower triangular part instead of the upper one
     @onlyCUDA
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
     @dtypes(*floating_and_complex_types())
     def test_old_cholesky_batched_upper(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -817,7 +817,7 @@ class TestLinalg(TestCase):
         reconstruct_A = U.mH @ U
         self.assertEqual(A, reconstruct_A)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_ex(self, device, dtype):
@@ -848,7 +848,7 @@ class TestLinalg(TestCase):
         for n, batch in itertools.product(ns, batches):
             run_test(n, batch)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
+    @skipCUDAIfNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_ex_non_pd(self, device, dtype):
@@ -3190,7 +3190,7 @@ class TestLinalg(TestCase):
                 Ax = torch.matmul(A, x)
                 self.assertEqual(Ax, b.expand_as(Ax))
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
@@ -9434,7 +9434,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             run_test(matsize, batchdims, mat_chars=['sym', 'sym_pd', 'sym_psd'])
             run_test(matsize, batchdims, mat_chars=['sing', 'non_sing'])
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_cholesky_inverse(self, device, dtype):
