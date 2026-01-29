@@ -293,6 +293,25 @@ class BundledCompiledBackward(
         )
 
 
+@torch._dynamo.disable(reason="do not trace pickling")
+def _serialize_graph_module_impl(gm: torch.fx.GraphModule) -> bytes:
+    from torch.fx._graph_pickler import GraphPickler, Options
+
+    # Clear metadata to avoid serializing unpicklable objects
+    gm.meta = {}
+    for node in gm.graph.nodes:
+        node.meta = {}
+
+    # Use GraphPickler which handles HigherOrderOperators correctly
+    # by serializing the graph structure directly instead of relying
+    # on symbolic tracing during deserialization.
+    # ops_filter=None allows all ops (including HigherOrderOperators)
+    return GraphPickler.dumps(
+        gm,
+        options=Options(ops_filter=None),
+    )
+
+
 @dataclass
 class SerializedGraphModule:
     """
@@ -310,21 +329,7 @@ class SerializedGraphModule:
     _serialized_bytes: bytes
 
     def __init__(self, gm: torch.fx.GraphModule):
-        from torch.fx._graph_pickler import GraphPickler, Options
-
-        # Clear metadata to avoid serializing unpicklable objects
-        gm.meta = {}
-        for node in gm.graph.nodes:
-            node.meta = {}
-
-        # Use GraphPickler which handles HigherOrderOperators correctly
-        # by serializing the graph structure directly instead of relying
-        # on symbolic tracing during deserialization.
-        # ops_filter=None allows all ops (including HigherOrderOperators)
-        self._serialized_bytes = GraphPickler.dumps(
-            gm,
-            options=Options(ops_filter=None),
-        )
+        self._serialized_bytes = _serialize_graph_module_impl(gm)
 
     def deserialize(self) -> torch.fx.GraphModule:
         from torch._subclasses.fake_tensor import FakeTensorMode
