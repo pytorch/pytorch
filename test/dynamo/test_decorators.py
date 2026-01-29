@@ -3515,8 +3515,6 @@ class GraphModule(torch.nn.Module):
                 return (x,)
 
     def test_leaf_function_output_structure_mismatch(self):
-        from torch._dynamo.decorators import leaf_function
-
         @leaf_function
         def mismatched_fn(x):
             return {"a": x, "b": x * 2}
@@ -3533,8 +3531,6 @@ class GraphModule(torch.nn.Module):
             torch.compile(fn, backend="eager")(x)
 
     def test_leaf_function_nested_output(self):
-        from torch._dynamo.decorators import leaf_function
-
         @leaf_function
         def nested_output_fn(linear1, linear2, linear3, x):
             if x.sum() > 0:
@@ -3582,8 +3578,6 @@ class GraphModule(torch.nn.Module):
         self._test_leaf_function_helper(NestedOutputModule, args_fn, loss_fn)
 
     def test_leaf_function_custom_pytree_output(self):
-        from torch._dynamo.decorators import leaf_function
-
         class Point:
             x: torch.Tensor
             y: torch.Tensor
