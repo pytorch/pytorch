@@ -6344,9 +6344,11 @@
     MkldnnCPU: mkldnn_transpose_
   autogen: _mkldnn_transpose.out
 
-- func: one_hot(Tensor self, int num_classes=-1) -> Tensor
+- func: one_hot(Tensor self, SymInt num_classes=-1) -> Tensor
   python_module: nn
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: one_hot_symint
   tags: dynamic_output_shape
 
 - func: flip(Tensor self, int[] dims) -> Tensor
