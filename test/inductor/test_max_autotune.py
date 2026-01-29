@@ -3909,6 +3909,10 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         if use_async_compile:
             torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        original_precompile = CachingAutotuner.precompile
+
         for gemm_config in [bad_tma_config, good_tma_config]:
             torch._dynamo.reset()
             tma_heuristic.mm_configs = [
@@ -3916,6 +3920,17 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             ]
             # Regular mm template gets no configs
             mm_heuristic.mm_configs = []
+
+            # Mock n_spills: bad config simulates high spilling (>8), good config has low spilling
+            # This is needed because the TMA template's actual spill count varies with template
+            # structure changes, but we want to test the fusion decision logic based on spill count.
+            mock_n_spills = 100 if gemm_config == bad_tma_config else 0
+
+            def mock_precompile(self, *args, **kwargs):
+                original_precompile(self, *args, **kwargs)
+                # After precompile, patch launchers with mock n_spills
+                for launcher in self.launchers:
+                    launcher.n_spills = mock_n_spills
 
             # Different paths:
             # benchmark_epilogue_fusion: True -> always multi_template
@@ -3931,6 +3946,11 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         ExternKernelCaller,
                         "benchmark",
                         return_value=float("inf"),
+                    ),
+                    mock.patch.object(
+                        CachingAutotuner,
+                        "precompile",
+                        mock_precompile,
                     ),
                 ):
                     compiled_f = torch.compile(f, mode="max-autotune")
