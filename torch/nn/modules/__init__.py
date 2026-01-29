@@ -156,6 +156,7 @@ from .pooling import (
 )
 from .rnn import GRU, GRUCell, LSTM, LSTMCell, RNN, RNNBase, RNNCell, RNNCellBase
 from .sparse import Embedding, EmbeddingBag
+from .ssm import StateSpaceModel
 from .transformer import (
     Transformer,
     TransformerDecoder,
@@ -309,6 +310,7 @@ __all__ = [
     "Softplus",
     "Softshrink",
     "Softsign",
+    "StateSpaceModel",
     "SyncBatchNorm",
     "Tanh",
     "Tanhshrink",
