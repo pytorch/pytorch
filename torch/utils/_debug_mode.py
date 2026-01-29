@@ -414,8 +414,6 @@ class _OpCall(_DebugCall):
 
 
 class _RedistributeCall(_DebugCall):
-    """Redistribute call from DTensor dispatch"""
-
     def __init__(
         self,
         arg,
@@ -432,7 +430,6 @@ class _RedistributeCall(_DebugCall):
         self.dst_placement = dst_placement
         self.transform_info_str = transform_info_str
         self.is_explicit = is_explicit
-        # Track if this is the outer call (arg index) vs inner call (tensor)
         self.is_outer_call = isinstance(arg, int)
 
         self.arg_str: str | None = None
@@ -456,7 +453,9 @@ class _RedistributeCall(_DebugCall):
             dst_placement_str = _arg_to_str(self.dst_placement, attributes)
             placement_str = f"{src_placement_str} -> {dst_placement_str}"
 
-        # Add [implicit/explicit] annotations for outer calls (from op dispatch)
+        # DebugMode will add redistribute_input logs at 2 levels,
+        # once per redistribute decision, and once per redistributed input.
+        # We only annotate [implicit/explicit] logs on the former (outer-level call).
         if self.is_outer_call:
             annotation = " [implicit] "
         elif self.is_explicit:

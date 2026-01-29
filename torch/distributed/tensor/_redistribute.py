@@ -977,6 +977,7 @@ def redistribute_local_tensor(
     *,
     async_op: bool = False,
     use_graph_based_transform: bool | None = None,
+    # True if user explicitly called DTensor.redistribute()
     is_explicit: bool = False,
 ) -> torch.Tensor:
     """
