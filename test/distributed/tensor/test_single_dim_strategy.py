@@ -915,6 +915,63 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsNotNone(op_spec.input_specs)
             self.assertEqual(len(op_spec.input_specs), 1, "Should have 1 input tensor")
 
+    def test_inplace_op_partial_input_raises_clear_error(self):
+        """Test that inplace ops with Partial input raise a clear error.
+
+        When an inplace op (like clamp_) is called on a tensor with Partial placement,
+        and no valid strategy preserves that placement (because clamp doesn't support
+        Partial), we should raise a clear error message instead of a cryptic
+        "min() arg is an empty sequence" error.
+
+        This tests the fix in expand_to_full_mesh_op_strategy that detects when all
+        strategies are filtered out due to inplace placement mismatch.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+
+        # Create a 0-dimensional (scalar) tensor with Partial placement
+        # This is a minimal case where there are no Shard dimensions available
+        input_meta = TensorMeta(
+            shape=torch.Size([]),  # scalar tensor
+            stride=(),
+            dtype=torch.float32,
+        )
+
+        # Create input spec with Partial placement
+        input_spec = DTensorSpec(
+            mesh=mesh,
+            placements=(Partial(),),
+            tensor_meta=input_meta,
+        )
+
+        # Create OpSchema for an inplace op (clamp_)
+        op_schema = OpSchema(
+            op=torch.ops.aten.clamp_.default,
+            args_schema=(OpStrategy([OpSpec(input_spec)]),),
+            kwargs_schema={},
+        )
+
+        # Define a single-dim strategy that only supports Replicate
+        # (like clamp which doesn't preserve Partial)
+        def mock_pointwise_strategy(op, args_schema, kwargs_schema):
+            # For a scalar (0-dim) tensor, there are no Shard strategies
+            # Only the implicit Replicate strategy will be added
+            return []
+
+        # This should raise a clear error about inplace ops not supporting
+        # placement changes, not a cryptic "min() arg is an empty sequence"
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "in-place operations that require placement changes are not supported",
+        ):
+            expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                mesh, op_schema, mock_pointwise_strategy, input_meta
+            )
+            expanded_strategy_fn(
+                torch.ops.aten.clamp_.default,
+                op_schema.args_meta,
+                op_schema.kwargs_meta,
+            )
+
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
 def dummy_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
