@@ -12,4 +12,4 @@ from . import (
 )
 
 # expose the entry function
-from .registry import get_template_heuristic
+from .registry import get_template_heuristic, with_fixed_template_config
