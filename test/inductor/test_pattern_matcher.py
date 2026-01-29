@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import copy
-import itertools
 import os
 import unittest
 from collections.abc import Callable
@@ -387,9 +386,7 @@ class TestPatternMatcher(TestCase):
         low, high = dtype_ranges[dtype_right]
         args = (
             torch.randn(256, 256, dtype=dtype_left, device=GPU_TYPE),
-            torch.randint(
-                low, high, (256, 256), dtype=dtype_right, device=GPU_TYPE
-            ),
+            torch.randint(low, high, (256, 256), dtype=dtype_right, device=GPU_TYPE),
         )
         self._test_mixed_impl(fn, args, True, False, rtol=0.16, atol=1e-4)
 
