@@ -1113,6 +1113,62 @@ class TestDebugModeUtils(TestCase):
         self.assertTrue(isinstance(out, int))
 
 
+@requires_cuda
+class TestShardingPropLogging(TestCase):
+    """Test sharding propagation cache hit/miss logging under TORCH_LOGS=+dtensor."""
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def setUp(self):
+        super().setUp()
+        self.world_size = 2
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+        self.device_type = "cuda"
+
+    def test_sharding_prop_logging(self):
+        import logging
+
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(2, 4)
+        x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+
+        # Capture log output
+        log_records = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_records.append(record)
+
+        logger = logging.getLogger("torch.distributed.tensor._dispatch")
+        original_level = logger.level
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(handler)
+
+        try:
+            # First call should be a cache miss, second should be a hit
+            _ = x_dt + x_dt
+            _ = x_dt + x_dt
+
+            messages = [r.getMessage() for r in log_records]
+            # Verify we see both MISS and HIT logs with schema info
+            miss_logs = [m for m in messages if "MISS" in m]
+            hit_logs = [m for m in messages if "HIT" in m]
+            self.assertGreater(len(miss_logs), 0, "Expected cache MISS log")
+            self.assertGreater(len(hit_logs), 0, "Expected cache HIT log")
+            # Verify schema info is included (op name and spec)
+            self.assertTrue(
+                any("aten" in m and "add" in m for m in messages),
+                f"Expected op schema in logs, got: {messages}",
+            )
+        finally:
+            logger.setLevel(original_level)
+            logger.removeHandler(handler)
+
+
 class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
     @property
     def world_size(self):
