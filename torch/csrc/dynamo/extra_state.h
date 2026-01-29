@@ -205,4 +205,10 @@ void _load_precompile_entry(
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
 void _set_lru_cache(py::object boolean);
 
+// Get stack values using known depth (for when stacktop is invalid).
+// depth: the number of values expected on the stack
+py::list _get_frame_value_stack_at_depth(
+    const py::handle& frame_obj,
+    int depth);
+
 #endif

@@ -20,6 +20,7 @@
 
 PyObject* guard_error_hook = NULL;
 PyObject* guard_complete_hook = NULL;
+PyObject* bytecode_debugger_callback = NULL;
 
 typedef struct {
   int active_dynamo_threads;
@@ -532,6 +533,109 @@ static PyTypeObject THPPyInterpreterFrameType = {
 
 #endif // !(IS_PYTHON_3_15_PLUS)
 
+// Get stack values at a known depth (for when stacktop is invalid)
+PyObject* get_frame_value_stack_at_depth_impl(PyFrameObject* frame, int depth) {
+  PyObject* result = PyList_New(0);
+  if (result == NULL) {
+    return NULL;
+  }
+
+  if (depth <= 0) {
+    return result;
+  }
+
+#if IS_PYTHON_3_11_PLUS
+  _PyInterpreterFrame* iframe = frame->f_frame;
+  if (iframe == NULL) {
+    return result;
+  }
+
+  PyCodeObject* code = F_CODE(iframe);
+  if (code == NULL) {
+    return result;
+  }
+
+  int nlocalsplus = code->co_nlocalsplus;
+  int stacksize = code->co_stacksize;
+
+  // Clamp depth to valid range
+  if (depth > stacksize) {
+    depth = stacksize;
+  }
+
+  int stack_start = nlocalsplus;
+
+#if IS_PYTHON_3_14_PLUS
+  // For Python 3.14+, use stackpointer-based access
+  if (iframe->stackpointer == NULL) {
+    return result;
+  }
+  if (iframe->localsplus == NULL) {
+    return result;
+  }
+  _PyStackRef* stack_base = iframe->localsplus + nlocalsplus;
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = THP_PyStackRef_AsPyObjectBorrow(&stack_base[i]);
+    if (obj == NULL) {
+      // Use a string marker for NULL to distinguish from Python None
+      obj = PyUnicode_FromString("<NULL>");
+      if (obj == NULL) {
+        Py_DECREF(result);
+        return NULL;
+      }
+      if (PyList_Append(result, obj) < 0) {
+        Py_DECREF(obj);
+        Py_DECREF(result);
+        return NULL;
+      }
+      Py_DECREF(obj);
+    } else {
+      Py_INCREF(obj);
+      if (PyList_Append(result, obj) < 0) {
+        Py_DECREF(obj);
+        Py_DECREF(result);
+        return NULL;
+      }
+      Py_DECREF(obj);
+    }
+  }
+#else
+  // Python 3.12/3.13 - read 'depth' values from the stack area
+  if (iframe->localsplus == NULL) {
+    return result;
+  }
+  for (int i = 0; i < depth; i++) {
+    PyObject* obj = iframe->localsplus[stack_start + i];
+    if (obj == NULL) {
+      // Use a string marker for NULL to distinguish from Python None
+      obj = PyUnicode_FromString("<NULL>");
+      if (obj == NULL) {
+        Py_DECREF(result);
+        return NULL;
+      }
+      if (PyList_Append(result, obj) < 0) {
+        Py_DECREF(obj);
+        Py_DECREF(result);
+        return NULL;
+      }
+      Py_DECREF(obj);
+    } else {
+      Py_INCREF(obj);
+      if (PyList_Append(result, obj) < 0) {
+        Py_DECREF(obj);
+        Py_DECREF(result);
+        return NULL;
+      }
+      Py_DECREF(obj);
+    }
+  }
+#endif
+
+#endif // IS_PYTHON_3_11_PLUS
+
+  return result;
+}
+
 void clear_old_frame_if_python_312_plus(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame) {
@@ -695,6 +799,14 @@ static PyObject* set_guard_complete_hook(PyObject* dummy, PyObject* obj) {
   }
 }
 
+static PyObject* set_bytecode_debugger_callback(PyObject* dummy, PyObject* obj) {
+  if (obj == Py_None) {
+    obj = NULL;
+  }
+  Py_XSETREF(bytecode_debugger_callback, Py_XNewRef(obj));
+  Py_RETURN_NONE;
+}
+
 // Debugging function for GNU C only.
 // Used to set gdb breakpoints in hot CPython sites from Python.
 // Code example:
@@ -739,6 +851,10 @@ static PyMethodDef _methods[] = {
      NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
+    {"set_bytecode_debugger_callback",
+     set_bytecode_debugger_callback,
+     METH_O,
+     NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 

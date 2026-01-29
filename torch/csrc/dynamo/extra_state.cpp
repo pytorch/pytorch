@@ -3,6 +3,7 @@
 
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -302,4 +303,19 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
     }
   }
   return result;
+}
+
+py::list _get_frame_value_stack_at_depth(
+    const py::handle& frame_obj,
+    int depth) {
+  if (!PyFrame_Check(frame_obj.ptr())) {
+    throw py::type_error("expected a frame object!");
+  }
+
+  PyObject* result = get_frame_value_stack_at_depth_impl(
+      (PyFrameObject*)frame_obj.ptr(), depth);
+  if (result == nullptr) {
+    return py::list();
+  }
+  return py::reinterpret_steal<py::list>(result);
 }

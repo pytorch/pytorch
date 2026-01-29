@@ -71,6 +71,12 @@ class _PyInterpreterFrame:
     closure: tuple[types.CellType]
 
 def _debug_get_cache_entry_list(code: types.CodeType) -> list[_CacheEntry]: ...
+def _get_frame_value_stack_at_depth(
+    frame: types.FrameType, depth: int
+) -> list[object]: ...
+def set_bytecode_debugger_callback(
+    callback: Callable[[types.CodeType], None] | None,
+) -> None: ...
 
 py_opcode_caches: list[int]
 

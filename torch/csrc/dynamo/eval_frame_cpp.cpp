@@ -178,6 +178,12 @@ PyObject* dynamo__custom_eval_frame(
   auto eval_custom = [&]() {
     eval_frame_callback_set(recursive_callback.ptr());
     DEBUG_NULL_CHECK(cached_code);
+    // Call bytecode debugger callback if set, to allow instruction-level
+    // debugging of the Dynamo-generated code
+    if (bytecode_debugger_callback != nullptr) {
+      py::handle debugger_cb(bytecode_debugger_callback);
+      debugger_cb(py::handle((PyObject*)cached_code));
+    }
     eval_result = dynamo_eval_custom_code(
         tstate, frame, cached_code, trace_annotation, throw_flag);
     if (!callback.is(recursive_callback)) {
