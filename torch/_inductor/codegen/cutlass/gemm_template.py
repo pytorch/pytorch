@@ -34,8 +34,8 @@ from ...virtualized import V
 from ..common import IndentedBuffer
 from . import utils as cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
-from .cuda_template import CUTLASSTemplate
 from .python_evt import CutlassEVTCodegen, scaled_mm_evt
+from .template import CUTLASSTemplate
 from .utils import (
     ACCUMULATOR_DTYPES,
     dtype_match,
