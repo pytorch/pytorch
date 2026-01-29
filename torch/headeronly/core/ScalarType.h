@@ -330,6 +330,106 @@ inline const char* toString(ScalarType t) {
 #undef DEFINE_CASE
 }
 
+// Returns the user-friendly Python dtype name (e.g., "torch.float16" for Half)
+inline const char* toDtypeString(ScalarType t) {
+  switch (t) {
+    case ScalarType::Byte:
+      return "torch.uint8";
+    case ScalarType::Char:
+      return "torch.int8";
+    case ScalarType::Short:
+      return "torch.int16";
+    case ScalarType::Int:
+      return "torch.int32";
+    case ScalarType::Long:
+      return "torch.int64";
+    case ScalarType::Half:
+      return "torch.float16";
+    case ScalarType::Float:
+      return "torch.float32";
+    case ScalarType::Double:
+      return "torch.float64";
+    case ScalarType::ComplexHalf:
+      return "torch.complex32";
+    case ScalarType::ComplexFloat:
+      return "torch.complex64";
+    case ScalarType::ComplexDouble:
+      return "torch.complex128";
+    case ScalarType::Bool:
+      return "torch.bool";
+    case ScalarType::QInt8:
+      return "torch.qint8";
+    case ScalarType::QUInt8:
+      return "torch.quint8";
+    case ScalarType::QInt32:
+      return "torch.qint32";
+    case ScalarType::BFloat16:
+      return "torch.bfloat16";
+    case ScalarType::QUInt4x2:
+      return "torch.quint4x2";
+    case ScalarType::QUInt2x4:
+      return "torch.quint2x4";
+    case ScalarType::Bits1x8:
+      return "torch.bits1x8";
+    case ScalarType::Bits2x4:
+      return "torch.bits2x4";
+    case ScalarType::Bits4x2:
+      return "torch.bits4x2";
+    case ScalarType::Bits8:
+      return "torch.bits8";
+    case ScalarType::Bits16:
+      return "torch.bits16";
+    case ScalarType::Float8_e5m2:
+      return "torch.float8_e5m2";
+    case ScalarType::Float8_e4m3fn:
+      return "torch.float8_e4m3fn";
+    case ScalarType::Float8_e5m2fnuz:
+      return "torch.float8_e5m2fnuz";
+    case ScalarType::Float8_e4m3fnuz:
+      return "torch.float8_e4m3fnuz";
+    case ScalarType::UInt16:
+      return "torch.uint16";
+    case ScalarType::UInt32:
+      return "torch.uint32";
+    case ScalarType::UInt64:
+      return "torch.uint64";
+    case ScalarType::UInt1:
+      return "torch.uint1";
+    case ScalarType::UInt2:
+      return "torch.uint2";
+    case ScalarType::UInt3:
+      return "torch.uint3";
+    case ScalarType::UInt4:
+      return "torch.uint4";
+    case ScalarType::UInt5:
+      return "torch.uint5";
+    case ScalarType::UInt6:
+      return "torch.uint6";
+    case ScalarType::UInt7:
+      return "torch.uint7";
+    case ScalarType::Int1:
+      return "torch.int1";
+    case ScalarType::Int2:
+      return "torch.int2";
+    case ScalarType::Int3:
+      return "torch.int3";
+    case ScalarType::Int4:
+      return "torch.int4";
+    case ScalarType::Int5:
+      return "torch.int5";
+    case ScalarType::Int6:
+      return "torch.int6";
+    case ScalarType::Int7:
+      return "torch.int7";
+    case ScalarType::Float8_e8m0fnu:
+      return "torch.float8_e8m0fnu";
+    case ScalarType::Float4_e2m1fn_x2:
+      return "torch.float4_e2m1fn_x2";
+    default:
+      return "UNKNOWN_DTYPE";
+  }
+}
+
 inline std::ostream& operator<<(
     std::ostream& stream,
     c10::ScalarType scalar_type) {
@@ -368,6 +468,7 @@ using c10::dummy_uint1_7_t;
 using c10::NumScalarTypes;
 using c10::ScalarType;
 using c10::toString;
+using c10::toDtypeString;
 using c10::operator<<;
 using c10::isQIntType;
 using c10::toUnderlying;
