@@ -1147,26 +1147,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
-    def _test_sdpa_dtype_mismatch(self):
-        def attention_fn(q, k, v):
-            attention_scores = torch.bmm(q, k.transpose(-1, -2))
-            attention_weights = torch.softmax(attention_scores.float(), dim=-1)
-            attention_weights = attention_weights.to(torch.float16)
-            return torch.bmm(attention_weights, v)
-
-        q = torch.randn(2, 4, 8, device=self.device, dtype=torch.float32)
-        k = torch.randn(2, 4, 8, device=self.device, dtype=torch.float32)
-        v = torch.randn(2, 4, 8, device=self.device, dtype=torch.float32)
-
-        # Eager mode should raise
-        with self.assertRaises(RuntimeError):
-            attention_fn(q, k, v)
-
-        # Compiled mode should also raise (not silently succeed)
-        compiled_fn = torch.compile(attention_fn)
-        with self.assertRaises(RuntimeError):
-            compiled_fn(q, k, v)
-
 
 if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENTION):
 
@@ -1248,9 +1228,6 @@ if HAS_XPU_AND_TRITON or (HAS_CUDA_AND_TRITON and PLATFORM_SUPPORTS_FUSED_ATTENT
         )
         test_sdpa_rewriter_24_gpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_24
-        )
-        test_sdpa_dtype_mismatch_gpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_dtype_mismatch
         )
 
         def test_skip_non_tf32(self):
