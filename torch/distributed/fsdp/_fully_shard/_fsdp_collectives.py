@@ -247,13 +247,19 @@ def foreach_all_gather(
     device: torch.device,
     all_gather_comm: AllGather,
     module_fqn: str | None = None,
+    mesh_dim_names: tuple[str, ...] | None = None,
 ) -> AllGatherResult | None:
     world_size, rank = group.size(), group.rank()
     device_handle = _get_device_handle(device.type)
 
     def _with_fqn(label: str) -> str:
+        parts = []
         if module_fqn:
-            return f"{label} ({module_fqn})"
+            parts.append(module_fqn)
+        if mesh_dim_names:
+            parts.append(f"mesh=[{','.join(mesh_dim_names)}]")
+        if parts:
+            return f"{label} ({', '.join(parts)})"
         return label
 
     with device_handle.stream(all_gather_copy_in_stream):

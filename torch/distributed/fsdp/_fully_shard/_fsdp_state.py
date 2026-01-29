@@ -238,28 +238,35 @@ class FSDPState(_State):
             raise AssertionError("Expected _is_root to be True")
         root_module = self._modules[0]
         param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
-        module_to_fsdp_param_group: dict[nn.Module, FSDPParamGroup] = {}
+        # Build a mapping from module to all its FSDPParamGroups (not just one)
+        module_to_fsdp_param_groups: dict[nn.Module, list[FSDPParamGroup]] = {}
         for state in self._state_ctx.all_states:
             for fsdp_param_group in state._fsdp_param_groups:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
                 for module in fsdp_param_group.modules:
-                    module_to_fsdp_param_group[module] = fsdp_param_group
+                    if module not in module_to_fsdp_param_groups:
+                        module_to_fsdp_param_groups[module] = []
+                    module_to_fsdp_param_groups[module].append(fsdp_param_group)
         for param_name, param in root_module.named_parameters():
             if param in param_to_fsdp_param:
                 param_to_fsdp_param[param]._param_fqn = param_name
         for module_name, module in root_module.named_modules():
-            if module in module_to_fsdp_param_group:
-                module_fqn = module_to_fsdp_param_group[module]._module_fqn
-                if module_fqn is None:
-                    module_to_fsdp_param_group[module]._module_fqn = module_name
-                else:
-                    if not isinstance(module_fqn, str):
-                        raise AssertionError(
-                            f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}"
-                        )
-                    module_fqn += f", {module_name}"
-                    module_to_fsdp_param_group[module]._module_fqn = module_fqn
+            if module in module_to_fsdp_param_groups:
+                # Use "<root>" for the root module which has empty module_name
+                effective_name = module_name if module_name else "<root>"
+                # Set FQN for all param groups associated with this module
+                for fsdp_param_group in module_to_fsdp_param_groups[module]:
+                    module_fqn = fsdp_param_group._module_fqn
+                    if module_fqn is None:
+                        fsdp_param_group._module_fqn = effective_name
+                    else:
+                        if not isinstance(module_fqn, str):
+                            raise AssertionError(
+                                f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}"
+                            )
+                        module_fqn += f", {effective_name}"
+                        fsdp_param_group._module_fqn = module_fqn
 
     @disable_if_config_true
     def _pre_forward(
@@ -271,9 +278,10 @@ class FSDPState(_State):
             # With nested FSDP and multiple forward passes before backward,
             # the params might have been resharded by a previous post_backward.
             # We need to ensure params are unsharded for AC recomputation.
-            if self._fsdp_param_group and not self._fsdp_param_group.is_unsharded:
-                self._fsdp_param_group.unshard()
-                self._fsdp_param_group.wait_for_unshard()
+            for fsdp_param_group in self._fsdp_param_groups:
+                if not fsdp_param_group.is_unsharded:
+                    fsdp_param_group.unshard()
+                    fsdp_param_group.wait_for_unshard()
             return args, kwargs
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
