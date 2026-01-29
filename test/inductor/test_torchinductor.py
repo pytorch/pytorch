@@ -10387,7 +10387,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
+    @xfail_if_mps
     def test_dropout2(self):
+        if is_mps_backend(self.device) and torch._inductor.config.align_random_eager:
+            raise AssertionError(
+                "MPS + align_random_eager: will pass but force failure for xfail_if_mps"
+            )
         n = 100000
         weight = torch.ones(
             n, device=self.device, dtype=torch.float32, requires_grad=True
@@ -10451,6 +10456,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps
     @config.patch(search_autotune_cache=False)
     def test_dropout3(self):
+        if is_mps_backend(self.device) and torch._inductor.config.align_random_eager:
+            raise AssertionError(
+                "MPS + align_random_eager + dynamic shapes: will pass but force failure for xfail_if_mps"
+            )
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
