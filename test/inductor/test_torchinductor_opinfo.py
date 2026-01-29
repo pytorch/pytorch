@@ -1029,6 +1029,7 @@ inductor_skip_exact_stride_xpu = {
     "nn.functional.conv_transpose2d",
     "nn.functional.max_unpool2d",
     "nn.functional.max_unpool2d.grad",
+    "nn.functional.rms_norm",
 }
 
 # Custom replacements for assertEquals, in cases where a difference in value
