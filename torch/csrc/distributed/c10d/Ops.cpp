@@ -242,22 +242,22 @@ IMPL_ALLGATHER(CPU)
 IMPL_ALLGATHER(CUDA)
 IMPL_ALLGATHER(PrivateUse1)
 
-#define IMPL__ALLGATHER_BASE(DEV)                                          \
-  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV(  \
-      at::Tensor& output_tensor,                                           \
-      at::Tensor& input_tensor,                                            \
-      const c10::intrusive_ptr<ProcessGroup>& process_group,               \
-      bool asyncOp,                                                        \
-      int64_t timeout,                                                     \
-      std::string_view profilingName) {                                    \
-    AllgatherOptions opts;                                                 \
-    opts.timeout = std::chrono::milliseconds(timeout);                     \
-    opts.asyncOp = asyncOp;                                                \
-    opts.profilingName = std::string(profilingName);                       \
-    auto work = process_group->getBackend(c10::DeviceType::DEV)            \
-                    ->_allgather_base(output_tensor, input_tensor, opts);  \
-    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(               \
-        output_tensor, work);                                              \
+#define IMPL__ALLGATHER_BASE(DEV)                                         \
+  std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV( \
+      at::Tensor& output_tensor,                                          \
+      at::Tensor& input_tensor,                                           \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,              \
+      bool asyncOp,                                                       \
+      int64_t timeout,                                                    \
+      std::string_view profilingName) {                                   \
+    AllgatherOptions opts;                                                \
+    opts.timeout = std::chrono::milliseconds(timeout);                    \
+    opts.asyncOp = asyncOp;                                               \
+    opts.profilingName = std::string(profilingName);                      \
+    auto work = process_group->getBackend(c10::DeviceType::DEV)           \
+                    ->_allgather_base(output_tensor, input_tensor, opts); \
+    return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(              \
+        output_tensor, work);                                             \
   }
 
 IMPL__ALLGATHER_BASE(CPU)
