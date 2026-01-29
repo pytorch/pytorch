@@ -205,7 +205,7 @@ sycl::event matmul(
       pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
     }
   }
-
+  
   // STEP3: create primitive
   if (with_bias) {
     bias_md = dnnl::memory::desc(bias_dims, bias_dt, bias_strides);
@@ -223,8 +223,8 @@ sycl::event matmul(
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
   // STEP4: create memory
-  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
-  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
+  auto m1_usr_m = make_onednn_memory_readonly(m1_usr_md, engine, m1.const_data_ptr());
+  auto m2_usr_m = make_onednn_memory_readonly(m2_usr_md, engine, m2.const_data_ptr());
   auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
 
   auto expected_m1_md = matmul_pd.src_desc();
