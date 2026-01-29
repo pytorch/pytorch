@@ -147,12 +147,18 @@ def parse_backend_yaml(
         for op in backend_ops:
             structured = False
             ext_structured_meta = False
+            device_guard = use_device_guard
             if isinstance(op, dict):
-                names = [k for k in op if k not in {"structured", "ext_structured_meta"}]
+                names = [
+                    k
+                    for k in op
+                    if k not in {"structured", "ext_structured_meta", "device_guard"}
+                ]
                 assert len(names) == 1, f"Expected one op name in {op.keys()}"
                 _op = names[0]
                 structured = op.get("structured", False)
                 ext_structured_meta = op.get("ext_structured_meta", False)
+                device_guard = op.get("device_guard", use_device_guard)
                 if ext_structured_meta:
                     assert structured, (
                         f"Operator '{_op}' has 'ext_structured_meta: True' but 'structured: False'. "
@@ -181,6 +187,7 @@ def parse_backend_yaml(
                 structured=structured,
                 cpp_namespace=cpp_namespace,
                 ext_structured_meta=ext_structured_meta,
+                device_guard=device_guard,
             )
             metadata[op_name] = m
         return BackendIndex(

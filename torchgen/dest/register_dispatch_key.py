@@ -603,7 +603,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
 
                 device_check = "  // No device check\n"
                 # Backends that require device guards presumably also require device checks.
-                if self.backend_index.device_guard:
+                if self.backend_index.device_guard and metadata.device_guard:
                     device_check_args = itertools.chain(
                         f.func.arguments.out, f.func.arguments.flat_positional
                     )
@@ -612,7 +612,11 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                     )
 
                 device_guard = "// DeviceGuard omitted"  # default
-                if f.device_guard and self.backend_index.device_guard:
+                if (
+                    f.device_guard
+                    and self.backend_index.device_guard
+                    and metadata.device_guard
+                ):
                     has_tensor_options = any(
                         isinstance(a, TensorOptionsArguments)
                         for a in f.func.arguments.non_out
@@ -969,7 +973,7 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{metadata.cpp_namespace}::structured_{metadata.kernel}"
 
-            if self.backend_index.device_guard:
+            if self.backend_index.device_guard and metadata.device_guard:
                 device_check_args = itertools.chain(
                     f.func.arguments.out, f.func.arguments.flat_positional
                 )
