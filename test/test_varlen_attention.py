@@ -1,16 +1,34 @@
 # Owner(s): ["module: sdpa"]
 import unittest
 from collections import namedtuple
+from contextlib import contextmanager
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention import (
+    activate_flash_attention_impl,
+    list_flash_attention_impls,
+    restore_flash_attention_impl,
+)
 from torch.nn.attention.varlen import varlen_attn
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import parametrize, run_tests, TEST_WITH_ROCM
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+@contextmanager
+def use_fa3():
+    try:
+        activate_flash_attention_impl("FA3")
+        yield
+    finally:
+        restore_flash_attention_impl()
 
 
 VarlenShape = namedtuple(
@@ -189,6 +207,68 @@ def create_variable_length_batch(
         "x_padded_ref": x_padded_ref,
         "max_len": max_len,
     }
+
+
+def combine_cache_and_new(
+    batch_size,
+    cache_batch_idx,
+    use_cache_batch_idx,
+    page_size,
+    cache_seqlen,
+    new_seqlen,
+    k_packed,
+    v_packed,
+    k_cache,
+    v_cache,
+    page_table,
+    device,
+):
+    complete_k = []
+    complete_v = []
+    for i in range(batch_size):
+        # cache_idx is idx of cache for query batch idx i
+        cache_idx = cache_batch_idx[i].item() if use_cache_batch_idx else i
+
+        # getting chunk corresponding to this batch
+        new_k = k_packed[i * new_seqlen : (i + 1) * new_seqlen]
+        new_v = v_packed[i * new_seqlen : (i + 1) * new_seqlen]
+
+        if cache_seqlen == 0:  # first token generation, no cache
+            complete_k.append(new_k)
+            complete_v.append(new_v)
+        elif page_size > 0:
+            # reconstructing cached sequence from paged memory
+            cached_tokens_k, cached_tokens_v = [], []
+            # iterate through each index to recover token value
+            for token_idx in range(cache_seqlen):
+                block_idx = token_idx // page_size
+                offset = token_idx % page_size
+                phys_block = page_table[cache_idx, block_idx].item()
+
+                # cache[phys_block, offset] is the actual token
+                cached_tokens_k.append(k_cache[phys_block, offset])
+                cached_tokens_v.append(v_cache[phys_block, offset])
+
+            cached_k = torch.stack(cached_tokens_k, dim=0)
+            cached_v = torch.stack(cached_tokens_v, dim=0)
+
+            complete_k.append(torch.cat([cached_k, new_k], dim=0))
+            complete_v.append(torch.cat([cached_v, new_v], dim=0))
+        else:
+            cached_k = k_cache[
+                cache_idx, :cache_seqlen
+            ]  # sequence corresponding to this batch
+            cached_v = v_cache[cache_idx, :cache_seqlen]
+
+            complete_k.append(torch.cat([cached_k, new_k], dim=0))
+            complete_v.append(torch.cat([cached_v, new_v], dim=0))
+
+    complete_k_packed, complete_cu_seq_k, complete_max_k = pack_sequences(
+        complete_k, device
+    )
+    complete_v_packed, _, _ = pack_sequences(complete_v, device)
+
+    return (complete_k_packed, complete_v_packed, complete_cu_seq_k, complete_max_k)
 
 
 class TestVarlenAttention(NNTestCase):
@@ -648,6 +728,167 @@ class TestVarlenAttention(NNTestCase):
                     perm_seq_grad = permuted_grad[perm_start:perm_end]
 
                     self.assertEqual(orig_seq_grad, perm_seq_grad)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
+    )
+    def test_kv_cache_requires_fa3(self, device):
+        torch.manual_seed(42)
+        dtype = torch.bfloat16
+
+        shape = VarlenShape(batch_size=2, max_seq_len=128, embed_dim=256, num_heads=4)
+        batch_data = create_variable_length_batch(shape, device, dtype)
+        cu_seq = batch_data["cu_seq"]
+        max_len = batch_data["max_len"]
+
+        attention_block = AttentionBlock(
+            shape.embed_dim, shape.num_heads, device, dtype
+        )
+        q, k, v = attention_block.get_varlen_qkv(batch_data["x_packed"])
+
+        k_cache = torch.randn(
+            shape.batch_size,
+            64,
+            shape.num_heads,
+            shape.embed_dim // shape.num_heads,
+            device=device,
+            dtype=dtype,
+        )
+        v_cache = torch.randn_like(k_cache)
+        cache_seqlens = torch.randint(
+            1, 32, (shape.batch_size,), device=device, dtype=torch.int32
+        )
+
+        restore_flash_attention_impl()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "KV cache parameters.*are not supported"
+        ):
+            varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                k_cache=k_cache,
+                v_cache=v_cache,
+                cache_seqlens=cache_seqlens,
+            )
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
+    )
+    @unittest.skipIf(not SM90OrLater, "FA3 requires SM90+")
+    @unittest.skipIf("FA3" not in list_flash_attention_impls(), "FA3 not available")
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("cache_seqlen", [0, 32, 64])
+    @parametrize("new_seqlen", [1, 16])
+    @parametrize("use_cache_batch_idx", [False, True])
+    @parametrize("page_size", [0, 4, 16, 32])
+    def test_kv_cache_correctness(
+        self, device, dtype, cache_seqlen, new_seqlen, use_cache_batch_idx, page_size
+    ):
+        torch.manual_seed(42)
+        batch_size, num_heads, head_dim, max_cache_len = 2, 4, 64, 128
+        cache_seqlens = torch.full(
+            (batch_size,), cache_seqlen, device=device, dtype=torch.int32
+        )
+
+        if page_size > 0:
+            num_blocks_per_seq = (max_cache_len + page_size - 1) // page_size
+            total_blocks = num_blocks_per_seq * batch_size
+            k_cache = torch.randn(
+                total_blocks, page_size, num_heads, head_dim, device=device, dtype=dtype
+            )
+            v_cache = torch.randn_like(k_cache)
+            page_table = torch.arange(
+                total_blocks, device=device, dtype=torch.int32
+            ).view(batch_size, num_blocks_per_seq)
+        else:
+            k_cache = torch.randn(
+                batch_size,
+                max_cache_len,
+                num_heads,
+                head_dim,
+                device=device,
+                dtype=dtype,
+            )
+            v_cache = torch.randn_like(k_cache)
+            page_table = None
+
+        cache_batch_idx = (
+            torch.tensor([1, 0], device=device, dtype=torch.int32)
+            if use_cache_batch_idx
+            else None
+        )
+        total_new = new_seqlen * batch_size
+        q_packed = torch.randn(
+            total_new, num_heads, head_dim, device=device, dtype=dtype
+        )
+        k_packed = torch.randn(
+            total_new, num_heads, head_dim, device=device, dtype=dtype
+        )
+        v_packed = torch.randn(
+            total_new, num_heads, head_dim, device=device, dtype=dtype
+        )
+        cu_seq_new = torch.arange(
+            0, total_new + 1, new_seqlen, device=device, dtype=torch.int32
+        )
+
+        complete_k_packed, complete_v_packed, complete_cu_seq_k, complete_max_k = (
+            combine_cache_and_new(
+                batch_size,
+                cache_batch_idx,
+                use_cache_batch_idx,
+                page_size,
+                cache_seqlen,
+                new_seqlen,
+                k_packed,
+                v_packed,
+                k_cache,
+                v_cache,
+                page_table,
+                device,
+            )
+        )
+
+        with use_fa3(), torch.no_grad():
+            # full recompute without cache/pagetable
+            expected = varlen_attn(
+                query=q_packed,
+                key=complete_k_packed,
+                value=complete_v_packed,
+                cu_seq_q=cu_seq_new,
+                cu_seq_k=complete_cu_seq_k,
+                max_q=new_seqlen,
+                max_k=complete_max_k,
+            )
+            # using kv cache
+            actual = varlen_attn(
+                query=q_packed,
+                key=k_packed,
+                value=v_packed,
+                cu_seq_q=cu_seq_new,
+                cu_seq_k=cu_seq_new,
+                max_q=new_seqlen,
+                max_k=new_seqlen,
+                k_cache=k_cache,
+                v_cache=v_cache,
+                cache_seqlens=cache_seqlens,
+                cache_batch_idx=cache_batch_idx,
+                page_table=page_table,
+            )
+
+        self.assertEqual(actual.shape, expected.shape)
+        self.assertEqual(actual, expected)
 
 
 device_types = ("cuda",)

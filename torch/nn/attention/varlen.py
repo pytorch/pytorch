@@ -54,6 +54,11 @@ def _varlen_attn(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -62,15 +67,20 @@ def _varlen_attn(
     """
     window_size = _normalize_window_size(window_size)
 
+    if (k_cache is None) != (v_cache is None):
+        raise ValueError("k_cache and v_cache must both be provided or both be None")
+
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
 
     if use_cudnn:
-        log.info("Using cuDNN backend for varlen_attn")
-
+        if k_cache is not None:
+            raise RuntimeError("cuDNN backend does not support KV cache.")
         if window_size[0] != -1 or window_size[1] != -1:
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
             )
+
+        log.info("Using cuDNN backend for varlen_attn")
         result = torch.ops.aten._cudnn_attention_forward(
             query,
             key,
@@ -100,10 +110,15 @@ def _varlen_attn(
             max_k,
             0.0,  # dropout_p hardcoded to 0.0
             is_causal,
-            return_debug_mask=False,
+            False,  # return_debug_mask
             scale=scale,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
+            k_cache=k_cache,
+            v_cache=v_cache,
+            cache_seqlens=cache_seqlens,
+            cache_batch_idx=cache_batch_idx,
+            page_table=page_table,
         )
 
     rng_state_ = torch.zeros(
@@ -124,6 +139,11 @@ def _varlen_attn_fake(
     is_causal: bool = False,
     scale: float | None = None,
     window_size: list[int] | None = None,
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -132,8 +152,6 @@ def _varlen_attn_fake(
     - query shape: (total, num_heads, head_dim)
     - logsumexp shape: (num_heads, total_q)
     """
-    window_size = _normalize_window_size(window_size)
-
     # Output has same shape as query
     output = torch.empty_like(query)
 
@@ -168,25 +186,58 @@ def varlen_attn(
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Compute variable-length attention using Flash Attention.
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
 
+    When KV cache parameters are provided (``k_cache``, ``v_cache``, ``cache_seqlens``),
+    this function operates in inference mode with incremental decoding. In this mode:
+
+    - The ``k_cache`` and ``v_cache`` tensors store the cached keys and values
+    - The ``key`` and ``value`` parameters are the new tokens to append to the cache
+    - ``cache_seqlens`` tracks how many tokens are currently in the cache for each sequence
+    - Autograd is NOT supported in KV cache mode
+
+    .. note::
+        KV cache mode requires Flash Attention 3 to be installed and activated.
+        Call ``torch.nn.attention.activate_flash_attention_impl('FA3')`` before
+        using KV cache parameters.
+
     Args:
         query (Tensor): Query tensor; shape :math:`(T_q, H, D)`
-        key (Tensor): Key tensor; shape :math:`(T_k, H, D)`
-        value (Tensor): Value tensor; shape :math:`(T_k, H, D)`
+        key (Tensor): Key tensor; shape :math:`(T_k, H, D)`. When using KV cache,
+            this is the new key tokens to append to the cache.
+        value (Tensor): Value tensor; shape :math:`(T_k, H, D)`. When using KV cache,
+            this is the new value tokens to append to the cache.
         cu_seq_q (Tensor): Cumulative sequence positions for queries; shape :math:`(N+1,)`
-        cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
+        cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`.
+            When using KV cache, this is the cumulative sequence positions for new tokens.
         max_q (int): Maximum query sequence length in the batch.
-        max_k (int): Maximum key/value sequence length in the batch.
+        max_k (int): Maximum key/value sequence length in the batch. When using KV cache,
+            this is the maximum length of new tokens.
         return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
         scale (float, optional): Scaling factor for attention scores
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
-            or (W, 0) for causal attention with sliding window of size W.
+            or (W, 0) for causal attention with sliding window of size W.s
+
+        k_cache (Tensor, optional): KV cache for keys. Shape is either:
+            - ``(batch_size, max_cache_len, num_heads_k, head_dim)`` for contiguous cache
+            - ``(num_blocks, block_size, num_heads_k, head_dim)`` for paged cache
+        v_cache (Tensor, optional): KV cache for values. Same shape as k_cache.
+        cache_seqlens (Tensor, optional): Sequence lengths of the KV cache for each sequence.
+            Shape ``(batch_size,)`` with dtype int32.
+        cache_batch_idx (Tensor, optional): Indices to index into the KV cache batch dimension.
+            Shape ``(batch_size,)`` with dtype int32. If None, uses [0, 1, ..., batch_size-1].
+        page_table (Tensor, optional): Page table for paged KV cache.
+            Shape ``(batch_size, max_num_blocks_per_seq)`` with dtype int32.
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
@@ -246,6 +297,11 @@ def varlen_attn(
         is_causal,
         scale,
         list(window_size),
+        k_cache,
+        v_cache,
+        cache_seqlens,
+        cache_batch_idx,
+        page_table,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -264,8 +320,19 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         is_causal,
         scale,
         window_size,
+        k_cache,
+        v_cache,
+        cache_seqlens,
+        cache_batch_idx,
+        page_table,
     ) = inputs
     out, lse, rng_state = output
+
+    if any(
+        p is not None
+        for p in (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table)
+    ):
+        raise RuntimeError("KV cache mode does not support autograd")
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
@@ -401,7 +468,9 @@ def _backward(
         scale,
         window_size,
     )
-    return dq, dk, dv, None, None, None, None, None, None, None
+    # None for: cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size,
+    #           k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table
+    return (dq, dk, dv, *((None,) * 12))
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)

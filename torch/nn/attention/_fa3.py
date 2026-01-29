@@ -249,6 +249,8 @@ def _fa3_run_forward(
     value: torch.Tensor,
     cu_seq_q: torch.Tensor | None,
     cu_seq_k: torch.Tensor | None,
+    max_seqlen_q: int | None,
+    max_seqlen_k: int | None,
     scale: float | None,
     is_causal: bool,
     window_size_left: int | None,
@@ -258,44 +260,77 @@ def _fa3_run_forward(
     q_descale: torch.Tensor | None = None,
     k_descale: torch.Tensor | None = None,
     v_descale: torch.Tensor | None = None,
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Run the FA3 forward pass by calling the C++ kernel directly.
+
+    When k_cache and v_cache are provided, the key and value tensors are treated
+    as new keys/values to append to the cache. The cache tensors become the main
+    k and v inputs to the kernel.
     """
     if _FA3_CUDA_FWD is None:
         raise RuntimeError("FA3 not registered")
+
+    use_kv_cache = k_cache is not None and v_cache is not None
+
+    if use_kv_cache:
+        if k_cache.stride(-1) != 1 or v_cache.stride(-1) != 1:
+            raise RuntimeError("k_cache and v_cache must be contiguous in the last dim")
+        k = k_cache
+        v = v_cache
+        k_new = _maybe_contiguous(key)
+        v_new = _maybe_contiguous(value)
+        # cache_seqlens overrides seqused_k for the cache lookup
+        effective_seqused_k = (
+            _maybe_contiguous(cache_seqlens) if cache_seqlens is not None else seqused_k
+        )
+        cu_seqlens_k = None
+        cu_seqlens_k_new = _maybe_contiguous(cu_seq_k)
+    else:
+        k = _maybe_contiguous(key)
+        v = (
+            value.contiguous()
+            if value.dtype == torch.float8_e4m3fn
+            and value.stride(-1) != 1
+            and value.stride(-3) != 1
+            else _maybe_contiguous(value)
+        )
+        k_new = None
+        v_new = None
+        effective_seqused_k = _maybe_contiguous(seqused_k)
+        cu_seqlens_k = _maybe_contiguous(cu_seq_k)
+        cu_seqlens_k_new = None
+
     # Ensure contiguous in the last dimension
     q = _maybe_contiguous(query)
-    k = _maybe_contiguous(key)
-    v = (
-        value.contiguous()
-        if value.dtype == torch.float8_e4m3fn
-        and value.stride(-1) != 1
-        and value.stride(-3) != 1
-        else _maybe_contiguous(value)
-    )
-
     cu_seqlens_q = _maybe_contiguous(cu_seq_q)
-    cu_seqlens_k = _maybe_contiguous(cu_seq_k)
-    seqused_k = _maybe_contiguous(seqused_k)
+
+    page_table, kv_batch_idx = [
+        _maybe_contiguous(x) for x in (page_table, cache_batch_idx)
+    ]
 
     out, softmax_lse, out_accum, softmax_lse_accum = _FA3_CUDA_FWD(
         q,
         k,
         v,
-        None,  # k_new
-        None,  # v_new
+        k_new,  # k_new (new keys for kv cache)
+        v_new,  # v_new (new values for kv cache)
         None,  # qv
         out,  # out_ (pre-allocated output)
         cu_seqlens_q,  # cu_seqlens_q
         cu_seqlens_k,  # cu_seqlens_k
-        None,  # cu_seqlens_k_new
+        cu_seqlens_k_new,  # cu_seqlens_k_new
         None,  # seqused_q
-        seqused_k,  # seqused_k
-        None,  # max_seqlen_q
-        None,  # max_seqlen_k
-        None,  # page_table,
-        None,  # kv_batch_idx,
+        effective_seqused_k,  # seqused_k
+        max_seqlen_q,  # max_seqlen_q
+        max_seqlen_k,  # max_seqlen_k
+        page_table,  # page_table
+        kv_batch_idx,  # kv_batch_idx
         None,  # leftpad_k,
         None,  # rotary_cos,
         None,  # rotary_sin,
@@ -398,6 +433,11 @@ def _fa3_flash_attention_forward_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -420,6 +460,8 @@ def _fa3_flash_attention_forward_impl(
         value,
         cum_seq_q,
         cum_seq_k,
+        max_q,
+        max_k,
         scale,
         is_causal,
         window_size_left,
@@ -429,6 +471,11 @@ def _fa3_flash_attention_forward_impl(
         q_descale,
         k_descale,
         v_descale,
+        k_cache,
+        v_cache,
+        cache_seqlens,
+        cache_batch_idx,
+        page_table,
     )
     rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
     philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
@@ -453,7 +500,11 @@ def _fa3_flash_attention_forward_impl_default(
     window_size_right: int = -1,
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
-    out: torch.Tensor | None = None,
+    k_cache: torch.Tensor | None = None,
+    v_cache: torch.Tensor | None = None,
+    cache_seqlens: torch.Tensor | None = None,
+    cache_batch_idx: torch.Tensor | None = None,
+    page_table: torch.Tensor | None = None,
 ):
     return _fa3_flash_attention_forward_impl(
         query,
@@ -474,7 +525,11 @@ def _fa3_flash_attention_forward_impl_default(
         window_size_right=window_size_right,
         seqused_k=seqused_k,
         alibi_slopes=alibi_slopes,
-        out=out,
+        k_cache=k_cache,
+        v_cache=v_cache,
+        cache_seqlens=cache_seqlens,
+        cache_batch_idx=cache_batch_idx,
+        page_table=page_table,
     )
 
 

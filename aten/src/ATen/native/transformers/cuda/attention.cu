@@ -1174,9 +1174,22 @@ _flash_attention_forward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
-    const std::optional<Tensor>& _alibi_slopes
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& k_cache,
+    const std::optional<Tensor>& v_cache,
+    const std::optional<Tensor>& cache_seqlens,
+    const std::optional<Tensor>& cache_batch_idx,
+    const std::optional<Tensor>& page_table
     ) {
 #if defined(USE_FLASH_ATTENTION)
+  // KV cache parameters require FA3
+  TORCH_CHECK(
+    !k_cache.has_value() && !v_cache.has_value() &&
+    !cache_seqlens.has_value() && !cache_batch_idx.has_value() &&
+    !page_table.has_value(),
+    "KV cache parameters (k_cache, v_cache, cache_seqlens, cache_batch_idx, page_table) ",
+    "are not supported by the default Flash Attention 2 implementation. ",
+    "Please install FA3 and activate using torch.nn.attention.activate_flash_attention_impl('FA3').");
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).expect_float();
   std::optional<Tensor> out = std::nullopt;
