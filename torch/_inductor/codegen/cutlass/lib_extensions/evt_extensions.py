@@ -3,6 +3,7 @@ from typing import Any, Union
 
 from sympy import Expr
 
+from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.ir import (
     ComputedBuffer,
     InputBuffer,
@@ -10,7 +11,11 @@ from torch._inductor.ir import (
 )
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils import torch_dtype_to_cutlass_type, try_import_cutlass
+from ..utils import (
+    _normalize_cutlass_arch,
+    torch_dtype_to_cutlass_type,
+    try_import_cutlass,
+)
 
 
 EpilogueFunctor = Any  # EpilogueFunctor local class defined in _trace
@@ -35,13 +40,11 @@ if try_import_cutlass():
         dtype2ctype,
     )
     from cutlass_cppgen.backend.evt import (  # type: ignore[import-not-found]
+        backend as evt_backend,
         EpilogueFunctorVisitor,
     )
     from cutlass_cppgen.backend.evt.backend.emitter_base import (  # type: ignore[import-not-found]
         FusionCallbacks,
-    )
-    from cutlass_cppgen.backend.evt.backend.sm90_emitter import (  # type: ignore[import-not-found]
-        CollectiveEpilogue,
     )
     from cutlass_cppgen.backend.evt.frontend import (  # type: ignore[import-not-found]
         PythonASTFrontend,
@@ -56,7 +59,6 @@ if try_import_cutlass():
         TileDescription,
     )
 
-    from torch._inductor.codegen.cuda import cuda_env
     from torch._inductor.utils import IndentedBuffer
 
     _CUTLASS_C_DTYPES = OrderedSet(dtype2ctype.values())  # type: ignore[var-annotated]
@@ -122,13 +124,27 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
         epilogue_schedule: EpilogueScheduleType,
         name_to_buffer: dict[str, Buffer],
         size_hint_fn: Callable[[Union[Expr, int]], int],
+        device_type: str = "cuda",
         **kwargs: dict[str, Any],
     ) -> tuple[str, str, str, EVTArgRenames]:
-        cuda_arch = int(cuda_env.get_cuda_arch())  # type: ignore[arg-type]
-        assert cuda_arch >= 90, "Only SM90+ is supported for EVT"
-        epilogue_functor = _trace(fn_src, example_tensors, cuda_arch, **kwargs)
-        visitor = EpilogueFunctorVisitor(cuda_arch, epilogue_functor)
-        fusion_callbacks = FusionCallbacks(visitor.graph, cuda_arch, emit_CD=False)
+        device_op_overrides = get_device_op_overrides(device_type)
+        arch = device_op_overrides.get_device_arch()
+        arch = int(_normalize_cutlass_arch(arch, device_type))
+        assert device_type != "cuda" or arch >= 90, (
+            "For CUDA, only SM90+ is supported for EVT"
+        )
+        epilogue_functor = _trace(fn_src, example_tensors, arch, **kwargs)
+        visitor = EpilogueFunctorVisitor(arch, epilogue_functor)
+        fusion_callbacks = FusionCallbacks(visitor.graph, arch, emit_CD=False)
+        arch_prefix = "xe" if device_type == "xpu" else "sm"
+        try:
+            evt_emitter = getattr(evt_backend, f"{arch_prefix}{arch}_emitter")
+            CollectiveEpilogue = evt_emitter.CollectiveEpilogue
+        except AttributeError as e:
+            raise NotImplementedError(
+                f"EVT backend is not supported on Arch {arch_prefix}{arch}."
+            ) from e
+
         collective_epilogue = CollectiveEpilogue(
             tile_description,
             epilogue_schedule,
@@ -166,7 +182,6 @@ non-contiguous layout, received stride: {stride} and shape: {shape}"
                 # pyrefly: ignore [missing-attribute]
                 self.visit(self.ast)
 
-        cc = int(cuda_env.get_cuda_arch())
         epilogue_functor = EpilogueFunctor(cc=cc, **kwargs)
         epilogue_functor.trace(example_tensors)
         return epilogue_functor

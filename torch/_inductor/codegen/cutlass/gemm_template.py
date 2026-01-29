@@ -1141,10 +1141,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             "op argument is required and has to be an instance of GemmOperation"
         )
 
-        if epilogue_nodes and not self._has_tma_epilogue(op):
-            raise NotImplementedError(
-                "Non-TMA epilogue visitor tree is not supported in Cutlass."
-            )
+        if epilogue_nodes:
+            if self.device_type == "cuda" and not self._has_tma_epilogue(op):
+                raise NotImplementedError(
+                    "Non-TMA epilogue visitor tree is not supported in NV-Cutlass."
+                )
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -1436,7 +1437,9 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         return result
 
     @staticmethod
-    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+    def supports_epilogue_fusion(op: GemmOperation, device_type: str) -> bool:
+        if device_type == "xpu":
+            return True
         return CUTLASS3xGemmTemplate._has_tma_epilogue(op)
 
     def _are_inputs_layout_compatible(self, layouts: list[Layout]) -> bool:
@@ -1541,6 +1544,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             op.epilogue_schedule,  # type: ignore[attr-defined]
             {k: name_to_buffer[v] for k, v in var_name_to_buffer_name.items()},  # type: ignore[arg-type,misc]
             V.graph.sizevars.size_hint,
+            device_type=self.device_type,
         )
 
         return (
