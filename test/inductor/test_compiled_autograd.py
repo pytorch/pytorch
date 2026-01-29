@@ -5362,6 +5362,9 @@ if not HAS_CUDA_AND_TRITON:
 if IS_S390X:
     skipped_tests.add("test_deep_reentrant")
 
+# test_functional_call_with_scan uses scan which uses FX tracing that conflicts with compiled autograd
+skipped_tests.add("test_functional_call_with_scan")
+
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
