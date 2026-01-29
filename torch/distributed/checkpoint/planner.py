@@ -327,6 +327,9 @@ class LoadPlanner:
     5) resolve_tensor and commit_tensor - called multiple times on each rank
         They are called in pair for each Tensor value in state_dict.
 
+    6) finish_load - called on all ranks
+        Signals the end of loading and allows for post-load collective operations.
+
     Users are recommended to extend DefaultLoadPlanner instead of this interface directly as
     most changes can be expressed by changes in a single method.
 
@@ -447,4 +450,14 @@ class LoadPlanner:
         copying it back to the one in the state_dict.
 
         The contents of tensor will follow its device synchronization model.
+        """
+
+    def finish_load(self) -> None:
+        """
+        Perform post-load operations after all ranks have finished reading data.
+
+        This method is called after a global barrier, serving as a hook for collective
+        operations such as broadcasting tensors from rank 0 to other ranks in HSDP.
+
+        . N.B. This is called on every rank.
         """
