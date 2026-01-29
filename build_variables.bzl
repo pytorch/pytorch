@@ -641,6 +641,7 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/passes/pass_manager/PassManager.cpp",
     "torch/nativert/kernels/KernelHandlerRegistry.cpp",
     "torch/nativert/kernels/TritonKernel.cpp",
+    "torch/nativert/executor/triton/TritonKernelManager.cpp",
     "torch/nativert/executor/triton/CpuTritonKernelManager.cpp",
     "torch/nativert/executor/AOTInductorDelegateExecutor.cpp",
     "torch/nativert/kernels/ETCallDelegateKernel.cpp",
@@ -884,6 +885,7 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Stream.cpp",
     "torch/csrc/xpu/XPUPluggableAllocator.cpp",
     "torch/csrc/xpu/memory_snapshot.cpp",
+    "torch/csrc/xpu/MemPool.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]

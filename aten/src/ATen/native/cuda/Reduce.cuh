@@ -1123,8 +1123,9 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // Otherwise split the output across lanes in a warp.
     config.output_mult[0] = config.split_output(block_width);
   }
+
 #ifdef USE_ROCM
-  constexpr int min_values_per_thread = 64;
+  constexpr int min_values_per_thread = 128;
 #else
   constexpr int min_values_per_thread = 16;
 #endif
@@ -1166,6 +1167,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // max_values_per_thread
     config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
     if (config.ctas_per_output > 1) {
+      config.ctas_per_output = ::max(config.ctas_per_output, 64);
       config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
   }
