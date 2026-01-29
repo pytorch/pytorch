@@ -2033,7 +2033,7 @@ class SkipFunctionVariable(VariableTracker):
                     "is created inside the parent function that is getting "
                     "compiled. This is not supported for now."
                 )
-                hints = []
+                hints: list[str] = []
             reason = self.reason if self.reason else "<missing reason>"
             unimplemented(
                 gb_type="Attempted to call function marked as skipped",

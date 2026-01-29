@@ -586,7 +586,7 @@ class VariableBuilder:
         if trace_numpy and np:
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
-        result = {}
+        result: dict[Any, Any] = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, tuple) else (ts,):
                 assert t not in result
@@ -680,7 +680,7 @@ class VariableBuilder:
             (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
-        result = {}
+        result: dict[int, Any] = {}
         for ts, fn in entries:
             for t in ts if isinstance(ts, (tuple, list)) else (ts,):
                 assert t not in result
@@ -2942,7 +2942,7 @@ def _dataclasses_fields_lambda(obj: VariableTracker) -> TupleVariable:
             base_src = AttrSource(obj.source, "__dataclass_fields__")
             source = DictGetItemSource(base_src, field.name)
         items.append(UserDefinedObjectVariable(field, source=source))
-    return TupleVariable(items)
+    return TupleVariable(items)  # pyrefly: ignore [bad-argument-type]
 
 
 def _clone_input(value: Any, fake_mode: FakeTensorMode | None) -> Any:
@@ -3590,10 +3590,10 @@ def record_automatic_dynamic(
         candidates = {}
         for i_stride, neg_i in pending:
             i = -neg_i
-            stride[i] = candidates.get(i_stride, i_stride)
-            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
+            stride[i] = candidates.get(i_stride, i_stride)  # pyrefly: ignore [unsupported-operation]
+            candidates.setdefault(i_stride * ex_size[i], InferStride(i))  # pyrefly: ignore [no-matching-overload]
     else:
-        stride = []
+        stride: list[Any] = []
 
     return process_automatic_dynamic(
         # type: ignore[arg-type]ks
@@ -3736,7 +3736,7 @@ def _automatic_dynamic(
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
     t_id = id(e)
-    dim2constraint = {}
+    dim2constraint: dict[int, Any] = {}
 
     def update_dim2constraint(
         dim: int, constraint_range: "StrictMinMaxConstraint", name: str
@@ -3910,7 +3910,7 @@ def _automatic_dynamic(
         dynamic_sizes=dynamic_sizes,
         dynamic_strides=dynamic_strides,
         constraint_sizes=constraint_sizes,
-        constraint_strides=constraint_strides,
+        constraint_strides=constraint_strides,  # pyrefly: ignore [bad-argument-type]
         specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,

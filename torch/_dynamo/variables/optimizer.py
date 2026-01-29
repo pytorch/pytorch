@@ -221,7 +221,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if isinstance(arg, VariableTracker) and arg.is_python_constant():
                 return arg.as_python_constant()
             elif isinstance(arg, ListVariable) and not arg.items:
-                return []
+                result: list[Any] = []
+                return result
             elif (
                 isinstance(arg, ConstDictVariable)
                 and isinstance(arg.source, GetItemSource)

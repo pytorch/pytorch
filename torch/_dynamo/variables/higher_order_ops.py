@@ -269,7 +269,7 @@ def add_call_function(
     # Set backend metadata if provided
     if config is not None:
         if "custom" not in proxy.node.meta:
-            proxy.node.meta["custom"] = {}
+            proxy.node.meta["custom"] = {}  # pyrefly: ignore[implicit-any]
         proxy.node.meta["custom"]["nested_region_config"] = config
         assert proxy.node.target == torch._higher_order_ops.invoke_subgraph
 
@@ -922,7 +922,7 @@ def are_same_graph_modules(
                 if not isinstance(b_value, torch.Tensor):
                     return False
                 # Extract fake tensor metadata for a and b and then compare
-                a_result = []
+                a_result: list[Any] = []
                 state = _CacheKeyState(fake_mode.shape_env)
                 a_metadata = extract_tensor_metadata(a_value)
                 a_metadata._flatten_into(a_result, fake_mode, state)
@@ -1107,7 +1107,7 @@ def validate_args_and_maybe_create_graph_inputs(
                         *graph_break_hints.USER_ERROR,
                     ],
                 )
-            args.append(new_arg)
+            args.append(new_arg)  # pyrefly: ignore[bad-argument-type]
         return args
 
 
@@ -3642,7 +3642,8 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
         # to (body_node, lifted_args_tuple, {})
         body_node = p_args[0]
         lifted_args = p_args[1:]
-        p_args = (body_node, tuple(lifted_args), {})
+        empty_dict: dict[str, Any] = {}
+        p_args = (body_node, tuple(lifted_args), empty_dict)
 
         # add hints into p_kwargs
         p_kwargs = {}
@@ -4736,7 +4737,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             return bwd_freevars.get(vt.proxy, vt.proxy).node  # type: ignore[attr-defined]
 
         # Find the mapping between orig_fwd_args and bwd_out
-        outer_fwd_proxy_to_bwd_node = {}
+        outer_fwd_proxy_to_bwd_node: dict[Any, Any] = {}
         if isinstance(bwd_out, variables.BaseListVariable):
             bwd_outs = bwd_out.items
             for idx, fwd_arg in enumerate(orig_fwd_args):
@@ -4889,7 +4890,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # we intentionally inserted a `None` VariableTracker for these positions,
         # so the backward graph contains no placeholder for them.
         bwd_input_nodes = list(bwd_graph.find_nodes(op="placeholder"))
-        fwd_vt_to_bwd_node = {}
+        fwd_vt_to_bwd_node: dict[Any, Any] = {}
         bwd_idx = 0
         if isinstance(fwd_out, variables.BaseListVariable):
             for fwd_vt in fwd_out.items:
@@ -4934,7 +4935,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         # Mechanical steps from here on. We have the extra_fwd_outputs and rewired_bwd_inputs. Lets make the changes.
         # Lets change the fwd graph outputs.
-        fwd_output_nodes = []
+        fwd_output_nodes: list[Any] = []
         for node in fwd_graph.find_nodes(op="output"):
             fwd_output_nodes = node.args[0]
             fwd_graph.erase_node(node)
@@ -5139,7 +5140,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             assert isinstance(fn_vt, UnspecializedNNModuleVariable)
             fn_id = id(fn_vt.value.forward.__func__)  # type: ignore[attr-defined]
             fn_name = fn_vt.value.forward.__name__  # type: ignore[attr-defined]
-        previously_installed_submodules = []
+        previously_installed_submodules: list[str] = []
         if invoke_subgraph_cache:
             previously_installed_submodules = (
                 invoke_subgraph_cache.get_dynamo_installed_submodules(fn_id)

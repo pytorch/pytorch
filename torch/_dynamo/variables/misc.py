@@ -391,7 +391,7 @@ class SuperVariable(VariableTracker):
             # `__torch_function__`, just without the first `cls` argument:
             #  * (func, types, args, kwargs)
             func = args[0]
-            tf_kwargs = {}
+            tf_kwargs: dict[str, Any] = {}
             tf_args = args[2].items  # type: ignore[attr-defined]
             # type: ignore[attr-defined]
             for hash_key_vt, value_vt in args[3].items.items():
@@ -1174,7 +1174,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
         # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
         if len(self.saved_tensors.tensors) > 0:
-            self.saved_tensors.tensors = []
+            self.saved_tensors.tensors = []  # pyrefly: ignore [implicit-any]
         for arg in args:
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
@@ -2135,7 +2135,8 @@ class ConstantLikeVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        cargs, ckwargs = [], {}
+        cargs: list[Any] = []
+        ckwargs: dict[str, Any] = {}
         try:
             # we only support constant propagation for methods
             cargs = [x.as_python_constant() for x in args]

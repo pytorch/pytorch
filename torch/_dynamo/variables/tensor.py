@@ -1153,7 +1153,7 @@ class TensorVariable(VariableTracker):
                     if node not in seen_nodes:
                         seen_nodes.add(node)
                         result.append(var)
-        return result
+        return result  # pyrefly: ignore[bad-return]
 
     def method_backward(
         self,

@@ -1027,14 +1027,14 @@ class SetVariable(ConstDictVariable):
         # Items can be either VariableTrackers or _HashableTrackers (from set ops).
         # For VariableTrackers, realize them to ensure aliasing guards are installed
         # when the same object appears multiple times.
-        realized_items = []
+        realized_items: list[ConstDictVariable._HashableTracker] = []
         for item in items:
             if isinstance(item, ConstDictVariable._HashableTracker):
                 # Already a _HashableTracker from a set operation
                 realized_items.append(item)
             else:
                 # VariableTracker - realize to install guards
-                realized_items.append(item.realize())
+                realized_items.append(item.realize())  # pyrefly: ignore[bad-argument-type]
         # pyrefly: ignore[bad-assignment]
         items = dict.fromkeys(realized_items, SetVariable._default_value())
         # pyrefly: ignore[bad-argument-type]
@@ -1384,7 +1384,7 @@ class OrderedSetClassVariable(VariableTracker):
             )
 
         if len(args) == 0:
-            items = []
+            items: list[VariableTracker] = []
         else:
             items = args[0].force_unpack_var_sequence(tx)
         return variables.OrderedSetVariable(items, mutation_type=ValueMutationNew())

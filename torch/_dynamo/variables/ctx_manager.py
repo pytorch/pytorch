@@ -1467,7 +1467,7 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
         super().__init__(
             target_values=(target_values_tuple,), initial_values=None, **kwargs
         )
-        initial_values_dict = {}
+        initial_values_dict: dict[str, Any] = {}
         for key, _ in target_values_tuple:
             initial_values_dict[key] = torch._dynamo.config.__getattr__(key)  # type: ignore[attr-defined]
         self.initial_values = (tuple(initial_values_dict.items()),)

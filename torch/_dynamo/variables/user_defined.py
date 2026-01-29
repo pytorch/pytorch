@@ -594,7 +594,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     )
                 items = bound_args.arguments["iterable"].force_unpack_var_sequence(tx)
             else:
-                items = []
+                items: list[VariableTracker] = []
 
             if "maxlen" in bound_args.arguments:
                 maxlen = bound_args.arguments["maxlen"]
@@ -1934,8 +1934,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # In optree, types can be registered globally (type in registry)
             # or with a namespace ((namespace, type) in registry)
             try:
-                import optree
-                from optree.registry import _NODETYPE_REGISTRY
+                import optree  # pyrefly: ignore[missing-import]
+                from optree.registry import _NODETYPE_REGISTRY  # pyrefly: ignore[missing-import]
 
                 # Check if registered globally
                 # Namedtuples and structseqs are implicitly pytree nodes
@@ -2121,8 +2121,8 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             )
 
         # Collect positional and keyword-only arguments
-        pos_args = []
-        kw_args = []
+        pos_args: list[Any] = []
+        kw_args: list[Any] = []
         for field in fields(dataclass_cls):
             if not field.init:
                 continue

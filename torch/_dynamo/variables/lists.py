@@ -1306,7 +1306,7 @@ class SizeVariable(TupleVariable):
         from .tensor import SymNodeVariable
 
         const_result = 1
-        sym_sizes = []
+        sym_sizes: list[SymNodeVariable] = []
 
         for v in self.items:
             if v.is_python_constant():
@@ -1402,7 +1402,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def __init__(
         self,
         items: list[VariableTracker],
-        tuple_cls: type[tuple],
+        tuple_cls: type[tuple[Any, ...]],
         dynamic_attributes: Optional[dict[str, VariableTracker]] = None,
         tuple_vt: Optional[TupleVariable] = None,
         **kwargs: Any,
@@ -1701,7 +1701,7 @@ class ListIteratorVariable(IteratorVariable):
         if not self.is_exhausted:
             remaining_items = self.items[self.index :]
         else:
-            remaining_items = []
+            remaining_items: list[VariableTracker] = []
         codegen.foreach(remaining_items)
         codegen.extend_output(
             [
