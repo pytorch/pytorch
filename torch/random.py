@@ -12,6 +12,11 @@ if TYPE_CHECKING:
 
 from torch._C import default_generator
 
+r"""
+Functionality: default_generator is the main random number generatir used by 
+default for all CPU random operations in the library. 
+"""
+
 
 __all__ = [
     "set_rng_state",

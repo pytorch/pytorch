@@ -2063,6 +2063,9 @@ softplus = _add_docstr(
     r"""
 softplus(input, beta=1, threshold=20) -> Tensor
 
+functionality: softplus function applies the Softplus activations function element-wise
+to the input tensor.
+
 Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
 
 For numerical stability the implementation reverts to the linear function
@@ -2352,6 +2355,7 @@ Shape:
 bilinear = _add_docstr(
     torch.bilinear,
     r"""
+functionality: bilinear() applies a bilinear transformation to two input tensors.
 bilinear(input1, input2, weight, bias=None) -> Tensor
 
 Applies a bilinear transformation to the incoming data:
