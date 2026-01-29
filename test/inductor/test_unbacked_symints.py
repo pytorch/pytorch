@@ -690,6 +690,37 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipCPUIf(True, "Triton codegen bug only affects GPU")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    @unittest.expectedFailure
+    def test_triton_pow_type_mismatch(self, device):
+        """
+        Test that libdevice.pow handles mixed float32/float64 types correctly.
+
+        Reproducer: sqrt returns float32, but exponent is float64 from sympy.
+        This caused: KeyError: (triton.language.float32, triton.language.float64)
+
+        The bug only triggers with a NON-INTEGER float exponent (like 2.5).
+        Integer exponents (like 10.0) are printed differently and don't trigger
+        the type mismatch.
+        """
+        import math
+
+        def fn(x):
+            # sqrt(x.size(0)) creates OpaqueUnaryFn_sqrt -> printed as float32
+            # **2.5 creates FloatPow with sympy.Float(2.5) -> printed as float64
+            # This causes: KeyError: (triton.language.float32, triton.language.float64)
+            r = math.sqrt(x.size(0))
+            r = r**2.5  # Non-integer exponent is required to trigger the bug
+            return torch.tensor(math.trunc(r), dtype=torch.float64, device=device)
+
+        example_inputs = (torch.randn(4, device=device),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True, dynamic=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
