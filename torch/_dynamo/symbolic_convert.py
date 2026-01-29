@@ -527,6 +527,10 @@ def get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
 
     Analyzes sample functions to extract the opcode sequences that appear
     after END_FOR for each result disposition (stored, discarded, returned, consumed).
+
+    Returns patterns with:
+        - pre_store_ops: opcodes between END_FOR and first STORE_FAST
+        - post_store_op: first opcode after all STORE_FASTs (for disambiguation)
     """
     assert sys.version_info >= (3, 12)
 
@@ -545,31 +549,31 @@ def get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
         return sum([i for i in range(1)])  # noqa: C416
 
     def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], Optional[str]]:
-        """Extract (prefix, first_postfix_opcode) from comprehension bytecode."""
+        """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
         insts = list(dis.get_instructions(fn))
 
         # Find END_FOR (sample functions have no nested loops)
         end_for_idx = [inst.opname for inst in insts].index("END_FOR")
 
-        # Extract prefix: opcodes from END_FOR+1 until first STORE_FAST
+        # Extract pre_store_ops: opcodes from END_FOR+1 until first STORE_FAST
         idx = end_for_idx + 1
-        prefix = []
+        pre_store_ops = []
         while idx < len(insts) and insts[idx].opname != "STORE_FAST":
-            prefix.append(insts[idx].opname)
+            pre_store_ops.append(insts[idx].opname)
             idx += 1
 
-        # Skip all STORE_FASTs to find first postfix opcode
+        # Skip all STORE_FASTs to find post_store_op
         while idx < len(insts) and insts[idx].opname == "STORE_FAST":
             idx += 1
 
-        postfix = insts[idx].opname if idx < len(insts) else None
-        return prefix, postfix
+        post_store_op = insts[idx].opname if idx < len(insts) else None
+        return pre_store_ops, post_store_op
 
     return {
-        "stored": {"prefix": extract_pattern(fn_stored)[0], "postfix": None},
-        "discarded": {"prefix": extract_pattern(fn_discarded)[0], "postfix": None},
-        "returned": {"prefix": extract_pattern(fn_returned)[0], "postfix": extract_pattern(fn_returned)[1]},
-        "consumed": {"prefix": extract_pattern(fn_consumed)[0], "postfix": extract_pattern(fn_consumed)[1]},
+        "stored": {"pre_store_ops": extract_pattern(fn_stored)[0], "post_store_op": None},
+        "discarded": {"pre_store_ops": extract_pattern(fn_discarded)[0], "post_store_op": None},
+        "returned": {"pre_store_ops": extract_pattern(fn_returned)[0], "post_store_op": extract_pattern(fn_returned)[1]},
+        "consumed": {"pre_store_ops": extract_pattern(fn_consumed)[0], "post_store_op": extract_pattern(fn_consumed)[1]},
     }
 
 
@@ -4517,27 +4521,25 @@ class InstructionTranslatorBase(
                     if var_name not in defined_inside and var_name not in captured_vars:
                         captured_vars.append(var_name)
 
-        # Extract prefix: all opcodes from END_FOR+1 until first STORE_FAST
-        prefix: list[str] = []
-        prefix_ip = end_for_ip + 1
-        while prefix_ip < len(self.instructions) and self.instructions[prefix_ip].opname != "STORE_FAST":
-            prefix.append(self.instructions[prefix_ip].opname)
-            prefix_ip += 1
+        # Extract pre_store_ops: all opcodes from END_FOR+1 until first STORE_FAST
+        pre_store_ops: list[str] = []
+        scan_ip = end_for_ip + 1
+        while scan_ip < len(self.instructions) and self.instructions[scan_ip].opname != "STORE_FAST":
+            pre_store_ops.append(self.instructions[scan_ip].opname)
+            scan_ip += 1
 
-        store_fast_ip = prefix_ip
+        store_fast_ip = scan_ip
 
-        # Skip all STORE_FASTs to find postfix start
-        while prefix_ip < len(self.instructions) and self.instructions[prefix_ip].opname == "STORE_FAST":
-            prefix_ip += 1
+        # Skip all STORE_FASTs to find post_store_op
+        while scan_ip < len(self.instructions) and self.instructions[scan_ip].opname == "STORE_FAST":
+            scan_ip += 1
 
-        postfix_ip = prefix_ip
-        first_postfix = self.instructions[postfix_ip].opname if postfix_ip < len(self.instructions) else None
+        post_store_op = self.instructions[scan_ip].opname if scan_ip < len(self.instructions) else None
 
         def matches(disposition: str) -> bool:
             p = patterns[disposition]
-            return prefix == p["prefix"] and (p["postfix"] is None or first_postfix == p["postfix"])
+            return pre_store_ops == p["pre_store_ops"] and (p["post_store_op"] is None or post_store_op == p["post_store_op"])
 
-        # Check all dispositions
         for disposition, result_on_stack in [
             ("discarded", False),
             ("returned", True),
@@ -4546,7 +4548,7 @@ class InstructionTranslatorBase(
         ]:
             if matches(disposition):
                 return ComprehensionAnalysis(
-                    end_ip=postfix_ip,
+                    end_ip=scan_ip,
                     result_var=self.instructions[store_fast_ip].argval if disposition == "stored" else None,
                     result_on_stack=result_on_stack,
                     result_disposition=disposition,
