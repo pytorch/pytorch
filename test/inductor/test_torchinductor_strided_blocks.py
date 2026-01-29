@@ -17,7 +17,7 @@ from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import get_max_y_grid, is_power_of_2
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import is_warp_size_64, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     decorateIf,
@@ -526,10 +526,10 @@ class CommonTemplate:
         """
         Tests a reduction kernel.
         """
-        if view_size == (2, 3 * max_block) and torch.version.hip is not None:
+        if view_size == (2, 3 * max_block) and is_warp_size_64(torch.device(GPU_TYPE)):
             view_size = (4, 6 * max_block)
 
-        if view_size == (128, 128) and torch.version.hip is not None:
+        if view_size == (128, 128) and is_warp_size_64(torch.device(GPU_TYPE)):
             view_size = (256, 256)
 
         if self.device == "cpu" and all(
@@ -808,7 +808,7 @@ class CommonTemplate:
         Tests 2D reduction kernels. These arise from "odd" shapes which are not
         expressible with a 1D block pointer.
         """
-        if reduction_op == torch.sum and torch.version.hip is not None:
+        if reduction_op == torch.sum and is_warp_size_64(torch.device(GPU_TYPE)):
             view_size = (513, 513) if view_size == (129, 129) else view_size
         view = self._discontiguous_tensor(view_size, self.device)
 
@@ -849,7 +849,7 @@ class CommonTemplate:
         doesn't generate a block pointer. Since tiling welford reductions depends on
         the block pointer analysis, those cases would fall back to 1D.
         """
-        if torch.version.hip is not None and expected_num_triton_kernels == 2:
+        if is_warp_size_64(torch.device(GPU_TYPE)) and expected_num_triton_kernels == 2:
             size = (256, 256)
         view = self._discontiguous_tensor(size, self.device)
 
