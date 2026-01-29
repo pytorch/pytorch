@@ -2052,6 +2052,54 @@ class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
         self.assertEqual(list(p.keys()), list("bc"))
 
 
+class ConstDictVariableTests(torch._dynamo.test_case.TestCase):
+    """Tests for ConstDictVariable internal methods."""
+
+    def test_is_new_item_with_none_value(self):
+        """is_new_item should handle None value correctly."""
+        from unittest.mock import MagicMock
+
+        from torch._dynamo.variables.dicts import ConstDictVariable
+
+        dict_var = ConstDictVariable({})
+
+        other = MagicMock()
+        other.is_realized.return_value = True
+
+        # None value should compare using id()
+        result = dict_var.is_new_item(None, other)
+        self.assertTrue(result)  # None is not other
+
+    def test_is_new_item_with_realized_values(self):
+        """is_new_item should compare realized values when both are realized."""
+        from unittest.mock import MagicMock
+
+        from torch._dynamo.variables.dicts import ConstDictVariable
+
+        dict_var = ConstDictVariable({})
+
+        # Create two mock values that are realized
+        value1 = MagicMock()
+        value1.is_realized.return_value = True
+        realized_obj = object()
+        value1.realize.return_value = realized_obj
+
+        value2 = MagicMock()
+        value2.is_realized.return_value = True
+        value2.realize.return_value = realized_obj  # Same object
+
+        result = dict_var.is_new_item(value1, value2)
+        self.assertFalse(result)  # Same realized object
+
+        # Different realized object
+        value3 = MagicMock()
+        value3.is_realized.return_value = True
+        value3.realize.return_value = object()  # Different object
+
+        result = dict_var.is_new_item(value1, value3)
+        self.assertTrue(result)  # Different realized objects
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

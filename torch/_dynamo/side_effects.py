@@ -350,8 +350,6 @@ class SideEffects:
         assert isinstance(cellvar, variables.CellVariable)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
-        # Use 'is not None' instead of truthiness check to correctly handle
-        # falsy values like 0, False, or empty string as valid cell contents
         if cellvar.pre_existing_contents is not None:
             return cellvar.pre_existing_contents
         unimplemented(
@@ -413,10 +411,7 @@ class SideEffects:
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-        # Defensive check: mutation_type should not be None for non-immutable items
-        # that we're tracking, but handle gracefully if it is
-        if item.mutation_type is None:
-            return False
+        assert item.mutation_type is not None
         return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(
