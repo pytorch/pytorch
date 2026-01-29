@@ -2619,8 +2619,8 @@ class PallasKernel(SIMDKernel):
         }
 
         kernel_name = name or "<KERNEL_NAME>"
-        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu" and not is_tpu
         if is_tpu:
             if not torch._inductor.config.pallas_take_first_jax_device_only:
                 raise RuntimeError(
@@ -2662,7 +2662,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             # outputs_need_read contains output parameter names (e.g., out_ptr0)
             needs_read = param in self.outputs_need_read
             aliasable_flags[param] = (
-                (not interpret_is_cpu) and is_contiguous
+                (not interpret_is_cpu and not is_tpu) and is_contiguous
             ) or needs_read
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
@@ -2679,7 +2679,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         # because pallas_call returns a new array (doesn't mutate in-place)
         # For outputs that need read access (scatter), we enable aliasing to read
         # current values, but still need to copy back the result
-        if interpret_is_cpu:
+        if interpret_is_cpu or is_tpu:
             # Copy back all outputs on CPU
             copy_output_indices = list(range(len(output_params)))
         else:
@@ -2913,9 +2913,18 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
         )
         code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
         with code.indent():
-            code.writeline("out_specs = tuple(")
+            code.writeline("out_shapes_pallas = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
             code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("indexer = lambda n: lambda i: [i] * n")
+            code.writeline("out_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(shape, indexer(len(shape)))")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+            code.writeline("in_specs_pallas = tuple(")
+            code.writeline("    pl.BlockSpec(i.shape, indexer(len(i.shape)))")
+            code.writeline("    for i in [" + ", ".join(kernel_input_params) + "]")
             code.writeline(")")
 
             alias_pairs: list[tuple[int, int]] = []
@@ -3317,7 +3326,9 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             else:
                 code.writeline("return pl.pallas_call(")
                 code.writeline("    " + kernel_arg)
-                code.writeline("    out_shape=out_specs,")
+                code.writeline("    out_shape=out_shapes_pallas,")
+                code.writeline("    out_specs=out_specs_pallas,")
+                code.writeline("    in_specs=in_specs_pallas,")
                 code.writeline(f"    interpret={interpret_literal},")
                 code.writeline("    grid=(1,),")
                 code.writeline(

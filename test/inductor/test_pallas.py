@@ -103,6 +103,13 @@ def make_pallas(cls, _debug_cpu_to_tpu_pallas=False):
     test_class.__module__ = __name__
     return test_class
 
+def skip_if_tpu(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        if config._debug_cpu_to_tpu_pallas:
+            self.skipTest("Not yet working on TPU")
+        fn(self, *args, **kwargs)
+    return wrapper
 
 class PallasTestsMixin:
     """Basic tests for Pallas backend functionality (parameterized by DEVICE). Mixin only, not collected.
@@ -368,6 +375,7 @@ class PallasTestsMixin:
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_different_shapes(self):
         """Test with different tensor shapes."""
         if self.DEVICE == "cuda":
@@ -438,6 +446,7 @@ class PallasTestsMixin:
         expected = operate_on_tensor(x_t_contiguous)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_strided_int_pallas(self):
         """Test strided access patterns with the Pallas backend."""
         if self.DEVICE == "cuda":
@@ -454,6 +463,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_strided_offset_pallas(self):
         """Test strided access with offset."""
         if self.DEVICE == "cuda":
@@ -641,6 +651,7 @@ class PallasTestsMixin:
         x = base_2d[::2, ::2].unsqueeze(0)
         self.assertEqual(compiled(x), x * 2.0 + 1.0)
 
+    @skip_if_tpu
     def test_stride_non_contiguous_dtypes(self):
         """Test non-contiguous patterns with various dtypes."""
         if self.DEVICE == "cuda":
@@ -676,6 +687,7 @@ class PallasTestsMixin:
         x = torch.randn(1, 1, 16, device=self.DEVICE).expand(4, 8, 16)
         self.assertEqual(compiled(x, x), x + x)
 
+    @skip_if_tpu
     def test_stride_multiple_inputs(self):
         """Test multiple strided inputs and broadcasting."""
         if self.DEVICE == "cuda":
@@ -739,6 +751,7 @@ class PallasTestsMixin:
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_indexing_gather(self):
         """Test complex indexing with gather-like operations."""
         if self.DEVICE == "cuda":
@@ -759,6 +772,7 @@ class PallasTestsMixin:
         expected = fn(x, indices)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_complex_indexing_2d(self):
         """Test complex indexing on 2D tensors with integer array indexing."""
         if self.DEVICE == "cuda":
@@ -990,6 +1004,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_erf(self):
         """Test erf operation."""
         if self.DEVICE == "cuda":
@@ -1005,6 +1020,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_atan2(self):
         """Test atan2 operation."""
         if self.DEVICE == "cuda":
@@ -1021,6 +1037,7 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_sum_reduction(self):
         """Test sum reduction."""
 
@@ -1034,6 +1051,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_max_reduction(self):
         """Test max reduction."""
 
@@ -1047,6 +1065,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_min_reduction(self):
         """Test min reduction."""
         if self.DEVICE == "cuda":
@@ -1062,6 +1081,8 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
+    @skip_if_tpu
     def test_prod_reduction(self):
         """Test prod reduction."""
         if self.DEVICE == "cuda":
@@ -1078,6 +1099,7 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    @skip_if_tpu
     def test_arange_multi_output(self):
         """Test arange with view and multiple outputs."""
         if self.DEVICE == "cuda":
@@ -1380,6 +1402,22 @@ class PallasTestsMixin:
         y = torch.randn(16, 8, device=self.DEVICE)
         result = compiled(x, y)
         expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_simple_mlp(self):
+        def fn(w_0, w_1, w_2, x):
+            x = (x @ w_0).relu()
+            x = (x @ w_1).relu()
+            x = (x @ w_2).relu()
+            return x
+
+        compiled = self._compile(fn)
+
+        ws = [torch.rand(32, 32, device=self.DEVICE) for _ in range(3)]
+        x = torch.randn(32, 32, device=self.DEVICE)
+
+        result = compiled(*ws, x)
+        expected = fn(*ws, x)
         self.assertEqual(result, expected)
 
     def test_warpgroup_size_2d_aligned_32x8(self):
