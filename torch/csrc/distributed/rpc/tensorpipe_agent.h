@@ -56,6 +56,11 @@ constexpr int64_t kCudaGdrChannelPriority = 200;
 constexpr int64_t kCudaXthChannelPriority = 400;
 constexpr int64_t kCudaBasicChannelPriority = 0;
 
+// CPU channel have higher priority than XPU channels, since the latter might
+// handle CPU-to-CPU transfers, but will always be less efficient than their
+// CPU-only counterparts.
+constexpr int64_t kXpuBasicChannelPriority = 0;
+
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
