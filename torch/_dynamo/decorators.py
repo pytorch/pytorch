@@ -319,6 +319,13 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         to trace through and potentially optimize the code.
 
     Usage:
+        **Applicable to**:
+        1. Standalone functions: they can take nn.Module as input.
+        2. nn.Module methods: apply to custom methods like ``compute()``.
+        3. nn.Module forward: the forward method itself becomes opaque. Note that module
+           hooks are still compiled by Dynamo and AOT Autograd; if you want hooks to also
+           be opaque, decorate them with @leaf_function too.
+
         **Inputs and Outputs**:
         - Both inputs and outputs must use pytree-compatible types.
         Tensors, Python primitives (int, float, bool, str), and built-in containers
@@ -520,6 +527,48 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         >>> x = torch.randn(32, 10, requires_grad=True)
         >>> out = compiled(x)[0]
         >>> out.sum().backward()  # Gradients flow to model.linear.weight/bias and x
+
+        # Example 3: nn.Module method calling external library
+        # External code that AOT autograd cannot trace
+        class ExternalLibModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.process_with_external(x)
+
+            @leaf_function
+            def process_with_external(self, x):
+                out = self.linear(x)
+                # Hypothetical external library call that AOT can't trace
+                # result = external_lib.process(out)
+                return (out,)
+
+            @process_with_external.fake_impl
+            def process_with_external_fake(self, x):
+                return (self.linear(x),)
+
+        # Example 4: forward_pre_hook with runtime logging
+        # Hooks with side effects that should run at runtime
+        @leaf_function
+        def logging_pre_hook(module, args):
+            x = args[0]
+            print(f"Pre-hook: input shape={x.shape}, mean={x.mean().item():.4f}")
+            return args
+
+        @logging_pre_hook.fake_impl
+        def logging_pre_hook_fake(module, args):
+            return args
+
+        class ModuleWithHook(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.register_forward_pre_hook(logging_pre_hook)
+
+            def forward(self, x):
+                return (self.linear(x),)
 
     Args:
         fn: The function being decorated.
