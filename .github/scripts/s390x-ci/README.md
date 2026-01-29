@@ -27,20 +27,7 @@ $ sudo systemctl enable --now qemu-user-static
 
 ## Rebuild the image
 
-First build s390x builder image `docker.io/pytorch/manylinuxs390x-builder`,
-using following commands:
-
-```
-$ cd ~
-$ git clone https://github.com/pytorch/pytorch
-$ cd pytorch
-$ git submodule update --init --recursive
-$ GPU_ARCH_TYPE=cpu-s390x "$(pwd)/.ci/docker/manywheel/build.sh" manylinuxs390x-builder
-$ docker image tag localhost/pytorch/manylinuxs390x-builder docker.io/pytorch/manylinuxs390x-builder:cpu-s390x
-$ docker image save -o ~/manywheel-s390x.tar docker.io/pytorch/manylinuxs390x-builder:cpu-s390x
-```
-
-Next step is to build `actions-runner` image using:
+Build `actions-runner` image using:
 
 ```
 $ cd self-hosted-builder
