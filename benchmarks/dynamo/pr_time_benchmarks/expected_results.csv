@@ -22,7 +22,7 @@ basic_modules_ListOfLinears_eager,compile_time_instruction_count,985800000,0.1
 
 
 
-basic_modules_ListOfLinears_inductor,compile_time_instruction_count,15240000000,0.1
+basic_modules_ListOfLinears_inductor,compile_time_instruction_count,13392543503,0.1
 
 
 
