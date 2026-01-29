@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import contextlib
-import functools
 import logging
 from collections.abc import Callable
 from typing import Any, cast, NamedTuple
@@ -344,6 +343,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._module_fqn,
             )
 
     def wait_for_unshard(self):
@@ -715,11 +715,24 @@ class FSDPParamGroup:
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
-        register_post_backward_func = functools.partial(
-            RegisterPostBackwardFunction.apply, self
+        # Collect all tensors that require gradients
+        inp_tensors: list[torch.Tensor] = []
+        _apply_to_tensors(
+            lambda t: inp_tensors.append(t) or t if t.requires_grad else t,
+            (args, kwargs),
         )
-        args = _apply_to_tensors(lambda t: register_post_backward_func(t)[0], args)
-        kwargs = _apply_to_tensors(lambda t: register_post_backward_func(t)[0], kwargs)
+        if len(inp_tensors) == 0:
+            return args, kwargs  # no tensors that require gradients
+        # Apply RegisterPostBackwardFunction to all tensors at once
+        out_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
+        # Replace original tensors with transformed ones
+        out_iter = iter(out_tensors)
+        args = _apply_to_tensors(
+            lambda t: next(out_iter) if t.requires_grad else t, args
+        )
+        kwargs = _apply_to_tensors(
+            lambda t: next(out_iter) if t.requires_grad else t, kwargs
+        )
         return args, kwargs
 
     def _register_state_dict_hooks(self) -> None:
