@@ -366,14 +366,10 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
-        # Set CUDA device before initializing process group to ensure
+        # Set device before initializing process group to ensure
         # each rank is bound to the correct GPU
-        if TEST_CUDA:
-            torch.cuda.set_device(rank)
-        elif TEST_XPU:
-            torch.xpu.set_device(rank)
-        elif TEST_HPU:
-            torch.hpu.set_device(rank)
+        if torch.accelerator.is_available():
+            torch.accelerator.set_device_index(rank)
         # Call parent's _init_pg to do the actual process group initialization
         super()._init_pg(rank, world_size, rdvz_file)
 
