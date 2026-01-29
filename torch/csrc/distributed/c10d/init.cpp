@@ -1061,7 +1061,8 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
-      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp);
+      .def_readwrite("asyncOp", &::c10d::AllgatherOptions::asyncOp)
+      .def_readwrite("profilingName", &::c10d::AllgatherOptions::profilingName);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
@@ -2064,9 +2065,17 @@ communication mechanism.
           py::arg("rank"),
           py::arg("world_size"));
 
+  // Use OpaqueBase as the metaclass to allow isinstance(fake_obj, ProcessGroup)
+  // to work.
+  py::object opaque_base_module = py::module_::import("torch._opaque_base");
+  py::object opaque_base = opaque_base_module.attr("OpaqueBaseMeta");
+
   auto processGroup =
       intrusive_ptr_no_gil_destructor_trampoline_class_<
-          ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(module, "ProcessGroup",
+          ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(
+          module,
+          "ProcessGroup",
+          py::metaclass(opaque_base),
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
