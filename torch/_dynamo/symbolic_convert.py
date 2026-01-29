@@ -505,7 +505,7 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
 
 
 @functools.cache
-def get_comprehension_bytecode_prefix() -> list[str]:
+def _get_comprehension_bytecode_prefix() -> list[str]:
     """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
 
     assert sys.version_info >= (3, 12)
@@ -522,7 +522,7 @@ def get_comprehension_bytecode_prefix() -> list[str]:
 
 
 @functools.cache
-def get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
+def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
     """Discover bytecode patterns for comprehension result handling.
 
     Analyzes sample functions to extract the opcode sequences that appear
@@ -4442,7 +4442,7 @@ class InstructionTranslatorBase(
         assert self.instruction_pointer is not None
         ip = self.instruction_pointer - 1
 
-        pattern = get_comprehension_bytecode_prefix()
+        pattern = _get_comprehension_bytecode_prefix()
         prefix = [inst.opname for inst in self.instructions[ip - len(pattern) : ip]]
 
         return prefix == pattern
@@ -4456,7 +4456,7 @@ class InstructionTranslatorBase(
         assert sys.version_info >= (3, 12)
         assert self.instruction_pointer is not None
 
-        patterns = get_comprehension_result_patterns()
+        patterns = _get_comprehension_result_patterns()
         start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
 
         iterator_vars: list[str] = []
