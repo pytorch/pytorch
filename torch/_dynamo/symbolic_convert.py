@@ -499,6 +499,119 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
     return insts[begin_idx + 1 : end_idx + 1]
 
 
+@functools.cache
+def get_comprehension_bytecode_prefix() -> list[str]:
+    """Get the bytecode instructions that precede BUILD_LIST in a list comprehension."""
+
+    assert sys.version_info >= (3, 12)
+
+    def fn() -> list[int]:
+        return [i for i in range(1)]  # noqa: C416
+
+    insts = [inst.opname for inst in dis.get_instructions(fn)]
+
+    start_idx = len(insts) - 1 - insts[::-1].index("LOAD_FAST_AND_CLEAR")
+    end_idx = insts.index("BUILD_LIST")
+
+    return insts[start_idx:end_idx]
+
+
+@functools.cache
+def get_comprehension_result_patterns() -> dict[str, Optional[str]]:
+    """Discover bytecode patterns for comprehension result handling.
+
+    Returns dict with:
+        - "stored_indicator": opcode after END_FOR when result is stored in variable
+        - "on_stack_indicator": opcode after END_FOR when result stays on stack
+        - "discard_indicator": opcode that discards result from stack
+        - "return_indicator": opcode that returns result directly
+    """
+
+    assert sys.version_info >= (3, 12)
+
+    # Pattern 1: Result assigned to variable
+    def fn_assigned() -> list[int]:
+        result = [i for i in range(1)]  # noqa: C416
+        return result
+
+    # Pattern 2: Result discarded
+    def fn_discarded() -> int:
+        [i for i in range(1)]  # noqa: C416
+        return 1
+
+    # Pattern 3: Result returned directly
+    def fn_returned() -> list[int]:
+        return [i for i in range(1)]  # noqa: C416
+
+    def find_post_end_for_opcode(fn: Callable[..., Any]) -> Optional[str]:
+        insts = list(dis.get_instructions(fn))
+        for i, inst in enumerate(insts):
+            if inst.opname == "END_FOR" and i + 1 < len(insts):
+                return insts[i + 1].opname
+        return None
+
+    def find_discard_opcode(fn: Callable[..., Any]) -> Optional[str]:
+        insts = list(dis.get_instructions(fn))
+        for i, inst in enumerate(insts):
+            if inst.opname == "END_FOR":
+                # Look for STORE_FAST after END_FOR (iterator restoration)
+                j = i + 1
+                while j < len(insts) and insts[j].opname in ("SWAP", "STORE_FAST"):
+                    j += 1
+                if j < len(insts):
+                    return insts[j].opname
+        return None
+
+    def find_return_after_iterator_restore(
+        fn: Callable[..., Any],
+    ) -> Optional[str]:
+        insts = list(dis.get_instructions(fn))
+        for i, inst in enumerate(insts):
+            if inst.opname == "END_FOR":
+                # Look for STORE_FAST after END_FOR (iterator restoration)
+                j = i + 1
+                while j < len(insts) and insts[j].opname in ("SWAP", "STORE_FAST"):
+                    j += 1
+                if j < len(insts) and insts[j].opname.startswith("RETURN"):
+                    return insts[j].opname
+        return None
+
+    stored_indicator = find_post_end_for_opcode(fn_assigned)
+    on_stack_indicator = find_post_end_for_opcode(fn_discarded)
+    discard_indicator = find_discard_opcode(fn_discarded)
+    return_indicator = find_return_after_iterator_restore(fn_returned)
+
+    return {
+        "stored_indicator": stored_indicator,
+        "on_stack_indicator": on_stack_indicator,
+        "discard_indicator": discard_indicator,
+        "return_indicator": return_indicator,
+    }
+
+
+@dataclasses.dataclass
+class ComprehensionAnalysis:
+    """Metadata about a comprehension's bytecode structure.
+
+    Attributes:
+        end_ip: Instruction pointer after all comprehension bytecode
+        result_var: Name of result variable, or None if result stays on stack
+        result_on_stack: True if result stays on stack (discarded, returned, or in expression)
+        result_disposition: What happens to result - "stored", "discarded", "returned", or "consumed"
+        iterator_vars: Variables from LOAD_FAST_AND_CLEAR (need restoration)
+        walrus_vars: Variables assigned via walrus operator (:=) inside comprehension
+        captured_vars: Variables read from outer scope via LOAD_FAST inside comprehension
+    """
+
+    end_ip: int
+    result_var: Optional[str]
+    result_on_stack: bool
+    result_disposition: str  # "stored", "discarded", "returned", "consumed"
+    iterator_vars: list[str]
+    walrus_vars: list[str]
+    captured_vars: list[str]
+
+
 def _detect_and_normalize_assert_statement(
     self: InstructionTranslatorBase,
     truth_fn: Callable[[object], bool],
@@ -3321,6 +3434,37 @@ class InstructionTranslatorBase(
         self.push(SliceVariable(items, tx=self))  # type: ignore[arg-type]
 
     def BUILD_LIST(self, inst: Instruction) -> None:
+        # Nested graph breaks are currently not supported for 3.12+ comprehension handling
+        if (
+            sys.version_info >= (3, 12)
+            and inst.argval == 0
+            and not config.nested_graph_breaks
+        ):
+            is_comp_start = self._is_comprehension_start()
+            if is_comp_start:
+                # For comprehensions, we use more permissive conditions:
+                # - We don't require > 1 calls in graph (even 0 is okay)
+                # - We skip the exception table check since comprehension exception
+                #   entries are just for cleanup, not real blocks
+                can_speculate = (
+                    all(b.can_restore() for b in self.block_stack)
+                    and not self.one_graph
+                    and not self.error_on_graph_break
+                    and not self.is_tracing_resume_prologue
+                    and not self.active_generic_context_managers
+                    and self.output.current_tracer.parent is None
+                    and self.parent is None  # Not inside an inlined function
+                )
+                # Only set up speculation at depth 0 (outermost comprehension)
+                if can_speculate and self._comprehension_depth == 0:
+                    speculation = self.speculate()
+                    if speculation.failed(self):
+                        # Graph break occurred in comprehension on previous attempt
+                        self._handle_comprehension_graph_break(inst)
+                        return
+                    self.current_speculation = speculation
+                self._comprehension_depth += 1
+
         items = self.popn(inst.argval)
         self.push(ListVariable(items, mutation_type=ValueMutationNew()))
 
@@ -3358,6 +3502,37 @@ class InstructionTranslatorBase(
     BUILD_TUPLE_UNPACK_WITH_CALL = BUILD_TUPLE_UNPACK
 
     def BUILD_MAP(self, inst: Instruction) -> None:
+        # Nested graph breaks are currently not supported for 3.12+ comprehension handling
+        if (
+            sys.version_info >= (3, 12)
+            and inst.argval == 0
+            and not config.nested_graph_breaks
+        ):
+            is_comp_start = self._is_comprehension_start()
+            if is_comp_start:
+                # For comprehensions, we use more permissive conditions:
+                # - We don't require > 1 calls in graph (even 0 is okay)
+                # - We skip the exception table check since comprehension exception
+                #   entries are just for cleanup, not real blocks
+                can_speculate = (
+                    all(b.can_restore() for b in self.block_stack)
+                    and not self.one_graph
+                    and not self.error_on_graph_break
+                    and not self.is_tracing_resume_prologue
+                    and not self.active_generic_context_managers
+                    and self.output.current_tracer.parent is None
+                    and self.parent is None
+                )
+                # Only set up speculation at depth 0 (outermost comprehension)
+                if can_speculate and self._comprehension_depth == 0:
+                    speculation = self.speculate()
+                    if speculation.failed(self):
+                        # Graph break occurred in comprehension on previous attempt
+                        self._handle_comprehension_graph_break(inst)
+                        return
+                    self.current_speculation = speculation
+                self._comprehension_depth += 1
+
         items = self.popn(inst.argval * 2)
         d = dict(zip(items[::2], items[1::2]))
         self.push(ConstDictVariable(d, mutation_type=ValueMutationNew()))
@@ -4262,6 +4437,424 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _is_comprehension_start(self) -> bool:
+        """Detect if we're at the start of a list/dict comprehension in 3.12+.
+
+        In Python 3.12+, comprehensions are inlined with a bytecode pattern that
+        precedes BUILD_LIST/BUILD_MAP.
+        """
+        if sys.version_info < (3, 12):
+            return False
+
+        assert self.instruction_pointer is not None
+        ip = self.instruction_pointer - 1
+
+        pattern = get_comprehension_bytecode_prefix()
+        prefix = [inst.opname for inst in self.instructions[ip - len(pattern) : ip]]
+
+        return prefix == pattern
+
+    def _analyze_comprehension(self) -> ComprehensionAnalysis:
+        """Analyze comprehension bytecode to determine result handling pattern.
+
+        Tracks FOR_ITER/END_FOR nesting depth to find the outermost END_FOR,
+        then analyzes what happens to the result using dynamically discovered patterns.
+
+        Returns ComprehensionAnalysis with:
+        - end_ip: instruction after all comprehension bytecode
+        - result_var: name of result variable (or None if on stack)
+        - result_on_stack: True if result stays on stack
+        - result_disposition: "stored", "discarded", "returned", or "consumed"
+        - iterator_vars: variables that need restoration
+        """
+        assert sys.version_info >= (3, 12)
+        assert self.instruction_pointer is not None
+        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
+        ip = self.instruction_pointer
+        depth = 0
+        patterns = get_comprehension_result_patterns()
+
+        # Collect iterator variables from LOAD_FAST_AND_CLEAR before BUILD_LIST/BUILD_MAP
+        iterator_vars: list[str] = []
+        scan_ip = start_ip - 1
+        while scan_ip >= 0:
+            scan_inst = self.instructions[scan_ip]
+            if scan_inst.opname == "LOAD_FAST_AND_CLEAR":
+                iterator_vars.insert(0, scan_inst.argval)
+                scan_ip -= 1
+            elif scan_inst.opname in ("SWAP", "GET_ITER"):
+                scan_ip -= 1
+            else:
+                break
+
+        # Find the outermost END_FOR
+        end_for_ip = -1
+        while ip < len(self.instructions):
+            inst = self.instructions[ip]
+            if inst.opname == "FOR_ITER":
+                depth += 1
+            elif inst.opname == "END_FOR":
+                depth -= 1
+                if depth == 0:
+                    end_for_ip = ip
+                    break
+            ip += 1
+
+        if end_for_ip == -1:
+            raise AssertionError("Could not find END_FOR for comprehension")
+
+        # Scan loop body for COPY + STORE_FAST walrus pattern
+        # Walrus operators compile to: COPY 1 followed by STORE_FAST <varname>
+        walrus_vars: list[str] = []
+
+        # Find first FOR_ITER to know where loop body starts
+        for_iter_ip = -1
+        for scan_ip in range(start_ip, end_for_ip):
+            if self.instructions[scan_ip].opname == "FOR_ITER":
+                for_iter_ip = scan_ip
+                break
+
+        if for_iter_ip >= 0:
+            scan_ip = for_iter_ip + 1
+            while scan_ip < end_for_ip:
+                inst = self.instructions[scan_ip]
+
+                # Skip nested loops to only capture outermost comprehension
+                if inst.opname == "FOR_ITER":
+                    nested_depth = 1
+                    while nested_depth > 0 and scan_ip < end_for_ip:
+                        scan_ip += 1
+                        nested_inst = self.instructions[scan_ip]
+                        if nested_inst.opname == "FOR_ITER":
+                            nested_depth += 1
+                        elif nested_inst.opname == "END_FOR":
+                            nested_depth -= 1
+                    scan_ip += 1
+                    continue
+
+                # Detect walrus pattern: COPY 1 followed by STORE_FAST
+                if inst.opname == "COPY" and inst.arg == 1:
+                    if scan_ip + 1 < end_for_ip:
+                        next_inst = self.instructions[scan_ip + 1]
+                        if next_inst.opname == "STORE_FAST":
+                            var_name = next_inst.argval
+                            # Exclude iterator variables and deduplicate
+                            if (
+                                var_name not in iterator_vars
+                                and var_name not in walrus_vars
+                            ):
+                                walrus_vars.append(var_name)
+
+                scan_ip += 1
+
+        # Scan loop body for LOAD_FAST instructions that reference outer scope variables
+        # These are variables accessed from the enclosing function scope
+        captured_vars: list[str] = []
+        defined_inside: set[str] = set(iterator_vars) | set(walrus_vars)
+
+        if for_iter_ip >= 0:
+            scan_ip = for_iter_ip + 1
+            while scan_ip < end_for_ip:
+                inst = self.instructions[scan_ip]
+
+                # Skip nested loops
+                if inst.opname == "FOR_ITER":
+                    nested_depth = 1
+                    while nested_depth > 0 and scan_ip < end_for_ip:
+                        scan_ip += 1
+                        nested_inst = self.instructions[scan_ip]
+                        if nested_inst.opname == "FOR_ITER":
+                            nested_depth += 1
+                        elif nested_inst.opname == "END_FOR":
+                            nested_depth -= 1
+                    scan_ip += 1
+                    continue
+
+                # Track variables defined inside the loop via STORE_FAST
+                if inst.opname == "STORE_FAST":
+                    defined_inside.add(inst.argval)
+                # Detect LOAD_FAST instructions that reference outer variables
+                elif inst.opname == "LOAD_FAST":
+                    var_name = inst.argval
+                    # Skip if it's defined inside the comprehension or already captured
+                    if var_name not in defined_inside and var_name not in captured_vars:
+                        captured_vars.append(var_name)
+
+                scan_ip += 1
+
+        # Check what happens after END_FOR
+        ip = end_for_ip + 1
+        post_end_for_inst = self.instructions[ip]
+
+        if post_end_for_inst.opname == patterns["stored_indicator"]:
+            result_var = post_end_for_inst.argval
+            ip += 1
+            # Consume iterator STORE_FASTs
+            while (
+                ip < len(self.instructions)
+                and self.instructions[ip].opname == "STORE_FAST"
+            ):
+                ip += 1
+            return ComprehensionAnalysis(
+                end_ip=ip,
+                result_var=result_var,
+                result_on_stack=False,
+                result_disposition="stored",
+                iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
+            )
+
+        elif post_end_for_inst.opname == patterns["on_stack_indicator"]:
+            # Result stays on stack, skip SWAP and iterator STORE_FASTs
+            ip += 1  # Skip SWAP
+            while (
+                ip < len(self.instructions)
+                and self.instructions[ip].opname == "STORE_FAST"
+            ):
+                ip += 1
+
+            # Check what happens to the result on stack
+            if ip < len(self.instructions):
+                disposition_inst = self.instructions[ip]
+
+                if disposition_inst.opname == patterns["discard_indicator"]:
+                    return ComprehensionAnalysis(
+                        end_ip=ip + 1,  # After POP_TOP
+                        result_var=None,
+                        result_on_stack=True,
+                        result_disposition="discarded",
+                        iterator_vars=iterator_vars,
+                        walrus_vars=walrus_vars,
+                        captured_vars=captured_vars,
+                    )
+
+                elif disposition_inst.opname == patterns["return_indicator"]:
+                    return ComprehensionAnalysis(
+                        end_ip=ip,  # At RETURN_VALUE (resume will handle it)
+                        result_var=None,
+                        result_on_stack=True,
+                        result_disposition="returned",
+                        iterator_vars=iterator_vars,
+                        walrus_vars=walrus_vars,
+                        captured_vars=captured_vars,
+                    )
+
+                else:
+                    # We don't expand to include the consuming call - just mark as consumed
+                    return ComprehensionAnalysis(
+                        end_ip=ip,  # At the consuming instruction
+                        result_var=None,
+                        result_on_stack=True,
+                        result_disposition="consumed",
+                        iterator_vars=iterator_vars,
+                        walrus_vars=walrus_vars,
+                        captured_vars=captured_vars,
+                    )
+
+            # Fallback - result on stack but no disposition found
+            return ComprehensionAnalysis(
+                end_ip=ip,
+                result_var=None,
+                result_on_stack=True,
+                result_disposition="consumed",
+                iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
+            )
+
+        else:
+            # Unexpected pattern - fallback to old behavior
+            ip = end_for_ip + 1
+            while (
+                ip < len(self.instructions)
+                and self.instructions[ip].opname == "STORE_FAST"
+            ):
+                ip += 1
+            return ComprehensionAnalysis(
+                end_ip=ip,
+                result_var=None,
+                result_on_stack=False,
+                result_disposition="stored",
+                iterator_vars=iterator_vars,
+                walrus_vars=walrus_vars,
+                captured_vars=captured_vars,
+            )
+
+    def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
+        """Handle graph break for a comprehension by skipping the comprehension bytecode.
+
+        Steps
+        1. Compiles the graph up to the comprehension
+        2. Adds the comprehension bytecode (runs eagerly at runtime)
+        3. Generates code to load comprehension-created locals
+        4. Creates a resume function for code after the comprehension
+        """
+        assert sys.version_info >= (3, 12)
+
+        analysis = self._analyze_comprehension()
+
+        assert self.instruction_pointer is not None
+        start_ip = (
+            self.instruction_pointer - 1
+        )  # Current instruction (BUILD_LIST/BUILD_MAP)
+
+        reason = GraphCompileReason("comprehension_graph_break", [self.frame_summary()])
+        log.debug("comprehension triggered compile")
+
+        # Calculate stack_pops: 1 for iterator + len(iterator_vars) for saved values
+        stack_pops = 1 + len(analysis.iterator_vars)
+
+        # Handle captured variables BEFORE compile_subgraph.
+        # For mutable objects (lists, dicts) that are captured by the comprehension,
+        # we need to ensure object identity is preserved - the same object must be:
+        # 1. Stored to the local slot (for comprehension access via LOAD_FAST)
+        # 2. Passed to the resume function (so mutations are visible)
+        #
+        # For variables without LocalSource, compile_subgraph would reconstruct them
+        # (creating a NEW object), and we'd also reconstruct them here (another new
+        # object). These would be different objects, breaking mutation semantics.
+        #
+        # Solution: For captured variables without LocalSource, we:
+        # 1. Reconstruct them ONCE and store to local slot (before compile_subgraph)
+        # 2. Set their source to LocalSource so compile_subgraph loads from local slot
+        # This ensures the same object is used everywhere.
+        pre_subgraph_insts = []
+        if analysis.captured_vars:
+            from .bytecode_transformation import create_instruction, create_load_const
+            from .codegen import PyCodegen
+            from .source import LocalSource
+            from .utils import is_safe_constant
+            from .variables.tensor import SymNodeVariable, TensorVariable
+
+            cg = PyCodegen(self)
+            cg.value_from_source = False  # Don't try to load from source
+
+            for var_name in analysis.captured_vars:
+                if var_name in self.symbolic_locals:
+                    var = self.symbolic_locals[var_name]
+
+                    if isinstance(var, (TensorVariable, SymNodeVariable)):
+                        continue
+
+                    if (
+                        isinstance(var.source, LocalSource)
+                        and var.source.local_name == var_name
+                    ):
+                        continue
+
+                    # For python constants, use create_load_const directly
+                    if var.is_python_constant():
+                        const_val = var.as_python_constant()
+                        if is_safe_constant(const_val):
+                            cg.append_output(create_load_const(const_val))
+                            cg.append_output(
+                                create_instruction("STORE_FAST", argval=var_name)
+                            )
+                            # Set LocalSource so compile_subgraph loads from local slot
+                            var.source = LocalSource(var_name)
+                            continue
+
+                    # For other variable types (lists, dicts, etc.)
+                    # Reconstruct once, store to local slot, set LocalSource
+                    cg(var)
+                    cg.append_output(create_instruction("STORE_FAST", argval=var_name))
+                    # Update source so compile_subgraph loads from local slot
+                    var.source = LocalSource(var_name)
+
+            pre_subgraph_insts = cg.get_instructions()
+
+        # Add pre-subgraph instructions that store captured variables to local slots
+        if pre_subgraph_insts:
+            self.output.add_output_instructions(pre_subgraph_insts)
+
+        all_stack_locals_metadata = self.output.compile_subgraph(
+            self,
+            reason=reason,
+            stack_pops=stack_pops,
+        )
+
+        # Now pop from symbolic stack (matching stack_pops)
+        self.popn(stack_pops)
+
+        # Copy comprehension bytecode to output (runs eagerly)
+        inst_map: dict[Instruction, Instruction] = {}
+        copied_insts: list[Instruction] = []
+
+        for ip in range(start_ip, analysis.end_ip):
+            original_inst = self.instructions[ip]
+            copied_inst = copy.copy(original_inst)
+            copied_inst.exn_tab_entry = None  # Clear exception table
+            inst_map[original_inst] = copied_inst
+            copied_insts.append(copied_inst)
+
+        for copied_inst in copied_insts:
+            if copied_inst.target is not None and copied_inst.target in inst_map:
+                copied_inst.target = inst_map[copied_inst.target]
+
+        self.output.add_output_instructions(copied_insts)
+
+        meta = all_stack_locals_metadata[0]
+
+        from .variables.misc import UnknownVariable
+
+        vars_to_pass: list[str] = []
+        if analysis.result_disposition == "stored" and analysis.result_var is not None:
+            vars_to_pass.append(analysis.result_var)
+        vars_to_pass.extend(analysis.walrus_vars)
+
+        if analysis.result_disposition == "discarded":
+            # Result is discarded (POP_TOP) - nothing to pass to resume
+            pass
+
+        elif analysis.result_disposition == "returned":
+            # Result is returned directly - the comprehension bytecode leaves result on stack
+            # and the resume instruction is RETURN_VALUE which will return it.
+            # Push a placeholder onto the symbolic stack to represent the result.
+            self.push(UnknownVariable())
+
+        elif analysis.result_disposition == "consumed":
+            # Result stays on stack and is consumed by next instruction (e.g., CALL)
+            # Push a placeholder onto the symbolic stack to represent the result.
+            self.push(UnknownVariable())
+
+        for var_name in vars_to_pass:
+            if var_name not in meta.locals_names:
+                meta.locals_names[var_name] = len(meta.locals_names)
+            self.symbolic_locals[var_name] = UnknownVariable()
+
+        from .bytecode_transformation import create_dup_top, create_instruction
+        from .codegen import PyCodegen
+
+        cg = PyCodegen(self)
+
+        for var_name in vars_to_pass:
+            # Stack: [..., frame_values_list]
+            cg.append_output(create_dup_top())
+            # Stack: [..., frame_values_list, frame_values_list]
+            cg.append_output(cg.create_load_const(0))
+            # Stack: [..., frame_values_list, frame_values_list, 0]
+            cg.append_output(cg.create_binary_subscr())
+            # Stack: [..., frame_values_list, frame_values_list[0]]
+            cg.append_output(create_instruction("LOAD_FAST", argval=var_name))
+            # Stack: [..., frame_values_list, frame_values_list[0], value]
+            # LIST_APPEND: append TOS to TOS[-2], pops TOS
+            cg.append_output(create_instruction("LIST_APPEND", arg=1))
+            # Stack: [..., frame_values_list, frame_values_list[0]]
+            # Pop the frame_values_list[0] reference
+            cg.append_output(create_instruction("POP_TOP"))
+            # Stack: [..., frame_values_list]
+
+        self.output.add_output_instructions(cg.get_instructions())
+
+        resume_inst = self.instructions[analysis.end_ip]
+        self.output.add_output_instructions(
+            self.create_call_resume_at(resume_inst, all_stack_locals_metadata)
+        )
+
+        self.output.should_exit = True
+        self.instruction_pointer = None
+
     def _make_frame_loc(
         self, filename: str, lineno: Optional[int], fallback_lineno: int
     ) -> tuple[str, int]:
@@ -4460,6 +5053,7 @@ class InstructionTranslatorBase(
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
         self.latest_bytecode_queue = deque(maxlen=20)
+        self._comprehension_depth = 0
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
