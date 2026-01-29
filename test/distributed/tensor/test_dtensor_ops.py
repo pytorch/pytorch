@@ -7,6 +7,7 @@ import unittest
 import warnings
 
 import torch
+import torch._dynamo
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
 from torch.distributed._local_tensor import LocalTensorMode, reconcile_args
@@ -24,6 +25,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
+from torch.testing._internal.common_ops_unbacked import ops_dde_xfail, ops_unbacked_skip
 from torch.testing._internal.common_utils import run_tests, suppress_warnings, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
@@ -32,7 +34,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._debug_mode import _OpCall, DebugMode
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_flatten, tree_map
 
 
 # rewrite common size variables to sth can be sharded evenly
@@ -539,26 +541,50 @@ class TestDTensorOps(TestCase):
     def world_size(self) -> int:
         return OP_DB_WORLD_SIZE
 
-    def run_opinfo_test(
-        self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
+    def iter_valid_samples(
+        self,
+        op,
+        dtype,
+        requires_grad=False,
+        sample_filter=None,
+        needs_deepcopy=False,
     ):
+        """
+        Iterate over valid samples for an op, yielding (args, kwargs) tuples.
+
+        Args:
+            op: The OpInfo object
+            dtype: The dtype to use for sample inputs
+            requires_grad: Whether tensors should require grad
+            sample_filter: Optional callable(args, kwargs) -> bool to filter samples
+            needs_deepcopy: If True, yields deepcopied args/kwargs and skips
+                            samples that can't be deepcopied
+        """
+        samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+
+            if sample_filter and not sample_filter(args, kwargs):
+                continue
+
+            if needs_deepcopy:
+                try:
+                    args = copy.deepcopy(args)
+                    kwargs = copy.deepcopy(kwargs)
+                except NotImplementedError:
+                    continue
+
+            yield args, kwargs
+
+    def run_opinfo_test(self, dtype, op, requires_grad=True, sample_filter=None):
         self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
 
-        # test each op with dist tensor inputs and normal inputs
         def test():
-            samples = op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=requires_grad)
-            for sample_input in samples:
-                if not sample_inputs_filter(sample_input):
-                    continue
-                args = [sample_input.input] + list(sample_input.args)
-                kwargs = sample_input.kwargs
-
+            for args, kwargs in self.iter_valid_samples(
+                op, dtype, requires_grad=requires_grad, sample_filter=sample_filter
+            ):
                 self.run_dtensor_crossref(op.op, args, kwargs)
-                # we need to figure out a way to test the out variant, out variant testing
-                # is tricky, as we need to pre allocate the dtensor out, some of them rely
-                # on sharding placements to be pre-known (i.e. mm.out)
-                # if isinstance(expected, torch.Tensor) and op.supports_out:
-                #     func(*args, **kwargs, out=expected)
 
         self.check_dtensor_func(test, op)
 
@@ -688,7 +714,7 @@ class TestDTensorOps(TestCase):
             torch.int64,
             op,
             requires_grad=False,
-            sample_inputs_filter=lambda s: s.kwargs["num_classes"] != -1,
+            sample_filter=lambda args, kwargs: kwargs.get("num_classes") != -1,
         )
 
     def run_mean(self):
@@ -803,14 +829,363 @@ class TestLocalDTensorOps(TestDTensorOps):
     def test_one_hot(self):
         self.run_one_hot()
 
-    def run_opinfo_test(
-        self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
-    ):
+    def run_opinfo_test(self, dtype, op, requires_grad=True, sample_filter=None):
         with LocalTensorMode(frozenset(range(self.world_size))):
-            super().run_opinfo_test(dtype, op, requires_grad, sample_inputs_filter)
+            super().run_opinfo_test(dtype, op, requires_grad, sample_filter)
 
     def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
         self.assertEqual(x, y, msg)
+
+
+# Ops where DTensor shard prop has DDEs with unbacked (base tensor passes).
+# This list only contains ops NOT in ops_dde_xfail - those are base tensor issues.
+ops_unbacked_dtensor_dde = {
+    xfail("__radd__"),
+    xfail("__rdiv__"),
+    xfail("__rmatmul__"),
+    xfail("__rmod__"),
+    xfail("__rmul__"),
+    xfail("__rpow__"),
+    xfail("_softmax_backward_data"),
+    xfail("abs"),
+    xfail("acos"),
+    xfail("acosh"),
+    xfail("add"),
+    xfail("addcdiv"),
+    xfail("addcmul"),
+    xfail("addmm"),
+    xfail("addmm", "decomposed"),
+    xfail("angle"),
+    xfail("argmax"),
+    xfail("argmin"),
+    xfail("argsort"),
+    xfail("as_strided"),
+    xfail("as_strided", "partial_views"),
+    xfail("asin"),
+    xfail("asinh"),
+    xfail("atan"),
+    xfail("atan2"),
+    xfail("atanh"),
+    xfail("atleast_1d"),
+    xfail("atleast_2d"),
+    xfail("atleast_3d"),
+    xfail("bmm"),
+    xfail("broadcast_tensors"),
+    xfail("broadcast_to"),
+    xfail("bucketize"),
+    xfail("cartesian_prod"),
+    xfail("cat"),
+    xfail("ceil"),
+    xfail("clamp"),
+    xfail("clamp_max"),
+    xfail("clamp_min"),
+    xfail("clone"),
+    xfail("column_stack"),
+    xfail("conj"),
+    xfail("conj_physical"),
+    xfail("constant_pad_nd"),
+    xfail("contiguous"),
+    xfail("copysign"),
+    xfail("cos"),
+    xfail("cosh"),
+    xfail("cumsum"),
+    xfail("deg2rad"),
+    xfail("diag"),
+    xfail("diagflat"),
+    xfail("digamma"),
+    xfail("div", "floor_rounding"),
+    xfail("div", "no_rounding_mode"),
+    xfail("div", "trunc_rounding"),
+    xfail("dot"),
+    xfail("dstack"),
+    xfail("einsum"),
+    xfail("eq"),
+    xfail("erf"),
+    xfail("erfc"),
+    xfail("erfinv"),
+    xfail("exp"),
+    xfail("exp2"),
+    xfail("expand"),
+    xfail("expand_as"),
+    xfail("expm1"),
+    xfail("flatten"),
+    xfail("float_power"),
+    xfail("floor"),
+    xfail("fmax"),
+    xfail("fmin"),
+    xfail("fmod"),
+    xfail("frac"),
+    xfail("gather"),
+    xfail("ge"),
+    xfail("gt"),
+    xfail("H"),
+    xfail("heaviside"),
+    xfail("histc"),
+    xfail("hstack"),
+    xfail("hypot"),
+    xfail("igamma"),
+    xfail("igammac"),
+    xfail("index_put"),
+    xfail("ldexp"),
+    xfail("le"),
+    xfail("lerp"),
+    xfail("lgamma"),
+    xfail("log"),
+    xfail("log10"),
+    xfail("log1p"),
+    xfail("log2"),
+    xfail("logaddexp"),
+    xfail("logaddexp2"),
+    xfail("logical_and"),
+    xfail("logical_not"),
+    xfail("logical_or"),
+    xfail("logical_xor"),
+    xfail("logit"),
+    xfail("lt"),
+    xfail("masked.normalize"),
+    xfail("masked_fill"),
+    xfail("matmul"),
+    xfail("max", "binary"),
+    xfail("max", "reduction_no_dim"),
+    xfail("max", "reduction_with_dim"),
+    xfail("maximum"),
+    xfail("meshgrid", "list_of_tensors"),
+    xfail("meshgrid", "variadic_tensors"),
+    xfail("mH"),
+    xfail("min", "binary"),
+    xfail("min", "reduction_no_dim"),
+    xfail("min", "reduction_with_dim"),
+    xfail("minimum"),
+    xfail("mm"),
+    xfail("movedim"),
+    xfail("msort"),
+    xfail("mT"),
+    xfail("mul"),
+    xfail("mvlgamma", "mvlgamma_p_1"),
+    xfail("mvlgamma", "mvlgamma_p_3"),
+    xfail("mvlgamma", "mvlgamma_p_5"),
+    xfail("nan_to_num"),
+    xfail("narrow"),
+    xfail("native_dropout_backward"),
+    xfail("neg"),
+    xfail("new_empty"),
+    xfail("new_empty_strided"),
+    xfail("new_full"),
+    xfail("new_ones"),
+    xfail("new_zeros"),
+    xfail("nextafter"),
+    xfail("nn.functional.cosine_embedding_loss"),
+    xfail("nn.functional.linear"),
+    xfail("nn.functional.margin_ranking_loss"),
+    xfail("nn.functional.multi_margin_loss"),
+    xfail("nn.functional.normalize"),
+    xfail("nn.functional.poisson_nll_loss"),
+    xfail("nn.functional.relu"),
+    xfail("nn.functional.silu"),
+    xfail("nn.functional.softsign"),
+    xfail("nn.functional.tanhshrink"),
+    xfail("nn.functional.triplet_margin_loss"),
+    xfail("nn.functional.triplet_margin_with_distance_loss"),
+    xfail("nonzero_static"),
+    xfail("outer"),
+    xfail("permute"),
+    xfail("positive"),
+    xfail("pow"),
+    xfail("rad2deg"),
+    xfail("ravel"),
+    xfail("real"),
+    xfail("reciprocal"),
+    xfail("remainder"),
+    xfail("reshape"),
+    xfail("reshape_as"),
+    xfail("resolve_conj"),
+    xfail("resolve_neg"),
+    xfail("round"),
+    xfail("round", "decimals_0"),
+    xfail("round", "decimals_3"),
+    xfail("round", "decimals_neg_3"),
+    xfail("rsqrt"),
+    xfail("select"),
+    xfail("sgn"),
+    xfail("sigmoid"),
+    xfail("sign"),
+    xfail("signbit"),
+    xfail("sin"),
+    xfail("sinc"),
+    xfail("sinh"),
+    xfail("slice"),
+    xfail("slice_scatter"),
+    xfail("sort"),
+    xfail("special.ndtr"),
+    xfail("split_with_sizes"),
+    xfail("split_with_sizes_copy"),
+    xfail("sqrt"),
+    xfail("square"),
+    xfail("squeeze"),
+    xfail("std"),
+    xfail("std", "unbiased"),
+    xfail("sub"),
+    xfail("T"),
+    xfail("tan"),
+    xfail("tanh"),
+    xfail("to"),
+    xfail("topk"),
+    xfail("torch.ops.aten._safe_softmax.default"),
+    xfail("transpose_copy"),
+    xfail("tril"),
+    xfail("triu"),
+    xfail("true_divide"),
+    xfail("trunc"),
+    xfail("unsqueeze"),
+    xfail("unsqueeze_copy"),
+    xfail("var"),
+    xfail("var", "unbiased"),
+    xfail("view"),
+    xfail("view_as"),
+    xfail("vstack"),
+    xfail("where"),
+    xfail("xlogy"),
+}
+
+
+class TestUnbackedDTensorOps(TestDTensorOps):
+    """
+    Test suite for DTensor ops with unbacked symints.
+
+    This runs the same correctness tests as TestLocalDTensorOps, but with
+    tensor dimensions marked as unbacked and the op compiled with fullgraph=True.
+    This catches data-dependent errors (DDEs) that occur during tracing.
+
+    The test expects all ops that fail in dtensor_fails to also fail here,
+    plus additional ops that have DDEs with unbacked dimensions.
+    """
+
+    _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestUnbackedDTensorOps")
+
+    def setUp(self) -> None:
+        super().setUp()
+        dist.init_process_group("fake", rank=0, world_size=self.world_size)
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+
+    def tearDown(self):
+        super().tearDown()
+        # Clear sharding propagation cache to avoid stale mesh references
+        from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+
+        _clear_sharding_prop_cache()
+        try:
+            dist.destroy_process_group()
+        except AssertionError:
+            pass
+
+    def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
+        self.assertEqual(x, y, msg)
+
+    def _has_valid_unbacked_dims(self, t: torch.Tensor) -> bool:
+        """Check if tensor has dimensions that can be marked as unbacked."""
+        return t.ndim > 0 and any(s >= 2 for s in t.shape)
+
+    def _sample_has_valid_unbacked_dims(self, args, kwargs) -> bool:
+        """Check if any tensor in args/kwargs has valid unbacked dimensions."""
+        all_tensors = [
+            x for x in tree_flatten((args, kwargs))[0] if isinstance(x, torch.Tensor)
+        ]
+        return any(self._has_valid_unbacked_dims(t) for t in all_tensors)
+
+    def _mark_unbacked(self, t: torch.Tensor) -> None:
+        """Mark all eligible dimensions of a tensor as unbacked."""
+        for i in range(t.ndim):
+            if t.shape[i] >= 2:
+                torch._dynamo.decorators.mark_unbacked(t, i)
+
+    def run_dtensor_crossref(self, func, args, kwargs):
+        """
+        Override to add unbacked marking and fullgraph compilation.
+
+        Same as parent but:
+        1. Marks DTensor dimensions as unbacked before running
+        2. Wraps the op in @torch.compile(backend="eager", fullgraph=True)
+        """
+        to_dtensor = DTensorConverter(self.mesh, args, kwargs)
+
+        def concat_res_if_necessary(func, res: object) -> object:
+            if (resolve_name(func) is not None) and ("split" in resolve_name(func)):
+                dim = args[2] if len(args) == 3 else 0
+                return torch.cat(res, dim=dim)
+            return res
+
+        op_args, op_kwargs = reconcile_args(args, kwargs)
+        rs = func(*op_args, **op_kwargs)
+        rs = concat_res_if_necessary(func, rs)
+
+        def to_replicate(e: object) -> object:
+            return e.full_tensor() if isinstance(e, DTensor) else e
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for dtensor_args, dtensor_kwargs in to_dtensor:
+                try:
+                    if not to_dtensor.successful():
+                        raise RuntimeError(
+                            f"Failed to convert args to DTensor; "
+                            f"originally (*{args}, **{kwargs})"
+                        )
+
+                    # Mark DTensor dimensions as unbacked
+                    def mark_unbacked_tree(x):
+                        if isinstance(x, DTensor) and self._has_valid_unbacked_dims(x):
+                            self._mark_unbacked(x)
+                        return x
+
+                    tree_map(mark_unbacked_tree, dtensor_args)
+                    tree_map(mark_unbacked_tree, dtensor_kwargs)
+
+                    # Compile with fullgraph=True to catch DDEs
+                    torch._dynamo.reset()
+
+                    @torch.compile(backend="eager", fullgraph=True)
+                    def compiled_func(*a, **kw):
+                        return func(*a, **kw)
+
+                    dtensor_rs = compiled_func(*dtensor_args, **dtensor_kwargs)
+
+                    flat_args = pytree.tree_leaves(dtensor_rs)
+                    if any(
+                        isinstance(e, torch.Tensor) and e.numel() == 0
+                        for e in flat_args
+                    ):
+                        continue
+
+                    dtensor_rs = tree_map(to_replicate, dtensor_rs)
+                    dtensor_rs = concat_res_if_necessary(func, dtensor_rs)
+
+                    # Skip backward for unbacked test (complex interaction with compile)
+
+                    self.assert_ref_dtensor_equal(dtensor_rs, rs)
+
+                except Exception as e:
+                    raise RuntimeError(
+                        f"{str(e)}\n\nFailed to run: {resolve_name(func)}, "
+                        f"with (*{dtensor_args}, **{dtensor_kwargs})"
+                    ) from e
+        return rs
+
+    @suppress_warnings
+    @ops(_op_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        _op_db,
+        "TestUnbackedDTensorOps",
+        "test_unbacked_dtensor_op_db",
+        dtensor_fails | ops_dde_xfail | ops_unbacked_dtensor_dde | ops_unbacked_skip,
+    )
+    def test_unbacked_dtensor_op_db(self, dtype, op):
+        # Filter to samples with valid unbacked dimensions
+        self.run_opinfo_test(
+            dtype,
+            op,
+            requires_grad=False,
+            sample_filter=self._sample_has_valid_unbacked_dims,
+        )
 
 
 class TestSingleDimStrategies(DTensorOpTestBase):
@@ -929,6 +1304,10 @@ instantiate_device_type_tests(
 )
 
 instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=(DEVICE_TYPE,))
+
+instantiate_device_type_tests(
+    TestUnbackedDTensorOps, globals(), only_for=(DEVICE_TYPE,)
+)
 
 instantiate_device_type_tests(
     TestSingleDimStrategies, globals(), only_for=(DEVICE_TYPE,)
