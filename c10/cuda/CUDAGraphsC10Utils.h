@@ -1,8 +1,10 @@
 #pragma once
 
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
+
 #include <iostream>
-#include <utility>
+#include <optional>
 
 // CUDA Graphs utils used by c10 and aten.
 // aten/cuda/CUDAGraphsUtils.cuh adds utils used by aten only.
@@ -71,6 +73,37 @@ inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
   C10_CUDA_CHECK(
       cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &is_capturing));
   return CaptureStatus(is_capturing);
+}
+
+inline CaptureStatus getStreamCaptureStatus(
+    std::optional<cudaStream_t> stream = std::nullopt) {
+  cudaStream_t s = stream.value_or(
+      static_cast<cudaStream_t>(c10::cuda::getCurrentCUDAStream()));
+  cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+  // Use relaxed capture mode to allow querying during capture
+  CUDAStreamCaptureModeGuard guard{cudaStreamCaptureModeRelaxed};
+  C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
+  return CaptureStatus(status);
+}
+
+inline bool isStreamCapturing(
+    std::optional<cudaStream_t> stream = std::nullopt) {
+  return getStreamCaptureStatus(stream) == CaptureStatus::Active;
+}
+
+inline std::optional<CaptureId_t> getStreamCaptureId(
+    std::optional<cudaStream_t> stream = std::nullopt) {
+  cudaStream_t s = stream.value_or(
+      static_cast<cudaStream_t>(c10::cuda::getCurrentCUDAStream()));
+  cudaStreamCaptureStatus status{};
+  CaptureId_t capture_id = 0;
+  // Use relaxed capture mode to allow querying during capture
+  CUDAStreamCaptureModeGuard guard{cudaStreamCaptureModeRelaxed};
+  C10_CUDA_CHECK(cudaStreamGetCaptureInfo(s, &status, &capture_id));
+  if (status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive) {
+    return capture_id;
+  }
+  return std::nullopt;
 }
 
 } // namespace c10::cuda

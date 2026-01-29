@@ -102,6 +102,16 @@ inline getStreamFromPoolMasqueradingAsCUDA(const int priority, DeviceIndex devic
 }
 
 HIPStreamMasqueradingAsCUDA
+inline getNonCapturingStreamFromPoolMasqueradingAsCUDA(const bool isHighPriority = false, DeviceIndex device = -1) {
+  return HIPStreamMasqueradingAsCUDA(getNonCapturingStreamFromPool(isHighPriority, device));
+}
+
+HIPStreamMasqueradingAsCUDA
+inline getNonCapturingStreamFromPoolMasqueradingAsCUDA(const int priority, DeviceIndex device = -1) {
+  return HIPStreamMasqueradingAsCUDA(getNonCapturingStreamFromPool(priority, device));
+}
+
+HIPStreamMasqueradingAsCUDA
 inline getStreamFromExternalMasqueradingAsCUDA(hipStream_t ext_stream, DeviceIndex device) {
   return HIPStreamMasqueradingAsCUDA(getStreamFromExternal(ext_stream, device));
 }
