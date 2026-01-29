@@ -269,6 +269,7 @@ class OpsHandler(Generic[T]):
         dtypes: tuple[torch.dtype, ...],
         combine_fn: Callable[[tuple[T, ...], tuple[T, ...]], tuple[T, ...]],
         values: tuple[T, ...],
+        reverse: bool = False,
     ) -> tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
@@ -840,7 +841,7 @@ class NoopHandler(DefaultHandler):
         return (None, None)
 
     @staticmethod
-    def scan(dtypes, combine_fn, values) -> tuple[None, ...]:
+    def scan(dtypes, combine_fn, values, reverse) -> tuple[None, ...]:
         return (None,) * len(values)
 
     @staticmethod
@@ -949,9 +950,9 @@ class MockHandler(BasicMathOpsMixin, DefaultHandler):
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
     @staticmethod
-    def scan(dtypes, combine_fn, values):
+    def scan(dtypes, combine_fn, values, reverse):
         return tuple(
-            f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
+            f"ops.scan({dtypes}, {combine_fn}, {values}, {reverse})[{i}]"
             for i in range(len(values))
         )
 

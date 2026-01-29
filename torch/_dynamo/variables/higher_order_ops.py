@@ -2528,21 +2528,22 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         def arg_extractor(
             combine_fn: VariableTracker,
             xs: VariableTracker,
+            reverse: VariableTracker,
             additional_inputs: VariableTracker,
         ) -> tuple[VariableTracker, VariableTracker, VariableTracker]:
-            return combine_fn, xs, additional_inputs
+            return combine_fn, xs, reverse, additional_inputs
 
-        combine_fn, xs, additional_inputs = arg_extractor(*args, **kwargs)
+        combine_fn, xs, reverse, additional_inputs = arg_extractor(*args, **kwargs)
 
         if args[0].python_type() is functools.partial:
             # This is the standard case when the user calls the frontend
             # and the frontend invokes dynamo
-            if len(args) != 2:
+            if len(args) != 3:
                 unimplemented(
                     gb_type="torch.associative_scan: improper args",
                     context=f"args: {args}",
-                    explanation=f"torch.associative_scan expects 2 positional arguments (got {len(args)}) "
-                    "Usage: associative_scan(combine_fn, xs)",
+                    explanation=f"torch.associative_scan expects 3 positional arguments (got {len(args)}) "
+                    "Usage: associative_scan(combine_fn, xs, reverse)",
                     hints=[
                         *graph_break_hints.USER_ERROR,
                     ],
@@ -2736,6 +2737,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             make_attr(tx, combine_fn_name),
             xs_proxy,
+            reverse.as_proxy(),
             additional_inputs_proxy,
         )
 
