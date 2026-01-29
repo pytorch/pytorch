@@ -1,7 +1,7 @@
 {%- set upload_artifact_s3_action = "seemethere/upload-artifact-s3@v5" -%}
 {%- set download_artifact_s3_action = "seemethere/download-artifact-s3@v4" -%}
-{%- set upload_artifact_action = "actions/upload-artifact@v4.4.0" -%}
-{%- set download_artifact_action = "actions/download-artifact@v4.1.7" -%}
+{%- set upload_artifact_action = "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0" -%}
+{%- set download_artifact_action = "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0" -%}
 
 {%- set timeout_minutes = 240 -%}
 {%- set timeout_minutes_windows_binary = 360 -%}
@@ -80,7 +80,7 @@ concurrency:
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8  # v6.0.1
         with:
       {%- if branch %}
           ref: !{{ branch }}
