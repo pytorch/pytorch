@@ -635,7 +635,9 @@ class TestCutlassBackend(TestCase):
         a8 = torch.randn(m, k, device="cuda", dtype=torch.float16).to(
             torch.float8_e4m3fn
         )
-        b8 = torch.randn(k, n, device="cuda", dtype=torch.float16).to(torch.float8_e5m2)
+        b8 = torch.randn(k, n, device="cuda", dtype=torch.float16).to(
+            torch.float8_e5m2
+        )
         # _scaled_mm requires mat2 to be column-major
         b8 = b8.t().contiguous().t()
 
