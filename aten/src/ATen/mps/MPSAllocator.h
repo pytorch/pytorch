@@ -347,6 +347,15 @@ class MPSHeapAllocatorImpl {
 
   inline std::string format_size(uint64_t size) const;
 
+  // Required by c10::DeviceAllocator interface
+  bool initialized();
+  void emptyCache(c10::MempoolId_t mempool_id);
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(c10::DeviceIndex device);
+  void resetAccumulatedStats(c10::DeviceIndex device);
+  void resetPeakStats(c10::DeviceIndex device);
+  std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device);
+  void recordStream(const c10::DataPtr& ptr, c10::Stream stream);
+
  private:
   // (see m_high_watermark_ratio for description)
   constexpr static double default_high_watermark_ratio = 1.7;
@@ -369,6 +378,16 @@ class MPSHeapAllocatorImpl {
   size_t m_current_allocated_memory = 0;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size = 0;
+  // Peak in-use memory
+  size_t m_peak_allocated_memory = 0;
+  // Peak reserved memory
+  size_t m_peak_reserved_memory = 0;
+  // Total allocated bytes
+  size_t m_total_allocated_bytes = 0;
+  // Total freed bytes
+  size_t m_total_freed_bytes = 0;
+  // Initialization flag
+  bool m_initialized = false;
   // maximum total size allowed to be allocated
   size_t m_max_total_allowed_size = 0;
   // high watermark ratio is a hard limit for the total allowed allocations
