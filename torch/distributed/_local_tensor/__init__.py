@@ -1238,6 +1238,8 @@ class LocalTensorMode(TorchDispatchMode):
         self._per_rank_rng_states: dict[
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
+        # Cache for get_coordinate results, keyed by mesh id
+        self._coordinate_cache: dict[int, list[int]] = {}
 
     def __enter__(self) -> "LocalTensorMode":
         get_local_tensor_mode_list().append(self)
@@ -1562,6 +1564,11 @@ class _LocalDeviceMesh:
         lm = enabled_local_tensor_mode()
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
+        # Check cache first
+        mesh_id = id(self)
+        if mesh_id in lm._coordinate_cache:
+            return lm._coordinate_cache[mesh_id]
+
         coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
         # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
         # error when running under torch.inference_mode()
@@ -1574,6 +1581,8 @@ class _LocalDeviceMesh:
                 coords[d][r] = c
 
         out = [torch.SymInt(LocalIntNode(c)) for c in coords]
+        # Cache the result
+        lm._coordinate_cache[mesh_id] = out
         # The output contains coordinates for each of the ranks with respect to
         # their meshes formed from root mesh and selecting the same dimensions
         # as the current mesh.
