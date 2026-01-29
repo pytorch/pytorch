@@ -4157,6 +4157,7 @@ class SourcelessBuilder:
             assert getattr(value.__self__, value.__func__.__name__) == value
             cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
             try:
+                # tx is InstructionTranslatorBase, but var_getattr needs InstructionTranslator
                 # pyrefly: ignore[bad-argument-type]
                 return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
             except NotImplementedError:
