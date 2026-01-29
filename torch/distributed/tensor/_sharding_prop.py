@@ -110,6 +110,20 @@ class LocalLRUCache(threading.local):
         self.cache = lru_cache(None)(user_function)
 
     def __call__(self, *args, **kwargs) -> object:
+        if log.isEnabledFor(logging.DEBUG):
+            info_before = self.cache.cache_info()
+            result = self.cache(*args, **kwargs)
+            info_after = self.cache.cache_info()
+            cache_hit = info_after.hits > info_before.hits
+            op_schema = args[0] if args else None
+            output_spec = getattr(result, "output_spec", None)
+            log.debug(
+                "sharding_prop python cache %s: %s -> %s",
+                "HIT" if cache_hit else "MISS",
+                op_schema,
+                output_spec,
+            )
+            return result
         return self.cache(*args, **kwargs)
 
     def cache_info(self):

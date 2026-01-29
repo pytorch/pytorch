@@ -48,6 +48,7 @@
 #include <structmember.h>
 #include <cstdint>
 #include <memory>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -1124,6 +1125,37 @@ class NativeOpSchema {
     return hash_;
   }
 
+  const c10::OperatorHandle& op() const {
+    return op_;
+  }
+
+  const c10::SmallVector<IValueOrDTensorSpec, 8>& comparison_key() const {
+    return comparison_key_;
+  }
+
+  // Format schema as string for logging
+  std::string format_inputs() const {
+    std::ostringstream ss;
+    ss << op_.operator_name().name;
+    if (!op_.operator_name().overload_name.empty()) {
+      ss << "." << op_.operator_name().overload_name;
+    }
+    ss << "(";
+    bool first = true;
+    for (const auto& item : comparison_key_) {
+      if (!first)
+        ss << ", ";
+      first = false;
+      if (item.dtensor_spec) {
+        ss << py::str(item.dtensor_spec).cast<std::string>();
+      } else if (!item.iv.isNone()) {
+        ss << item.iv;
+      }
+    }
+    ss << ")";
+    return ss.str();
+  }
+
  private:
   // It would *not* be correct to store this by reference, because we
   // have no guarantees about its lifetime. This class is cheap anyway.
@@ -1155,6 +1187,48 @@ struct hash<NativeOpSchema> {
   }
 };
 } // namespace std
+
+// Helper to check if dtensor debug logging is enabled and log cache hits.
+// We cache the logger to avoid repeated Python calls.
+namespace {
+thread_local py::object dtensor_dispatch_logger;
+thread_local bool dtensor_dispatch_logger_initialized = false;
+
+py::object get_dtensor_dispatch_logger() {
+  if (!dtensor_dispatch_logger_initialized) {
+    dtensor_dispatch_logger_initialized = true;
+    try {
+      auto logging = py::module_::import("logging");
+      dtensor_dispatch_logger =
+          logging.attr("getLogger")("torch.distributed.tensor._dispatch");
+    } catch (...) {
+      dtensor_dispatch_logger = py::none();
+    }
+  }
+  return dtensor_dispatch_logger;
+}
+
+void log_sharding_prop_cache_hit(
+    const NativeOpSchema& schema,
+    const py::object& cached_sharding) {
+  auto logger = get_dtensor_dispatch_logger();
+  if (logger.is_none()) {
+    return;
+  }
+  auto logging = py::module_::import("logging");
+  if (!logger.attr("isEnabledFor")(logging.attr("DEBUG")).cast<bool>()) {
+    return;
+  }
+  std::ostringstream ss;
+  ss << "sharding_prop HIT (C++ fast path): ";
+  ss << schema.format_inputs();
+  auto output_spec = cached_sharding.attr("output_spec");
+  if (!output_spec.is_none()) {
+    ss << " -> " << py::str(output_spec).cast<std::string>();
+  }
+  logger.attr("debug")(ss.str());
+}
+} // namespace
 
 // Map from OpSchema to pyobject sharding propagation config.
 class NativeShardingPropagatorCache {
@@ -1497,6 +1571,9 @@ py::object dispatchDTensorOp(
           std::move(opt_native_op_schema->first), std::move(sharding));
     }
     py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
+  } else if (opt_native_op_schema.has_value()) {
+    // Cache hit - log it if debug logging is enabled
+    log_sharding_prop_cache_hit(opt_native_op_schema->first, cached_sharding);
   }
 
   const auto get_py_op_info_if_needed = [&, &args = args, &kwargs = kwargs]() {
