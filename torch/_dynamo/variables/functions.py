@@ -683,7 +683,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     key: val.as_python_constant() for key, val in kwargs.items()
                 }
                 out_val = const_fn(*const_args, **const_kwargs)
-                cls_source = AttrSource(ImportSource("inspect"), "Signature")
+                out_type = type(out_val)
+                # Build cls_source by chaining AttrSource for nested modules
+                # e.g., "a.b.c" -> AttrSource(AttrSource(ImportSource("a"), "b"), "c")
+                module_parts = out_type.__module__.split(".")
+                cls_source = ImportSource(module_parts[0])
+                for part in module_parts[1:]:
+                    cls_source = AttrSource(cls_source, part)
+                cls_source = AttrSource(cls_source, out_type.__name__)
                 return tx.output.side_effects.track_eagerly_created_new_user_defined_object(
                     UserDefinedObjectVariable(
                         out_val,
