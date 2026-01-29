@@ -327,7 +327,7 @@ def has_same_metadata(t1, t2):
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MetadataKey:
     """
     This should be equal whenever has_same_metadata would return True
