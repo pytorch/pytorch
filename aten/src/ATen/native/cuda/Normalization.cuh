@@ -1227,16 +1227,12 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
   int m_offset = blockIdx.y * blockDim.y + threadIdx.y;
   int c_offset = blockIdx.x * blockDim.x + threadIdx.x;
 
-  if (c_offset >= stride || m_offset >= reduction_size) {
-    return;
-  }
-
   int loop_count = 1 + (reduction_size - 1) / (inner_loop_stride * PARALLEL_LOADS);
   int address_base = m_offset * stride + c_offset;
   int address_increment = inner_loop_stride * stride;
 
-  auto r_mean = mean[c_offset];
-  auto factor = inv_std[c_offset];
+  auto r_mean = (c_offset < stride) ? mean[c_offset] : accscalar_t(0);
+  auto factor = (c_offset < stride) ? inv_std[c_offset] : accscalar_t(0);
 
   for (int i = 0; i < loop_count; i++) {
     accscalar_t x_input[PARALLEL_LOADS];
