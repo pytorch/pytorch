@@ -21,6 +21,7 @@ from torch.distributed.elastic.rendezvous.utils import (
     _try_parse_port,
     parse_rendezvous_endpoint,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 class UtilsTest(TestCase):
@@ -401,3 +402,7 @@ class PeriodicTimerTest(TestCase):
                 f"The interval between two function calls was {actual_call_interval} second(s) but "
                 f"expected to be at least {call_interval} second(s).",
             )
+
+
+if __name__ == "__main__":
+    run_tests()

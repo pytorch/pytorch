@@ -15,6 +15,7 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousInfo,
     RendezvousParameters,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 class RendezvousParametersTest(TestCase):
@@ -287,3 +288,7 @@ class RendezvousHandlerRegistryTest(TestCase):
             self._params.backend = "dummy_backend_2"
 
             self._registry.create_handler(self._params)
+
+
+if __name__ == "__main__":
+    run_tests()
