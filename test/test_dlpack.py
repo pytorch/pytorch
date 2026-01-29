@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     skipCUDAIfNotRocm,
     skipMeta,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -101,8 +102,9 @@ class TestTorchDlPack(TestCase):
             # DLPack protocol that establishes correct stream order
             # does not behave as expected on Jetson
             stream.synchronize()
-        stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
+        stream = torch.Stream()
+        acc = torch.accelerator.current_accelerator()
+        with torch.get_device_module(acc).stream(stream):
             z = from_dlpack(x)
         stream.synchronize()
         return z
@@ -799,6 +801,7 @@ class TestTorchDlPack(TestCase):
             functions=["test_dlpack_exchange_api"],
             verbose=False,
             with_cuda=device.startswith("cuda"),
+            with_sycl=device.startswith("xpu"),
         )
 
         # Run the comprehensive C++ test
