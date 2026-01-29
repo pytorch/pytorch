@@ -786,17 +786,33 @@ static void _wrap_outputs(
         bool use_zeros_like = is_differentiable && num_outputs > 1 &&
             (wrapped_output->is_nested() || output_is_dtensor);
         if (use_zeros_like && output_is_dtensor) {
+          // Strip "Backward" suffix from name for clearer user messaging.
+          // The autograd function's backward class is named "<Name>Backward",
+          // but users define "<Name>" in their code.
+          std::string node_name = cdata->name();
+          const std::string suffix = "Backward";
+          if (node_name.size() >= suffix.size() &&
+              node_name.compare(
+                  node_name.size() - suffix.size(), suffix.size(), suffix) ==
+                  0) {
+            node_name =
+                node_name.substr(0, node_name.size() - suffix.size());
+          }
           TORCH_WARN_ONCE(
               "Autograd is calling zeros_like() on a DTensor to materialize "
-              "the gradient for an unused output in ",
-              cdata->name(),
-              ". This preserves the DTensor type but may have performance "
-              "implications. To avoid this: (1) call "
-              "ctx.set_materialize_grads(False) in forward() (only works when "
-              "the autograd.Function is not compiled with torch.compile), "
-              "(2) detach unused outputs before returning from forward() "
-              "(required if torch.compile() may be used), and (3) handle None "
-              "gradients in backward() instead of relying on zero tensors.");
+              "the gradient for an unused output in autograd.Function '",
+              node_name,
+              "'. This preserves the DTensor type but may have performance "
+              "implications. To avoid this:\n"
+              "(1) In eager mode (i.e., the function name is not "
+              "'CompiledFunction' or 'ApplyTemplate'): One of the "
+              "autograd.Function's outputs is unused. Call "
+              "ctx.set_materialize_grads(False) in forward() and handle None "
+              "gradients in backward().\n"
+              "(2) In compile mode: One of the compiled region's outputs is "
+              "unused. Call detach() on unused outputs that are returned from "
+              "the compiled region, whether explicitly or implicitly (e.g., "
+              "saved as a global).");
         }
         self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
