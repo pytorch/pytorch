@@ -1,7 +1,7 @@
 import typing
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Generic, overload, TypeAlias, TypeVar
+from typing import Any, Generic, overload, TypeAlias, TypeVar
 from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
 
 import torch
@@ -88,7 +88,7 @@ class FlatApply(HigherOrderOperator):
     def __call__(
         self,
         func: _OpTypes | pytree.TreeSpec,
-        in_spec: pytree.TreeSpec,
+        in_spec: pytree.TreeSpec | None,
         *flat_args: Unpack[_Ts],
         # If True then the output is checked to be valid. If False then it is up
         # to the caller to ensure the output is appropriate.
@@ -114,9 +114,15 @@ class FlatApply(HigherOrderOperator):
         - an input type is a constant type (i.e. torch.compile will specialize on it)
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
+
+        If in_spec is None, flat_args are passed directly to func without unflattening.
         """
-        assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
-        assert len(_unused) == 0
+        if not (isinstance(func, _op_types) or pytree._is_constant_holder(func)):
+            raise AssertionError(
+                f"func must be an op type or constant holder, got {type(func)}"
+            )
+        if len(_unused) != 0:
+            raise AssertionError(f"unexpected keyword arguments: {_unused}")
         # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
         return impl(func, in_spec, flat_args, checked_output)
 
@@ -137,25 +143,33 @@ def is_valid_output(x: object) -> bool:
 
 def impl(
     func: _OpTypes | pytree.TreeSpec,
-    in_spec: pytree.TreeSpec,
+    in_spec: pytree.TreeSpec | None,
     flat_args: tuple[Unpack[_Ts]],
     checked_output: bool,
 ) -> _FXOutput:
     if isinstance(func, pytree.TreeSpec):
         # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
-        assert isinstance(func, _ConstantFunction)
+        if not isinstance(func, _ConstantFunction):
+            raise AssertionError(
+                f"expected retrieved constant to be _ConstantFunction, got {type(func)}"
+            )
 
-    from torch._higher_order_ops.invoke_leaf_function import reconstruct_original_args
-
-    # Reconstruct args/kwargs from flat_args and process any LeafModuleState objects
-    with reconstruct_original_args(in_spec, flat_args) as (args, kwargs):
-        out = func(*args, **kwargs)
+    if in_spec is None:
+        # Pass through flat_args directly without unflattening
+        args: tuple[Any, ...] | list[Any] = flat_args
+        kwargs: dict[str, Any] = {}
+    else:
+        args, kwargs = pytree.tree_unflatten(list(flat_args), in_spec)
+    out = func(*args, **kwargs)
 
     if checked_output:
         # For "normal" usage all outputs must either be graphable or
         # lists/tuples of graphables.
-        assert is_valid_output(out)
+        if not is_valid_output(out):
+            raise AssertionError(
+                f"output must be graphable or nested list/tuple of graphables, got {type(out)}"
+            )
     return out
 
 

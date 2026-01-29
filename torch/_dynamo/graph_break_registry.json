@@ -1713,6 +1713,20 @@
       "Hints": []
     }
   ],
+  "GB9672": [
+    {
+      "Gb_type": "unsupported type.__dict__['{attr_name}'].__get__ call",
+      "Context": "call_function {self}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "`torch.compile` only supports calling type.__dict__['{attr_name}'].__get__ on a single constant argument (i.e. a type).",
+      "Hints": [
+        "Make sure your call to type.__dict__['{attr_name}'].__get__ only has ",
+        "one positional argument (no keyword arguments).",
+        "Make sure the argument to type.__dict__['{attr_name}'].__get__ is a constant ",
+        "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0149": [
     {
       "Gb_type": "Unsupported functorch tracing attempt",

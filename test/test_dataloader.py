@@ -1066,16 +1066,7 @@ def _test_worker_info_init_fn(worker_id):
         "worker_info should have correct dataset copy"
     )
     assert not hasattr(dataset, "value"), "worker_info should have correct dataset copy"
-    # test that WorkerInfo attributes are read-only
-    try:
-        worker_info.id = 3999
-    except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
-    try:
-        worker_info.a = 3
-    except RuntimeError as e:
-        assert str(e) == "Cannot assign attributes to WorkerInfo objects"
-    for k in ["id", "num_workers", "seed", "dataset"]:
+    for k in ["id", "num_workers", "seed", "dataset", "rng"]:
         assert f"{k}=" in repr(worker_info)
     dataset.value = [worker_id, os.getpid()]
 

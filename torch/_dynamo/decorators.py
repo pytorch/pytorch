@@ -226,20 +226,17 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     - Global/captured tensors treated as constants (assumed not updated during execution)
 
     Note:
+        - With ``backend="eager"``, the original Python function runs directly.
+          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
+          With ``backend="inductor"``, the traced graph is compiled with inductor.
+
         - Training is supported: you can call ``.backward()`` on outputs and gradients
           will flow through the nonstrict-traced function.
 
-        - ``nn.Module`` can be passed as an input argument. The module's parameters
-          and buffers will be properly tracked for autograd.
-
-        - With ``backend="eager"``, the original Python function runs directly.
-          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
-          With ``backend="inductor"``, the traced graph is compiled.
-
     Dangerous patterns (may cause silent incorrectness):
-        - Side effects: Don't rely on side effects for correctness. The function
-          should not depend on variables mutated by other code inside the compiled
-          function, and code after the call should not depend on mutations made by it.
+        - Side effects between nonstric_traced fn and compiled region: The function should
+          not depend on variables mutated by other code inside the compiled function, and code
+          after the call should not depend on mutations made by it.
 
         - Implicit inputs (closures/globals): Tensors captured from enclosing scopes
           are treated as constants. Gradients will NOT flow back to them. Pass tensors
@@ -251,34 +248,32 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
           :func:`torch.utils._pytree.register_dataclass`, or
           :func:`torch.utils._pytree.register_constant`. Tensors, Python primitives (int, float, bool, str),
           symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
-          tuple, dict) are already handled by default. Primitive values and container
-          structure are specialized per call site: different call sites can use different
-          values, but each call site expects the same primitives and structure on every
-          execution.
+          tuple, dict) are already handled by default.
+        - Primitive values and container structure are specialized per call site:
+          each call site expects the same primitives and structure on every execution.
 
     Example::
 
-        @torch._dynamo.nonstrict_trace
-        def traced_forward(model, x):
-            # Graph breaks are allowed inside during dynamo tracing
-            torch._dynamo.graph_break()
-            return model(x) + x
-
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.inner = torch.nn.Linear(10, 10)
-
-            def forward(self, x):
-                return traced_forward(self.inner, x)
-
-
-        # Compile and run
-        model = MyModule()
-        opt_model = torch.compile(model, backend="aot_eager")
-        out = opt_model(torch.randn(10, 10))
-        out.sum().backward()  # Gradients flow through traced_forward
+        >>> import torch
+        >>> @torch._dynamo.nonstrict_trace
+        ... def traced_forward(model, x):
+        ...     # It's OK to have dynamo graph break within nonstrict_trace region
+        ...     torch._dynamo.graph_break()
+        ...     return model(x) + x
+        ...
+        >>> class MyModule(torch.nn.Module):
+        ...     def __init__(self):
+        ...         super().__init__()
+        ...         self.inner = torch.nn.Linear(10, 10)
+        ...
+        ...     def forward(self, x):
+        ...         return traced_forward(self.inner, x)
+        ...
+        >>> # Compile and run
+        >>> model = MyModule()
+        >>> opt_model = torch.compile(model, backend="aot_eager", fullgraph=True)
+        >>> out = opt_model(torch.randn(10, 10))
+        >>> out.sum().backward()  # Gradients flow through traced_forward
 
     """
     assert callable(traceable_fn), "nonstrict_trace expects a callable"
@@ -411,25 +406,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # At runtime: real function runs (counter increments to 1, 2, 3, ...)
             # But returned count is always 999 (from fake implementation at compile time)
 
-            # BAD: primitive output varies at runtime
-            counter = 0
-
-
-            @leaf_function
-            def count_calls(x):
-                global counter
-                counter += 1
-                return (x, counter)
-
-
-            @count_calls.register_fake
-            def count_calls_fake(x):
-                return (x, 999)  # placeholder value
-
-
-            # At runtime: real function runs (counter increments to 1, 2, 3, ...)
-            # But returned count is always 999 (from register_fake at compile time)
-
         - User-defined classes must be registered via :func:`torch.utils._pytree.register_pytree_node`,
         :func:`torch.utils._pytree.register_dataclass`, or :func:`torch.utils._pytree.register_constant`.
 
@@ -443,7 +419,7 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         satisfy the following requirements:
 
         - Must have the same input and output signature (e.g., same pytree structure, same tensor metadata
-          such as shapes, dtypes, device, strides) as the real function
+          such as shapes, dtypes, device, strides, requires_grad) as the real function
         - Must be runnable with FakeTensor inputs
         - Must only use its explicit arguments (no closures over tensors or modules)
 
@@ -585,47 +561,39 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             >>> out = compiled(x)[0]
             >>> out.sum().backward()  # Gradients flow to model.linear.weight/bias and x
 
-        # Example 3: nn.Module method calling external library
-        # External code that AOT autograd cannot trace
-        class ExternalLibModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
+        Wrapping a forward_pre_hook with runtime logging. Note that both the hook
+        and the forward method should be decorated with ``@leaf_function``::
 
-            def forward(self, x):
-                return self.process_with_external(x)
-
-            @leaf_function
-            def process_with_external(self, x):
-                out = self.linear(x)
-                # Hypothetical external library call that AOT can't trace
-                # result = external_lib.process(out)
-                return (out,)
-
-            @process_with_external.fake_impl
-            def process_with_external_fake(self, x):
-                return (self.linear(x),)
-
-        # Example 4: forward_pre_hook with runtime logging
-        # Hooks with side effects that should run at runtime
-        @leaf_function
-        def logging_pre_hook(module, args):
-            x = args[0]
-            print(f"Pre-hook: input shape={x.shape}, mean={x.mean().item():.4f}")
-            return args
-
-        @logging_pre_hook.fake_impl
-        def logging_pre_hook_fake(module, args):
-            return args
-
-        class ModuleWithHook(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-                self.register_forward_pre_hook(logging_pre_hook)
-
-            def forward(self, x):
-                return (self.linear(x),)
+            >>> import torch
+            >>> from torch._dynamo.decorators import leaf_function
+            >>>
+            >>> @leaf_function
+            ... def logging_pre_hook(module, args):
+            ...     x = args[0]
+            ...     print(f"Pre-hook: input shape={x.shape}, mean={x.mean().item():.4f}")
+            ...     return args
+            ...
+            >>> @logging_pre_hook.register_fake
+            ... def logging_pre_hook_fake(module, args):
+            ...     return args
+            ...
+            >>> class ModuleWithHook(torch.nn.Module):
+            ...     def __init__(self):
+            ...         super().__init__()
+            ...         self.linear = torch.nn.Linear(10, 10)
+            ...         self.register_forward_pre_hook(logging_pre_hook)
+            ...     @leaf_function
+            ...     def forward(self, x):
+            ...         return (self.linear(x),)
+            ...     @forward.register_fake
+            ...     def forward_fake
+            ...     def forward_fake(self, x):
+            ...         return (self.linear(x),)
+            ...
+            >>> model = ModuleWithHook()
+            >>> compiled = torch.compile(model, backend="aot_eager", fullgraph=True)
+            >>> x = torch.randn(32, 10)
+            >>> out = compiled(x)
 
     Args:
         fn: The function being decorated.
