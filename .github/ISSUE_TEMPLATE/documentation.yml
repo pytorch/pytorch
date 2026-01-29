@@ -11,6 +11,7 @@ body:
     value: >
       #### Note: Please report your documentation issue in English to ensure it can be understood and addressed by the development team.
 - type: textarea
+  id: doc-issue
   attributes:
     label: 📚 The doc issue
     description: >
@@ -18,6 +19,7 @@ body:
   validations:
     required: true
 - type: textarea
+  id: suggested-fix
   attributes:
     label: Suggest a potential alternative/fix
     description: >
