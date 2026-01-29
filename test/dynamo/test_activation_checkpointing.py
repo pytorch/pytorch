@@ -1814,38 +1814,44 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         fwd_graph = aot_graphs[0]
         op1 = torch.ops.aten._scaled_dot_product_flash_attention.default
         op2 = torch.ops.aten._scaled_dot_product_cudnn_attention.default
-        self.assertTrue(
+        try:
+            self.assertTrue(
             count_ops(
                 fwd_graph,
                 [],
                 freq=1,
                 op=op1,
             )
-            or count_ops(
+            )
+        except AssertionError:
+            count_ops(
                 fwd_graph,
                 [],
                 freq=1,
                 op=op2,
             )
-        )
         bwd_graph = aot_graphs[1]
         # Check that sin is not recomputed in the backward graph - checks percolate tags
         self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
         # Check that the sdpa op is recomputed in the backward graph
-        self.assertTrue(
-            count_ops(
-                bwd_graph,
-                [],
-                freq=1,
-                op=op1,
-            )
-            or count_ops(
+        try:
+            self.assertTrue(
+                count_ops(
+                    bwd_graph,
+                    [],
+                    freq=1,
+                    op=op1,
+                )
+                )
+        except AssertionError:
+            self.assertTrue(
+                count_ops(
                 bwd_graph,
                 [],
                 freq=1,
                 op=op2,
             )
-        )
+            )
 
     @requires_distributed()
     @requires_cuda_and_triton
