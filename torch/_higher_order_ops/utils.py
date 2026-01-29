@@ -514,6 +514,7 @@ def _from_fun(t):
                 # which could be either FunctionalTensorWrapper or FunctionalTensor
                 torch._sync(t)
                 maybe_unfunc_t = torch._from_functional_tensor(t)
+            # pyrefly: ignore[missing-attribute]
             return maybe_unfunc_t.clone()
     return t
 

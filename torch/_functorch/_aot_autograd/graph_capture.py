@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module dispatches the graphs to either the forward-only or joint compilation
 pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
@@ -6,6 +5,7 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 
 import contextlib
 import dataclasses
+from collections.abc import Callable
 from typing import Any, Optional
 
 import torch
@@ -55,7 +55,7 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 def _create_graph(
-    f,
+    f: Callable[..., Any],
     args: list[torch.Tensor],
     args_descs: Optional[
         list[AOTInput]
@@ -72,7 +72,7 @@ def _create_graph(
     else:
 
         @simple_wraps(f)
-        def inner_f(*args):
+        def inner_f(*args: Any) -> Any:
             nonlocal out_descs
             assert out_descs is None
             out, out_descs = call_and_expect_output_descs(f, args)
@@ -147,9 +147,10 @@ def _create_graph(
 
 
 # TODO: Refactor the following code so detach() persists item_memo
-def _detach_and_copy_item_memo(t):
+def _detach_and_copy_item_memo(t: torch.Tensor) -> torch.Tensor:
     detached_t = t.detach()
     if hasattr(t, "item_memo"):
+        # pyrefly: ignore[missing-attribute]
         detached_t.item_memo = t.item_memo
     return detached_t
 
@@ -404,6 +405,7 @@ def aot_dispatch_autograd_graph(
     joint_fn_to_trace = create_joint(
         fn_prepared_for_autograd, flat_args_descs, aot_config=aot_config
     )
+    # pyrefly: ignore[missing-attribute]
     joint_fn_handle = joint_fn_to_trace.handle
 
     if aot_config.disable_functionalization:

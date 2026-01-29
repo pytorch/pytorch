@@ -146,7 +146,7 @@ implicit-any = true
 
 
 [[sub-config]]
-matches = "torch/_functorch/_aot_autograd/collect_metadata_analysis.py"
+matches = "torch/_functorch/_activation_checkpointing/remat_using_tags_for_fwd_loss_bwd_graph_pass.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true

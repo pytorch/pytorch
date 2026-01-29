@@ -1964,9 +1964,12 @@ def _export_to_aten_ir_make_fx(
         sig = GraphSignature(
             parameters=list(named_parameters),
             buffers=list(named_buffers),
+            # pyrefly: ignore[bad-argument-type]
             user_inputs=input_names[params_len:],
             user_outputs=output_names,
+            # pyrefly: ignore[no-matching-overload]
             inputs_to_parameters=dict(zip(input_names[0:param_len], named_parameters)),
+            # pyrefly: ignore[no-matching-overload]
             inputs_to_buffers=dict(
                 zip(input_names[param_len : param_len + buffer_len], named_buffers)
             ),

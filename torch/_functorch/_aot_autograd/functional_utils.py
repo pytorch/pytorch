@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This file contains utilities related to functionalization in AOTAutograd:
 1. converting to/from functional tensors
@@ -10,7 +9,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 from torch import Tensor
@@ -30,7 +29,7 @@ from torch.utils._python_dispatch import (
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
 
-def to_fun(t):
+def to_fun(t: object) -> Any:
     if isinstance(t, Tensor):
         if is_traceable_wrapper_subclass(t):
             # See Note [Functionalization always runs last]
@@ -46,7 +45,7 @@ def to_fun(t):
         return t
 
 
-def sync_functional_tensor(t):
+def sync_functional_tensor(t: torch.Tensor) -> None:
     if is_traceable_wrapper_subclass(t):
         attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
         for attr in attrs:
@@ -57,7 +56,7 @@ def sync_functional_tensor(t):
 
 # When subclasses are involved, t here will usually look something like:
 # SubclassA(SubclassB(FunctionalTensor(_to_fun_tensor(FakeTensor))))
-def from_fun(t):
+def from_fun(t: object) -> object:
     if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
         # See Note [Functionalization always runs last]
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
@@ -76,7 +75,7 @@ def from_fun(t):
     return torch._from_functional_tensor(t.elem)
 
 
-def is_fun(t):
+def is_fun(t: object) -> bool:
     if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
         # See Note [Functionalization always runs last]
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
@@ -96,7 +95,7 @@ def is_fun(t):
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
 # (2) A traceable tensor subclass that holds a FunctionalTensor
 # (3) Not a tensor
-def has_data_mutation(t):
+def has_data_mutation(t: object) -> bool:
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
         # A tensor subclass was updated if any of its inner elements were updated
@@ -108,7 +107,7 @@ def has_data_mutation(t):
         return False
 
 
-def are_all_mutations_hidden_from_autograd(t):
+def are_all_mutations_hidden_from_autograd(t: object) -> bool:
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
         # If all inner elements are mutations hidden from autograd, then it is a mutation hidden from autograd.
@@ -122,7 +121,7 @@ def are_all_mutations_hidden_from_autograd(t):
         return False
 
 
-def are_all_mutations_under_no_grad_or_inference_mode(t):
+def are_all_mutations_under_no_grad_or_inference_mode(t: torch.Tensor) -> bool:
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
         return all(
@@ -136,13 +135,14 @@ def are_all_mutations_under_no_grad_or_inference_mode(t):
         )
 
 
-def was_inductor_storage_resized(t):
+def was_inductor_storage_resized(t: object) -> bool:
     if is_traceable_wrapper_subclass(t):
         attrs, _ = t.__tensor_flatten__()
         if any(was_inductor_storage_resized(getattr(t, attr)) for attr in attrs):
             raise RuntimeError(
                 f"storage resizing is not supported on tensor subclass: {type(t)}"
             )
+        return False
     elif not isinstance(t, torch.Tensor):
         return False
     else:
@@ -158,7 +158,9 @@ def was_inductor_storage_resized(t):
 # Note: "storage mutations" coming from set_() are a type of metadata mutation. So:
 # - check_only_storage_mutation=True: only return true if there was a storage mutation
 # - check_only_storage_mutation=Flse: return true if there was any metadata mutation (including a storage mutation)
-def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
+def has_metadata_mutation(
+    f_arg: object, arg: object, *, check_only_storage_mutation: bool
+) -> bool:
     if is_traceable_wrapper_subclass(f_arg):
         attrs, _ = f_arg.__tensor_flatten__()
         # A tensor subclass was updated if any of its inner elements were updated
@@ -222,17 +224,17 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
 
 
 def gen_alias_from_base(
-    aliased_base_tensor,
-    target_meta_tensor,
-    target_requires_grad,
+    aliased_base_tensor: Tensor,
+    target_meta_tensor: Tensor,
+    target_requires_grad: bool,
     target_view_meta_sequence: ViewMetaSequence | None = None,
     *,
     replay_views: bool,
-):
+) -> Tensor:
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
     # and (ii) the concrete returned output does require grad or not.
-    def patch_requires_grad(out):
+    def patch_requires_grad(out: Tensor) -> Tensor:
         if aliased_base_tensor.requires_grad and not target_requires_grad:
             out = out.detach()
         elif not aliased_base_tensor.requires_grad and target_requires_grad:
@@ -279,7 +281,7 @@ def gen_alias_from_base(
             )
         else:
             reshaped_base_tensor = aliased_base_tensor
-        out = target_meta_tensor._view_func(reshaped_base_tensor)
+        out = target_meta_tensor._view_func(reshaped_base_tensor)  # type: ignore[attr-defined]
         # This shape mismatch can happen due to a bug in inplace/view handling in autograd.
         # Try putting a breakpoint here and running
         # `test/functorch/test_aotdispatch TestAOTAutograd.test_output_all_alias_types`
@@ -311,7 +313,7 @@ def gen_alias_from_base(
     return aliased_out
 
 
-def has_same_metadata(t1, t2):
+def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:
     return (
         guard_or_false(sym_eq(t1.size(), t2.size()))
         and guard_or_false(t1.layout == t2.layout)
@@ -343,7 +345,7 @@ class MetadataKey:
     is_neg: bool
 
     @staticmethod
-    def make(t):
+    def make(t: Tensor) -> MetadataKey:
         is_sparse = is_sparse_any(t)
         return MetadataKey(
             size=tuple(SymIntEqByExpr(s) for s in t.size()),
@@ -410,7 +412,7 @@ class ViewMetaSequence:
 # `from_fun(to_fun(x)) is x` will return False, because the call to `from_fun` constructs
 # a brand new subclass instance: we are calling __tensor_unflatten__, and going
 # from Subclass(FakeTensor) to Subclass(FunctionalTensor(FakeTensor))
-def was_tensor_updated(arg, new_arg):
+def was_tensor_updated(arg: torch.Tensor, new_arg: torch.Tensor) -> bool:
     if is_traceable_wrapper_subclass(arg):
         assert is_traceable_wrapper_subclass(new_arg)
         attrs, _ = arg.__tensor_flatten__()
@@ -432,7 +434,7 @@ def was_tensor_updated(arg, new_arg):
 # When we run functionalization and wrap our inputs into FunctionalTensors,
 # we can detect whether or not an input was mutated by checking to see if the inner tensor has changed,
 # but shares storage with the old input
-def was_tensor_metadata_updated(arg, new_arg):
+def was_tensor_metadata_updated(arg: Any, new_arg: Any) -> bool:
     if is_traceable_wrapper_subclass(arg):
         assert is_traceable_wrapper_subclass(new_arg)
         attrs, _ = arg.__tensor_flatten__()
@@ -511,14 +513,14 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
 
 def _check_if_mutation_can_be_in_graph(
     keep_input_mutations: bool,
-    mutates_data,
-    mutates_metadata,
-    mutations_hidden_from_autograd,
-    mutations_under_no_grad_or_inference_mode,
-    mutates_storage_metadata,
-    mutation_inductor_storage_resize,
-    requires_grad,
-):
+    mutates_data: bool,
+    mutates_metadata: bool,
+    mutations_hidden_from_autograd: bool,
+    mutations_under_no_grad_or_inference_mode: bool,
+    mutates_storage_metadata: bool,
+    mutation_inductor_storage_resize: bool,
+    requires_grad: bool,
+) -> bool:
     if keep_input_mutations:
         in_graph = (
             mutates_data or mutates_storage_metadata or mutation_inductor_storage_resize

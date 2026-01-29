@@ -2,6 +2,8 @@
 AC rematerialize pass: Duplicates checkpointed nodes for backward, then DCE removes unused forward versions.
 """
 
+from typing import Any
+
 import torch
 import torch.fx as fx
 from torch._functorch import config
@@ -17,7 +19,7 @@ from torch._functorch.partitioners import (
 )
 
 
-def is_impure_node_for_dce(node):
+def is_impure_node_for_dce(node: fx.Node) -> bool:
     # Check for special collectives that should be treated as pure
     if not is_not_collective(node):
         # It's a collective (wait_tensor, all_gather_into_tensor, etc.)
@@ -80,13 +82,13 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
     for node in list(gm.graph.nodes)[:bwd_start]:
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    def remat_input(x):
+    def remat_input(x: fx.Node | Any) -> fx.Node | Any:
         # fx.Node can have args that are primitive types (e.g. int, float, bool)
         if not isinstance(x, fx.Node):
             return x
         return recomputed_nodes.get(x, env[x])
 
-    def gather_checkpointed_deps(node: fx.Node, visited: set) -> None:
+    def gather_checkpointed_deps(node: fx.Node, visited: set[fx.Node]) -> None:
         if node in visited or node in recomputed_nodes:
             return
         visited.add(node)
