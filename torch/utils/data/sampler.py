@@ -115,7 +115,7 @@ class SequentialSampler(Sampler[int]):
 
 
 def init_generator():
-    seed = int(torch.empty((), dtype=torch.int64).random_())
+    seed = int(torch.empty((), dtype=torch.int64).random_().item())
     return torch.Generator().manual_seed(seed)
 
 
