@@ -7411,6 +7411,7 @@ class AOTInductorTestsTemplate:
         # the output should have int type
         self.check_model(Model2(), (x,))
 
+    @unittest.skipIf(not IS_BIG_GPU, "Test requires large GPU memory")
     def test_upper_bound_i64(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
