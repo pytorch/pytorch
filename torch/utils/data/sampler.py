@@ -365,6 +365,23 @@ class BatchSampler(Sampler[list[int]]):
 
 
 class RandomBatchSampler(Sampler[list[int]]):
+    r"""Yields batches of randomly sampled elements from [0, ..., len(data_source) - 1].
+
+        Args:
+            For documentation of `replacement`, `data_source` and `generator` See :class:`~torch.utilds.data.sampler.RandomSampler`.
+            For documentation of `batch_size` and `drop_last` see :class:`~torch.utilds.data.sampler.BatchSampler`.
+
+        Example:
+            >>> list(
+            ...     RandomBatchSampler(range(10), batch_size=3, drop_last=False)
+            ... )
+            [[6, 2, 0], [5, 3, 7], [8, 1, 9], [4]]
+            >>> list(
+            ...     RandomBatchSampler(range(10), batch_size=3, drop_last=True)
+            ... )
+            [[6, 2, 0], [5, 3, 7], [8, 1, 9]]
+        """
+
     def __init__(
         self,
         data_source: Sized,
