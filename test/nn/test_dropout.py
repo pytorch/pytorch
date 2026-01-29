@@ -93,6 +93,114 @@ class TestDropoutNN(NNTestCase):
         self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
         self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
 
+    def test_dropout_generator(self):
+        """Test that F.dropout supports generator parameter for deterministic dropout."""
+        x = torch.ones(8, 8)
+        gen = torch.Generator().manual_seed(1234)
+        out1 = F.dropout(x, p=0.5, training=True, generator=gen)
+        gen = torch.Generator().manual_seed(1234)
+        out2 = F.dropout(x, p=0.5, training=True, generator=gen)
+        self.assertEqual(out1, out2)
+
+        # Test that generator doesn't affect global RNG state
+        torch.manual_seed(1234)
+        gen = torch.Generator().manual_seed(5678)
+        _ = F.dropout(x, p=0.5, training=True, generator=gen)
+        out3 = F.dropout(x, p=0.5, training=True)
+        torch.manual_seed(1234)
+        out4 = F.dropout(x, p=0.5, training=True)
+        self.assertEqual(out3, out4)
+
+    def test_dropout_generator_training_false(self):
+        """Test that generator doesn't affect output when training=False."""
+        x = torch.randn(8, 8)
+        gen = torch.Generator().manual_seed(1234)
+        out = F.dropout(x, p=0.5, training=False, generator=gen)
+        self.assertEqual(x, out)
+
+    def test_dropout_module_generator(self):
+        """Test that nn.Dropout module supports generator parameter."""
+        x = torch.ones(8, 8)
+        dropout = nn.Dropout(p=0.5)
+        dropout.train()
+
+        gen1 = torch.Generator().manual_seed(1234)
+        out1 = dropout(x, generator=gen1)
+        gen2 = torch.Generator().manual_seed(1234)
+        out2 = dropout(x, generator=gen2)
+        self.assertEqual(out1, out2)
+
+    def test_feature_dropout_generator(self):
+        """Test that feature dropout variants support generator parameter."""
+        # Test dropout1d (expects 2D or 3D input)
+        x1d = torch.ones(4, 8, 16)  # (N, C, L)
+        gen1 = torch.Generator().manual_seed(1234)
+        out1 = F.dropout1d(x1d, p=0.5, training=True, generator=gen1)
+        gen2 = torch.Generator().manual_seed(1234)
+        out2 = F.dropout1d(x1d, p=0.5, training=True, generator=gen2)
+        self.assertEqual(out1, out2)
+
+        # Test dropout2d (expects 3D or 4D input)
+        x2d = torch.ones(4, 8, 16, 16)  # (N, C, H, W)
+        gen1 = torch.Generator().manual_seed(1234)
+        out1 = F.dropout2d(x2d, p=0.5, training=True, generator=gen1)
+        gen2 = torch.Generator().manual_seed(1234)
+        out2 = F.dropout2d(x2d, p=0.5, training=True, generator=gen2)
+        self.assertEqual(out1, out2)
+
+        # Test dropout3d (expects 4D or 5D input)
+        x3d = torch.ones(4, 8, 4, 4, 4)  # (N, C, D, H, W)
+        gen1 = torch.Generator().manual_seed(1234)
+        out1 = F.dropout3d(x3d, p=0.5, training=True, generator=gen1)
+        gen2 = torch.Generator().manual_seed(1234)
+        out2 = F.dropout3d(x3d, p=0.5, training=True, generator=gen2)
+        self.assertEqual(out1, out2)
+
+    def test_dropout_module_variants_generator(self):
+        """Test that nn.Dropout1d/2d/3d modules support generator parameter."""
+        # Test Dropout1d
+        x1d = torch.ones(4, 8, 16)
+        dropout1d = nn.Dropout1d(p=0.5)
+        dropout1d.train()
+        gen1 = torch.Generator().manual_seed(1234)
+        out1 = dropout1d(x1d, generator=gen1)
+        gen2 = torch.Generator().manual_seed(1234)
+        out2 = dropout1d(x1d, generator=gen2)
+        self.assertEqual(out1, out2)
+
+        # Test Dropout2d
+        x2d = torch.ones(4, 8, 16, 16)
+        dropout2d = nn.Dropout2d(p=0.5)
+        dropout2d.train()
+        gen1 = torch.Generator().manual_seed(1234)
+        out1 = dropout2d(x2d, generator=gen1)
+        gen2 = torch.Generator().manual_seed(1234)
+        out2 = dropout2d(x2d, generator=gen2)
+        self.assertEqual(out1, out2)
+
+        # Test Dropout3d
+        x3d = torch.ones(4, 8, 4, 4, 4)
+        dropout3d = nn.Dropout3d(p=0.5)
+        dropout3d.train()
+        gen1 = torch.Generator().manual_seed(1234)
+        out1 = dropout3d(x3d, generator=gen1)
+        gen2 = torch.Generator().manual_seed(1234)
+        out2 = dropout3d(x3d, generator=gen2)
+        self.assertEqual(out1, out2)
+
+    def test_native_dropout_generator(self):
+        """Test that torch.native_dropout supports generator parameter."""
+        x = torch.ones(8, 8)
+
+        gen1 = torch.Generator().manual_seed(1234)
+        out1, mask1 = torch.native_dropout(x, p=0.5, train=True, generator=gen1)
+
+        gen2 = torch.Generator().manual_seed(1234)
+        out2, mask2 = torch.native_dropout(x, p=0.5, train=True, generator=gen2)
+
+        self.assertEqual(out1, out2)
+        self.assertEqual(mask1, mask2)
+
 
 class TestDropoutNNDeviceType(NNTestCase):
     def _test_dropout(self, cls, device, input, memory_format=torch.contiguous_format):

@@ -1653,13 +1653,13 @@ TEST(IRNonDeterminismTest, DropoutSpecialCase) {
 
 TEST(NonDeterminismBackwardsCompatibility, BackwardsCompatibility) {
   static const std::vector<std::string> nondeterministic_ops = {
-      "aten::dropout(Tensor input, float p, bool train) -> Tensor",
+      "aten::dropout(Tensor input, float p, bool train, Generator? generator=None) -> Tensor",
       "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
       "aten::_standard_gamma(Tensor self, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
       "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
-      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
+      "aten::native_dropout(Tensor input, float p, bool? train, Generator? generator=None) -> (Tensor, Tensor)",
       "aten::normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal.float_Tensor(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal.Tensor_float(Tensor mean, float std, *, Generator? generator) -> Tensor",

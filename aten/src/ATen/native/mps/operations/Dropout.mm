@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorOperators.h>
+#include <ATen/Generator.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -24,14 +25,18 @@ static Tensor native_dropout_mask_and_scale(const Tensor& input, const Tensor& m
   return output;
 }
 
-std::tuple<Tensor, Tensor> native_dropout_mps(const Tensor& input, double p, std::optional<bool> train) {
+std::tuple<Tensor, Tensor> native_dropout_mps(
+    const Tensor& input,
+    double p,
+    std::optional<bool> train,
+    std::optional<Generator> generator) {
   if (input.numel() == 0 || !train.value_or(false) || p == 0) {
     return {input.clone(), at::ones_like(input, input.options().dtype(c10::kBool))};
   }
 
   float p_comp = 1.0f - p;
   Tensor mask = at::empty_like(input, input.options().dtype(c10::kBool));
-  mask.bernoulli_(p_comp);
+  mask.bernoulli_(p_comp, generator);
   auto scale = p_comp == 0 ? 0.0f : 1.0f / p_comp;
   Tensor output = native_dropout_mask_and_scale(input, mask, scale);
   return {std::move(output), std::move(mask)};

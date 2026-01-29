@@ -283,7 +283,7 @@
     CUDA: masked_scale_cuda
   autogen: _masked_scale.out
 
-- func: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)
+- func: native_dropout(Tensor input, float p, bool? train, Generator? generator=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: native_dropout_cpu
@@ -313,16 +313,16 @@
 
 - func: _shape_as_tensor(Tensor self) -> Tensor
 
-- func: dropout(Tensor input, float p, bool train) -> Tensor
+- func: dropout(Tensor input, float p, bool train, Generator? generator=None) -> Tensor
   tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
-- func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: dropout_(Tensor(a!) self, float p, bool train, Generator? generator=None) -> Tensor(a!)
   tags: nondeterministic_seeded
 
-- func: feature_dropout(Tensor input, float p, bool train) -> Tensor
+- func: feature_dropout(Tensor input, float p, bool train, Generator? generator=None) -> Tensor
   tags: [nondeterministic_seeded, maybe_aliasing_or_mutating]
 
-- func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
+- func: feature_dropout_(Tensor(a!) self, float p, bool train, Generator? generator=None) -> Tensor(a!)
   tags: nondeterministic_seeded
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor

@@ -80,6 +80,7 @@ DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 def _dropout_helper(
     self: TensorLikeType,
     val: float,
+    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     """
     Helper function for all dropout-type operators. During training,
@@ -91,7 +92,12 @@ def _dropout_helper(
 
     return (
         refs._uniform_helper(
-            self.shape, low=0.0, high=1.0, dtype=torch.float32, device=self.device
+            self.shape,
+            low=0.0,
+            high=1.0,
+            dtype=torch.float32,
+            device=self.device,
+            generator=generator,
         )
         < val
     )
@@ -195,7 +201,11 @@ def celu(
 @_inplace_wrapper
 @out_wrapper()
 def dropout(
-    a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
+    a: TensorLikeType,
+    p: float = 0.5,
+    training: bool = True,
+    inplace: bool = False,
+    generator: Optional[torch.Generator] = None,
 ) -> TensorLikeType:
     if inplace:
         raise NotImplementedError
@@ -215,7 +225,7 @@ def dropout(
         return a
 
     scale = 1 / (1 - p)
-    dropout_mask = _dropout_helper(a, 1 - p)
+    dropout_mask = _dropout_helper(a, 1 - p, generator=generator)
 
     return a * dropout_mask * scale
 
