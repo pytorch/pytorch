@@ -23,7 +23,11 @@ C10_API void warnDeprecatedDataPtr();
 // Currently used only for storing a custom error message
 // used when throwing an exception when data_ptr is accessed.
 struct C10_API StorageExtraMeta {
+  virtual ~StorageExtraMeta() = default;
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
+  virtual bool allows_shallow_copy_to(c10::DispatchKeySet dest) const {
+    return false;
+  }
 };
 
 // A storage represents the underlying backing data buffer for a
@@ -283,6 +287,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       extra_meta_ = std::make_unique<StorageExtraMeta>();
     }
     return *extra_meta_;
+  }
+
+  void set_extra_meta(std::unique_ptr<StorageExtraMeta> extra_meta) {
+    extra_meta_ = std::move(extra_meta);
   }
 
   [[noreturn]] void throw_data_ptr_access_error() const;

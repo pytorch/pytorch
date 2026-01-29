@@ -31,6 +31,16 @@ class TestStorage(TestCase):
         self.assertTrue(rewrapped_a.is_pinned())
         self.assertNotEqual(pinned_a.data_ptr(), rewrapped_a.data_ptr())
 
+    def test_set_data_cpu_to_openreg(self):
+        """Test cpu_tensor.data = openreg_tensor"""
+        cpu_tensor = torch.randn(2, 3, device="cpu")
+        openreg_tensor = torch.randn(2, 3, device="openreg")
+
+        cpu_tensor.data = openreg_tensor
+
+        self.assertEqual(cpu_tensor.device.type, "openreg")
+        self.assertEqual(cpu_tensor.data_ptr(), openreg_tensor.data_ptr())
+
 
 class TestSerialization(TestCase):
     def test_serialization(self):

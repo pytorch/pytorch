@@ -1,8 +1,22 @@
 #include "Minimal.h"
 
+#include <c10/core/StorageImpl.h>
 #include <unordered_set>
 
 namespace at::native::openreg {
+
+struct OpenRegStorageExtraMeta : public c10::StorageExtraMeta {
+  bool allows_shallow_copy_to(c10::DispatchKeySet dest_key_set) const override {
+    auto is_dense = [](c10::DispatchKeySet ts) {
+      constexpr auto dense_backends = c10::DispatchKeySet(
+          {c10::BackendComponent::CPUBit,});
+      constexpr auto dense_k = c10::DispatchKeySet(c10::DispatchKey::Dense);
+      return ts.has_any(dense_k) && ts.has_any(dense_backends);
+    };
+    return is_dense(dest_key_set);
+  }
+};
+
 
 // LITERALINCLUDE START: EMPTY.MEMORY_FORMAT IMPL
 at::Tensor empty_memory_format(
@@ -24,8 +38,13 @@ at::Tensor empty_memory_format(
   const c10::DeviceGuard device_guard(device);
   constexpr c10::DispatchKeySet pu1_dks(c10::DispatchKey::PrivateUse1);
   auto allocator = at::GetAllocator(at::kPrivateUse1);
-  return at::detail::empty_generic(
+  auto tensor = at::detail::empty_generic(
       size, allocator, pu1_dks, dtype, memory_format_opt);
+  if (tensor.has_storage()) {
+    tensor.storage().unsafeGetStorageImpl()->set_extra_meta(
+        std::make_unique<OpenRegStorageExtraMeta>());
+  }
+  return tensor;
 }
 // LITERALINCLUDE END: EMPTY.MEMORY_FORMAT IMPL
 
@@ -48,8 +67,13 @@ at::Tensor empty_strided(
   const c10::DeviceGuard device_guard(device);
   constexpr c10::DispatchKeySet pu1_dks(c10::DispatchKey::PrivateUse1);
   auto allocator = at::GetAllocator(at::kPrivateUse1);
-  return at::detail::empty_strided_generic(
+  auto tensor = at::detail::empty_strided_generic(
       size, stride, allocator, pu1_dks, dtype);
+  if (tensor.has_storage()) {
+    tensor.storage().unsafeGetStorageImpl()->set_extra_meta(
+        std::make_unique<OpenRegStorageExtraMeta>());
+  }
+  return tensor;
 }
 
 at::Tensor as_strided(

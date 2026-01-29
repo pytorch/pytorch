@@ -485,8 +485,15 @@ void VariableHooks::set_data(
   // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
   // from `new_data` to `var`. It requires that `new_data` and `var` have
   // compatible tensor type.
+  bool compatible = _has_compatible_shallow_copy_type(self, new_data);
+  if (!compatible && new_data.has_storage()) {
+    compatible = new_data.storage()
+                     .unsafeGetStorageImpl()
+                     ->get_extra_meta()
+                     .allows_shallow_copy_to(self.key_set());
+  }
   TORCH_CHECK(
-      _has_compatible_shallow_copy_type(self, new_data),
+      compatible,
       "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
 
   TORCH_CHECK(
