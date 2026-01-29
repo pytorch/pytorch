@@ -409,6 +409,76 @@ class TestSerializedGraphModule(TestCase):
         self.assertEqual(gm(x, y), deserialized(x, y))
 
 
+class TestGraphModuleGetState(TestCase):
+    """Tests that _GraphModulePickleData respects custom __getstate__ methods."""
+
+    def test_graph_module_getstate_is_called(self):
+        """
+        When a GraphModule subclass defines __getstate__, the pickler should
+        use it instead of copying __dict__ directly. This ensures that custom
+        serialization logic (e.g., filtering out unpicklable attributes) is
+        respected.
+        """
+        from unittest.mock import patch
+
+        from torch.fx._graph_pickler import _GraphModulePickleData, Options
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        getstate_called = []
+
+        original_getstate = gm.__getstate__
+
+        def mock_getstate():
+            getstate_called.append(True)
+            return original_getstate()
+
+        with patch.object(gm, "__getstate__", mock_getstate):
+            _GraphModulePickleData(gm, Options())
+
+        self.assertEqual(
+            len(getstate_called),
+            1,
+            "__getstate__ should be called exactly once during serialization",
+        )
+
+    def test_graph_module_custom_getstate_filters_attributes(self):
+        """
+        Test that a custom __getstate__ that filters attributes is respected.
+        The filtered attribute should not appear in the pickled data.
+        """
+        from torch.fx._graph_pickler import _GraphModulePickleData, Options
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+        gm.unpicklable_attr = lambda: None
+
+        original_getstate = gm.__getstate__
+
+        def custom_getstate():
+            state = original_getstate()
+            if "unpicklable_attr" in state:
+                del state["unpicklable_attr"]
+            return state
+
+        gm.__getstate__ = custom_getstate
+
+        pickle_data = _GraphModulePickleData(gm, Options())
+
+        self.assertNotIn(
+            "unpicklable_attr",
+            pickle_data.gm_dict,
+            "Custom __getstate__ should filter out unpicklable_attr",
+        )
+
+
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests
 
