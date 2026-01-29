@@ -104,12 +104,12 @@ struct SumReduceOp<Float2<scalar_t, accscalar_t>> {
 // Sum across (batch, x/y/z) applying Op() pointwise
 // this works by first having each thread sum it's part
 // of the data. Then there is a double-shuffling reduction.
-// First each warp (of C10_WARP_SIZE threads) uses warpSum to reduce its
+// First each warp (of warpSize threads) uses warpSum to reduce its
 // data to the "warp leader", who writes its value into shared memory.
-// Then a single warp reads the remaining (at most C10_WARP_SIZE) items
+// Then a single warp reads the remaining (at most warpSize) items
 // and reduces them using another warpSum.
 // The implicit assumption is that there are no more
-// than C10_WARP_SIZE**2 threads.
+// than warpSize**2 threads.
 template<typename scalar_t, typename Op, typename PTA>
 __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
   // first the reductions each thread does separately
@@ -334,39 +334,39 @@ __global__ void batch_norm_collect_statistics_kernel(
 
   // first warpSum to get one value per thread to
   // one value per warp
-  for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
-    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
-    int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
+  for (int i = 0; i < getMSB(warpSize); ++i) {
+    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, warpSize);
+    int o_n = WARP_SHFL_XOR(n, 1 << i, warpSize);
     stat_accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
-    var_n += WARP_SHFL_XOR(var_n, 1 << i, C10_WARP_SIZE) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
+    var_n += WARP_SHFL_XOR(var_n, 1 << i, warpSize) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
     avg = (n * avg + o_n * o_avg) * factor;
     n += o_n;
   }
 
   // this writes each warps  item into shared memory
-  // there are at most C10_WARP_SIZE items left because
-  // there are at most C10_WARP_SIZE**2 threads at the beginning
+  // there are at most warpSize items left because
+  // there are at most warpSize**2 threads at the beginning
   __syncthreads();
-  if (tid % C10_WARP_SIZE == 0) {
-    shared_n[tid / C10_WARP_SIZE] = n;
-    shared_avg_var[tid / C10_WARP_SIZE * 2] = avg;
-    shared_avg_var[tid / C10_WARP_SIZE * 2 + 1] = var_n;
+  if (tid % warpSize == 0) {
+    shared_n[tid / warpSize] = n;
+    shared_avg_var[tid / warpSize * 2] = avg;
+    shared_avg_var[tid / warpSize * 2 + 1] = var_n;
   }
   __syncthreads();
   // now have a second warpSum to reduce the intermediate values
   // from shared memory to a single number. The very first
   // thread writes it to shared memory.
 
-  if (tid < C10_WARP_SIZE) {
-    n = (tid < blockDim.x * blockDim.y / C10_WARP_SIZE ? shared_n[tid] : 0);
-    avg = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid] : stat_accscalar_t(0));
-    var_n = (tid < blockDim.x * blockDim.y  / C10_WARP_SIZE ? shared_avg_var[2 * tid + 1] : stat_accscalar_t(0));
+  if (tid < warpSize) {
+    n = (tid < blockDim.x * blockDim.y / warpSize ? shared_n[tid] : 0);
+    avg = (tid < blockDim.x * blockDim.y  / warpSize ? shared_avg_var[2 * tid] : stat_accscalar_t(0));
+    var_n = (tid < blockDim.x * blockDim.y  / warpSize ? shared_avg_var[2 * tid + 1] : stat_accscalar_t(0));
   }
-  for (int i = 0; i < getMSB(C10_WARP_SIZE); ++i) {
-    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, C10_WARP_SIZE);
-    int o_n = WARP_SHFL_XOR(n, 1 << i, C10_WARP_SIZE);
+  for (int i = 0; i < getMSB(warpSize); ++i) {
+    stat_accscalar_t o_avg = WARP_SHFL_XOR(avg, 1 << i, warpSize);
+    int o_n = WARP_SHFL_XOR(n, 1 << i, warpSize);
     stat_accscalar_t factor = 1.0 / fmaxf(1.0, n+o_n);
-    var_n += WARP_SHFL_XOR(var_n, 1 << i, C10_WARP_SIZE) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
+    var_n += WARP_SHFL_XOR(var_n, 1 << i, warpSize) + (avg - o_avg) * (avg - o_avg) * n * o_n * factor;
     avg = (n * avg + o_n * o_avg) * factor;
     n += o_n;
   }
