@@ -2620,7 +2620,9 @@ class PallasKernel(SIMDKernel):
 
         kernel_name = name or "<KERNEL_NAME>"
         is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
-        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu" and not is_tpu
+        interpret_is_cpu = (
+            V.graph.get_current_device_or_throw().type == "cpu" and not is_tpu
+        )
         if is_tpu:
             if not torch._inductor.config.pallas_take_first_jax_device_only:
                 raise RuntimeError(
@@ -2652,18 +2654,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
 
         aliasable_flags: dict[str, bool] = {}
         for param in pure_out_params:
-            buffer_name = output_buffer_lookup.get(param)
-            is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
-                buffer_name
-            )
-            # Enable aliasing if:
-            # 1. Not on CPU and buffer is contiguous (normal case), OR
-            # 2. Output needs to be readable (for scatter operations)
-            # outputs_need_read contains output parameter names (e.g., out_ptr0)
-            needs_read = param in self.outputs_need_read
-            aliasable_flags[param] = (
-                (not interpret_is_cpu and not is_tpu) and is_contiguous
-            ) or needs_read
+            aliasable_flags[param] = True
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
         ]
