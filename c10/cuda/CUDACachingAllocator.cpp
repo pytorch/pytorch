@@ -18,6 +18,7 @@
 #include <c10/util/static_tracepoint.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <c10/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/driver_api.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -404,20 +405,46 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
 
-    // if the handle type is not specified, try to use fabric handle first.
-    // if it fails, use posix file handle
-    if (CUDAAllocatorConfig::expandable_segments_handle_type() ==
-        Expandable_Segments_Handle_Type::UNSPECIFIED) {
-      CUDAAllocatorConfig::set_expandable_segments_handle_type(
-          Expandable_Segments_Handle_Type::FABRIC_HANDLE);
-      auto output = map(range);
-      if (output.ptr != nullptr) {
-        return output;
+    // In fbcode, IPC handle types for expandable segments are disabled by
+    // default because some jobs were failing (see
+    // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
+    // enabled via environment variable when IPC functionality is required
+    // (e.g., for multi-process communication with CTran). In non-fbcode
+    // builds, IPC handle types are enabled by default.
+#ifdef FBCODE_CAFFE2
+    static const bool default_enable_ipc = false;
+#else
+    static const bool default_enable_ipc = true;
+#endif
+    static const bool enable_ipc_handles =
+        c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
+            .value_or(default_enable_ipc);
+
+    // Determine IPC handle type upfront based on config and device capability.
+    // Must check FABRIC support at runtime because CUDA silently accepts
+    // FABRIC handle type on non-FABRIC devices during cuMemCreate, but later
+    // cuMemExportToShareableHandle fails with "invalid argument".
+    if (enable_ipc_handles) {
+      switch (CUDAAllocatorConfig::expandable_segments_handle_type()) {
+        case Expandable_Segments_Handle_Type::UNSPECIFIED:
+          // Auto-detect based on device capability
+          handle_type_ = cuda::get_fabric_access(device_)
+              ? Expandable_Segments_Handle_Type::FABRIC_HANDLE
+              : Expandable_Segments_Handle_Type::POSIX_FD;
+          break;
+        case Expandable_Segments_Handle_Type::FABRIC_HANDLE:
+          // User explicitly requested FABRIC - validate device support
+          TORCH_CHECK(
+              cuda::get_fabric_access(device_),
+              "FABRIC handle type configured but device ",
+              device_,
+              " does not support fabric access");
+          handle_type_ = Expandable_Segments_Handle_Type::FABRIC_HANDLE;
+          break;
+        case Expandable_Segments_Handle_Type::POSIX_FD:
+          handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
+          break;
       }
-      // if fabric handle is not supported, use posix file handle.
-      CUDAAllocatorConfig::set_expandable_segments_handle_type(
-          Expandable_Segments_Handle_Type::POSIX_FD);
-      return map(range);
     }
 
     while (end > handles_.size()) {
@@ -428,26 +455,11 @@ struct ExpandableSegment {
       CUmemGenericAllocationHandle handle = 0;
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
-      // In fbcode, IPC handle types for expandable segments are disabled by
-      // default because some jobs were failing (see
-      // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
-      // enabled via environment variable when IPC functionality is required
-      // (e.g., for multi-process communication with CTran). In non-fbcode
-      // builds, IPC handle types are enabled by default.
-#ifdef FBCODE_CAFFE2
-      static const bool default_enable_ipc = false;
-#else
-      static const bool default_enable_ipc = true;
-#endif
-      static const bool enable_ipc_handles =
-          c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
-              .value_or(default_enable_ipc);
       if (enable_ipc_handles) {
-        if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
-            Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
-          prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
-        } else {
+        if (handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
           prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
+        } else {
+          prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
         }
       }
       int flag = 0;
@@ -472,21 +484,8 @@ struct ExpandableSegment {
           }
           trimHandles();
           return rangeFromHandles(begin, begin);
-        } else if (
-            CUDAAllocatorConfig::expandable_segments_handle_type() ==
-            Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
-          // we are testing if we can use fabric handle.
-          // if we can, we will use it.
-          // if we can't, we will use posix file handle.
-          // so we should not return an error here.
-          // in practice, we can get CUDA_ERROR_NOT_SUPPORTED or
-          // CUDA_ERROR_NOT_PERMITTED to be safe, any non out-of-memory error is
-          // considered as the handle type is not supported. if the handle type
-          // is not supported, return a null range to indicate it.
-          return SegmentRange(nullptr, 0);
-        } else {
-          C10_CUDA_DRIVER_CHECK(status);
         }
+        C10_CUDA_DRIVER_CHECK(status);
       }
       handles_.at(i) = Handle{handle, std::nullopt};
     }
@@ -525,13 +524,13 @@ struct ExpandableSegment {
     header.pid = getpid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
+    header.handle_type = handle_type_;
 
     buf.write(reinterpret_cast<const char*>(&header), sizeof(ShareHeader));
     for (auto i : c10::irange(begin, end)) {
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       auto& handle = handles_.at(i).value();
-      if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
-          Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+      if (handle_type_ != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
         if (!handle.shareable_handle) {
           int fd = 0;
           C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemExportToShareableHandle_(
@@ -572,6 +571,7 @@ struct ExpandableSegment {
     buf.read(reinterpret_cast<char*>(&header), sizeof(ShareHeader));
     auto segment = std::make_unique<ExpandableSegment>(
         device, std::nullopt, header.segment_size, std::move(peers));
+    segment->handle_type_ = header.handle_type;
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
 // but the kernel on the system might still support it.
 #ifndef SYS_pidfd_open
@@ -580,8 +580,7 @@ struct ExpandableSegment {
 #ifndef SYS_pidfd_getfd
 #define SYS_pidfd_getfd 438
 #endif
-    if (CUDAAllocatorConfig::expandable_segments_handle_type() !=
-        Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+    if (header.handle_type != Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
       auto pidfd = syscall(SYS_pidfd_open, header.pid, 0);
       TORCH_CHECK(
           pidfd != -1 || errno != ENOSYS,
@@ -773,11 +772,15 @@ struct ExpandableSegment {
     pid_t pid;
     size_t segment_size;
     size_t num_handles;
+    Expandable_Segments_Handle_Type handle_type;
   };
   std::vector<std::optional<Handle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
   std::vector<c10::DeviceIndex> peers_;
+  // handle type of the expandable segment; recorded for IPC share.
+  Expandable_Segments_Handle_Type handle_type_ =
+      Expandable_Segments_Handle_Type::UNSPECIFIED;
 };
 #else
 struct ExpandableSegment {
