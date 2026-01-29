@@ -62,7 +62,8 @@ def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
 
 @numpy_mul.register_fake
 def _(x, y):
-    assert x.device == y.device
+    if x.device != y.device:
+        raise ValueError(f"Device mismatch: x is on {x.device}, y is on {y.device}")
     return (x * y).contiguous()
 
 def numpy_mul_setup_context(ctx, inputs, output):
@@ -159,10 +160,14 @@ def numpy_take(x: Tensor, ind: Tensor, ind_inv: Tensor, dim: int) -> Tensor:
 
 @numpy_take.register_fake
 def _(x, ind, ind_inv, dim):
-    assert x.device == ind.device
-    assert x.device == ind_inv.device
-    assert ind.dtype == torch.long
-    assert ind_inv.dtype == torch.long
+    if x.device != ind.device:
+        raise ValueError(f"Device mismatch: x is on {x.device}, ind is on {ind.device}")
+    if x.device != ind_inv.device:
+        raise ValueError(f"Device mismatch: x is on {x.device}, ind_inv is on {ind_inv.device}")
+    if ind.dtype != torch.long:
+        raise ValueError(f"ind.dtype must be torch.long, got {ind.dtype}")
+    if ind_inv.dtype != torch.long:
+        raise ValueError(f"ind_inv.dtype must be torch.long, got {ind_inv.dtype}")
     return torch.empty_like(x)
 
 def numpy_take_setup_context(ctx, inputs, output):
@@ -261,18 +266,24 @@ def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs
 
 @torch.library.custom_op('_torch_testing::numpy_cat', mutates_args=())
 def numpy_cat(xs: Sequence[Tensor], dim: int) -> Tensor:
-    assert len(xs) > 0
-    assert all(x.device == xs[0].device for x in xs)
-    assert all(x.dtype == xs[0].dtype for x in xs)
+    if len(xs) == 0:
+        raise ValueError("xs must be non-empty")
+    if any(x.device != xs[0].device for x in xs):
+        raise ValueError("All tensors must be on the same device")
+    if any(x.dtype != xs[0].dtype for x in xs):
+        raise ValueError("All tensors must have the same dtype")
     np_xs = [to_numpy(x) for x in xs]
     np_out = np.concatenate(np_xs, axis=dim)
     return torch.tensor(np_out, device=xs[0].device)
 
 @numpy_cat.register_fake
 def _(xs, dim):
-    assert len(xs) > 0
-    assert all(x.device == xs[0].device for x in xs)
-    assert all(x.dtype == xs[0].dtype for x in xs)
+    if len(xs) == 0:
+        raise ValueError("xs must be non-empty")
+    if any(x.device != xs[0].device for x in xs):
+        raise ValueError("All tensors must be on the same device")
+    if any(x.dtype != xs[0].dtype for x in xs):
+        raise ValueError("All tensors must have the same dtype")
     return torch.cat(xs, dim=dim)
 
 def numpy_cat_setup_context(ctx, inputs, output):
@@ -370,15 +381,18 @@ numpy_split_copy_with_int.register_vmap(numpy_split_copy_with_int_vmap)
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
     # Adapted from Ross Girshick's fast-rcnn implementation at
     # https://github.com/rbgirshick/fast-rcnn/blob/master/lib/utils/nms.py
-    assert boxes.device == scores.device
+    if boxes.device != scores.device:
+        raise ValueError(f"Device mismatch: boxes is on {boxes.device}, scores is on {scores.device}")
     device = boxes.device
 
     boxes = to_numpy(boxes)
     scores = to_numpy(scores)
 
     N = boxes.shape[0]
-    assert boxes.shape == (N, 4)
-    assert scores.shape == (N,)
+    if boxes.shape != (N, 4):
+        raise ValueError(f"boxes must have shape (N, 4), got {boxes.shape}")
+    if scores.shape != (N,):
+        raise ValueError(f"scores must have shape (N,), got {scores.shape}")
 
     x1 = boxes[:, 0]
     y1 = boxes[:, 1]
@@ -407,15 +421,19 @@ def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
 
     result = torch.tensor(np.stack(keep), device=device)
     # Needed for data-dependent condition :(
-    assert result.size(0) >= 2
+    if result.size(0) < 2:
+        raise ValueError(f"Result must have at least 2 elements, got {result.size(0)}")
     return result
 
 @numpy_nms.register_fake
 def _(boxes, scores, iou_threshold):
-    assert boxes.device == scores.device
+    if boxes.device != scores.device:
+        raise ValueError(f"Device mismatch: boxes is on {boxes.device}, scores is on {scores.device}")
     N = boxes.shape[0]
-    assert boxes.shape == (N, 4)
-    assert scores.shape == (N,)
+    if boxes.shape != (N, 4):
+        raise ValueError(f"boxes must have shape (N, 4), got {boxes.shape}")
+    if scores.shape != (N,):
+        raise ValueError(f"scores must have shape (N,), got {scores.shape}")
 
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()

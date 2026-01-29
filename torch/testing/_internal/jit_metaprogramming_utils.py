@@ -19,7 +19,8 @@ import math  # noqa: F401
 # Testing utils
 from torch import inf
 
-assert torch.get_default_dtype() == torch.float32
+if torch.get_default_dtype() != torch.float32:
+    raise RuntimeError(f"Default dtype must be torch.float32, got {torch.get_default_dtype()}")
 
 L = 20
 M = 10

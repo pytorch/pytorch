@@ -38,11 +38,14 @@ class WrapperSubclass(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
+        if meta is not None:
+            raise AssertionError("meta must be None for WrapperSubclass")
         a = inner_tensors["a"]
         if is_fake(a):
-            assert outer_size is not None
-            assert outer_stride is not None
+            if outer_size is None:
+                raise AssertionError("outer_size must not be None when a is fake")
+            if outer_stride is None:
+                raise AssertionError("outer_stride must not be None when a is fake")
         return WrapperSubclass(a, outer_size, outer_stride)
 
     @classmethod

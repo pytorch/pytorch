@@ -24,7 +24,8 @@ def mock_init_dist(rank, world_size):
     # !!! WARNING !!!
     # Kids don't try this at home, this is a cute pile of hacks that
     # depends on a small mountain of c10d internals
-    assert not dist.is_initialized()
+    if dist.is_initialized():
+        raise AssertionError("torch.distributed is already initialized")
     store = dist.HashStore()
     # Trick _store_based_barrier into believing everyone else already checked-in
     # Zero is the group index
