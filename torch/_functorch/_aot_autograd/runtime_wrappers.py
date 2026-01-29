@@ -1976,17 +1976,28 @@ def _backward_prologue_functional(
                 "The grad inputs should be same number as forward output tangents"
             )
 
+        stack_traces = metadata.tangent_source_stack_traces or []
+
         flat_processed_tangents = list(
             itertools.chain.from_iterable(
                 (
                     AOTDispatchAutograd.process_runtime_tangent(
                         t,
                         m,
+                        tangent_idx=idx,
+                        tangent_desc=desc,
+                        compile_id_str=metadata.compile_id_str,
+                        tangent_stack_trace=stack_traces[idx]
+                        if idx < len(stack_traces)
+                        else None,
                     )[1]
                 )
-                for t, m in zip(
-                    tangents,
-                    metadata.subclass_tangent_meta,
+                for idx, (t, m, desc) in enumerate(
+                    zip(
+                        tangents,
+                        metadata.subclass_tangent_meta,
+                        metadata.traced_tangents_descs,
+                    )
                 )
             )
         )
@@ -2009,11 +2020,21 @@ def _backward_prologue_functional(
             )
         )
     else:
+        stack_traces = metadata.tangent_source_stack_traces or []
+
         all_args = [
             (
                 AOTDispatchAutograd.process_runtime_tangent(
                     t,
                     metadata.subclass_tangent_meta[i - tangents_start_idx],
+                    tangent_idx=i - tangents_start_idx,
+                    tangent_desc=metadata.traced_tangents_descs[i - tangents_start_idx],
+                    compile_id_str=metadata.compile_id_str,
+                    tangent_stack_trace=(
+                        stack_traces[i - tangents_start_idx]
+                        if (i - tangents_start_idx) < len(stack_traces)
+                        else None
+                    ),
                 )[0]
                 if (tangents_start_idx <= i < tangents_end_idx)
                 else t
@@ -2194,7 +2215,14 @@ class SerializableCompiledFunction:
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
     @staticmethod
-    def process_runtime_tangent(x, meta: Union[PlainTensorMeta, SubclassCreationMeta]):
+    def process_runtime_tangent(
+        x,
+        meta: Union[PlainTensorMeta, SubclassCreationMeta],
+        tangent_idx: Optional[int] = None,
+        tangent_desc: Optional[Any] = None,
+        compile_id_str: Optional[str] = None,
+        tangent_stack_trace: Optional[str] = None,
+    ):
         if not isinstance(x, torch.Tensor):
             return x, [x]
 
@@ -2242,19 +2270,70 @@ class AOTDispatchAutograd:
         orig_x = x
         x = maybe_coerce(x)
         if x is None:
-            raise RuntimeError(
-                f"""
+            expected_subclass_got_plain_tensor = (
+                expected_type is not None
+                and expected_type is not torch.Tensor
+                and runtime_type is torch.Tensor
+            )
+            if expected_subclass_got_plain_tensor:
+                tangent_msg = ""
+                if tangent_idx is not None:
+                    tangent_msg = f" (tangent index: {tangent_idx})"
+
+                # Try to provide a helpful description of which forward output
+                # corresponds to this tangent, so the user knows where to add .detach()
+                output_hint = ""
+                if tangent_desc is not None:
+                    from .descriptors import PlainAOTOutput, TangentAOTInput
+
+                    if isinstance(tangent_desc, TangentAOTInput) and isinstance(
+                        tangent_desc.output, PlainAOTOutput
+                    ):
+                        idx = tangent_desc.output.idx
+                        output_hint = f"\n\nThe problematic output is: forward output at index {idx} (0-indexed)"
+                    else:
+                        output_hint = (
+                            f"\n\nThe problematic output is: {tangent_desc.expr()}"
+                        )
+
+                # Include compile_id to help identify which graph this is in tlparse
+                graph_hint = ""
+                if compile_id_str is not None:
+                    graph_hint = (
+                        f"\n\nThis error occurred in compiled graph [{compile_id_str}]."
+                    )
+
+                # Include stack trace if available to help users find where to add .detach()
+                stack_trace_hint = ""
+                if tangent_stack_trace is not None:
+                    stack_trace_hint = f"\n\nThe forward output was created here:\n{tangent_stack_trace}"
+
+                raise RuntimeError(
+                    f"""
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
+Expected a {expected_type.__name__} tangent but got a plain Tensor{tangent_msg}.
+This happens when a compiled function returns multiple outputs that
+require gradients, but .backward() is only called on some of them.
+To fix: call .detach() on forward outputs you don't need gradients for.{output_hint}{graph_hint}{stack_trace_hint}
 
-Expected metadata: {str(expected_meta)}, expected type: {str(expected_type)}
+This error is also more likely to occur if your compiled model is suffering
+from a large number of graph breaks. For more advice on finding and fixing
+graph breaks, see:
+https://docs.pytorch.org/docs/stable/user_guide/torch_compiler/compile/programming_model.graph_breaks_index.html
 
-Runtime metadata: {str(runtime_meta)}, runtime type: {str(runtime_type)}
-
-shape: {str(orig_x.shape)}
-To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
-"""
-            )
+For more info about this error, see:
+https://github.com/pytorch/pytorch/issues/172556"""
+                )
+            else:
+                raise RuntimeError(
+                    f"""
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+Expected: {expected_meta} (type {expected_type}),
+got: {runtime_meta} (type {runtime_type}), shape: {orig_x.shape}.
+Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
+                )
 
         # Coerce to expected memory format
         assert meta.memory_format
@@ -2327,6 +2406,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         backward_state_position = 0
         pending_forwards: set[int] = set()
         saved_backward_tensor_states: dict[int, list[torch.Tensor]] = {}
+
+        # capture the compile_id at compile time for error messages
+        _compile_id = CompileContext.current_compile_id()
+        _compile_id_str = str(_compile_id) if _compile_id is not None else None
+        # store on metadata so it's accessible during backward error handling
+        fw_metadata.compile_id_str = _compile_id_str
 
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
