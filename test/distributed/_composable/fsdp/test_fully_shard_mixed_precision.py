@@ -598,9 +598,15 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_dataclass_input_output(self):
-        from unittest.mock import patch
+        """
+        Test that FSDP correctly handles dataclass inputs/outputs and computes
+        gradients correctly for all input tensors.
 
-        from torch.distributed._composable_state import _get_module_state
+        This test also catches a regression where applying RegisterPostBackwardFunction
+        individually to each tensor (instead of batching all tensors together)
+        causes post_backward() to be called multiple times, which disrupts the
+        autograd graph and results in some input tensors having None gradients.
+        """
 
         @dataclasses.dataclass
         class Input:
@@ -640,7 +646,6 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
                     out = out * scale
                 return out
 
-        # Test with different MixedPrecisionPolicy configurations
         mp_policies = [
             MixedPrecisionPolicy(
                 param_dtype=torch.bfloat16,
@@ -653,30 +658,18 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         ]
 
         for mp_policy in mp_policies:
-            # Test with normal torch.Tensor as arg
+            # Test with normal torch.Tensor as both arg and kwarg
             tensor_model = TensorModel()
             fully_shard(tensor_model, mp_policy=mp_policy)
-            fsdp_state = _get_module_state(tensor_model)
-            x = torch.randn(10, 10, device=device_type, requires_grad=True)
-            with patch.object(
-                fsdp_state, "_pre_backward", wraps=fsdp_state._pre_backward
-            ) as mock_pre_backward:
-                loss = tensor_model(x).sum()
-                loss.backward()
-                mock_pre_backward.assert_called()
-
-            # Test with normal torch.Tensor as both arg and kwarg
-            tensor_model.zero_grad()
             x = torch.randn(10, 10, device=device_type, requires_grad=True)
             scale = torch.randn(10, 10, device=device_type, requires_grad=True)
-            with patch.object(
-                fsdp_state, "_pre_backward", wraps=fsdp_state._pre_backward
-            ) as mock_pre_backward:
-                loss = tensor_model(x, scale=scale).sum()
-                loss.backward()
-                mock_pre_backward.assert_called()
+            loss = tensor_model(x, scale=scale).sum()
+            loss.backward()
+            self.assertIsNotNone(x.grad, "Input x gradient should not be None")
+            self.assertIsNotNone(scale.grad, "Input scale gradient should not be None")
 
             # Test with dataclass as positional arg only
+            torch.manual_seed(42)
             model = nn.Sequential(*[Model(), Model()])
             inp = Input(
                 x=torch.randn(10, 10, device=device_type, requires_grad=True),
@@ -687,43 +680,48 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
                 fully_shard(layer, mp_policy=mp_policy, reshard_after_forward=True)
             fully_shard(model, mp_policy=mp_policy, reshard_after_forward=True)
 
-            # Patch _pre_backward on all FSDP states
-            layer0_state = _get_module_state(model[0])
-            layer1_state = _get_module_state(model[1])
-            root_state = _get_module_state(model)
-            with (
-                patch.object(
-                    layer0_state, "_pre_backward", wraps=layer0_state._pre_backward
-                ) as layer0_mock,
-                patch.object(
-                    layer1_state, "_pre_backward", wraps=layer1_state._pre_backward
-                ) as layer1_mock,
-                patch.object(
-                    root_state, "_pre_backward", wraps=root_state._pre_backward
-                ) as root_mock,
-            ):
-                output = model(inp)
-                loss = output.x.sum() + output.y.sum()
-                loss.backward()
-                layer0_mock.assert_called()
-                layer1_mock.assert_called()
-                root_mock.assert_called()
+            output = model(inp)
+            loss = output.x.sum() + output.y.sum()
+            loss.backward()
+
+            # Critical check: ALL input tensors must have gradients computed
+            # This catches the regression where RegisterPostBackwardFunction.apply
+            # is called per-tensor instead of batched, causing some gradients to be None
+            self.assertIsNotNone(
+                inp.x.grad,
+                "Dataclass input.x gradient is None - post_backward hook issue",
+            )
+            self.assertIsNotNone(
+                inp.y.grad,
+                "Dataclass input.y gradient is None - post_backward hook issue",
+            )
 
             # Test with dataclass as both positional arg and kwarg
-            inp = Input(
-                x=torch.randn(10, 10, device=device_type, requires_grad=True),
-                y=torch.randn(10, 10, device=device_type, requires_grad=True),
+            # Also test mixed requires_grad (scale.factor requires grad, but inp tensors don't)
+            inp_no_grad = Input(
+                x=torch.randn(10, 10, device=device_type, requires_grad=False),
+                y=torch.randn(10, 10, device=device_type, requires_grad=False),
             )
             scale = Scale(
                 factor=torch.randn(10, 10, device=device_type, requires_grad=True)
             )
-            with patch.object(
-                layer0_state, "_pre_backward", wraps=layer0_state._pre_backward
-            ) as layer0_mock:
-                output = model[0](inp, scale=scale)
-                loss = output.x.sum() + output.y.sum()
-                loss.backward()
-                layer0_mock.assert_called()
+            output = model[0](inp_no_grad, scale=scale)
+            loss = output.x.sum() + output.y.sum()
+            loss.backward()
+            # Verify gradient for scale.factor (requires_grad=True)
+            self.assertIsNotNone(
+                scale.factor.grad,
+                "scale.factor gradient should not be None",
+            )
+            # Verify no gradient for inp tensors (requires_grad=False)
+            self.assertIsNone(
+                inp_no_grad.x.grad,
+                "inp.x should not have gradient (requires_grad=False)",
+            )
+            self.assertIsNone(
+                inp_no_grad.y.grad,
+                "inp.y should not have gradient (requires_grad=False)",
+            )
 
 
 if __name__ == "__main__":

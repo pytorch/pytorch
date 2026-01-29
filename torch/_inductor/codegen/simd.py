@@ -2315,7 +2315,11 @@ class SIMDScheduling(BaseScheduling):
 
         Returns a list of (src_code, kernel, node_group) tuples.
         """
+        from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
+
+        # This is currently the only type supported by this method
+        assert issubclass(self.kernel_type, TritonKernel)
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         node_schedule_map: dict[Any, NodeInfo] = {}
@@ -2376,6 +2380,7 @@ class SIMDScheduling(BaseScheduling):
             else:
                 # Multi-node: create ComboKernel with combo subkernels
                 kernel = ComboKernel(
+                    triton_kernel_cls=self.kernel_type,
                     enable_autotune=enable_autotune,
                     mixed_sizes=mixed_sizes,
                 )
@@ -2385,6 +2390,7 @@ class SIMDScheduling(BaseScheduling):
                         node_info.tiling,
                         features=node_info.features,
                         optimize_mask=not mixed_sizes,
+                        triton_kernel_cls=self.kernel_type,
                     )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
