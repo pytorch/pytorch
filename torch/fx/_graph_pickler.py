@@ -2,12 +2,18 @@ import dataclasses
 import importlib
 import io
 import itertools
+import pickle
 from abc import abstractmethod
 from collections.abc import Callable
 from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
-import dill
+from torch.utils._import_utils import import_dill
+
+
+dill = import_dill()
+if dill is not None:
+    pickle = dill  # noqa: F811
 
 import torch
 import torch.utils._pytree as pytree
@@ -59,7 +65,8 @@ class Options:
     )
 
 
-class GraphPickler(dill.Pickler):
+# pyrefly: ignore [invalid-inheritance]
+class GraphPickler(pickle.Pickler):
     """
     GraphPickler is a Pickler which helps pickling fx graph - in particular
     GraphModule.
@@ -317,7 +324,7 @@ class GraphPickler(dill.Pickler):
             reduce_tuple = None
             try:
                 if hasattr(o, "__reduce_ex__"):
-                    reduce_tuple = o.__reduce_ex__(dill.HIGHEST_PROTOCOL)
+                    reduce_tuple = o.__reduce_ex__(pickle.HIGHEST_PROTOCOL)
                     log(f"{indent}__reduce_ex__ -> {type(reduce_tuple)}")
                 elif hasattr(o, "__reduce__"):
                     reduce_tuple = o.__reduce__()
@@ -351,7 +358,8 @@ class _UnpickleState:
 _UnpickleStateToken = NewType("_UnpickleStateToken", object)
 
 
-class _GraphUnpickler(dill.Unpickler):
+# pyrefly: ignore [invalid-inheritance]
+class _GraphUnpickler(pickle.Unpickler):
     def __init__(self, stream: io.BytesIO, unpickle_state: _UnpickleState) -> None:
         super().__init__(stream)
         self._unpickle_state = unpickle_state
@@ -362,7 +370,7 @@ class _GraphUnpickler(dill.Unpickler):
         if pid == "unpickle_state":
             return self._unpickle_state
         else:
-            raise dill.UnpicklingError("Invalid persistent ID")
+            raise pickle.UnpicklingError("Invalid persistent ID")
 
 
 class _ShapeEnvPickleData:
