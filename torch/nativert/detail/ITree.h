@@ -122,6 +122,12 @@ class ITreeSpec {
 
 void registerPytreeNode(std::string_view typeName, NodeDef nodeDef);
 
+// Register a pytree node, replacing any existing registration with the same name.
+// This is useful for customizing unflatten behavior for types like KeyedJaggedTensor
+// where the default implementation returns a tuple but the caller wants to reconstruct
+// the actual custom class object.
+void registerOrReplacePytreeNode(std::string_view typeName, NodeDef nodeDef);
+
 // Serialized json tree spec should be dumped from treespec_dumps() in
 // torch.utils._pytree directly .
 ITreeSpec itreeSpecLoads(
