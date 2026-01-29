@@ -816,6 +816,7 @@ class TestTorchDlPack(TestCase):
         module.test_dlpack_exchange_api(tensor, api_capsule, device.startswith("cuda") or device.startswith("xpu"))
 
     @skipMeta
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2798")
     def test_numpy_cross_device_transfer(self, device):
         """Test cross-device transfer from NumPy (CPU) to PyTorch (CUDA).
 
