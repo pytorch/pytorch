@@ -397,39 +397,18 @@ struct ScaleSpec {
     return 0;
   }
 
-  // Normalize scale tensor to oneDNN's expected K-contiguous format.
+  // Normalize scale tensor to contiguous format for oneDNN.
   //
-  // CUDA cuBLAS uses swizzle format for blockwise scales, which handles memory
-  // layout transformation internally. XPU/oneDNN does not support swizzle, so
-  // we explicitly transpose scales here to match oneDNN's K-contiguous format.
-  //
-  // Transformations performed:
-  //   - BlockWise1x128 WEI: [N, K//128] -> [K//128, N]
-  //   - BlockWise128x128 SRC: [K//128, M//128] -> [M//128, K//128]
-
-  at::Tensor normalize(
-      const at::Tensor& scale,
-      at::blas::ScalingType scaling_type,
-      const std::string& arg_type) const {
+  // XPU uses natural scale shapes that match matrix dimensions:
+  //   - A: [M, K] -> scale_a: [M, K//128] or [M//128, K//128]
+  //   - B: [K, N] -> scale_b: [K//128, N] or [K//128, N//128]
+  at::Tensor normalize(const at::Tensor& scale) const {
     TORCH_INTERNAL_ASSERT(
         dtype == dnnl::memory::data_type::f32,
         "tensor scale currently must be f32, but got scale dtype: ",
         scale.scalar_type());
 
     at::Tensor scale_f32 = scale.to(at::kFloat);
-
-    // Handle internal reshape for blockwise scales to match oneDNN expectations
-    if (scale_f32.dim() == 2) {
-      if (scaling_type == at::blas::ScalingType::BlockWise1x128) {
-        if (arg_type == "wei") {
-          return scale_f32.t().contiguous();
-        }
-      } else if (scaling_type == at::blas::ScalingType::BlockWise128x128) {
-        if (arg_type == "src") {
-          return scale_f32.t().contiguous();
-        }
-      }
-    }
 
     return scale_f32.contiguous();
   }
@@ -607,14 +586,12 @@ sycl::event scaled_matmul(
   }
 
   // Prepare scale memory for oneDNN.
-  // The normalize() function handles internal reshape to K-contiguous format.
+  // The normalize() function handles conversion to contiguous format.
   auto make_scale_mem_from_spec = [&](const ScaleSpec& spec,
                                       int64_t expected_numel,
-                                      const at::Tensor& scale_tensor,
-                                      const std::string& arg_type,
-                                      at::blas::ScalingType scaling_type)
+                                      const at::Tensor& scale_tensor)
       -> std::pair<dnnl::memory, at::Tensor> {
-    at::Tensor prepared = spec.normalize(scale_tensor, scaling_type, arg_type);
+    at::Tensor prepared = spec.normalize(scale_tensor);
 
     TORCH_CHECK(
         prepared.numel() == expected_numel,
@@ -644,17 +621,9 @@ sycl::event scaled_matmul(
   // Attach runtime scales using specs
   // Note: We need to keep the prepared tensors alive until execute() completes
   auto [src_sc_mem, src_scale_prepared] = make_scale_mem_from_spec(
-      src_spec,
-      src_spec.expected_numel(M, K, "src"),
-      scale_a,
-      "src",
-      scaling_choice_a);
+      src_spec, src_spec.expected_numel(M, K, "src"), scale_a);
   auto [wei_sc_mem, wei_scale_prepared] = make_scale_mem_from_spec(
-      wei_spec,
-      wei_spec.expected_numel(N, K, "wei"),
-      scale_b,
-      "wei",
-      scaling_choice_b);
+      wei_spec, wei_spec.expected_numel(N, K, "wei"), scale_b);
   // Keep tensors alive during execute - suppress unused warnings
   (void)src_scale_prepared;
   (void)wei_scale_prepared;
