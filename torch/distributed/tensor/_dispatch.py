@@ -11,7 +11,6 @@ import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch._logging import LazyString
-from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._nonlinear_redux import (
@@ -222,7 +221,9 @@ class OpDispatcher:
         try:
             # We have basically inlined propagate() here, but WITHOUT the
             # output_sharding assignment
-            if try_cache and not _are_we_tracing():
+            # Use cache if try_cache is True and no symints are present in the schema.
+            # This allows caching during torch.compile when shapes are static.
+            if try_cache and not op_info.schema.has_symints():
                 return self.sharding_propagator.propagate_op_sharding(op_info.schema)
             else:
                 return self.sharding_propagator.propagate_op_sharding_non_cached(
