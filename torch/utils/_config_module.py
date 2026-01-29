@@ -75,6 +75,9 @@ class _Config(Generic[T]):
     env_name_force: list[str] | None = None
     value_type: type | None = None
     alias: str | None = None
+    # Deprecation support
+    deprecated: bool = False
+    deprecation_message: str | None = None
 
     def __post_init__(self) -> None:
         self.env_name_default = _Config.string_or_list_of_string_to_list(
@@ -122,6 +125,9 @@ if TYPE_CHECKING:
         env_name_force: str | list[str] | None = None,
         value_type: type | None = None,
         alias: str | None = None,
+        # Deprecation support
+        deprecated: bool = False,
+        deprecation_message: str | None = None,
     ) -> T: ...
 
 else:
@@ -133,6 +139,9 @@ else:
         env_name_force: str | list[str] | None = None,
         value_type: type | None = None,
         alias: str | None = None,
+        # Deprecation support
+        deprecated: bool = False,
+        deprecation_message: str | None = None,
     ) -> _Config[T]:
         return _Config(
             default=default,
@@ -141,6 +150,9 @@ else:
             env_name_force=env_name_force,
             value_type=value_type,
             alias=alias,
+            # Deprecation support
+            deprecated=deprecated,
+            deprecation_message=deprecation_message,
         )
 
 
@@ -298,6 +310,10 @@ class _ConfigEntry:
     # upstream bug - python/cpython#126886
     hide: bool = False
     alias: str | None = None
+    # Deprecation support
+    deprecated: bool = False
+    deprecation_message: str | None = None
+    _deprecation_warned: bool = False
 
     def __init__(self, config: _Config) -> None:
         self.default = config.default
@@ -306,6 +322,11 @@ class _ConfigEntry:
         )
         self.justknob = config.justknob
         self.alias = config.alias
+        # Deprecation fields
+        self.deprecated = config.deprecated
+        self.deprecation_message = config.deprecation_message
+        self._deprecation_warned = False
+
         if config.env_name_default is not None:
             for val in config.env_name_default:
                 if (env_value := _read_env_variable(val)) is not None:
@@ -354,17 +375,34 @@ class ConfigModule(ModuleType):
             f"use {__name__}.install_config_module(sys.modules[__name__])"
         )
 
+    def _warn_if_deprecated(self, name: str, config: _ConfigEntry) -> None:
+        """Issue deprecation warning for config if not already warned."""
+        if config.deprecated and not config._deprecation_warned:
+            import warnings
+
+            msg = f"{self.__name__}.{name} is deprecated"
+            if config.deprecation_message:
+                msg += f" and {config.deprecation_message}"
+            msg += ". It will be removed in a future version of PyTorch."
+            warnings.warn(msg, FutureWarning, stacklevel=3)
+            config._deprecation_warned = True
+
     def __setattr__(self, name: str, value: object) -> None:
         if name in self._bypass_keys:
             super().__setattr__(name, value)
         elif name not in self._config:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
-        elif self._config[name].alias is not None:
-            self._set_alias_val(self._config[name], value)
         else:
-            self._config[name].user_override = value
-            self._is_dirty = True
-            self._config[name].hide = False
+            # Issue deprecation warning on write (once per config)
+            config = self._config[name]
+            self._warn_if_deprecated(name, config)
+
+            if config.alias is not None:
+                self._set_alias_val(config, value)
+            else:
+                config.user_override = value
+                self._is_dirty = True
+                config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -372,6 +410,9 @@ class ConfigModule(ModuleType):
 
             if config.hide:
                 raise AttributeError(f"{self.__name__}.{name} does not exist")
+
+            # Issue deprecation warning on read (once per config)
+            self._warn_if_deprecated(name, config)
 
             alias_val = self._get_alias_val(config)
             if alias_val is not _UNSET_SENTINEL:
