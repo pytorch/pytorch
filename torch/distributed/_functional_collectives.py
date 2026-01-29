@@ -1151,11 +1151,13 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        # TODO: it should run collective in the whole mesh instead of dim 0
-        pg = group.get_group()
-        rankset = dist.get_process_group_ranks(pg)
+        # get all ranks from the mesh directly
+        rankset = group.mesh.flatten().tolist()
         group_size = len(rankset)
-        tag = tag or c10d._get_group_tag(pg)
+        if not tag:
+            # get tag from dimension 0 process group for backward compatibility
+            pg = group.get_group()
+            tag = c10d._get_group_tag(pg)
     elif isinstance(group, tuple):
         if (
             len(group) == 2
