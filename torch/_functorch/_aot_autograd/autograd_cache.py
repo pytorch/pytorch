@@ -1020,11 +1020,54 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         write_atomic(path, content)
 
     @staticmethod
+    def _find_unpicklable_field(entry: GenericAOTAutogradResult) -> Optional[str]:
+        """Find which field of entry is causing pickle to fail."""
+        fields = []
+        if hasattr(entry, "__dataclass_fields__"):
+            fields = list(entry.__dataclass_fields__.keys())
+        elif hasattr(entry, "__dict__"):
+            fields = list(entry.__dict__.keys())
+
+        for name in fields:
+            try:
+                pickle.dumps(getattr(entry, name))
+            except Exception:
+                return name
+        return None
+
+    @staticmethod
+    def _pickle_entry(entry: GenericAOTAutogradResult, remote: bool) -> Optional[bytes]:
+        """Pickle entry, returning None on failure."""
+        try:
+            return pickle.dumps(entry)
+        except (pickle.PicklingError, TypeError, AttributeError) as e:
+            bad_field = AOTAutogradCache._find_unpicklable_field(entry)
+            error_str = str(e)
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aotautograd_cache_pickle_failure",
+                    "encoding": "json",
+                },
+                payload_fn=lambda: json.dumps({"error": error_str, "field": bad_field}),
+            )
+            if remote:
+                log_cache_bypass(
+                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
+                )
+            if config.strict_autograd_cache:
+                raise
+            return None
+
+    @staticmethod
     def save(key: str, entry: GenericAOTAutogradResult, remote: bool):
         """Save a single entry into the cache."""
         try:
             entry.pre_save()
-            content = pickle.dumps(entry)
+            content = AOTAutogradCache._pickle_entry(entry, remote)
+            if content is None:
+                return None
             CacheArtifactManager.record_artifact(
                 AOTAutogradCacheArtifact.type(), key, content
             )
@@ -1047,15 +1090,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             if remote:
                 log_cache_bypass("bypass_aot_autograd", str(e))
-            return None
-        except Exception as e:
-            log.info("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
-            if remote:
-                log_cache_bypass(
-                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
-                )
-            if config.strict_autograd_cache:
-                raise
             return None
 
         if remote:
