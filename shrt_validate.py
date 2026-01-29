@@ -189,10 +189,14 @@ def _create_partial_input(
     We use asymmetric splits/offsets to avoid coincidental matches when
     combining different Partial types.
 
-    For Partial(sum): rank 0 gets 60%, rank 1 gets 40% (sum = 100%)
-    For Partial(avg): rank 0 gets 60% * world_size, rank 1 gets 40% * world_size (avg = 100%)
+    For Partial(sum): tensor_idx-dependent split (60/40, 70/30, 80/20, ...)
+    For Partial(avg): tensor_idx-dependent split scaled by world_size
     For Partial(min): Element-wise variation based on tensor_idx
     For Partial(max): Element-wise variation based on tensor_idx
+
+    Using tensor_idx-dependent ratios prevents coincidental cancellation
+    when dividing or multiplying Partial tensors (e.g., P(avg)/P(avg) would
+    incorrectly appear valid if both used the same 60/40 split).
 
     Args:
         tensor: The original tensor value
@@ -206,28 +210,31 @@ def _create_partial_input(
     reduce_op = placement.reduce_op
 
     if reduce_op == "sum":
-        # Split unevenly: rank 0 gets 60%, rank 1 gets 40%
-        # This prevents coincidental matches with min/max outputs
+        # Split unevenly with tensor_idx-dependent ratios to prevent
+        # coincidental cancellation when dividing P(sum) tensors.
+        # tensor_idx=0: 60%/40%, tensor_idx=1: 70%/30%, etc.
+        base_ratio = 0.6 + 0.1 * (tensor_idx % 3)  # 0.6, 0.7, 0.8, 0.6, ...
         local_tensors = {}
         for r in range(world_size):
             if r == 0:
-                local_tensors[r] = tensor.clone() * 0.6
+                local_tensors[r] = tensor.clone() * base_ratio
             else:
-                # Distribute remaining 40% evenly across other ranks
-                local_tensors[r] = tensor.clone() * (0.4 / (world_size - 1))
+                # Distribute remaining across other ranks
+                local_tensors[r] = tensor.clone() * ((1 - base_ratio) / (world_size - 1))
         return LocalTensor(local_tensors)
 
     elif reduce_op == "avg":
         # For avg: local values should average to original
         # avg = (sum of locals) / world_size = original
         # So sum of locals = original * world_size
-        # Use 60%/40% split scaled by world_size
+        # Use tensor_idx-dependent split to prevent cancellation in division
+        base_ratio = 0.6 + 0.1 * (tensor_idx % 3)  # 0.6, 0.7, 0.8, 0.6, ...
         local_tensors = {}
         for r in range(world_size):
             if r == 0:
-                local_tensors[r] = tensor.clone() * 0.6 * world_size
+                local_tensors[r] = tensor.clone() * base_ratio * world_size
             else:
-                local_tensors[r] = tensor.clone() * (0.4 / (world_size - 1)) * world_size
+                local_tensors[r] = tensor.clone() * ((1 - base_ratio) / (world_size - 1)) * world_size
         return LocalTensor(local_tensors)
 
     elif reduce_op == "min":
