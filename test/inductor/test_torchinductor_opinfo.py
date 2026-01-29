@@ -992,6 +992,7 @@ inductor_skip_exact_stride = {
     "linalg.diagonal",
     "linalg.eigvals",  # Fails for ROCM
     "linalg.lu_factor",
+    "linalg.lu_factor_ex",
     "linalg.matrix_norm",
     "linalg.norm",
     "linalg.norm.subgradients_at_zero",
@@ -1000,6 +1001,7 @@ inductor_skip_exact_stride = {
     "linalg.solve",
     "linalg.solve_ex",
     "linalg.qr",
+    "lu",
     "matmul",
     "__rmatmul__",
     "nn.functional.adaptive_avg_pool1d",
