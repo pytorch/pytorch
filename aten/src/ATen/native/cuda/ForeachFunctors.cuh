@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/OpMathType.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/cuda/DeviceAddCmulCdiv.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
 
@@ -172,11 +173,8 @@ __device__ __forceinline__ void pointwise_op_scalar(
       load_store(r_args[2], args[2], 0, i_start);
 #pragma unroll
       for (int ii = 0; ii < kILP; ii++) {
-        r_args[0][ii] = static_cast<T>(
-            static_cast<opmath_t>(r_args[0][ii]) +
-            scalar *
-                op(static_cast<opmath_t>(r_args[1][ii]),
-                   static_cast<opmath_t>(r_args[2][ii])));
+        r_args[0][ii] = pointwise_op_impl<opmath_t>(
+            r_args[0][ii], r_args[1][ii], r_args[2][ii], scalar, op);
       }
       // store
       load_store(args[res_arg_index], r_args[0], i_start, 0);
@@ -189,11 +187,8 @@ __device__ __forceinline__ void pointwise_op_scalar(
       load_args<3>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
       for (int ii = 0; ii < kILP; ii++) {
-        r_args[0][ii] = static_cast<T>(
-            static_cast<opmath_t>(r_args[0][ii]) +
-            scalar *
-                op(static_cast<opmath_t>(r_args[1][ii]),
-                   static_cast<opmath_t>(r_args[2][ii])));
+        r_args[0][ii] = pointwise_op_impl<opmath_t>(
+            r_args[0][ii], r_args[1][ii], r_args[2][ii], scalar, op);
       }
       store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
     }
@@ -545,9 +540,8 @@ struct PointwiseOpScalar0dTensorFunctor {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           // input + alpha * op(tensor1_val, tensor2)
-          r_args[0][ii] = static_cast<T>(
-              static_cast<opmath_t>(r_args[0][ii]) +
-              alpha * op(tensor1_val, static_cast<opmath_t>(r_args[1][ii])));
+          r_args[0][ii] = pointwise_op_impl<opmath_t>(
+              r_args[0][ii], tensor1_val, r_args[1][ii], alpha, op);
         }
         // store
         load_store(args[res_arg_index], r_args[0], i_start, 0);
@@ -570,9 +564,8 @@ struct PointwiseOpScalar0dTensorFunctor {
         }
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
-          r_args[0][ii] = static_cast<T>(
-              static_cast<opmath_t>(r_args[0][ii]) +
-              alpha * op(tensor1_val, static_cast<opmath_t>(r_args[1][ii])));
+          r_args[0][ii] = pointwise_op_impl<opmath_t>(
+              r_args[0][ii], tensor1_val, r_args[1][ii], alpha, op);
         }
         store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
       }

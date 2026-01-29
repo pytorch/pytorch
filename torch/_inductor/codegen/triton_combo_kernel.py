@@ -35,7 +35,7 @@ from .common import (
 )
 from .simd import NodeInfo, prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
-from .triton import gen_common_triton_imports, TritonKernel
+from .triton import TritonKernel
 from .triton_utils import config_of, equal_1_arg_indices, signature_to_meta
 
 
@@ -347,9 +347,13 @@ class ComboKernel(Kernel):
                 code.splice(f"pid_offset = pid // {num_kernels}")
 
     def __init__(
-        self, enable_autotune: bool = False, mixed_sizes: bool = False
+        self,
+        triton_kernel_cls: type[TritonKernel],
+        enable_autotune: bool = False,
+        mixed_sizes: bool = False,
     ) -> None:
         super().__init__()
+        self.triton_kernel_cls = triton_kernel_cls
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
@@ -383,12 +387,13 @@ class ComboKernel(Kernel):
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
+        triton_kernel_cls: type[TritonKernel],
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
-        return TritonKernel(
+        return triton_kernel_cls(
             tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
@@ -486,11 +491,7 @@ class ComboKernel(Kernel):
 
     def select_heuristics(self, sub_kernel: TritonKernel) -> tuple[str, dict[str, int]]:
         size_hints = {
-            prefix: next_power_of_2(
-                V.graph.sizevars.size_hint(
-                    numel, fallback=config.unbacked_symint_fallback
-                )
-            )
+            prefix: next_power_of_2(V.graph.sizevars.optimization_hint(numel))
             for prefix, numel in sub_kernel.numels.items()
             if not prefix_is_reduction(prefix) or sub_kernel.inside_reduction
         }
@@ -598,6 +599,8 @@ class ComboKernel(Kernel):
         argdefs: list[ArgName],
         pointwise_with_reduce: bool = False,
     ) -> str:
+        """Write the @triton_heuristics.<heuristics> decorator line for the combo kernel."""
+
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         for i, sub in enumerate(self.sub_kernels):
@@ -619,12 +622,13 @@ class ComboKernel(Kernel):
         mutated_args = self.get_mutated_args_sub_kernels()
         dispatch = self.dispatch_class
         assert dispatch is not None
+
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
-            **TritonKernel.inductor_meta_common(),
+            **self.triton_kernel_cls.inductor_meta_common(),
         }
 
         sub_kernel = selected_kernel
@@ -746,11 +750,7 @@ class ComboKernel(Kernel):
 
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(
-                        str(
-                            V.graph.sizevars.size_hint(
-                                tree.numel, fallback=config.unbacked_symint_fallback
-                            )
-                        )
+                        str(V.graph.sizevars.optimization_hint(tree.numel))
                     )
         return extra_args
 
@@ -772,7 +772,7 @@ class ComboKernel(Kernel):
         )
         code = IndentedBuffer()
 
-        code.splice(gen_common_triton_imports())
+        code.splice(self.triton_kernel_cls.gen_common_triton_imports())
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
 
@@ -859,24 +859,16 @@ class ComboKernel(Kernel):
                 var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.try_get_buffer(arg_name)
                 if buf:
-                    size = V.graph.sizevars.size_hints(
-                        buf.get_size(), fallback=config.unbacked_symint_fallback
-                    )
-                    stride = V.graph.sizevars.size_hints(
-                        buf.get_stride(), fallback=config.unbacked_symint_fallback
-                    )
+                    size = V.graph.sizevars.optimization_hints(buf.get_size())
+                    stride = V.graph.sizevars.optimization_hints(buf.get_stride())
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
                     )
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
-                    size = V.graph.sizevars.size_hints(
-                        const_tensor.size(), fallback=config.unbacked_symint_fallback
-                    )
-                    stride = V.graph.sizevars.size_hints(
-                        const_tensor.stride(), fallback=config.unbacked_symint_fallback
-                    )
+                    size = V.graph.sizevars.optimization_hints(const_tensor.size())
+                    stride = V.graph.sizevars.optimization_hints(const_tensor.stride())
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )

@@ -101,14 +101,11 @@ jobs:
             dist/torch-*.whl \
             dist/vision/torchvision-*.whl \
             dist/audio/torchaudio-*.whl \
+            dist/ao/torchao-*.whl \
             dist/vllm/vllm-*.whl \
+            dist/deepgemm/deep_gemm-*.whl \
             --extra-index-url https://download.pytorch.org/whl/cu129 \
             --index-strategy unsafe-best-match
-
-          # We can build and install torchao from its pinned commit in PyTorch
-          # too, but that pin is too old and nothing seems to use it. Let's
-          # install torchao from pypi then
-          uv pip install torchao==0.15.0 --torch-backend=cu129
 
       - name: Print some debug information
         env:
