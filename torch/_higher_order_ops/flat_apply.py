@@ -48,6 +48,14 @@ def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
     return flat_args, spec
 
 
+def from_graphable(
+    flat_args: tuple[Unpack[_Ts]], spec: pytree.TreeSpec
+) -> pytree.PyTree:
+    """The inverse of to_graphable."""
+    stuff = pytree.tree_unflatten(flat_args, spec)
+    return stuff
+
+
 def func_to_graphable(
     func: Callable[..., object],
 ) -> tuple[list[object], pytree.TreeSpec]:
@@ -156,11 +164,11 @@ def impl(
             )
 
     if in_spec is None:
-        # Pass through flat_args directly without unflattening
         args: tuple[Any, ...] | list[Any] = flat_args
         kwargs: dict[str, Any] = {}
     else:
-        args, kwargs = pytree.tree_unflatten(list(flat_args), in_spec)
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
+        args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
 
     if checked_output:

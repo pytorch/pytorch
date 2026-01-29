@@ -2554,9 +2554,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         def flat_apply_capture(*flat_args: Any) -> list[object]:
             nonlocal captured_out_spec
 
-            # Use the captured input_spec to unflatten and convert LeafModuleState
             with reconstruct_original_args(input_spec, flat_args) as (args, kwargs):
-                # Call the function with allow_non_fake_inputs_override
                 old_val = fake_tensor_tls.allow_non_fake_inputs_override
                 fake_tensor_tls.allow_non_fake_inputs_override = True
                 try:
@@ -2564,7 +2562,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 finally:
                     fake_tensor_tls.allow_non_fake_inputs_override = old_val
 
-                # Flatten the output and capture the spec
                 flat_out, spec = to_graphable(out)
                 if captured_out_spec is None:
                     captured_out_spec = spec
@@ -2586,8 +2583,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         )
         f_spec_proxy.node.type = type(f_spec)
 
-        # Pass None as in_spec to flat_apply, which means "pass through flat_args directly".
-        # flat_apply_capture will use the captured input_spec to do the real unflattening.
+        # flat_apply_capture already takes flat inputs so pass None as in_spec to flat_apply
         all_args = (f_spec_proxy, None, *proxified_flat_args)
 
         # What's going on here? The output of the nonstrict-traced function must
@@ -2744,11 +2740,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args_with_states, kwargs_with_states = self._extract_nn_module_states(
             tx, args, kwargs
         )
-        flat_args_vts, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
+        flat_args_var, input_spec_var = _make_inlined(tx, pytree.tree_flatten)(
             VariableTracker.build(tx, (args_with_states, kwargs_with_states))
         ).unpack_var_sequence(tx)
         flat_arg_proxies = [
-            arg.as_proxy() for arg in flat_args_vts.unpack_var_sequence(tx)
+            arg.as_proxy() for arg in flat_args_var.unpack_var_sequence(tx)
         ]
         input_spec = input_spec_var.as_python_constant()
 

@@ -880,8 +880,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
             )
 
     def test_nonstrict_trace_with_module_input(self):
-        """Test nonstrict_trace decorated function with nn.Module as input."""
-
         @torch._dynamo.nonstrict_trace
         def traced_forward(helper_mod, x):
             return helper_mod(x) + x
@@ -911,8 +909,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_with_module_in_pytree(self):
-        """Test nonstrict_trace with nn.Module inside a pytree (dict)."""
-
         @torch._dynamo.nonstrict_trace
         def traced_forward(modules_dict, x):
             return modules_dict["first"](x) + modules_dict["second"](x)
@@ -944,8 +940,6 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_with_module_as_kwarg(self):
-        """Test nonstrict_trace with nn.Module passed as keyword argument."""
-
         @torch._dynamo.nonstrict_trace
         def traced_forward(x, helper_mod=None):
             if helper_mod is not None:
