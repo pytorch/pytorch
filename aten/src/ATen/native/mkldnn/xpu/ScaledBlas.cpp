@@ -540,7 +540,7 @@ Tensor& _scaled_block1x128_block1x128(
   const int64_t K = mat_a.sizes()[1];
   const int64_t N = mat_b.sizes()[1];
 
-  // scale_a shape
+  // scale_a shape: [M, K//128]
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_a.scalar_type() == kFloat,
@@ -550,36 +550,26 @@ Tensor& _scaled_block1x128_block1x128(
       ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_a.sizes());
-  // scale_a stride
+  // scale_a stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
-      scale_a.stride(0) == 1 &&
-          (scale_a.stride(1) == M ||
-           (scale_a.size(1) == 1 && scale_b.stride(1) == 1)),
-      "scale_a strides must be (",
-      1,
-      ", ",
-      M,
-      "); got: ",
+      scale_a.stride(1) == 1,
+      "scale_a must be K-contiguous (stride(1) == 1); got: ",
       scale_a.strides());
 
-  // scale_b shape
+  // scale_b shape: [K//128, N]
   TORCH_CHECK_VALUE(
-      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
+      scale_b.size(0) == ceil_div<int64_t>(K, 128) && scale_b.size(1) == N &&
           scale_b.scalar_type() == kFloat,
       "scale_b must have shape ",
-      N,
-      " x ",
       ceil_div<int64_t>(K, 128),
+      " x ",
+      N,
       " Float elements, got ",
       scale_b.sizes());
-  // scale_b stride
+  // scale_b stride: K-contiguous (stride(0) can vary, stride(1) == 1)
   TORCH_CHECK_VALUE(
-      scale_b.stride(0) == 1 &&
-          (scale_b.stride(1) == N ||
-           (scale_b.size(1) == 1 && scale_b.stride(1) == 1)),
-      "scale_b strides must be (1, ",
-      N,
-      "); got: ",
+      scale_b.stride(1) == 1,
+      "scale_b must be K-contiguous (stride(1) == 1); got: ",
       scale_b.strides());
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
@@ -612,11 +602,9 @@ Tensor& _scaled_block128x128_block1x128(
   // A: [M, K], B: [K, N] are FP8, scales are fp32
 
   // [Note:] Unlike cuBLAS, XPU does not use L4 padding nor swizzling
-  // However, XPU needs the scale shape to match cuBLAS, so we keep the same
-  // shape here. This makes XPU `scale` an additional reshape before oneDNN's
-  // call. See aten/src/ATen/native/mkldnn/xpu/detail/QMatmul.cpp's
-  // `spec.normalize()` for detail.
-  // We keep the frontend the same with CUDA to make it easier to align
+  // XPU uses natural scale shapes that match matrix dimensions:
+  // A: [M, K] -> scale_a: [M//128, K//128]
+  // B: [K, N] -> scale_b: [K//128, N]
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
@@ -627,45 +615,37 @@ Tensor& _scaled_block128x128_block1x128(
   const int64_t K = mat_a.sizes()[1];
   const int64_t N = mat_b.sizes()[1];
 
-  // scale_a shape: [K//128, M//128] with column-major stride
+  // scale_a shape: [M//128, K//128]
   TORCH_CHECK_VALUE(
-      scale_a.size(0) == ceil_div<int64_t>(K, 128) &&
-          scale_a.size(1) == ceil_div<int64_t>(M, 128) &&
+      scale_a.size(0) == ceil_div<int64_t>(M, 128) &&
+          scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_a.scalar_type() == kFloat,
       "scale_a must have shape ",
-      ceil_div<int64_t>(K, 128),
-      " x ",
       ceil_div<int64_t>(M, 128),
+      " x ",
+      ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_a.sizes());
-  // scale_a stride
+  // scale_a stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
-      scale_a.stride(0) == 1 &&
-          (scale_a.stride(1) == ceil_div<int64_t>(K, 128) ||
-           (scale_a.size(1) == 1 && scale_a.stride(1) == 1)),
-      "scale_a must have strides (1, ",
-      ceil_div<int64_t>(K, 128),
-      "); got ",
+      scale_a.stride(1) == 1,
+      "scale_a must be K-contiguous (stride(1) == 1); got: ",
       scale_a.strides());
 
-  // scale_b shape
+  // scale_b shape: [K//128, N] - natural shape matching B [K, N]
   TORCH_CHECK_VALUE(
-      scale_b.size(0) == N && scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
+      scale_b.size(0) == ceil_div<int64_t>(K, 128) && scale_b.size(1) == N &&
           scale_b.scalar_type() == kFloat,
       "scale_b must have shape ",
-      N,
-      " x ",
       ceil_div<int64_t>(K, 128),
+      " x ",
+      N,
       " Float elements, got ",
       scale_b.sizes());
-  // scale_b stride: column-major [1, N]
+  // scale_b stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
-      scale_b.stride(0) == 1 &&
-          (scale_b.stride(1) == N ||
-           (scale_b.size(1) == 1 && scale_b.stride(1) == 1)),
-      "scale_b strides must be (1, ",
-      N,
-      "); got: ",
+      scale_b.stride(1) == 1,
+      "scale_b must be K-contiguous (stride(1) == 1); got: ",
       scale_b.strides());
 
   auto scaling_choice_a = ScalingType::BlockWise128x128;
@@ -699,12 +679,9 @@ Tensor& _scaled_block1x128_block128x128(
   // As: [M x K // 128]
   // Bs: [K // 128 x N // 128]
 
-  // [Note:] Unlike cuBLAS, XPU does not use L4 padding nor swizzling
-  // However, XPU needs the scale shape to match cuBLAS, so we keep the same
-  // shape here. This makes XPU `scale` an additional reshape before oneDNN's
-  // call. See aten/src/ATen/native/mkldnn/xpu/detail/QMatmul.cpp's
-  // `spec.normalize()` for detail.
-  // We keep the frontend the same with CUDA to make it easier to align
+  // XPU uses natural scale shapes that match matrix dimensions:
+  // A: [M, K] -> scale_a: [M, K//128]
+  // B: [K, N] -> scale_b: [K//128, N//128]
   TORCH_CHECK_VALUE(
       isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
       "mat_a and mat_b must be fp8 types, got: ",
@@ -715,7 +692,7 @@ Tensor& _scaled_block1x128_block128x128(
   int64_t K = mat_a.size(1);
   int64_t N = mat_b.size(1);
 
-  // scale_a shape
+  // scale_a shape: [M, K//128]
   TORCH_CHECK_VALUE(
       scale_a.size(0) == M && scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
           scale_a.scalar_type() == kFloat,
@@ -725,16 +702,12 @@ Tensor& _scaled_block1x128_block128x128(
       ceil_div<int64_t>(K, 128),
       " Float elements, got ",
       scale_a.sizes());
-  // scale_a stride
+  // scale_a stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
-      scale_a.stride(0) == 1 &&
-          (scale_a.stride(1) == M ||
-           (scale_a.size(1) == 1 && scale_a.stride(1) == 1)),
-      "scale_a must have strides (1, ",
-      M,
-      "); got ",
-      scale_b.strides());
-  // scale_b shape
+      scale_a.stride(1) == 1,
+      "scale_a must be K-contiguous (stride(1) == 1); got: ",
+      scale_a.strides());
+  // scale_b shape: [K//128, N//128]
   TORCH_CHECK_VALUE(
       scale_b.size(0) == ceil_div<int64_t>(K, 128) &&
           scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
@@ -745,14 +718,10 @@ Tensor& _scaled_block1x128_block128x128(
       ceil_div<int64_t>(N, 128),
       " Float elements, got ",
       scale_b.sizes());
-  // scale_b stride
+  // scale_b stride: K-contiguous (stride(1) == 1)
   TORCH_CHECK_VALUE(
-      scale_b.stride(0) == 1 &&
-          (scale_b.stride(1) == ceil_div<int64_t>(K, 128) ||
-           (scale_b.size(1) == 1 && scale_b.stride(1) == 1)),
-      "scale_b must have strides (1, ",
-      ceil_div<int64_t>(K, 128),
-      "); got ",
+      scale_b.stride(1) == 1,
+      "scale_b must be K-contiguous (stride(1) == 1); got: ",
       scale_b.strides());
 
   auto scaling_choice_a = ScalingType::BlockWise1x128;
