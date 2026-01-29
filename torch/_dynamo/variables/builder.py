@@ -4072,25 +4072,14 @@ class SourcelessBuilder:
     @overload
     @staticmethod
     def create(
-        tx: "InstructionTranslatorBase", value: type[set[Any]]
+        tx: "InstructionTranslatorBase",
+        value: type[set[Any]] | type[dict[Any, Any]] | type[tuple[Any, ...]],
     ) -> BuiltinVariable: ...
 
     @overload
     @staticmethod
     def create(
-        tx: "InstructionTranslatorBase", value: type[dict[Any, Any]]
-    ) -> BuiltinVariable: ...
-
-    @overload
-    @staticmethod
-    def create(
-        tx: "InstructionTranslatorBase", value: type[tuple[Any, ...]]
-    ) -> BuiltinVariable: ...
-
-    @overload
-    @staticmethod
-    def create(
-        tx: "InstructionTranslatorBase", value: Union[bool, int, float, str]
+        tx: "InstructionTranslatorBase", value: bool | int | float | str
     ) -> ConstantVariable: ...
 
     @overload
@@ -4157,7 +4146,6 @@ class SourcelessBuilder:
             assert getattr(value.__self__, value.__func__.__name__) == value
             cls_obj_vt = SourcelessBuilder.create(tx, value.__self__)
             try:
-                # tx is InstructionTranslatorBase, but var_getattr needs InstructionTranslator
                 # pyrefly: ignore[bad-argument-type]
                 return cls_obj_vt.var_getattr(tx, value.__func__.__name__)
             except NotImplementedError:
