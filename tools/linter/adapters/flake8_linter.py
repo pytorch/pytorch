@@ -11,7 +11,6 @@
 #   "mccabe==0.7.0",
 #   "pycodestyle==2.14.0",
 #   "pyflakes==3.4.0",
-#   "torchfix==0.4.0 ; python_version >= '3.10' and python_version < '3.13'",
 #   "setuptools",
 # ]
 # ///
