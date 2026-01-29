@@ -78,7 +78,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           # We filter by github.actor at workflow level, there is no point of filtering here as well
-          allowed_bots: "*"  
+          allowed_bots: "*"
           claude_args: "--model global.anthropic.claude-opus-4-5-20251101-v1:0"
           settings: '{"alwaysThinkingEnabled": true}'
           use_bedrock: "true"
