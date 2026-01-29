@@ -6859,7 +6859,9 @@ def _check_scaled_mm_sizes_v2(
                 and recipe_b[0] == ScalingType.BlockWise1x32
             )
 
-        def is_nv_single_level(recipe_a: list[ScalingType], recipe_b: list[ScalingType]):
+        def is_nv_single_level(
+            recipe_a: list[ScalingType], recipe_b: list[ScalingType]
+        ):
             return (
                 len(recipe_a) == 1
                 and len(recipe_b) == 1
