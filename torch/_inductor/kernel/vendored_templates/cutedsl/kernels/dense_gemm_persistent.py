@@ -245,6 +245,8 @@ class PersistentDenseGemmKernel:
         mma_tiler_mn: Tuple[int, int],
         cluster_shape_mn: Tuple[int, int],
         use_tma_store: bool,
+        swizzle_size: int = 1,
+        raster_along_m: bool = True,
     ):
         """Initializes the configuration for a Blackwell dense GEMM kernel.
 
@@ -281,6 +283,8 @@ class PersistentDenseGemmKernel:
         self.mma_tiler_mn = mma_tiler_mn
         self.mma_tiler = (*mma_tiler_mn, 1)
         self.use_tma_store = use_tma_store
+        self.swizzle_size = swizzle_size
+        self.raster_along_m = raster_along_m
 
         self.cta_group = (
             tcgen05.CtaGroup.TWO if use_2cta_instrs else tcgen05.CtaGroup.ONE
@@ -505,7 +509,7 @@ class PersistentDenseGemmKernel:
 
         # Compute grid size
         self.tile_sched_params, grid = self._compute_grid(
-            c, self.cta_tile_shape_mnk, self.cluster_shape_mn, max_active_clusters
+            c, self.cta_tile_shape_mnk, max_active_clusters
         )
 
         # Launch the kernel synchronously
@@ -1359,11 +1363,10 @@ class PersistentDenseGemmKernel:
         tRS_rC = tiled_copy_r2s.retile(tTR_rC)
         return tiled_copy_r2s, tRS_rC, tRS_sC
 
-    @staticmethod
     def _compute_grid(
+        self,
         c: cute.Tensor,
         cta_tile_shape_mnk: Tuple[int, int, int],
-        cluster_shape_mn: Tuple[int, int],
         max_active_clusters: cutlass.Constexpr,
     ) -> Tuple[utils.PersistentTileSchedulerParams, Tuple[int, int, int]]:
         """Use persistent tile scheduler to compute the grid size for the output tensor C.
@@ -1372,8 +1375,6 @@ class PersistentDenseGemmKernel:
         :type c: cute.Tensor
         :param cta_tile_shape_mnk: The shape (M, N, K) of the CTA tile.
         :type cta_tile_shape_mnk: tuple[int, int, int]
-        :param cluster_shape_mn: Shape of each cluster in M, N dimensions.
-        :type cluster_shape_mn: tuple[int, int]
         :param max_active_clusters: Maximum number of active clusters.
         :type max_active_clusters: cutlass.Constexpr
 
@@ -1385,10 +1386,13 @@ class PersistentDenseGemmKernel:
         c_shape = cute.slice_(cta_tile_shape_mnk, (None, None, 0))
         gc = cute.zipped_divide(c, tiler=c_shape)
         num_ctas_mnl = gc[(0, (None, None, None))].shape
-        cluster_shape_mnl = (*cluster_shape_mn, 1)
+        cluster_shape_mnl = (*self.cluster_shape_mn, 1)
 
         tile_sched_params = utils.PersistentTileSchedulerParams(
-            num_ctas_mnl, cluster_shape_mnl
+            num_ctas_mnl,
+            cluster_shape_mnl,
+            raster_along_m=self.raster_along_m,
+            swizzle_size=self.swizzle_size,
         )
         grid = utils.StaticPersistentTileScheduler.get_grid_shape(
             tile_sched_params, max_active_clusters
