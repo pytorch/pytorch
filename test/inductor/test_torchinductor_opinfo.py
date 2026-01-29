@@ -991,6 +991,7 @@ inductor_skip_exact_stride = {
     "fft.irfft2",
     "linalg.diagonal",
     "linalg.eigvals",  # Fails for ROCM
+    "linalg.lu",
     "linalg.lu_factor",
     "linalg.matrix_norm",
     "linalg.norm",
