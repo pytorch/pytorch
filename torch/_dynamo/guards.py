@@ -2708,7 +2708,7 @@ class GuardBuilder(GuardBuilderBase):
                 names: dict[str, tuple[int, int]] = {}
                 source_pairs: list[tuple[Source, Source]] = []
                 derived_equalities: list[  # type: ignore[type-arg]
-                    tuple[Source, Union[Source, Symbol], Callable]
+                    tuple[Source, Source | Symbol, Callable[..., Any]]
                 ] = []
                 phantom_symbols: dict[str, Symbol] = {}
                 relaxed_sources: set[Source] = set()
@@ -4567,8 +4567,8 @@ def format_user_stack_trace(
 def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
-    compile_id: Optional[CompileId],
-    backend: Optional[Callable],
+    compile_id: CompileId | None,
+    backend: Callable[..., Any] | None,
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -4675,7 +4675,7 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
-    backend: Callable,
+    backend: Callable[..., Any],
     skip_logging: bool = False,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
@@ -4701,9 +4701,9 @@ def get_guard_fail_reason(
 
 
 def get_and_maybe_log_recompilation_reasons(
-    cache_entry: Optional[CacheEntry],
+    cache_entry: CacheEntry | None,
     frame: DynamoFrameType,
-    backend: Callable,
+    backend: Callable[..., Any],
     skip_logging: bool = False,
 ) -> list[str]:
     """
