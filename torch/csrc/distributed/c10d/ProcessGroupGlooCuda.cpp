@@ -90,6 +90,15 @@ class AsyncAllreduceCUDAHostWork : public AsyncAllreduceWork {
             timeout) {
     initializeStreamsEvents(inputs, streams, events);
 
+    // Capture the original streams where tensors were created
+    // This is necessary for proper synchronization when using non-default streams
+    originalStreams.reserve(inputs.size());
+    for (const auto i : c10::irange(inputs.size())) {
+      c10::Device device = inputs[i].device();
+      c10::impl::VirtualGuardImpl impl(device.type());
+      originalStreams.push_back(impl.getStream(device));
+    }
+
     // Kick off copy from CUDA tensors to pinned CPU tensors.
     tmp.reserve(inputs.size());
     c10::OptionalStreamGuard guard;
@@ -119,15 +128,17 @@ class AsyncAllreduceCUDAHostWork : public AsyncAllreduceWork {
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
     for (const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(
-          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+//      c10::Device device = inputs[i].device();
+//      events[i].block(
+//          c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+      events[i].block(originalStreams[i]);
     }
   }
 
   std::vector<at::Tensor> tmp;
   std::vector<c10::Stream> streams;
   std::vector<c10::Event> events;
+  std::vector<c10::Stream> originalStreams;
 };
 
 class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
