@@ -174,8 +174,24 @@ const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
 
 GEMM_TEMPLATE_MICROKERNEL_DEF = r"""
 {{template.header().getvalue()}}
-
+{%- if fuse_epilogue_into_microkernel %}
+{{ kernel.define_buffer("local_acc_buf", ["Mc_blocks*Mr", "Nr"], acc_buf_dtype, alloc=False) }}
+{%- set acc = kernel.local_buffers["local_acc_buf"] %}
+{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "Nr")]) %}
+{%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("nci*Nr", "(nci+1)*Nr")]) %}
+{{micro_gemm.codegen_define(
+    kernel,
+    fake_buffers,
+    epilogue_nodes,
+    kernel.store_output(tile_Y,
+                        acc_slice,
+                        GemmOut,
+                        epilogue_nodes,
+                        reindexers=reindexers,
+                        in_microgemm=True))}}
+{%- else %}
 {{micro_gemm.codegen_define(kernel)}}
+{%- endif %}
 """
 
 GEMM_TEMPLATE_STUB_DEF = r"""
@@ -217,8 +233,13 @@ GEMM_TEMPLATE = r"""
         {{ micro_gemm.codegen_init(kernel) }}
 {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
+        {%- if fuse_epilogue_into_microkernel %}
+        {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nr"], acc_buf_dtype) }}
+        {%- else %}
         {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+        {%- endif %}
 {%- endif %}
+
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
             {{ template.codegen_m_loop_params()|indent(12, false) }}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
@@ -234,7 +255,11 @@ GEMM_TEMPLATE = r"""
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
 {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
+{%- if fuse_epilogue_into_microkernel %}
+{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "Nr")]) %}
+{%- else %}
 {%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- endif %}
 {%- if template.should_block_weights and not is_woq_int4 %}
 {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
@@ -248,12 +273,43 @@ GEMM_TEMPLATE = r"""
         {%- set tile_qparam = None %}
     {%- endif %}
 {%- endif %}
-                        if (kc == k_block_start) {
+                    {% if fuse_epilogue_into_microkernel %}
+                        int64_t N_epi = N - nci * Nr < Nr ? (N - nci * Nr) : Nr;
+                        {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("nci*Nr", "(nci+1)*Nr")]) %}
+                        if (kc == k_block_start && kc + Kc_blocks < k_block_end) {
                             {{ micro_gemm.codegen_call(kernel,
                                                        tile_X,
                                                        tile_W,
                                                        acc_slice,
                                                        accum=False,
+                                                       Y=tile_Y,
+                                                       do_epilogue=False,
+                                                       epilogue_nodes=epilogue_nodes,
+                                                       offsets=("m_start", "nci*Nr"),
+                                                       qscale_and_zeros=tile_qparam)|indent(28, false)
+                            }}
+                        } else if (kc == k_block_start && kc + Kc_blocks >= k_block_end) {
+                            {{ micro_gemm.codegen_call(kernel,
+                                                       tile_X,
+                                                       tile_W,
+                                                       acc_slice,
+                                                       accum=False,
+                                                       Y=tile_Y,
+                                                       do_epilogue=True,
+                                                       epilogue_nodes=epilogue_nodes,
+                                                       offsets=("m_start", "nci*Nr"),
+                                                       qscale_and_zeros=tile_qparam)|indent(28, false)
+                            }}
+                        } else if (kc >= k_block_end - Kc_blocks) {
+                            {{ micro_gemm.codegen_call(kernel,
+                                                       tile_X,
+                                                       tile_W,
+                                                       acc_slice,
+                                                       accum=True,
+                                                       Y=tile_Y,
+                                                       do_epilogue=True,
+                                                       epilogue_nodes=epilogue_nodes,
+                                                       offsets=("m_start", "nci*Nr"),
                                                        qscale_and_zeros=tile_qparam)|indent(28, false)
                             }}
                         } else {
@@ -262,9 +318,26 @@ GEMM_TEMPLATE = r"""
                                                        tile_W,
                                                        acc_slice,
                                                        accum=True,
+                                                       Y=tile_Y,
+                                                       do_epilogue=False,
+                                                       epilogue_nodes=epilogue_nodes,
+                                                       offsets=("m_start", "nci*Nr"),
                                                        qscale_and_zeros=tile_qparam)|indent(28, false)
                             }}
                         }
+                    {% else %}
+                        if (kc == k_block_start) {
+                            {{ micro_gemm.codegen_call(
+                                kernel, tile_X, tile_W, acc_slice, accum=False, qscale_and_zeros=tile_qparam,
+                            )|indent(28, false)
+                            }}
+                        } else {
+                            {{ micro_gemm.codegen_call(
+                                kernel, tile_X, tile_W, acc_slice, accum=True, qscale_and_zeros=tile_qparam,
+                            )|indent(28, false)
+                            }}
+                        }
+                    {%- endif %}
                     }
                 }
 {%- if maybe_k_slicing %}
@@ -274,6 +347,8 @@ GEMM_TEMPLATE = r"""
                         {{ kernel.release_buffer(acc_buf_name) }});
                 } else
 {%- endif %}
+
+{%- if not fuse_epilogue_into_microkernel %}
                 {
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
 {%- set tile_acc = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "n_end - n_start")]) %}
@@ -282,8 +357,9 @@ GEMM_TEMPLATE = r"""
                     )|indent(20, false)
                     }}
                 }
-            }
+{%- endif %}
         }
+    }
 {%- if maybe_k_slicing %}
         if (num_Kt_blocks > 1) {
             #pragma omp barrier
@@ -878,7 +954,6 @@ class CppGemmTemplate(CppTemplate):
         )
         register_blocking = self.register_blocking
         thread_blocking = self.thread_blocking(num_threads)
-
         return GemmBlocking(*get_cache_blocking(register_blocking, thread_blocking))
 
     def log_blockings(self):
@@ -1564,6 +1639,13 @@ class CppGemmTemplate(CppTemplate):
         L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
+        fuse_epilogue_into_microkernel = (
+            isinstance(micro_gemm, CppMicroGemmAMX)
+            and len(epilogues) > 0
+            and use_local_acc
+            and not self.maybe_k_slicing()
+        )
+
         options = dict(
             X=X,
             W=W,
@@ -1583,6 +1665,7 @@ class CppGemmTemplate(CppTemplate):
             kernel=kernel,
             export_declaration=get_export_declaration(),
             epilogue_nodes=epilogues,
+            fuse_epilogue_into_microkernel=fuse_epilogue_into_microkernel,
             reindexers=reindexers,
             Y_2d=Y_2d,
             use_local_acc=use_local_acc,
@@ -1699,10 +1782,11 @@ class CppGemmTemplate(CppTemplate):
         )
 
     def codegen_gemm_stub_def(self):
-        microkernel = self.codegen_microkernel_def()
-        return microkernel + self._template_from_string(GEMM_TEMPLATE_STUB_DEF).render(
+        stub = self._template_from_string(GEMM_TEMPLATE_STUB_DEF).render(
             self.render_options
         )
+        microkernel = self.codegen_microkernel_def()
+        return microkernel + stub
 
     def codegen_multi_threads_params(self):
         return self._template_from_string(GEMM_TEMPLATE_MULTI_THREADS_PARAMS).render()

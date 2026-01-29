@@ -18,7 +18,7 @@ from torch.utils._sympy.printers import CppPrinter as _CppPrinter
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .. import ir
+from .. import config, ir
 from ..dependencies import Dep
 from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
@@ -268,12 +268,31 @@ def rewrite_index_for_nodes(
     used_vars = OrderedSet(
         s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)
     )
-    index_vars = []
-    local_buf = localize_buffer_handler.global_to_local[global_buf_name]
-    for i in range(len(local_buf.get_size())):
-        var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
-        index_vars.append(var if var in used_vars else 0)
-    index = local_buf.get_layout().make_indexer()(index_vars)
+
+    def _make_index_vars(ndim: int) -> list[sympy.Expr]:
+        out: list[sympy.Expr] = []
+        for i in range(ndim):
+            var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
+            out.append(var if var in used_vars else sympy.S.Zero)
+        return out
+
+    # 1) If a layout override exists for the original name, use it directly.
+    if localize_buffer_handler.inner_layouts and global_buf_name in localize_buffer_handler.inner_layouts:
+        layout = localize_buffer_handler.inner_layouts[global_buf_name]
+        return layout.make_indexer()(_make_index_vars(len(layout.size)))
+
+    # 2) If name is localized to a local buffer, index with the local buffer's layout,
+    #    allowing an override on the *local* name as well.
+    if global_buf_name in localize_buffer_handler.global_to_local:
+        local_buf = localize_buffer_handler.global_to_local[global_buf_name]
+        index_vars = _make_index_vars(len(local_buf.get_size()))
+
+        if localize_buffer_handler.inner_layouts and local_buf.get_name() in localize_buffer_handler.inner_layouts:
+            layout = localize_buffer_handler.inner_layouts[local_buf.get_name()]
+            return layout.make_indexer()(index_vars)
+
+        return local_buf.get_layout().make_indexer()(index_vars)
+
     return index
 
 
@@ -282,17 +301,27 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         self,
         inner,
         global_to_local: dict[str, ir.Buffer],
+        inner_layouts: Optional[dict[str, ir.FixedLayout]],
         rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr, str], sympy.Expr],
     ) -> None:
         super().__init__(inner)
         self.global_to_local = global_to_local
+        self.inner_layouts = inner_layouts
         self.rewrite_index = rewrite_index
 
     def localize(self, name: str, index: sympy.Expr):
-        if self.global_to_local and name in self.global_to_local:
+        # Rewrite index if either:
+        #  - name has a layout override, or
+        #  - name is localized to a local buffer
+        if (self.inner_layouts and name in self.inner_layouts) or (
+            self.global_to_local and name in self.global_to_local
+        ):
             assert self.rewrite_index is not None
             index = self.rewrite_index(self, index, name)
+
+        if self.global_to_local and name in self.global_to_local:
             name = self.global_to_local[name].get_name()
+
         return name, index
 
     def load(self, name: str, index: sympy.Expr):
@@ -326,7 +355,16 @@ class LocalBufferContext:
     these buffers without exposure to the outside world.
     """
 
-    def __init__(self, kernel_args: KernelArgs) -> None:
+    def __init__(
+        self,
+        kernel_args: KernelArgs,
+        in_microgemm: bool=False,
+        inner_layouts: Optional[dict[str, ir.FixedLayout]] = None,
+        inner_names: Optional[dict[str, str]] = None
+    ) -> None:
+        self.in_microgemm = in_microgemm
+        self.inner_layouts = inner_layouts
+        self.inner_names = inner_names
         self.kernel_args = kernel_args
         self.exit_stack = contextlib.ExitStack()
         # map local buffer name to local buffer
@@ -352,7 +390,9 @@ class LocalBufferContext:
         original_input = self.kernel_args.input
 
         def input(name):
-            if name in self.local_buffers:
+            if self.inner_names is not None and name in self.inner_names:
+                return self.inner_names[name]
+            elif name in self.local_buffers:
                 return name
             return original_input(name)
 
@@ -361,7 +401,9 @@ class LocalBufferContext:
         original_output = self.kernel_args.output
 
         def output(name):
-            if name in self.local_buffers:
+            if self.inner_names is not None and name in self.inner_names:
+                return self.inner_names[name]
+            elif name in self.local_buffers:
                 return name
             return original_output(name)
 
@@ -409,6 +451,7 @@ class LocalBufferContext:
                 LocalizeBufferHandler(
                     V.get_ops_handler(),
                     global_to_local=self.global_to_local,
+                    inner_layouts=self.inner_layouts,
                     rewrite_index=rewrite_index,
                 )
             ):
