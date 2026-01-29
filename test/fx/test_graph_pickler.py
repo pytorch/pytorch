@@ -243,7 +243,7 @@ class TestHigherOrderOperatorPickle(TestCase):
 
     def setUp(self):
         super().setUp()
-        from torch.fx._graph_pickler import GraphPickler, Options, _OpPickleData
+        from torch.fx._graph_pickler import _OpPickleData, GraphPickler, Options
 
         self.GraphPickler = GraphPickler
         self.Options = Options
