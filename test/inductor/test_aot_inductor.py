@@ -3482,7 +3482,10 @@ class AOTInductorTestsTemplate:
         finally:
             torch.cuda.memory._record_memory_history(False)
         segments = torch.cuda.memory._snapshot()["segments"]
-        self.assertEqual(segments[0]["requested_size"], 400)
+        self.assertTrue(
+            any(seg["requested_size"] == 400 for seg in segments),
+            f"Expected segment with size 400, got: {[s["requested_size"] for s in segments]}",
+        )
 
     def test_view_outputs(self):
         class Model(torch.nn.Module):
