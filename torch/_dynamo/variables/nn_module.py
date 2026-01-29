@@ -1135,7 +1135,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else nullcontext()
         )
         with ctx:
-            # Check if fn is a leaf_function (e.g., forward decorated with @leaf_function)
             if trace_rules.is_leaf_function(fn):
                 return variables.TorchInGraphFunctionVariable(
                     fn, kind=variables.torch.AllowInGraphKind.LEAF_FUNCTION
