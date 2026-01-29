@@ -7,8 +7,10 @@ Runs CIFAR10 training with differential privacy.
 
 import argparse
 import logging
+import os
 import shutil
 import sys
+import tempfile
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -443,7 +445,7 @@ def parse_args():
     parser.add_argument(
         "--log-dir",
         type=str,
-        default="/tmp/stat/tensorboard",
+        default=os.path.join(tempfile.gettempdir(), "stat", "tensorboard"),
         help="Where Tensorboard log will be stored",
     )
     parser.add_argument(

@@ -571,7 +571,7 @@ class LocalElasticAgentTest(unittest.TestCase):
     def run_agent_local_watchdog_setup_enabled(self):
         # Set the env for watchdog
         watchdog_env_name = TORCHELASTIC_TIMER_FILE
-        watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
+        watchdog_file_path = os.path.join(tempfile.gettempdir(), f"watchdog_timer_{uuid.uuid4()}")
         os.environ[watchdog_env_name] = watchdog_file_path
         # Run the agent
         node_conf = Conf(

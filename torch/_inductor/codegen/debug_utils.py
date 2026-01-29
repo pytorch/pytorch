@@ -4,6 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import tempfile
 from enum import Enum
 from typing import Optional, TYPE_CHECKING
 
@@ -211,7 +212,7 @@ class DebugPrinterManager:
                 )
             else:
                 cwd = os.getcwd()
-                saved_dir = cwd + "/tmp/jit_inductor/"
+                saved_dir = os.path.join(cwd, os.path.relpath(os.path.join(tempfile.gettempdir(), "jit_inductor"), "/"))
                 if not os.path.exists(saved_dir):
                     log.info(
                         "Creating directory to save inductor intermediate tensor values."

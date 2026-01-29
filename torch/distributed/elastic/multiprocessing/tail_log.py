@@ -73,7 +73,8 @@ class TailLog:
 
     ::
 
-     log_files = {0: "/tmp/0_stdout.log", 1: "/tmp/1_stdout.log"}
+     import tempfile
+     log_files = {0: os.path.join(tempfile.gettempdir(), "0_stdout.log"), 1: os.path.join(tempfile.gettempdir(), "1_stdout.log")}
      tailer = TailLog("trainer", log_files, sys.stdout).start()
      # actually run the trainers to produce 0_stdout.log and 1_stdout.log
      run_trainers()
