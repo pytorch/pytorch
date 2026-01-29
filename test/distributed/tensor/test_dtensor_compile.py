@@ -30,6 +30,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     loss_parallel,
@@ -1709,6 +1710,70 @@ class TestDTensorCompileE2E(DTensorTestBase):
             self.assertEqual(len(result), len(expected))
             for dt_chunk, tensor_chunk in zip(result, expected):
                 self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_monotonic_compile_preserves_partial(self):
+        """
+        Test that compiled monotonic ops on Partial("max") don't insert collectives.
+
+        Monotonic increasing ops (exp, sigmoid, tanh, etc.) preserve relative
+        ordering, so they can keep Partial("max")/Partial("min") placements
+        without triggering all_reduce.
+        """
+        mesh = self.build_device_mesh()
+
+        @torch.compile
+        def monotonic_ops(x):
+            y = torch.exp(x)
+            y = torch.sigmoid(y)
+            y = torch.tanh(y)
+            return y
+
+        local_tensor = torch.full((8, 8), 0.5, device=self.device_type)
+        x = DTensor.from_local(local_tensor, mesh, [Partial("max")])
+
+        # Warmup compile
+        _ = monotonic_ops(x)
+
+        # Measure communication on subsequent call
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result = monotonic_ops(x)
+
+        comm_count = comm_mode.get_total_counts()
+
+        self.assertEqual(result.placements, (Partial("max"),))
+        self.assertEqual(comm_count, 0, f"Expected 0 communications, got {comm_count}")
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_monotonic_compile_eager_parity(self):
+        """Verify eager and compiled paths produce identical results for monotonic ops."""
+        mesh = self.build_device_mesh()
+
+        def monotonic_chain(x):
+            return torch.tanh(torch.sigmoid(torch.exp(x)))
+
+        compiled_fn = torch.compile(monotonic_chain)
+
+        local_tensor = torch.randn(8, 8, device=self.device_type)
+        x = DTensor.from_local(local_tensor, mesh, [Partial("max")])
+
+        eager_result = monotonic_chain(x)
+        compiled_result = compiled_fn(x)
+
+        # Both should have same placement
+        self.assertEqual(eager_result.placements, (Partial("max"),))
+        self.assertEqual(compiled_result.placements, (Partial("max"),))
+
+        # Both should have same local values
+        torch.testing.assert_close(
+            eager_result.to_local(),
+            compiled_result.to_local(),
+            rtol=1e-5,
+            atol=1e-5,
+        )
 
 
 if __name__ == "__main__":
