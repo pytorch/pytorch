@@ -1209,6 +1209,23 @@ TEST_F(FunctionalTest, OneHot) {
     ASSERT_TRUE(torch::allclose(y, expected));
     ASSERT_EQ(y.sizes(), std::vector<int64_t>({3, 2, 3}));
   }
+
+  { // Test #4 for dtype
+    auto x = torch::arange(0, 6, torch::kLong);
+    for (at::ScalarType dtype : {torch::kBool, torch::kByte, torch::kLong}) {
+      auto y = F::one_hot(x.view(std::vector<int64_t>({3, 2})) % 3, -1, dtype);
+      auto expected = torch::tensor(
+          {{{true, false, false}, {false, true, false}},
+           {{false, false, true}, {true, false, false}},
+           {{false, true, false}, {false, false, true}}},
+          dtype);
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_TRUE(torch::allclose(y, expected));
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({3, 2, 3}));
+      ASSERT_EQ(y.dtype(), dtype);
+    }
+  }
 }
 
 TEST_F(FunctionalTest, Hardtanh) {

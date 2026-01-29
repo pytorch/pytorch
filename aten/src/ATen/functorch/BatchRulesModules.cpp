@@ -216,7 +216,7 @@ static cudnn_grid_sample_backward_batch_rule(
 // mirrors the meta path in aten/src/ATen/native/Onehot.cpp,
 // but requires explicit positive num_classes under vmap to avoid
 // data-dependent output shapes.
-static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes) {
+static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes, std::optional<ScalarType> dtype) {
     TORCH_CHECK(self.dtype() == kLong, "one_hot is only applicable to index tensor.");
 
     // disallow implicit inference under vmap; this would be data-dependent
@@ -226,7 +226,7 @@ static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes
 
     const auto options = self.options();
     at::Tensor index = at::arange(num_classes, options);
-    return at::eq(self.unsqueeze(-1), index).to(at::kLong);
+    return at::eq(self.unsqueeze(-1), index).to(dtype.value_or(at::kLong));
 }
 
 template <typename A, A a, typename C>
