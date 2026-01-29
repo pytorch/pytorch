@@ -1816,19 +1816,21 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         op2 = torch.ops.aten._scaled_dot_product_cudnn_attention.default
         try:
             self.assertTrue(
-            count_ops(
-                fwd_graph,
-                [],
-                freq=1,
-                op=op1,
-            )
+                count_ops(
+                    fwd_graph,
+                    [],
+                    freq=1,
+                    op=op1,
+                )
             )
         except AssertionError:
-            count_ops(
-                fwd_graph,
-                [],
-                freq=1,
-                op=op2,
+            self.assertTrue(
+                count_ops(
+                    fwd_graph,
+                    [],
+                    freq=1,
+                    op=op2,
+                )
             )
         bwd_graph = aot_graphs[1]
         # Check that sin is not recomputed in the backward graph - checks percolate tags
@@ -1842,15 +1844,15 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                     freq=1,
                     op=op1,
                 )
-                )
+            )
         except AssertionError:
             self.assertTrue(
                 count_ops(
-                bwd_graph,
-                [],
-                freq=1,
-                op=op2,
-            )
+                    bwd_graph,
+                    [],
+                    freq=1,
+                    op=op2,
+                )
             )
 
     @requires_distributed()
