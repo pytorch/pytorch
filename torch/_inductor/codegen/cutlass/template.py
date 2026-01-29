@@ -14,11 +14,11 @@ from torch._inductor.utils import clear_on_fresh_cache, Placeholder
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
-from ...ir import Buffer, CUDATemplateBuffer, IRNode, Layout
+from ...ir import Buffer, CUTLASSTemplateBuffer, IRNode, Layout
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
-from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+from .kernel import CUTLASSTemplateCaller, CUTLASSTemplateKernel
 from .utils import DTYPE_TO_CUTLASS_TYPE
 
 
@@ -129,7 +129,7 @@ class CUTLASSTemplate(KernelTemplate):
             return code, extra_args
 
         kernel_name = str(Placeholder.KERNEL_NAME)
-        kernel = CUDATemplateKernel(
+        kernel = CUTLASSTemplateKernel(
             kernel_name=kernel_name,
             runtime_arg_info=self.get_runtime_arg_info(),
             runtime_arg_values=self.get_runtime_arg_values(**kwargs),
@@ -180,10 +180,10 @@ class CUTLASSTemplate(KernelTemplate):
         input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         **kwargs,
-    ) -> CUDATemplateCaller:
+    ) -> CUTLASSTemplateCaller:
         """
         Generates the CUDA template caller object for the given GEMM template and operation.
-        This CUDATemplateCaller may be used to call and benchmark the generated CUDA kernel
+        This CUTLASSTemplateCaller may be used to call and benchmark the generated CUDA kernel
         in a standalone manner to enable Autotuning.
 
         Args:
@@ -191,7 +191,7 @@ class CUTLASSTemplate(KernelTemplate):
             kwargs: Additional keyword arguments.
 
         Returns:
-            A CUDATemplateCaller object representing the generated CUDA template caller.
+            A CUTLASSTemplateCaller object representing the generated CUDA template caller.
         """
         code, extra_args = self.generate_code_and_args(
             name=name,
@@ -223,13 +223,13 @@ class CUTLASSTemplate(KernelTemplate):
             supports_epilogue_fusion = self.supports_epilogue_fusion(op)
 
         def make_kernel_render(
-            template_node: CUDATemplateBuffer,
+            template_node: CUTLASSTemplateBuffer,
             epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
-        ) -> tuple[CUDATemplateKernel, functools.partial[str]]:
+        ) -> tuple[CUTLASSTemplateKernel, functools.partial[str]]:
             assert supports_epilogue_fusion or not epilogue_nodes, (
                 "epilogue fusion is not supported for this kernel"
             )
-            kernel = CUDATemplateKernel(
+            kernel = CUTLASSTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),
                 runtime_arg_info=self.get_runtime_arg_info(),
                 runtime_arg_values=self.get_runtime_arg_values(**kwargs),
@@ -243,7 +243,7 @@ class CUTLASSTemplate(KernelTemplate):
             )
             return kernel, render
 
-        return CUDATemplateCaller(
+        return CUTLASSTemplateCaller(
             kernel_name,
             "cutlass_gemm",
             self.input_nodes,
