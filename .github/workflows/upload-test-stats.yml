@@ -28,6 +28,7 @@ on:
       - inductor-perf-nightly-rocm-mi355
       - mac-mps
       - linux-aarch64
+      - xpu
     types:
       - completed
 
