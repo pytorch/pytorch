@@ -28,8 +28,8 @@ void glu_kernel(TensorIteratorBase& iter) {
         gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a_, scalar_t b_) -> scalar_t {
           const opmath_t a = a_;
           const opmath_t b = b_;
-          const opmath_t one = opmath_t(1);
-          const opmath_t sigmoid = one / (one + std::exp(-b));
+          constexpr opmath_t one = opmath_t(1);
+          const opmath_t sigmoid = one / (one + c10::cuda::compat::exp(-b));
           return a * sigmoid;
         });
       });
@@ -51,9 +51,9 @@ void glu_jvp_kernel(TensorIteratorBase& iter) {
               const opmath_t b = b_;
               const opmath_t da = da_;
               const opmath_t db = db_;
-              const opmath_t one = opmath_t(1);
+              constexpr opmath_t one = opmath_t(1);
 
-              const opmath_t sig_b = one / (one + std::exp(-b));
+              const opmath_t sig_b = one / (one + c10::cuda::compat::exp(-b));
               return (da * sig_b + res * (db - sig_b * db));
             });
       });
@@ -96,8 +96,8 @@ __global__ void glu_backward_kernel(
   const opmath_t b = *byte_offset(I + offsets[1], I_byte_offset);
   const opmath_t gO_val = gO[offsets[2]];
 
-  const auto one = opmath_t(1);
-  const opmath_t sigmoid = one / (one + std::exp(-b));
+  constexpr auto one = opmath_t(1);
+  const opmath_t sigmoid = one / (one + c10::cuda::compat::exp(-b));
 
   auto* gA = gI + offsets[0];
   *gA = sigmoid * gO_val;
