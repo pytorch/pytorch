@@ -477,14 +477,11 @@ class _GraphModulePickleData:
             _python_code = gm._real_recompile()
         else:
             _python_code = gm.recompile()
-        # Respect __getstate__ if defined (e.g., for _CodegenGraphModule which
-        # has unpicklable dynamic module references).
         if hasattr(gm, "__getstate__"):
             self.gm_dict = gm.__getstate__()
         else:
             self.gm_dict = gm.__dict__.copy()
-        # Ensure _graph is handled separately
-        self.gm_dict.pop("_graph", None)
+        del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph, options)
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch.fx.GraphModule:
@@ -567,10 +564,6 @@ class _OpPickleData:
             return cls._pickle_op(name, _OpOverloadPickleData, options)
         elif isinstance(op, torch._ops.OpOverloadPacket):
             return cls._pickle_op(name, _OpOverloadPacketPickleData, options)
-        elif isinstance(op, torch._ops.HigherOrderOperator):
-            # HigherOrderOperators have a _name attribute that we can use to
-            # look them up at torch.ops.higher_order.{name} during unpickling.
-            return _HigherOrderOperatorPickleData(op._name)
         elif name.startswith(_OpFunctionPickleData.SUPPORTED_ROOTS):
             root, detail = name.split(".", 1)
             return _OpFunctionPickleData(root, detail)
@@ -645,29 +638,6 @@ class _OpOverloadPacketPickleData(_OpPickleData):
         obj = self._lookup_global_by_name(self.name)
         assert isinstance(obj, torch._ops.OpOverloadPacket)
         return obj
-
-
-class _HigherOrderOperatorPickleData(_OpPickleData):
-    """
-    Supports pickling HigherOrderOperators by their registered name.
-
-    HigherOrderOperators are stored in torch._ops._higher_order_ops and
-    can be looked up by name at torch.ops.higher_order.{name}.
-    """
-
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.HigherOrderOperator:
-        # HigherOrderOperators are accessible via torch.ops.higher_order.{name}
-        hop = getattr(torch.ops.higher_order, self.name, None)
-        if hop is None:
-            raise RuntimeError(
-                f"HigherOrderOperator '{self.name}' not found. "
-                f"Make sure the module defining it has been imported."
-            )
-        assert isinstance(hop, torch._ops.HigherOrderOperator)
-        return hop
 
 
 class _OpPrecompiledPickleData(_OpPickleData):
