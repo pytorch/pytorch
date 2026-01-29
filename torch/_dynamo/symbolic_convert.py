@@ -4503,19 +4503,6 @@ class InstructionTranslatorBase(
         while scan_ip < end_for_ip:
             inst = self.instructions[scan_ip]
 
-            # Skip nested loops to only process outermost comprehension
-            if inst.opname == "FOR_ITER":
-                nested_depth = 1
-                while nested_depth > 0 and scan_ip < end_for_ip:
-                    scan_ip += 1
-                    nested_inst = self.instructions[scan_ip]
-                    if nested_inst.opname == "FOR_ITER":
-                        nested_depth += 1
-                    elif nested_inst.opname == "END_FOR":
-                        nested_depth -= 1
-                scan_ip += 1
-                continue
-
             # Detect walrus pattern: COPY 1 followed by STORE_FAST
             if inst.opname == "COPY" and inst.arg == 1:
                 if scan_ip + 1 < end_for_ip:

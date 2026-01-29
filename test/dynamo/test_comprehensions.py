@@ -296,6 +296,95 @@ class ComprehensionTests(torch._inductor.test_case.TestCase):
         self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
         self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
 
+    def test_nested_comprehension_with_walrus_operators(self):
+        """Test nested comprehension with walrus operators in both inner and outer."""
+
+        def fn(x):
+            a = x + 1
+            result = [
+                (outer := i * 10, [(inner := (torch._dynamo.graph_break() or j * 2)) for j in range(2)])
+                for i in range(3)
+            ]
+            b = x + 2
+            return a, result, outer, inner, b
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
+
+    def test_nested_comprehension_with_captured_outer_variable(self):
+        """Test nested comprehension with captured outer variable in inner loop."""
+
+        def fn(x):
+            outer_val = 100
+            a = x + 1
+            result = [
+                [outer_val + j for j in range(2) if torch._dynamo.graph_break() or True]
+                for i in range(2)
+            ]
+            b = x + 2
+            return a, result, b
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
+
+    def test_triple_nested_comprehension_with_walrus(self):
+        """Test triple-nested comprehension with walrus at middle level."""
+
+        def fn(x):
+            a = x + 1
+            result = [
+                [
+                    [(w := i + j + k) for k in range(2) if torch._dynamo.graph_break() or True]
+                    for j in range(2)
+                ]
+                for i in range(2)
+            ]
+            b = x + 2
+            return a, result, w, b
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
+
+    def test_nested_dict_comprehension_with_walrus_and_captured(self):
+        """Test nested dict comprehension with walrus in inner and captured variable."""
+
+        def fn(x):
+            multiplier = 10
+            a = x + 1
+            result = {
+                i: {j: (inner_val := j * multiplier) for j in range(2) if torch._dynamo.graph_break() or True}
+                for i in range(3)
+            }
+            b = x + 2
+            return a, result, inner_val, b
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.randn(4)
+
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(count_op(backend.graphs[0], operator.add), 1)
+        self.assertEqual(count_op(backend.graphs[1], operator.add), 1)
+
     def test_comprehension_with_outer_variable_read(self):
         """Test accessing outer variable inside comprehension with graph break."""
 
