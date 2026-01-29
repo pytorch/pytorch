@@ -291,7 +291,9 @@ def _worker_loop(
             numpy_generator=numpy_generator,
         )
 
-        from torch.utils.data import IterDataPipe
+        from torch.utils.data import (
+            IterDataPipe,  # pyrefly: ignore [missing-module-attribute]
+        )
         from torch.utils.data.graph_settings import apply_random_seed
 
         shared_rng = torch.Generator()
