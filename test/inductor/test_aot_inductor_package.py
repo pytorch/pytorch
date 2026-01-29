@@ -254,6 +254,70 @@ class TestAOTInductorPackage(TestCase):
 
             self.assertEqual(actual, expected)
 
+    def test_load_package_from_directory(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        model = Model()
+        with torch.no_grad():
+            model = model.to(self.device)
+            ref_model = copy.deepcopy(model)
+            ref_inputs = copy.deepcopy(example_inputs)
+            expected = ref_model(*ref_inputs)
+
+            with WritableTempFile(suffix=".pt2") as f:
+                ep = torch.export.export(model, example_inputs, strict=True)
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep,
+                    package_path=f.name,
+                )
+
+                # Unzip to a temporary directory
+                temp_dir = tempfile.mkdtemp()
+                try:
+                    with zipfile.ZipFile(package_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_dir)
+
+                    # Identify prefix if any (ZipFile.extractall extracts as is)
+                    # The loader should be able to load from temp_dir which contains 'data/...'
+                    # or 'some_prefix/data/...'
+
+                    loaded = torch._inductor.aoti_load_package(temp_dir)
+                    actual = loaded(*example_inputs)
+                    self.assertEqual(actual, expected)
+
+                    # Verify robustness: move data deeper
+                    nested_dir = os.path.join(temp_dir, "nested_layer")
+                    os.makedirs(nested_dir)
+                    # Move all contents to nested_dir
+                    for item in os.listdir(temp_dir):
+                        if item != "nested_layer":
+                            shutil.move(os.path.join(temp_dir, item), nested_dir)
+                    
+                    # Load from root temp_dir again, it should find it in nested_layer via recursive search
+                    loaded_nested = torch._inductor.aoti_load_package(temp_dir)
+                    actual_nested = loaded_nested(*example_inputs)
+                    self.assertEqual(actual_nested, expected)
+
+                    # Determine if destructor deletes the files
+                    del loaded
+                    del loaded_nested
+                    import gc
+                    gc.collect()
+
+                    # In shared mode, the directory should NOT be deleted
+                    # We check if we can still find some files.
+                    self.assertTrue(os.path.exists(nested_dir))
+                    self.assertTrue(len(os.listdir(nested_dir)) > 0)
+
+                finally:
+                    shutil.rmtree(temp_dir)
+
     def test_linear(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
