@@ -60,6 +60,8 @@ class Discrepancy:
     input_shapes: tuple
     discrepancy_type: str  # "false_positive" or "false_negative"
     error_msg: str = ""
+    scalar_args: tuple = ()  # Non-tensor args
+    scalar_kwargs: dict = field(default_factory=dict)  # Non-tensor kwargs
 
 
 @dataclass
@@ -297,6 +299,14 @@ def compare_operator(
 
             input_shapes = tuple(t.shape for _, t in tensors)
 
+            # Extract non-tensor args and kwargs for context in discrepancy reports
+            scalar_args = tuple(
+                a for a in sample.args if not isinstance(a, torch.Tensor)
+            )
+            scalar_kwargs = {
+                k: v for k, v in sample.kwargs.items() if not isinstance(v, torch.Tensor)
+            }
+
             # Get all possible input placement combinations (including Partial)
             input_placement_options = [
                 get_1d_input_placements_for_tensor(t, include_partial=True)
@@ -419,6 +429,8 @@ def compare_operator(
                             sample_idx=sample_idx,
                             input_shapes=input_shapes,
                             discrepancy_type="false_negative",
+                            scalar_args=scalar_args,
+                            scalar_kwargs=scalar_kwargs,
                         ))
 
                 for combo_key in dtensor_rules:
@@ -430,6 +442,8 @@ def compare_operator(
                             sample_idx=sample_idx,
                             input_shapes=input_shapes,
                             discrepancy_type="false_positive",
+                            scalar_args=scalar_args,
+                            scalar_kwargs=scalar_kwargs,
                         ))
                     # (true positives already counted above)
 
@@ -466,7 +480,15 @@ def compare_operator(
         for (inp, out), discrepancies in sorted(by_combo.items(), key=str):
             print(f"\n  inputs={inp}, output={out}")
             for d in discrepancies[:3]:
-                print(f"    Sample {d.sample_idx}: shapes={d.input_shapes}")
+                extra = ""
+                if d.scalar_args or d.scalar_kwargs:
+                    parts = []
+                    if d.scalar_args:
+                        parts.append(f"args={d.scalar_args}")
+                    if d.scalar_kwargs:
+                        parts.append(f"kwargs={d.scalar_kwargs}")
+                    extra = f", {', '.join(parts)}"
+                print(f"    Sample {d.sample_idx}: shapes={d.input_shapes}{extra}")
             if len(discrepancies) > 3:
                 print(f"    ... and {len(discrepancies) - 3} more")
 
@@ -480,7 +502,15 @@ def compare_operator(
         for (inp, out), discrepancies in sorted(by_combo.items(), key=str):
             print(f"\n  inputs={inp}, output={out}")
             for d in discrepancies[:3]:
-                print(f"    Sample {d.sample_idx}: shapes={d.input_shapes}")
+                extra = ""
+                if d.scalar_args or d.scalar_kwargs:
+                    parts = []
+                    if d.scalar_args:
+                        parts.append(f"args={d.scalar_args}")
+                    if d.scalar_kwargs:
+                        parts.append(f"kwargs={d.scalar_kwargs}")
+                    extra = f", {', '.join(parts)}"
+                print(f"    Sample {d.sample_idx}: shapes={d.input_shapes}{extra}")
             if len(discrepancies) > 3:
                 print(f"    ... and {len(discrepancies) - 3} more")
 
