@@ -43,6 +43,74 @@ from cutlass.pipeline import pipeline_init_arrive, pipeline_init_wait
 from torch.utils._ordered_set import OrderedSet
 
 
+"""
+A high-performance persistent batched dense GEMM example for the NVIDIA Blackwell SM100 architecture
+using CUTE DSL.
+- Matrix A is MxKxL, L is batch dimension, A can be row-major("K") or column-major("M")
+- Matrix B is NxKxL, L is batch dimension, B can be row-major("N") or column-major("K")
+- Matrix C is MxNxL, L is batch dimension, C can be row-major("N") or column-major("M")
+
+This GEMM kernel supports the following features:
+    - Utilizes Tensor Memory Access (TMA) for efficient memory operations
+    - Utilizes Blackwell's tcgen05.mma for matrix multiply-accumulate (MMA) operations (including 2cta mma instructions)
+    - Implements TMA multicast with cluster to reduce L2 memory traffic
+    - Support persistent tile scheduling to better overlap memory load/store with mma between tiles
+    - Support warp specialization to avoid explicit pipelining between mainloop load and mma
+
+This GEMM works as follows:
+1. DMA warp: Load A and B matrices from global memory (GMEM) to shared memory (SMEM) using TMA operations.
+2. MMA warp: Perform matrix multiply-accumulate (MMA) operations using tcgen05.mma instruction.
+3. EPILOGUE warp:
+    - Load completed accumulator from tensor memory (TMEM) to registers (RMEM) using tcgen05.ld.
+    - Type convert C matrix to output type.
+    - Optionally store C matrix from registers (RMEM) to shared memory (SMEM) to global memory (GMEM) with TMA operations,
+      or directly store C matrix from registers (RMEM) to global memory (GMEM) without TMA operations.
+    - Optionally accept an elementwise lambda function epilogue_op to apply to the output tensor:
+      e.g., relu can set epilogue_op = lambda x: cute.where(x > 0, x, cute.full_like(x, 0))
+
+SM100 tcgen05.mma instructions operate as follows:
+- Read matrix A from SMEM
+- Read matrix B from SMEM
+- Write accumulator to TMEM
+The accumulator in TMEM must then be loaded to registers before writing back to GMEM.
+
+Input arguments to this example is same as dense_gemm.py.
+
+.. code-block:: bash
+
+    python examples/blackwell/dense_gemm_persistent.py                          \
+      --ab_dtype Float16 --c_dtype Float16 --acc_dtype Float32                  \
+      --mma_tiler_mn 256,128 --cluster_shape_mn 2,1                             \
+      --mnkl 8192,8192,8192,1                                                   \
+      --use_tma_store --use_2cta_instrs
+
+To collect performance with NCU profiler:
+
+.. code-block:: bash
+
+    ncu python examples/blackwell/dense_gemm_persistent.py                     \
+      --ab_dtype Float16 --c_dtype Float16 --acc_dtype Float32                 \
+      --mma_tiler_mn 256,128 --cluster_shape_mn 2,1                            \
+      --mnkl 8192,8192,8192,1                                                  \
+      --use_tma_store --use_2cta_instrs                                        \
+      --warmup_iterations 1 --iterations 10 --skip_ref_check
+
+
+Constraints are same as dense_gemm.py:
+* Supported input data types: fp16, bf16, tf32, int8, uint8, fp8 (e4m3fn, e5m2),
+  see detailed valid dtype combinations in below PersistentDenseGemmKernel class documentation
+* A/B tensor must have the same data type
+* Mma tiler M must be 64/128 (use_2cta_instrs=False) or 128/256 (use_2cta_instrs=True)
+* Mma tiler N must be 32-256, step 32
+* Cluster shape M/N must be positive and power of 2, total cluster size <= 16
+* Cluster shape M must be multiple of 2 if use_2cta_instrs=True
+* The contiguous dimension of A/B/C tensors must be at least 16 bytes aligned,
+  i.e, number of elements is a multiple of 4, 8, and 16 for TFloat32,
+  Float16/BFloat16, and Int8/Uint8/Float8, respectively.
+* OOB tiles are not allowed when TMA store is disabled
+"""
+
+
 def _compute_stages(
     tiled_mma: cute.TiledMma,
     mma_tiler_mnk: Tuple[int, int, int],
