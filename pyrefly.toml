@@ -39,6 +39,7 @@ project-excludes = [
   "torch/_appdirs.py",
   "torch/multiprocessing/pool.py",
   "torch/overrides.py",
+  "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/**",
   "*/__pycache__/**",
   "*/.*",
 ]

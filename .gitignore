@@ -128,6 +128,8 @@ torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
 torch/_inductor/kernel/vendored_templates/cutedsl/kernels/*
+!torch/_inductor/kernel/vendored_templates/cutedsl/kernels/__init__.py
+!torch/_inductor/kernel/vendored_templates/cutedsl/kernels/dense_gemm_persistent.py
 test/inductor/test_tlx*
 minifier_launcher.py
 aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_fwd_d*
