@@ -1677,6 +1677,7 @@ def onlyMPS(fn):
 def onlyXPU(fn):
     return onlyOn("xpu")(fn)
 
+
 def onlyGPU(fn):
     return onlyOn("cuda")(fn) or onlyOn("xpu")(fn)
 
