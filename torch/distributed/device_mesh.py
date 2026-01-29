@@ -496,24 +496,28 @@ else:
                 )
                 if dim_group is None:
                     return None
-                return dim_group.group_name
+                # Use canonical name based on the first subgroup's ranks for
+                # cross-rank consistency. All ranks can compute this locally
+                # since pg_ranks_by_dim is the same across all ranks.
+                first_subgroup_ranks = pg_ranks_by_dim[0].tolist()
+                canonical_name = f"group_{group_desc}_{first_subgroup_ranks[0]}"
+                # Register alias from canonical name to our actual group name.
+                # Skip if alias already exists (e.g., mesh was already created).
+                try:
+                    torch._C._distributed_c10d._register_process_group_alias(
+                        canonical_name, dim_group.group_name
+                    )
+                except RuntimeError:
+                    pass  # Alias already registered
+                return canonical_name
 
-            # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
-            # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
-            # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
-            # along with appending information to the `dim_group_names` list whenever necessary.
-            pg_name = None
+            # Use canonical name based on the first subgroup's ranks for cross-rank
+            # consistency. This matches the naming used in the split_group path above,
+            # ensuring compiled graphs are portable between fake and real backends.
+            first_subgroup_ranks = pg_ranks_by_dim[0].tolist()
+            canonical_name = f"group_{group_desc}_{first_subgroup_ranks[0]}"
+
             found_my_rank = False
-
-            # We want a consistent naming scheme across ranks so the output
-            # graphs are the same on each rank. To do this we'll always report
-            # the name of the first created group and if that's not our rank's
-            # name then we'll add an alias.
-            #
-            # Couldn't we just tell c10d to use the same name on every rank? In
-            # theory yes, but for consistency we want to create ALL groups (even
-            # ones that don't contain our rank) and there's checks to ensure
-            # that we don't duplicate names.
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
                 dim_group = new_group(
@@ -524,10 +528,8 @@ else:
                     group_desc=group_desc,
                     always_return_group_name=True,
                 )
-                if pg_name is None:
-                    pg_name = "group_" + dim_group.group_name
 
-                # only add to dim_groups if the current rank in the subgroup
+                # Register alias from canonical name to actual group name
                 if get_rank() in subgroup_ranks:
                     if found_my_rank:
                         raise RuntimeError(
@@ -535,14 +537,17 @@ else:
                             f"in {subgroup_ranks}!"
                         )
                     found_my_rank = True
-                    if pg_name != dim_group.group_name:
-                        torch._C._distributed_c10d._register_process_group_alias(
-                            pg_name, dim_group.group_name
-                        )
+                    if canonical_name != dim_group.group_name:
+                        try:
+                            torch._C._distributed_c10d._register_process_group_alias(
+                                canonical_name, dim_group.group_name
+                            )
+                        except RuntimeError:
+                            pass  # Alias already registered
 
-            if not pg_name:
+            if not found_my_rank:
                 raise RuntimeError(f"Rank {get_rank()} not present in DeviceMesh")
-            return pg_name
+            return canonical_name
 
         @staticmethod
         def _init_process_groups(
