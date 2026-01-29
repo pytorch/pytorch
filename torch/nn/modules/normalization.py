@@ -112,10 +112,17 @@ class LayerNorm(Module):
     .. math::
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated over the last `D` dimensions, where `D`
-    is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
+    where :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed over the last `D` dimensions,
+    where `D` is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
     is ``(3, 5)`` (a 2-dimensional shape), the mean and standard-deviation are computed over
-    the last 2 dimensions of the input (i.e. ``input.mean((-2, -1))``).
+    the last 2 dimensions of the input:
+
+    .. code-block:: python
+
+        # For input shape (N, 3, 5) with normalized_shape=(3, 5):
+        mean = input.mean(dim=(-2, -1))  # shape: (N,)
+        var = input.var(dim=(-2, -1), correction=0)  # shape: (N,)
+
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
@@ -248,8 +255,19 @@ class GroupNorm(Module):
 
     The input channels are separated into :attr:`num_groups` groups, each containing
     ``num_channels / num_groups`` channels. :attr:`num_channels` must be divisible by
-    :attr:`num_groups`. The mean and standard-deviation are calculated
-    separately over each group. :math:`\gamma` and :math:`\beta` are learnable
+    :attr:`num_groups`. :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed per instance, per group
+    over the channels within each group and spatial dimensions. For input shape `(N, C, H, W)`
+    with `num_groups=G`:
+
+    .. code-block:: python
+
+        # Equivalent computation:
+        # Reshape: (N, C, H, W) -> (N, G, C//G, H, W)
+        x = input.view(N, G, C // G, H, W)
+        mean = x.mean(dim=(2, 3, 4))  # shape: (N, G)
+        var = x.var(dim=(2, 3, 4), correction=0)  # shape: (N, G)
+
+    :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to

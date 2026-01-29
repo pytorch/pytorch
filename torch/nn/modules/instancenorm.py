@@ -137,8 +137,16 @@ class InstanceNorm1d(_InstanceNorm):
 
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    where :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed per instance, per channel
+    over the spatial dimensions. For input shape `(N, C, L)`:
+
+    .. code-block:: python
+
+        # Equivalent computation (for each instance n and channel c):
+        mean = input.mean(dim=2)  # shape: (N, C)
+        var = input.var(dim=2, correction=0)  # shape: (N, C)
+
+    :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the number of features or channels of the input) if :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
     `torch.var(input, correction=0)`.
@@ -252,8 +260,16 @@ class InstanceNorm2d(_InstanceNorm):
 
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    where :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed per instance, per channel
+    over the spatial dimensions. For input shape `(N, C, H, W)`:
+
+    .. code-block:: python
+
+        # Equivalent computation (for each instance n and channel c):
+        mean = input.mean(dim=(2, 3))  # shape: (N, C)
+        var = input.var(dim=(2, 3), correction=0)  # shape: (N, C)
+
+    :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
     `torch.var(input, correction=0)`.
@@ -368,8 +384,16 @@ class InstanceNorm3d(_InstanceNorm):
 
         y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
-    The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    where :math:`\mathrm{E}[x]` and :math:`\mathrm{Var}[x]` are computed per instance, per channel
+    over the spatial dimensions. For input shape `(N, C, D, H, W)`:
+
+    .. code-block:: python
+
+        # Equivalent computation (for each instance n and channel c):
+        mean = input.mean(dim=(2, 3, 4))  # shape: (N, C)
+        var = input.var(dim=(2, 3, 4), correction=0)  # shape: (N, C)
+
+    :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size C (where C is the input size) if :attr:`affine` is ``True``.
     The standard-deviation is calculated via the biased estimator, equivalent to
     `torch.var(input, correction=0)`.
