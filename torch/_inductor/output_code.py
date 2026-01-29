@@ -1087,6 +1087,7 @@ class RegionalOutputCode(OutputCode):
                 graph_module,
                 options=Options(
                     ops_filter=self._ops_filter,
+                    node_metadata_key_filter=self._node_metadata_key_filter,
                 ),
             )
             # Clear the graph module to avoid pickling it with standard pickle
