@@ -20,6 +20,7 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 
 import functools
 import inspect
+import types
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -247,7 +248,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             if member_type == MemberType.USE_REAL:
                 value = getattr(real_obj, name)
-                if callable(value):
+                if inspect.ismethod(value) or isinstance(
+                    value, types.MethodWrapperType
+                ):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
@@ -256,7 +259,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             elif member_type == MemberType.INLINED:
                 value = getattr(real_obj, name)
-                if callable(value) and self.source is None:
+                if (
+                    inspect.ismethod(value)
+                    or isinstance(value, types.MethodWrapperType)
+                ) and self.source is None:
                     # When we don't have a source, fall back to call_method
                     # which creates a proxy node.
                     return LambdaVariable(
