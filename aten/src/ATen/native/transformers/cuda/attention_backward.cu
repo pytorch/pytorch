@@ -91,7 +91,18 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
 
-#ifndef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
+#ifdef USE_ROCM
+  // ROCm backend uses std::optional where nullopt means "no limit".
+  // Convert -1 (CUDA's "no limit" convention) to nullopt for ROCm.
+  std::optional<int64_t> rocm_window_left = window_size_left;
+  std::optional<int64_t> rocm_window_right = window_size_right;
+  if (rocm_window_left.has_value() && rocm_window_left.value() == -1) {
+    rocm_window_left = std::nullopt;
+  }
+  if (rocm_window_right.has_value() && rocm_window_right.value() == -1) {
+    rocm_window_right = std::nullopt;
+  }
+#else
   const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
   const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
 #endif
@@ -143,8 +154,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         false /*zero_tensors*/,
         is_causal,
 #ifdef USE_ROCM
-        window_size_left,
-        window_size_right,
+        rocm_window_left,
+        rocm_window_right,
 #else
         non_null_window_left,
         non_null_window_right,
@@ -171,8 +182,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         is_causal,
 #ifdef USE_ROCM
-        window_size_left,
-        window_size_right,
+        rocm_window_left,
+        rocm_window_right,
 #else
         non_null_window_left,
         non_null_window_right,
