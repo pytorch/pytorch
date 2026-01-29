@@ -336,7 +336,6 @@ if torch.backends.mps.is_available():
             "linalg.matrix_norm": [torch.float32],
             "linalg.norm": [torch.float32],
             "linalg.normsubgradients_at_zero": [torch.float32],
-            "linalg.qr": None,
             "linalg.svdvals": None,
             "masked.median": None,
             "matrix_exp": None,

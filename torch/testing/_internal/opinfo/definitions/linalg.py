@@ -1112,6 +1112,9 @@ def sample_inputs_linalg_qr_geqrf(
     ns = [5, 2, 0]
 
     for batch, (m, n) in product(batches, product(ns, ns)):
+        # MPS implementation requires m >= n (tall or square matrices only)
+        if torch.device(device).type == "mps" and m < n:
+            continue
         shape = batch + (m, n)
         yield SampleInput(make_arg(*shape))
 
@@ -1953,7 +1956,13 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_linalg_qr_geqrf,
         decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+            # MPS doesn't support complex types for linalg.qr yet
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(

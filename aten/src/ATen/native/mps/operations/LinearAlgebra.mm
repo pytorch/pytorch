@@ -1462,8 +1462,6 @@ static void metal_qr_kernel_impl(const Tensor& A, const Tensor& Q, const Tensor&
   QrParams params;
   params.m = m;
   params.n = n;
-  params.reduced_mode = (uint32_t)reduced_mode;
-  params.num_batch_dims = A.dim() - 2;
 
   auto info = at::zeros({1}, A.options().dtype(kInt));
   MPSStream* stream = getCurrentMPSStream();
@@ -1520,7 +1518,7 @@ static void metal_qr_kernel_impl(const Tensor& A, const Tensor& Q, const Tensor&
   }
 }
 
-static void linalg_qr_out_mps_impl(const Tensor& A, const c10::string_view mode, const Tensor& Q, const Tensor& R) {
+static void linalg_qr_out_impl_mps(const Tensor& A, const Tensor& Q, const Tensor& R, const c10::string_view mode) {
   using namespace mps;
 
   TORCH_CHECK(A.scalar_type() == kFloat, "linalg_qr: MPS currently supports float32 only");
@@ -1766,7 +1764,7 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
 }
 
 TORCH_IMPL_FUNC(linalg_qr_out_mps)(const Tensor& A, c10::string_view mode, const Tensor& Q, const Tensor& R) {
-  mps::linalg_qr_out_mps_impl(A, mode, Q, R);
+  mps::linalg_qr_out_impl_mps(A, Q, R, mode);
 }
 
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
