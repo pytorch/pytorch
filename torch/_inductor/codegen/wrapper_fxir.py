@@ -1108,7 +1108,11 @@ class FxConverter:
 
         # Get the result buffer.
         # Some kernels write to a pre-existing output tensor via the "out" kwarg.
-        kwargs = kernel.kwargs.copy()
+        # Materialize any IR nodes in kwargs to FX nodes (e.g., TensorBox -> Tensor).
+        kwargs = {
+            k: self._generate_buffer(v) if isinstance(v, ir.IRNode) else v
+            for k, v in kernel.kwargs.items()
+        }
 
         result_buffer: Optional[str] = None
         if isinstance(kernel, ir.ExternKernelOut):
