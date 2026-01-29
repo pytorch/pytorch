@@ -17,7 +17,13 @@ from unittest.mock import patch, MagicMock, ANY
 import math
 import itertools
 import torch.optim as optim
-from torch.testing._internal.common_device_type import expectedFailureMPS, instantiate_device_type_tests, onlyCUDA, largeTensorTest
+from torch.testing._internal.common_device_type import (
+    expectedFailureMPS,
+    instantiate_device_type_tests,
+    onlyCUDA,
+    largeTensorTest,
+    onlyOn
+)
 from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
@@ -26,6 +32,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfXpu,
     MI300_ARCH,
     MI350_ARCH,
     skipIfTorchDynamo,
@@ -263,7 +270,7 @@ class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skip("4D mask not supported yet - activate when 4D mask supported")
     def test_self_attn_TxT_attn_mask(self, device):
         embed_dim = 16
@@ -272,12 +279,12 @@ class TestTransformers(NNTestCase):
         tgt_len = 16
 
         query = torch.rand(batch_size, tgt_len, embed_dim, device=device)  # [N, T, D]
-        attn_mask = torch.randint(0, 2, (tgt_len, tgt_len)).cuda().float()  # [T, T]
+        attn_mask = torch.randint(0, 2, (tgt_len, tgt_len)).to(device).float()  # [T, T]
         attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, 0.0)
 
         attn_mask_4d = attn_mask.expand(batch_size, num_heads, tgt_len, tgt_len)
 
-        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).cuda()
+        mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads, batch_first=True).to(device)
         mta_model.eval()
 
         # Generate 3D results
@@ -430,6 +437,7 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
+    @skipIfXpu
     @skipIfRocmArch(MI300_ARCH)
     @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
@@ -850,10 +858,10 @@ class TestTransformers(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not supposrt pre-SM80 hardware"
     )
-    def test_math_backend_high_precision(self):
-        xq = torch.rand([1, 128, 2, 80], device="cuda", dtype=torch.bfloat16) * 5
-        xk = torch.rand([1, 128, 2, 80], device="cuda", dtype=torch.bfloat16) * 5
-        xv = torch.randn([1, 128, 2, 80], device="cuda", dtype=torch.bfloat16)
+    def test_math_backend_high_precision(self, device):
+        xq = torch.rand([1, 128, 2, 80], device=device, dtype=torch.bfloat16) * 5
+        xk = torch.rand([1, 128, 2, 80], device=device, dtype=torch.bfloat16) * 5
+        xv = torch.randn([1, 128, 2, 80], device=device, dtype=torch.bfloat16)
         mask = None
 
         def scaled_dot_product_attention(
@@ -870,9 +878,11 @@ class TestTransformers(NNTestCase):
                 )
             return attn_output.transpose(1, 2)
 
-        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
+        if device == 'cuda':
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
         sdp_math_low_prec_out = scaled_dot_product_attention(xq, xk, xv, mask, SDPBackend.MATH)
-        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
+        if device == 'cuda':
+            torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(False)
         sdp_math_high_prec_out = scaled_dot_product_attention(xq, xk, xv, mask, SDPBackend.MATH)
 
         sdp_math_fp64_out_ref = scaled_dot_product_attention(
@@ -884,10 +894,10 @@ class TestTransformers(NNTestCase):
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
             torch.testing.assert_close(sdp_math_low_prec_out, sdp_math_fp64_out_ref, atol=1e-2, rtol=1e-2)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @parametrize("nb_heads", [1, 8])
     @parametrize("bias", [True, False])
-    def test_mha_native_args(self, nb_heads, bias):
+    def test_mha_native_args(self, device, nb_heads, bias):
 
         B, L, F = 8, 100, 128
         batch_first = True
@@ -899,18 +909,18 @@ class TestTransformers(NNTestCase):
             num_heads=nb_heads,
             batch_first=batch_first,
             bias=bias
-        ).cuda()
+        ).to(device)
         mha.eval()
 
         ctx = torch.no_grad if fast_path else contextlib.nullcontext
         with ctx():
-            x = torch.randn(B, L, F).cuda()
+            x = torch.randn(B, L, F).to(device)
             if not batch_first:
                 x = x.transpose(0, 1)
 
             pad_mask = None
             if use_pad_mask:
-                pad_mask = torch.zeros((B, L), dtype=torch.bool).cuda()
+                pad_mask = torch.zeros((B, L), dtype=torch.bool).to(device)
 
             mha(query=x, key=x, value=x, key_padding_mask=pad_mask)
 
@@ -934,7 +944,7 @@ class TestTransformers(NNTestCase):
 
     # CPU unit test has_torch_functions in test environment,
     #   preventing successful completion
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_with_nested_tensor_input(self, device):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=256,
@@ -1046,9 +1056,9 @@ class TestTransformers(NNTestCase):
             self.assertEqual(result, scripted_result)
 
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
-    def test_decoder_only_layer(self):
+    def test_decoder_only_layer(self, device):
         class FairseqDecoder(torch.nn.Module):
             def __init__(
                 self,
@@ -1089,7 +1099,7 @@ class TestTransformers(NNTestCase):
 
                 if torch_encoder is not None:
                     self.decoder = torch_to_fairseq(torch_encoder, self.decoder)  # noqa: F821
-                self.decoder = self.decoder.eval().cuda().half()
+                self.decoder = self.decoder.eval().to(device).half()
 
             def forward(
                 self,
@@ -1421,13 +1431,17 @@ class TestTransformers(NNTestCase):
                             qkv_f.size(1), device=device
                         )
                         _ = mha_f(qkv_f, qkv_f, qkv_f, attn_mask=mask, need_weights=False, is_causal=True)
-                        torch.cuda.synchronize()
+                        if device == 'xpu':
+                            torch.xpu.synchronize()
+                        else:
+                            torch.cuda.synchronize()
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not supposrt fused SDPA or pre-SM80 hardware"
     )
-    def test_is_causal_gpu(self):
-        device = 'cuda'
+    def test_is_causal_gpu(self, device):
+        if device == 'cpu':
+            return
         self.is_causal_kernels([SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION], device)
 
     def test_script_mha_in_proj_weight_none(self):
@@ -1437,6 +1451,7 @@ class TestTransformers(NNTestCase):
 
         torch.jit.script(mha)
 
+    @skipIfXpu
     @unittest.skipIf(TEST_WITH_CROSSREF, 'Fastpath not available with crossref')
     @torch.no_grad()
     def test_disable_fastpath(self, device):
@@ -4986,7 +5001,7 @@ else:
 if TEST_XPU:
     device_types += ("xpu", )
 
-instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
+instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
