@@ -2024,6 +2024,8 @@ class BuiltinVariable(VariableTracker):
                 variables.ConstDictVariable,
                 variables.NNModuleVariable,
                 variables.TensorVariable,
+                variables.TupleVariable,
+                variables.DictItemsVariable,
             ),
         ):
             return obj.call_method(tx, "__iter__", [], {})
@@ -2684,7 +2686,7 @@ class BuiltinVariable(VariableTracker):
                         gb_type="Attempted to wrap sparse Tensor",
                         context="",
                         explanation="torch.compile does not support sparse Tensors",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                        hints=[*graph_break_hints.SPARSE_TENSOR],
                     )
 
             try:
@@ -2738,7 +2740,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
-                variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
