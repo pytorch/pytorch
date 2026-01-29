@@ -687,10 +687,11 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if (
-                        f_evt.device_type == DeviceType.CUDA
-                        or f_evt.device_type == DeviceType.PrivateUse1
-                    ):
+                    if f_evt.device_type in [
+                        DeviceType.CUDA,
+                        DeviceType.PrivateUse1,
+                        DeviceType.XPU,
+                    ]:
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
