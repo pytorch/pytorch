@@ -97,6 +97,12 @@ class GenCompositeViewCopyKernel:
     def __call__(self, g: NativeFunctionsViewGroup) -> str | None:
         if g.view_copy is None:
             return None
+
+        # Some view_copy operators have explicitly defined composite kernels and they don't need to be generated.
+        list_of_view_copy_ops_with_explicit_kernels = ["lift_fresh_copy"]
+        if str(g.view_copy.func.name) in list_of_view_copy_ops_with_explicit_kernels:
+            return None
+
         elif g.view_copy.func.name.name.base != f"{g.view.func.name.name}_copy":
             # If the view_copy doesn't match the standard naming scheme of <op>_copy,
             # assume it already exists and doesn't need to be generated.
