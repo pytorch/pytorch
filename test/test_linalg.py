@@ -2478,6 +2478,7 @@ class TestLinalg(TestCase):
         self.assertEqual(a.to(v.dtype) @ v, w * v, atol=1e-3, rtol=1e-3)
 
     @onlyCUDA
+    @skipCUDAIfNoMagma
     @dtypes(torch.float32, torch.float64)
     def test_eig_cuda_complex_eigenvectors(self, device, dtype):
         """Test CUDA eigenvector decoding with known ground truth, including batching."""
@@ -7181,14 +7182,11 @@ class TestLinalg(TestCase):
     def test_lobpcg_basic(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'basic')
 
+    @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_ortho(self, device, dtype):
-        if torch.version.hip:
-            torch.backends.cuda.preferred_linalg_library('magma')
         self._test_lobpcg_method(device, dtype, 'ortho')
-        if torch.version.hip:
-            torch.backends.cuda.preferred_linalg_library('default')
 
     def _test_lobpcg_method(self, device, dtype, method):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
