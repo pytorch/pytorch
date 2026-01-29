@@ -4451,146 +4451,109 @@ class InstructionTranslatorBase(
         """
         assert sys.version_info >= (3, 12)
         assert self.instruction_pointer is not None
-        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
-        ip = self.instruction_pointer
-        depth = 0
+
         patterns = get_comprehension_result_patterns()
+        start_ip = self.instruction_pointer - 1  # BUILD_LIST/BUILD_MAP
+
+        iterator_vars: list[str] = []
+        walrus_vars: list[str] = []
+        captured_vars: list[str] = []
+        defined_inside: set[str] = set()
 
         # Collect iterator variables from LOAD_FAST_AND_CLEAR before BUILD_LIST/BUILD_MAP
-        iterator_vars: list[str] = []
-        scan_ip = start_ip - 1
-        while scan_ip >= 0:
-            scan_inst = self.instructions[scan_ip]
-            if scan_inst.opname == "LOAD_FAST_AND_CLEAR":
-                iterator_vars.insert(0, scan_inst.argval)
-                scan_ip -= 1
-            elif scan_inst.opname in ("SWAP", "GET_ITER"):
-                scan_ip -= 1
+        iter_scan_ip = start_ip - 1
+        while iter_scan_ip >= 0:
+            inst = self.instructions[iter_scan_ip]
+            if inst.opname == "LOAD_FAST_AND_CLEAR":
+                iterator_vars.insert(0, inst.argval)
+                iter_scan_ip -= 1
+            elif inst.opname in ("SWAP", "GET_ITER"):
+                iter_scan_ip -= 1
             else:
                 break
+        defined_inside.update(iterator_vars)
 
-        # Find the outermost END_FOR
+        # Find the outermost END_FOR by tracking nesting depth
         end_for_ip = -1
-        while ip < len(self.instructions):
-            inst = self.instructions[ip]
+        nesting_depth = 0
+        for search_ip in range(self.instruction_pointer, len(self.instructions)):
+            inst = self.instructions[search_ip]
             if inst.opname == "FOR_ITER":
-                depth += 1
+                nesting_depth += 1
             elif inst.opname == "END_FOR":
-                depth -= 1
-                if depth == 0:
-                    end_for_ip = ip
+                nesting_depth -= 1
+                if nesting_depth == 0:
+                    end_for_ip = search_ip
                     break
-            ip += 1
-
         assert end_for_ip >= 0
 
         # Find first FOR_ITER to know where loop body starts
-        for_iter_ip = -1
-        for scan_ip in range(start_ip, end_for_ip):
-            if self.instructions[scan_ip].opname == "FOR_ITER":
-                for_iter_ip = scan_ip
-                break
+        for_iter_ip = next(
+            i for i in range(start_ip, end_for_ip)
+            if self.instructions[i].opname == "FOR_ITER"
+        )
 
-        assert for_iter_ip >= 0
-
-        # Single pass to detect walrus variables and captured outer variables
-        captured_vars: list[str] = []
-        defined_inside: set[str] = set(iterator_vars)
-        # Walrus operators compile to: COPY 1 followed by STORE_FAST <varname>
-        walrus_vars: list[str] = []
-
-        scan_ip = for_iter_ip + 1
-        while scan_ip < end_for_ip:
-            inst = self.instructions[scan_ip]
+        # Single pass through loop body to detect walrus vars and captured vars
+        for body_ip in range(for_iter_ip + 1, end_for_ip):
+            inst = self.instructions[body_ip]
 
             # Detect walrus pattern: COPY 1 followed by STORE_FAST
-            if inst.opname == "COPY" and inst.arg == 1:
-                if scan_ip + 1 < end_for_ip:
-                    next_inst = self.instructions[scan_ip + 1]
-                    if next_inst.opname == "STORE_FAST":
-                        var_name = next_inst.argval
-                        if var_name not in iterator_vars and var_name not in walrus_vars:
-                            walrus_vars.append(var_name)
-                            defined_inside.add(var_name)
+            if inst.opname == "COPY" and inst.arg == 1 and body_ip + 1 < end_for_ip:
+                next_inst = self.instructions[body_ip + 1]
+                if next_inst.opname == "STORE_FAST":
+                    var_name = next_inst.argval
+                    if var_name not in iterator_vars and var_name not in walrus_vars:
+                        walrus_vars.append(var_name)
+                        defined_inside.add(var_name)
 
             # Track variables defined inside the loop
             if inst.opname == "STORE_FAST":
                 defined_inside.add(inst.argval)
 
-            # Detect LOAD_FAST that reference outer variables
-            # Python 3.14+ uses LOAD_FAST_BORROW and combined opcodes
+            # Detect LOAD_FAST referencing outer variables
             elif inst.opname.startswith("LOAD_FAST"):
-                var_names = (
-                    inst.argval
-                    if isinstance(inst.argval, tuple)
-                    else (inst.argval,)
-                )
+                var_names = inst.argval if isinstance(inst.argval, tuple) else (inst.argval,)
                 for var_name in var_names:
                     if var_name not in defined_inside and var_name not in captured_vars:
                         captured_vars.append(var_name)
 
-            scan_ip += 1
-
         # Extract prefix: all opcodes from END_FOR+1 until first STORE_FAST
-        ip = end_for_ip + 1
         prefix: list[str] = []
-        while (
-            ip < len(self.instructions)
-            and self.instructions[ip].opname != "STORE_FAST"
-        ):
-            prefix.append(self.instructions[ip].opname)
-            ip += 1
+        prefix_ip = end_for_ip + 1
+        while prefix_ip < len(self.instructions) and self.instructions[prefix_ip].opname != "STORE_FAST":
+            prefix.append(self.instructions[prefix_ip].opname)
+            prefix_ip += 1
 
-        store_fast_start_ip = ip
+        store_fast_ip = prefix_ip
 
-        while (
-            ip < len(self.instructions)
-            and self.instructions[ip].opname == "STORE_FAST"
-        ):
-            ip += 1
+        # Skip all STORE_FASTs to find postfix start
+        while prefix_ip < len(self.instructions) and self.instructions[prefix_ip].opname == "STORE_FAST":
+            prefix_ip += 1
 
-        postfix_start_ip = ip
-        first_postfix = (
-            self.instructions[postfix_start_ip].opname
-            if postfix_start_ip < len(self.instructions)
-            else None
-        )
+        postfix_ip = prefix_ip
+        first_postfix = self.instructions[postfix_ip].opname if postfix_ip < len(self.instructions) else None
 
         def matches(disposition: str) -> bool:
             p = patterns[disposition]
-            if prefix != p["prefix"]:
-                return False
-            return p["postfix"] is None or first_postfix == p["postfix"]
+            return prefix == p["prefix"] and (p["postfix"] is None or first_postfix == p["postfix"])
 
-        # Check dispositions in order of specificity
+        # Check all dispositions
         for disposition, result_on_stack in [
             ("discarded", False),
             ("returned", True),
             ("consumed", True),
+            ("stored", False),
         ]:
             if matches(disposition):
                 return ComprehensionAnalysis(
-                    end_ip=postfix_start_ip,
-                    result_var=None,
+                    end_ip=postfix_ip,
+                    result_var=self.instructions[store_fast_ip].argval if disposition == "stored" else None,
                     result_on_stack=result_on_stack,
                     result_disposition=disposition,
                     iterator_vars=iterator_vars,
                     walrus_vars=walrus_vars,
                     captured_vars=captured_vars,
                 )
-
-        if matches("stored"):
-            result_var = self.instructions[store_fast_start_ip].argval
-            end_ip = postfix_start_ip
-            return ComprehensionAnalysis(
-                end_ip=end_ip,
-                result_var=result_var,
-                result_on_stack=False,
-                result_disposition="stored",
-                iterator_vars=iterator_vars,
-                walrus_vars=walrus_vars,
-                captured_vars=captured_vars,
-            )
 
         raise AssertionError("Comprehension does not match any known pattern")
 
