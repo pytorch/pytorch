@@ -151,15 +151,21 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             log.debug("No heuristic configs found, using first %d kernels", count)
             return kernels[:count]
 
-        # Match kernels to heuristic configs
+        # Match kernels to heuristic configs with class diversity
+        # For each config, include at most one kernel per unique class to ensure
+        # diversity across kernel implementations
         matched: list[tuple] = []
         for cfg in heuristic_configs:
             key = _make_config_key_from_heuristic(cfg)
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
+            seen_classes: OrderedSet[type] = OrderedSet()
             for kernel in kernels_for_key:
-                matched.append((kernel, cfg.estimated_runtime))
+                kernel_class = kernel.metadata.kernel_class
+                if kernel_class not in seen_classes:
+                    matched.append((kernel, cfg.estimated_runtime))
+                    seen_classes.add(kernel_class)
 
         if not matched:
             log.debug(
@@ -187,7 +193,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             design = kernel.metadata.design
             autotuning_log.info(
                 "  Selected kernel %d: tile=(%d, %d, %d), cluster=(%d, %d), "
-                "estimated_runtime=%.2f us",
+                "estimated_runtime=%.2f us, class=%s",
                 i,
                 design.tile_shape[0],
                 design.tile_shape[1],
@@ -195,6 +201,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 design.cluster_shape[0],
                 design.cluster_shape[1],
                 runtime * 1e6,
+                kernel.metadata.kernel_class.__name__,
             )
 
         return result
