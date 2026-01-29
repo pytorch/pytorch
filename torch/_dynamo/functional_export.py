@@ -678,8 +678,8 @@ class _DynamoBytecodeCodeGen(torch.fx.graph.CodeGen):
     def __init__(
         self,
         orig_arg_names: list[str],
-        dynamo_bytecode_flatten: Callable,
-        dynamo_bytecode_unflatten: Callable,
+        dynamo_bytecode_flatten: Callable[..., Any],
+        dynamo_bytecode_unflatten: Callable[..., Any],
     ) -> None:
         super().__init__()
         self.orig_arg_names = orig_arg_names
