@@ -4476,13 +4476,6 @@ class InstructionTranslatorBase(
 
         Tracks FOR_ITER/END_FOR nesting depth to find the outermost END_FOR,
         then analyzes what happens to the result using dynamically discovered patterns.
-
-        Returns ComprehensionAnalysis with:
-        - end_ip: instruction after all comprehension bytecode
-        - result_var: name of result variable (or None if on stack)
-        - result_on_stack: True if result stays on stack
-        - result_disposition: "stored", "discarded", "returned", or "consumed"
-        - iterator_vars: variables that need restoration
         """
         assert sys.version_info >= (3, 12)
         assert self.instruction_pointer is not None
