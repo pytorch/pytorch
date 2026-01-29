@@ -119,34 +119,46 @@ def get_dtensor_strategies_for_op(op_overload, input_specs, mesh):
 
 
 class _CaptureAtenOp(torch.utils._python_dispatch.TorchDispatchMode):
-    """Dispatch mode that captures the first aten op called and its args."""
+    """Dispatch mode that captures aten ops called and their args."""
 
-    def __init__(self):
-        self.captured_op = None
-        self.captured_args = None
-        self.captured_kwargs = None
+    def __init__(self, target_op_name: str = ""):
+        self.target_op_name = target_op_name.lower()
+        self.all_ops = []  # List of (op, args, kwargs)
+        self.best_match = None
+        self.best_match_args = None
+        self.best_match_kwargs = None
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        if self.captured_op is None and func.namespace == "aten":
-            self.captured_op = func
-            self.captured_args = args
-            self.captured_kwargs = kwargs
+        if func.namespace == "aten":
+            self.all_ops.append((func, args, kwargs))
+            # Check if this op matches the target name
+            op_name = func.name().split("::")[1].split(".")[0].lower()
+            if self.target_op_name and self.target_op_name in op_name:
+                if self.best_match is None:
+                    self.best_match = func
+                    self.best_match_args = args
+                    self.best_match_kwargs = kwargs
         return func(*args, **kwargs)
 
 
-def get_aten_op_for_sample(op, sample):
+def get_aten_op_for_sample(op, sample, op_name: str = ""):
     """
     Determine the actual aten op that will be dispatched for a given sample.
 
     Runs the operation through a capture mode to see which aten overload
     is actually used (e.g., sum.default vs sum.dim_IntList).
 
+    Args:
+        op: The operator callable
+        sample: The sample input
+        op_name: Optional op name to prefer when multiple ops are called
+
     Returns (aten_op, non_tensor_args, non_tensor_kwargs) where the args/kwargs
     are the actual values passed to the aten op (with tensors removed).
     """
-    with _CaptureAtenOp() as capture:
+    with _CaptureAtenOp(op_name) as capture:
         try:
             if isinstance(sample.input, torch.Tensor):
                 op(sample.input, *sample.args, **sample.kwargs)
@@ -155,19 +167,26 @@ def get_aten_op_for_sample(op, sample):
         except Exception:
             pass
 
-    if capture.captured_op is None:
+    # Use best match if we found one, otherwise fall back to first op
+    if capture.best_match is not None:
+        captured_op = capture.best_match
+        captured_args = capture.best_match_args
+        captured_kwargs = capture.best_match_kwargs
+    elif capture.all_ops:
+        captured_op, captured_args, captured_kwargs = capture.all_ops[0]
+    else:
         return None, (), {}
 
     # Extract non-tensor args and kwargs from what was actually passed to aten op
     non_tensor_args = tuple(
-        a for a in capture.captured_args if not isinstance(a, torch.Tensor)
+        a for a in captured_args if not isinstance(a, torch.Tensor)
     )
     non_tensor_kwargs = {
-        k: v for k, v in capture.captured_kwargs.items()
+        k: v for k, v in captured_kwargs.items()
         if not isinstance(v, torch.Tensor)
     }
 
-    return capture.captured_op, non_tensor_args, non_tensor_kwargs
+    return captured_op, non_tensor_args, non_tensor_kwargs
 
 
 def query_single_dim_strategy(op_overload, tensors, mesh):
@@ -307,7 +326,9 @@ def compare_operator(
             output_placement_options = get_1d_output_placements_for_tensor(ground_truth)
 
             # Query DTensor's single-dim strategy (if available)
-            aten_op, non_tensor_args, non_tensor_kwargs = get_aten_op_for_sample(op, sample)
+            aten_op, non_tensor_args, non_tensor_kwargs = get_aten_op_for_sample(
+                op, sample, opinfo.name
+            )
 
             from torch.distributed.tensor._api import DTensor
             propagator = DTensor._op_dispatcher.sharding_propagator
