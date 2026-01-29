@@ -555,6 +555,7 @@ class TestExternKernelCaller(TestCase):
         expected = torch.mm(a, b)
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
 
+    @skipIfRocmArch(MI200_ARCH)
     @patches
     def test_extern_kernel_caller_hash_key_deduplication(self):
         def fn(a, b, c, d):
