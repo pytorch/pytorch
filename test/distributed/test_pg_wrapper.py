@@ -379,6 +379,51 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
         @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_wrapper_forwards_nccl_methods(self):
+            """
+            Tests that ProcessGroupWrapper correctly forwards NCCL-specific
+            utility methods to the wrapped backend. See issue #173538.
+            """
+            torch.cuda.set_device(self.rank)
+            store = c10d.FileStore(self.file_name, self.world_size)
+            device = torch.device(f"cuda:{self.rank}")
+            c10d.init_process_group(
+                backend="nccl",
+                rank=self.rank,
+                world_size=self.world_size,
+                store=store,
+                device_id=device,
+            )
+            pg = c10d.distributed_c10d._get_default_group()
+            backend = pg._get_backend(device)
+
+            # Verify we're testing the wrapper
+            self.assertEqual(type(backend).__name__, "_ProcessGroupWrapper")
+            unwrapped = backend.wrapped_pg
+
+            # Verify wrapper returns same values as unwrapped backend
+            self.assertEqual(backend.supports_splitting, unwrapped.supports_splitting)
+            self.assertEqual(backend.supports_coalescing, unwrapped.supports_coalescing)
+            self.assertEqual(
+                backend.supports_time_estimate, unwrapped.supports_time_estimate
+            )
+            self.assertEqual(
+                backend.supports_tensor_alloc(device),
+                unwrapped.supports_tensor_alloc(device),
+            )
+            self.assertEqual(backend.get_error(), unwrapped.get_error())
+            self.assertEqual(type(backend.mem_allocator), type(unwrapped.mem_allocator))
+            self.assertEqual(type(backend.options), type(unwrapped.options))
+
+            # Test allocate_tensor with eager init (no collective needed)
+            # This works because device_id triggers eagerConnectSingleDevice
+            # which is forwarded by the wrapper via supportsSplitting check
+            tensor = backend.allocate_tensor(1024, dtype=torch.float32, device=device)
+            self.assertEqual(tensor.shape, torch.Size([1024]))
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
         @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
         def test_new_group_no_gloo(self):
             def patched_isinstance(obj, clazz):
