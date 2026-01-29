@@ -242,7 +242,10 @@ def _make_inlined(
     def inline_call(
         *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker:
-        return SourcelessBuilder.create(tx, f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+        from torch._dynamo.trace_rules import _force_inline
+
+        with _force_inline():
+            return SourcelessBuilder.create(tx, f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
 
     return inline_call
 
@@ -404,11 +407,9 @@ def _call_function_and_unflatten_output(
         # point, it is safe to just get rid of the extra outputs
         flat_variable = SourcelessBuilder.create(
             tx,
-            tuple(
-                flat_variable.items[  # mypy: ignore[attr-defined]
-                    : -ret_spec.num_intermediate_nodes_as_outputs
-                ]
-            ),
+            flat_variable.items[  # mypy: ignore[attr-defined]
+                : -ret_spec.num_intermediate_nodes_as_outputs
+            ],
         )
 
     if ret_spec.masks_to_filter_const_values:
@@ -1014,7 +1015,7 @@ def validate_args_and_maybe_create_graph_inputs(
 
     if set_subgraph_inputs == "flatten_manual":
         flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
-            SourcelessBuilder.create(tx, list(sub_args))
+            SourcelessBuilder.create(tx, sub_args)
         ).unpack_var_sequence(tx)
 
         flat_inputs = validate_args_and_maybe_create_graph_inputs(
