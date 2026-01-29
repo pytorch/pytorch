@@ -4212,6 +4212,9 @@ static Tensor differential_analytic_matrix_function(
 ) {
   // Given an analytic matrix function, this computes the differential (forward
   // AD) or the adjoint of the differential (backward AD)
+  TORCH_CHECK(
+      self.dim() >= 2,
+      "differential_analytic_matrix_function: The input tensor must have at least 2 dimensions.");
   auto A = adjoint ? self.transpose(-2, -1).conj() : self;
   auto meta_grad_sizes = A.sym_sizes().vec();
   meta_grad_sizes[A.dim() - 2] *= 2;
