@@ -2833,9 +2833,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             "This should not happen - please report a bug."
         )
         out_spec_vt = VariableTracker.build(tx, captured_out_spec)
-        return variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
-            tx, [flat_output_vt, out_spec_vt], {}
-        )
+        return _make_inlined(tx, _pytree.tree_unflatten)(flat_output_vt, out_spec_vt)
 
     def _call_ntuple(
         self,
