@@ -167,14 +167,18 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   auto self = reinterpret_cast<THPGenerator*>(_self);
   auto generator = self->cdata;
   TORCH_CHECK(
-      THPUtils_checkLong(seed),
-      "manual_seed expected a long, "
-      "but got ",
+      THPUtils_checkLong(seed) || THPVariable_Check(seed),
+      "manual_seed expected a long or Tensor, but got ",
       THPUtils_typename(seed));
-  uint64_t unsigned_seed = unpack_uint64(seed);
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(generator.mutex());
-  generator.set_current_seed(unsigned_seed);
+  if (THPVariable_Check(seed)) {
+    at::Tensor tensor_seed = THPVariable_Unpack(seed);
+    generator.set_current_tensor_seed(tensor_seed);
+  } else {
+    uint64_t unsigned_seed = unpack_uint64(seed);
+    generator.set_current_seed(unsigned_seed);
+  }
   Py_INCREF(self);
   return reinterpret_cast<PyObject*>(self);
   END_HANDLE_TH_ERRORS

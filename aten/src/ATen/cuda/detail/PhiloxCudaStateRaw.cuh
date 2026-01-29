@@ -26,6 +26,16 @@ struct PhiloxCudaState {
     captured_ = true;
   }
 
+  PhiloxCudaState(int64_t* seed,
+                  int64_t* offset,
+                  uint64_t increment,
+                  bool use_atomic)
+    : increment_(increment), use_atomic_(use_atomic) {
+    seed_.ptr = seed;
+    offset_.ptr = offset;
+    captured_ = true;
+  }
+
   // Public members, directly accessible by at::cuda::philox::unpack.
   // If we made them private with getters/setters, the getters/setters
   // would have to be __device__, and we can't declare __device__ in ATen.
@@ -38,6 +48,8 @@ struct PhiloxCudaState {
   Payload offset_{};
   uint64_t offset_intragraph_ = 0;
   bool captured_ = false;
+  uint64_t increment_ = 0;
+  bool use_atomic_ = false;
 };
 
 } // namespace at
