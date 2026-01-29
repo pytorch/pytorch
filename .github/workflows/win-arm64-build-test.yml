@@ -190,8 +190,7 @@ jobs:
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           PYTORCH_FINAL_PACKAGE_DIR: C:/${{ github.run_id }}/build-results/
         run: |
-          if not exist "%PYTORCH_FINAL_PACKAGE_DIR%" mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
-          set PATH=%DEPENDENCIES_DIR%\armpl_24.10\bin;%PATH%
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
           call pytorch/.ci/pytorch/windows/arm64/bootstrap_tests.bat
           set GIT_BASH=C:\Program Files\Git\usr\bin\bash.exe
           "%GIT_BASH%" -c "bash --noprofile --norc .ci/pytorch/win-arm64-test.sh"

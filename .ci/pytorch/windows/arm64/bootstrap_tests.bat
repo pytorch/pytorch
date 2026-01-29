@@ -11,6 +11,9 @@ echo * > .venv\.gitignore
 call .\.venv\Scripts\activate
 where python
 
+:: add APL to PATH for runtime dependencies
+if exist "%DEPENDENCIES_DIR%\armpl_24.10\bin" set PATH=%DEPENDENCIES_DIR%\armpl_24.10\bin;%PATH%
+
 :: install dependencies
 python -m pip install --upgrade pip
 pip install -r requirements.txt
