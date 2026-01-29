@@ -353,25 +353,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             # At runtime: real function runs (counter increments to 1, 2, 3, ...)
             # But returned count is always 999 (from fake implementation at compile time)
 
-            # BAD: primitive output varies at runtime
-            counter = 0
-
-
-            @leaf_function
-            def count_calls(x):
-                global counter
-                counter += 1
-                return (x, counter)
-
-
-            @count_calls.register_fake
-            def count_calls_fake(x):
-                return (x, 999)  # placeholder value
-
-
-            # At runtime: real function runs (counter increments to 1, 2, 3, ...)
-            # But returned count is always 999 (from register_fake at compile time)
-
         - User-defined classes must be registered via :func:`torch.utils._pytree.register_pytree_node`,
         :func:`torch.utils._pytree.register_dataclass`, or :func:`torch.utils._pytree.register_constant`.
 
