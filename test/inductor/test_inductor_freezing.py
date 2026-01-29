@@ -992,6 +992,7 @@ class OptimizeForInferenceTemplate(TestCase):
 
 
 if TEST_WITH_ROCM:
+    torch._inductor.config.layout_optimization = 1
     torch._inductor.config.force_layout_optimization = 1
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
