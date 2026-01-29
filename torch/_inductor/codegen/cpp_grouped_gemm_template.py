@@ -48,7 +48,9 @@ extern "C" {{export_declaration}}
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        {{ template.codegen_multi_threads_params()|indent(8, false) }}
+        #pragma omp for
+        for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
+            {{ template.codegen_multi_threads_params()|indent(12, false) }}
 {%- else %}
     {
         {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
@@ -133,8 +135,14 @@ extern "C" {{export_declaration}}
                 }
             }
         }
+{%- if num_threads > 1 %}
+        }
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
+{%- else %}
+        {{ micro_gemm.codegen_finalize(kernel) }}
+    }
+{%- endif %}
 }
 """
 
