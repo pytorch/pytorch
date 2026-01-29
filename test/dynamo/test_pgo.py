@@ -467,6 +467,41 @@ def run(cnt):
                 f(t(2, 2), t(2, 4))
                 self.assertEqual(cnts.frame_count, 2)
 
+    def test_factory_created_functions_separate_pgo_state(self):
+        cnts = CompileCounter()
+
+        def wrap_compile(func):
+            @torch.compile(backend=cnts, fullgraph=True)
+            def _func(x):
+                return func(x)
+
+            return _func
+
+        def impl_a(x):
+            return x.view(-1)
+
+        def impl_b(x):
+            return x.sum()
+
+        compiled_a = wrap_compile(impl_a)
+        compiled_b = wrap_compile(impl_b)
+
+        # Call with different shapes - they should NOT share PGO state
+        compiled_a(torch.randn(2, 3))  # shape (2, 3)
+        compiled_b(torch.randn(5, 7))  # shape (5, 7) - different!
+
+        # If PGO state is properly separated, compiled_b should NOT have
+        # been triggered to use dynamic shapes based on compiled_a's shapes
+        # This should result in 2 separate static compilations
+        self.assertEqual(cnts.frame_count, 2)
+
+        # Verify no dynamic shapes were introduced incorrectly
+        # by checking that calling with same shapes doesn't recompile
+        cnts.clear()
+        compiled_a(torch.randn(2, 3))
+        compiled_b(torch.randn(5, 7))
+        self.assertEqual(cnts.frame_count, 0)  # No recompilation needed
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
