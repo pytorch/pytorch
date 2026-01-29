@@ -294,8 +294,12 @@ else
     # set only when building other architectures
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
-      # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-      python -mpip install numpy==2.0.2
+      # TODO: Remove me and may be just focus on numpy-2.x testing
+      if [[ "$ANACONDA_PYTHON_VERSION" =~ ^3\.1[0-2]$ ]]; then
+        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
+        # In relality it's only needed for numpy_2_x and vllm shards (where vllm depends on numpy-2)
+        python -mpip install numpy==2.0.2
+      fi
 
       WERROR=1 python setup.py clean
 
