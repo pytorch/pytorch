@@ -2185,9 +2185,8 @@ class TestBinaryUfuncs(TestCase):
         # -9 cast to uint8 after comparison
         self.assertEqual(result_min.item(), (-9) % 256)
 
-        # Test with different dtype combinations
+        # Test with different dtype combinations.
         test_cases = [
-            # (tensor1, tensor2)
             (
                 torch.tensor([5], dtype=torch.uint8, device=device),
                 torch.tensor([-3], dtype=torch.int32, device=device),
