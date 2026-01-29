@@ -18,6 +18,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine ONEDNN_BUILD_GRAPH": "#undef ONEDNN_BUILD_GRAPH",
     "#cmakedefine DNNL_EXPERIMENTAL_PROFILING": "#undef DNNL_EXPERIMENTAL_PROFILING",
     "#cmakedefine DNNL_EXPERIMENTAL_LOGGING": "#undef DNNL_EXPERIMENTAL_LOGGING",
+    "#cmakedefine DNNL_SAFE_RBP": "#undef DNNL_SAFE_RBP",
     "#cmakedefine DNNL_EXPERIMENTAL_SYCL_KERNEL_COMPILER": "#undef DNNL_EXPERIMENTAL_SYCL_KERNEL_COMPILER",
     "#cmakedefine DNNL_DISABLE_GPU_REF_KERNELS": "#undef DNNL_DISABLE_GPU_REF_KERNELS",
     "#cmakedefine01 BUILD_TRAINING": "#define BUILD_TRAINING 1",
@@ -69,8 +70,8 @@ template_rule(
     out = "include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "3",
-        "@DNNL_VERSION_MINOR@": "10",
-        "@DNNL_VERSION_PATCH@": "2",
+        "@DNNL_VERSION_MINOR@": "11",
+        "@DNNL_VERSION_PATCH@": "0",
     },
 )
 
@@ -85,7 +86,7 @@ template_rule(
     name = "include_dnnl_version_hash",
     src = "include/oneapi/dnnl/dnnl_version_hash.h.in",
     out = "include/oneapi/dnnl/dnnl_version_hash.h",
-    substitutions = {"@DNNL_VERSION_HASH@": "f1d471933dc852f956fd05389f9313c7148783d5",}
+    substitutions = {"@DNNL_VERSION_HASH@": "5786de27cff245de5aad36c8db3a2286e32450ce",}
 )
 
 cc_library(
@@ -112,6 +113,7 @@ cc_library(
         "src/common/**/**/*.h",
         "third_party/xbyak/*.h",
         "third_party/ittnotify/jitprofiling.h",
+        "third_party/ittnotify/ittnotify.h",
         "third_party/spdlog/**/*.h",
     ], exclude=[
         "src/cpu/aarch64/**/*.hpp",
