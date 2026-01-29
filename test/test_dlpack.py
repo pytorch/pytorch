@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     skipCUDAIfNotRocm,
     skipMeta,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -106,8 +107,7 @@ class TestTorchDlPack(TestCase):
             # does not behave as expected on Jetson
             stream.synchronize()
         stream = torch.Stream()
-        acc = torch.accelerator.current_accelerator()
-        with torch.get_device_module(acc).stream(stream):
+        with stream:
             z = from_dlpack(x)
         stream.synchronize()
         return z
@@ -117,7 +117,7 @@ class TestTorchDlPack(TestCase):
     def test_dlpack_conversion_with_streams(self, device, dtype):
         # Create a stream where the tensor will reside
         stream = torch.Stream()
-        with torch.get_device_module(device_type).stream(stream):
+        with stream:
             # Do an operation in the actual stream
             x = make_tensor((5,), dtype=dtype, device=device) + 1
         z = self._dlpack_conversion_with_streams(stream, x)
@@ -134,7 +134,7 @@ class TestTorchDlPack(TestCase):
     )
     def test_dlpack_conversion_with_streams_narrow_precision(self, device, dtype):
         stream = torch.Stream()
-        with torch.get_device_module(device_type).stream(stream):
+        with stream:
             x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
         z = self._dlpack_conversion_with_streams(stream, x)
@@ -208,7 +208,7 @@ class TestTorchDlPack(TestCase):
         # (hence data dependency) at the exchange boundary.
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
-        with torch.get_device_module(device_type).stream(stream_a):
+        with stream_a:
             x = make_tensor((5,), dtype=dtype, device=device) + 1
             z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
             stream_a.synchronize()
@@ -228,7 +228,7 @@ class TestTorchDlPack(TestCase):
     def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
         stream_a = torch.Stream()
         stream_b = torch.Stream()
-        with torch.get_device_module(device_type).stream(stream_a):
+        with stream_a:
             x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
             z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
@@ -256,6 +256,8 @@ class TestTorchDlPack(TestCase):
             raise AssertionError(f"dtype mismatch: {x.dtype} != {y.dtype}")
 
     @skipMeta
+    @onlyCUDA
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2793")
     def test_dlpack_default_stream(self, device):
         class DLPackTensor:
             def __init__(self, tensor):
@@ -280,6 +282,8 @@ class TestTorchDlPack(TestCase):
             from_dlpack(x)
 
     @skipMeta
+    @onlyCUDA
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2793")
     def test_dlpack_convert_default_stream(self, device):
         # tests run on non-default stream, so _sleep call
         # below will run on a non-default stream, causing
@@ -308,6 +312,8 @@ class TestTorchDlPack(TestCase):
             x.__dlpack__(stream=object())
 
     @skipMeta
+    @onlyCUDA
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2796")
     def test_dlpack_cuda_per_thread_stream(self, device):
         # Test whether we raise an error if we are trying to use per-thread default
         # stream, which is currently not supported by PyTorch.
@@ -326,6 +332,8 @@ class TestTorchDlPack(TestCase):
             x.__dlpack__(stream=2)
 
     @skipMeta
+    @onlyCUDA
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2796")
     @skipCUDAIfNotRocm
     def test_dlpack_invalid_rocm_streams(self, device):
         # Test that we correctly raise errors on unsupported ROCm streams.
@@ -339,6 +347,8 @@ class TestTorchDlPack(TestCase):
         test(x, stream=1)
         test(x, stream=2)
 
+    @onlyCUDA
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2796")
     @skipMeta
     def test_dlpack_invalid_cuda_streams(self, device):
         x = make_tensor((5,), dtype=torch.float32, device=device)
@@ -526,6 +536,8 @@ class TestTorchDlPack(TestCase):
         self._test_from_dlpack(device, out_device=device, copy=False)
 
     @skipMeta
+    @onlyCUDA
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2797")
     def test_needs_copy_error(self, device):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
