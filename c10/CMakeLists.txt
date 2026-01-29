@@ -106,8 +106,9 @@ if(NOT BUILD_LIBTORCHLESS)
     message(STATUS "don't use NUMA")
   endif()
 
-  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x" AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-    target_link_libraries(c10 PRIVATE cpuinfo)
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
+    target_link_libraries(c10 INTERFACE "$<BUILD_INTERFACE:cpuinfo>")
+    target_link_libraries(c10 PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,cpuinfo>")
   endif()
 
   find_package(Backtrace)
