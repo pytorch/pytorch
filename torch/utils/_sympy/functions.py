@@ -304,6 +304,13 @@ class FloorDiv(sympy.Function):
 
         return None
 
+    def _eval_is_nonnegative(self) -> bool | None:
+        # pyrefly: ignore [missing-attribute]
+        p, q = self.args[:2]
+        if all([p.is_integer, q.is_integer, p.is_nonnegative, q.is_nonnegative]):
+            return True
+        return None
+
 
 class ModularIndexing(sympy.Function):
     """
