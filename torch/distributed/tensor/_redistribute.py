@@ -178,12 +178,12 @@ def _get_flattened_mesh_by_layout(
         The flattened DeviceMesh if it was explicitly created, None otherwise.
     """
     root_mesh = mesh._get_root_mesh()
-    mesh_dim_names = root_mesh.mesh_dim_names
+    mesh_dim_names = mesh.mesh_dim_names
 
     if mesh_dim_names is None:
         return None
 
-    # Convert mesh dim indices to dim names
+    # Convert mesh dim indices to dim names (indices are relative to the passed-in mesh)
     dim_names = tuple(mesh_dim_names[i] for i in mesh_dims)
 
     # Get the submesh for these dimensions
