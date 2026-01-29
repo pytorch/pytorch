@@ -3,6 +3,7 @@ import logging
 
 from cli.lib.common.cli_helper import register_targets, RichHelp, TargetSpec
 from cli.lib.core.vllm.vllm_test import VllmTestRunner
+from cli.test_cli.register_pytorch_test import register_pytorch_test_commands
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ def register_test_commands(subparsers: argparse._SubParsersAction) -> None:
         formatter_class=RichHelp,
     )
     build_subparsers = build_parser.add_subparsers(dest="test_command", required=True)
+
+    # Register external targets (vllm, etc.)
     overview = "\n".join(
         f"  {name:12} {spec.get('help', '')}" for name, spec in _TARGETS.items()
     )
@@ -60,3 +63,6 @@ def register_test_commands(subparsers: argparse._SubParsersAction) -> None:
         formatter_class=RichHelp,
     )
     register_targets(external_parser, _TARGETS, common_args=common_args)
+
+    # Register pytorch test utilities
+    register_pytorch_test_commands(build_subparsers)
