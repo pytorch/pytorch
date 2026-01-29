@@ -643,6 +643,12 @@ def mirror_inductor_external_kernels() -> None:
             / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
             True,
         ),
+        (
+            CWD
+            / "torch/_inductor/kernel/vendored_templates/cutedsl/kernels/dense_gemm.py",
+            CWD / "third_party/cutlass/examples/python/CuTeDSL/blackwell/dense_gemm.py",
+            True,
+        ),
     ]
     for new_path, orig_path, allow_missing_if_cuda_is_disabled in paths:
         # Create the dirs involved in new_path if they don't exist
