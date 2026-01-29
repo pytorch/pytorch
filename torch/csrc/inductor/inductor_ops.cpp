@@ -108,4 +108,10 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       {at::Tag::pt2_compliant_tag});
 }
 
+TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
+  m.def(
+      "inductor_reserve_rng_state(Generator? generator, SymInt increment) "
+      "-> (Tensor, Tensor, Tensor)");
+}
+
 } // namespace torch::inductor
