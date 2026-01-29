@@ -2601,6 +2601,23 @@ class TestTensorCreation(TestCase):
                                    torch.tensor(3),
                                    torch.tensor(1, dtype=torch.int16)).dtype)
 
+    def test_arange_float_to_integral_out_raises(self, device):
+        # Test that arange raises RuntimeError instead of SIGFPE when
+        # float inputs are provided with an integral out tensor.
+        # See https://github.com/pytorch/pytorch/issues/173574
+        out = torch.full((10,), 2, dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(RuntimeError, "floating-point inputs.*integral dtype"):
+            torch.arange(2.0, 7.0, 0.5, out=out)
+
+        # Also test with just floating-point step
+        with self.assertRaisesRegex(RuntimeError, "floating-point inputs.*integral dtype"):
+            torch.arange(2, 7, 0.5, out=out)
+
+        # Valid case: integer inputs with integer out should work
+        out_valid = torch.full((5,), 0, dtype=torch.int64, device=device)
+        result = torch.arange(0, 5, 1, out=out_valid)
+        self.assertEqual(result, torch.tensor([0, 1, 2, 3, 4], device=device))
+
     # cannot call storage() on meta tensor
     @skipMeta
     def test_empty_strided(self, device):

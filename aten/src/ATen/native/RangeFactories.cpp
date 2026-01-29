@@ -190,6 +190,17 @@ Tensor& range_out_no_step(const Scalar& start, const Scalar& end, Tensor& result
 }
 
 Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
+  // Check for dtype compatibility: if output is integral, inputs must not be floating point
+  // to avoid SIGFPE when converting float to int with non-integer values
+  if (at::isIntegralType(result.scalar_type(), /*includeBool=*/false)) {
+    TORCH_CHECK(
+        !start.isFloatingPoint() && !end.isFloatingPoint() && !step.isFloatingPoint(),
+        "torch.arange received floating-point inputs (start=", start,
+        ", end=", end, ", step=", step,
+        ") but the output tensor has integral dtype ", result.scalar_type(),
+        ". This is not supported because it can produce undefined behavior. "
+        "Please use a floating-point output tensor or integer inputs.");
+  }
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     int64_t size = compute_arange_size<scalar_t>(start, end, step);
     int64_t numel = result.numel();
