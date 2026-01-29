@@ -27,7 +27,7 @@ fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info &mask,
                            enable_bias ? bias_enum::elementwise_bias : bias_enum::no_bias,
                            has_lse,
                            has_dropout,
-                           false}; // do_fp8_static_quant
+                           quant_scale_enum::no_scale};
 }
 
 fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
@@ -100,12 +100,19 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          k.data_ptr(),
                          v.data_ptr(),
                          attn_bias_ptr, // bias
+                         nullptr, // q_descale_ptr
+                         nullptr, // k_descale_ptr
+                         nullptr, // v_descale_ptr
                          has_dropout_randval ? dropout_randval.data_ptr() : nullptr,
                          has_lse ? softmax_lse.data_ptr() : nullptr,
                          out.data_ptr(),
-                         nullptr,                           // seqstart_q
-                         nullptr,                           // seqstart_k
-                         nullptr,
+                         nullptr, // seqstart_q
+                         nullptr, // seqstart_k
+                         nullptr, // seqlen_q_ptr
+                         nullptr, // seqlen_k_ptr
+                         nullptr, // cu_seqlen_q_ptr
+                         nullptr, // cu_seqlen_k_ptr
+                         nullptr, // sink_ptr
                          seqlen_q,
                          seqlen_k,
                          b,
@@ -115,8 +122,6 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          h,                                 // nhead
                          h_k,                               // nhead_k
                          softmax_scale,                     // scale_s
-                         1,                                 // scale_p
-                         1,                                 // scale_o
                          0.0f,                              // logits_soft_cap
                          stride_q,
                          stride_k,
@@ -140,6 +145,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          batch_stride_o,
                          mask.left,
                          mask.right,
+                         0,                                 // sink_size
                          static_cast<ck_tile::index_t>(mask.type),
                          -1,                                // min_seqlen_q
                          p_dropout,
