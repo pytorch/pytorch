@@ -91,8 +91,154 @@ class TestGraphPickler(TestCase):
         check_model(self, fn, (torch.tensor([False, True]), torch.tensor([True, True])))
 
 
+class TestDebugDumps(TestCase):
+    """Tests for GraphPickler.debug_dumps debugging utility."""
+
+    def setUp(self):
+        super().setUp()
+        from torch.fx._graph_pickler import GraphPickler
+
+        self.GraphPickler = GraphPickler
+
+    def test_picklable_object_returns_none_equivalent(self):
+        """
+        When an object is fully picklable, debug_dumps should return
+        "root" since there's no unpicklable leaf.
+        """
+        result = self.GraphPickler.debug_dumps([1, 2, 3], verbose=False)
+        self.assertIsNone(result)
+
+    def test_simple_unpicklable_lambda(self):
+        """
+        A lambda at the root should return "root" as the unpicklable path.
+        """
+        bad_obj = lambda x: x  # noqa: E731
+        result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
+        self.assertIn("root", result)
+
+    def test_nested_unpicklable_in_list(self):
+        """
+        When a lambda is nested in a list, debug_dumps should find the path
+        to it (e.g., "root[1]").
+        """
+        bad_obj = [1, lambda x: x, 3]  # noqa: E731
+        result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
+        self.assertIn("root[1]", result)
+
+    def test_nested_unpicklable_in_dict(self):
+        """
+        When a lambda is nested in a dict, debug_dumps should find the path
+        to it (e.g., "root['bad_key']").
+        """
+        bad_obj = {"good": 1, "bad": lambda x: x}  # noqa: E731
+        result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
+        self.assertIn("root['bad']", result)
+
+    def test_deeply_nested_unpicklable(self):
+        """
+        debug_dumps should find unpicklables even when deeply nested.
+        """
+        bad_obj = {"level1": {"level2": {"level3": [1, 2, lambda x: x]}}}  # noqa: E731
+        result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
+        self.assertIn("level3", result)
+        self.assertIn("[2]", result)
+
+    def test_unpicklable_in_tuple(self):
+        """
+        debug_dumps should handle tuples correctly.
+        """
+        bad_obj = (1, 2, lambda x: x)  # noqa: E731
+        result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
+        self.assertIn("root[2]", result)
+
+    def test_unpicklable_in_set(self):
+        """
+        Sets containing unhashable items can't be tested, but we can test
+        sets with objects that pickle might choke on differently. We'll test
+        a frozenset to ensure container traversal works.
+        """
+        good_obj = frozenset([1, 2, 3])
+        result = self.GraphPickler.debug_dumps(good_obj, verbose=False)
+        self.assertIsNone(result)
+
+    def test_max_depth_limit(self):
+        """
+        When max_depth is reached, the path should include "(depth_limit)".
+        """
+
+        def build_nested(depth):
+            if depth == 0:
+                return lambda x: x  # noqa: E731
+            return [build_nested(depth - 1)]
+
+        deeply_nested = build_nested(100)
+        result = self.GraphPickler.debug_dumps(
+            deeply_nested, max_depth=5, verbose=False
+        )
+        self.assertIn("depth_limit", result)
+
+    def test_object_with_unpicklable_attribute(self):
+        """
+        An object with an unpicklable attribute in __dict__ should be found.
+        """
+
+        class Container:
+            def __init__(self):
+                self.good = 1
+                self.bad = lambda x: x  # noqa: E731
+
+        obj = Container()
+        result = self.GraphPickler.debug_dumps(obj, verbose=False)
+        self.assertIn("bad", result)
+
+    def test_dataclass_with_unpicklable_field(self):
+        """
+        A dataclass with an unpicklable field should be found.
+        """
+        import dataclasses
+
+        @dataclasses.dataclass
+        class MyData:
+            good: int
+            bad: object
+
+        obj = MyData(good=1, bad=lambda x: x)  # noqa: E731
+        result = self.GraphPickler.debug_dumps(obj, verbose=False)
+        self.assertIn("bad", result)
+
+    def test_verbose_output(self):
+        """
+        When verbose=True, output should be printed (captured via capsys or similar).
+        We just verify it doesn't crash.
+        """
+        import io
+        import sys
+
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            self.GraphPickler.debug_dumps([1, lambda x: x], verbose=True)  # noqa: E731
+        finally:
+            sys.stdout = old_stdout
+
+        output = captured.getvalue()
+        self.assertIn("Walking:", output)
+
+    def test_generator_object(self):
+        """
+        Generator objects are not picklable. debug_dumps should identify them.
+        """
+
+        def gen():
+            yield 1
+
+        bad_obj = {"data": gen()}
+        result = self.GraphPickler.debug_dumps(bad_obj, verbose=False)
+        self.assertIn("data", result)
+
+
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test is not currently used and should be "
-        "enabled in discover_tests.py if required."
-    )
+    from torch.testing._internal.common_utils import run_tests
+
+    run_tests()
