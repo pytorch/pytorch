@@ -559,7 +559,10 @@ class _GraphModulePickleData:
             _python_code = gm._real_recompile()
         else:
             _python_code = gm.recompile()
-        self.gm_dict = gm.__dict__.copy()
+        if hasattr(gm, "__getstate__"):
+            self.gm_dict = gm.__getstate__()
+        else:
+            self.gm_dict = gm.__dict__.copy()
         del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph, options)
 
@@ -733,7 +736,9 @@ class _HigherOrderOperatorPickleData(_OpPickleData):
     def __init__(self, name: str) -> None:
         self.name = name
 
-    def unpickle(self, unpickle_state: _UnpickleState) -> torch._ops.HigherOrderOperator:
+    def unpickle(
+        self, unpickle_state: _UnpickleState
+    ) -> torch._ops.HigherOrderOperator:
         # HigherOrderOperators are accessible via torch.ops.higher_order.{name}
         hop = getattr(torch.ops.higher_order, self.name, None)
         if hop is None:

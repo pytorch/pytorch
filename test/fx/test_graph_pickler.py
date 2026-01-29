@@ -243,7 +243,7 @@ class TestHigherOrderOperatorPickle(TestCase):
 
     def setUp(self):
         super().setUp()
-        from torch.fx._graph_pickler import GraphPickler, Options, _OpPickleData
+        from torch.fx._graph_pickler import _OpPickleData, GraphPickler, Options
 
         self.GraphPickler = GraphPickler
         self.Options = Options
@@ -407,6 +407,195 @@ class TestSerializedGraphModule(TestCase):
         x = torch.tensor([1.0, 2.0])
         y = torch.tensor([3.0, 4.0])
         self.assertEqual(gm(x, y), deserialized(x, y))
+
+
+class TestGraphModuleGetState(TestCase):
+    """Tests that _GraphModulePickleData respects custom __getstate__ methods."""
+
+    def test_graph_module_getstate_is_called(self):
+        """
+        When a GraphModule subclass defines __getstate__, the pickler should
+        use it instead of copying __dict__ directly. This ensures that custom
+        serialization logic (e.g., filtering out unpicklable attributes) is
+        respected.
+        """
+        from unittest.mock import patch
+
+        from torch.fx._graph_pickler import _GraphModulePickleData, Options
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        getstate_called = []
+
+        original_getstate = gm.__getstate__
+
+        def mock_getstate():
+            getstate_called.append(True)
+            return original_getstate()
+
+        with patch.object(gm, "__getstate__", mock_getstate):
+            _GraphModulePickleData(gm, Options())
+
+        self.assertEqual(
+            len(getstate_called),
+            1,
+            "__getstate__ should be called exactly once during serialization",
+        )
+
+    def test_graph_module_custom_getstate_filters_attributes(self):
+        """
+        Test that a custom __getstate__ that filters attributes is respected.
+        The filtered attribute should not appear in the pickled data.
+        """
+        from torch.fx._graph_pickler import _GraphModulePickleData, Options
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+        gm.unpicklable_attr = lambda: None
+
+        original_getstate = gm.__getstate__
+
+        def custom_getstate():
+            state = original_getstate()
+            if "unpicklable_attr" in state:
+                del state["unpicklable_attr"]
+            return state
+
+        gm.__getstate__ = custom_getstate
+
+        pickle_data = _GraphModulePickleData(gm, Options())
+
+        self.assertNotIn(
+            "unpicklable_attr",
+            pickle_data.gm_dict,
+            "Custom __getstate__ should filter out unpicklable_attr",
+        )
+
+
+class TestNodeMetadataKeyFilter(TestCase):
+    """Tests for the node_metadata_key_filter option in GraphPickler."""
+
+    def test_default_filter_excludes_known_unserializable_keys(self):
+        """
+        The default _node_metadata_key_filter_safe should exclude known
+        unserializable metadata keys like source_fn_stack, nn_module_stack,
+        and fwd_source_fn_stack.
+        """
+        from torch.fx._graph_pickler import _node_metadata_key_filter_safe
+
+        self.assertFalse(_node_metadata_key_filter_safe("source_fn_stack"))
+        self.assertFalse(_node_metadata_key_filter_safe("nn_module_stack"))
+        self.assertFalse(_node_metadata_key_filter_safe("fwd_source_fn_stack"))
+
+    def test_default_filter_allows_standard_keys(self):
+        """
+        The default _node_metadata_key_filter_safe should allow standard
+        metadata keys that are normally serializable.
+        """
+        from torch.fx._graph_pickler import _node_metadata_key_filter_safe
+
+        self.assertTrue(_node_metadata_key_filter_safe("val"))
+        self.assertTrue(_node_metadata_key_filter_safe("tensor_meta"))
+        self.assertTrue(_node_metadata_key_filter_safe("stack_trace"))
+        self.assertTrue(_node_metadata_key_filter_safe("example_value"))
+
+    def test_node_pickle_data_uses_metadata_filter(self):
+        """
+        _NodePickleData should use the node_metadata_key_filter from Options
+        to filter node metadata during serialization.
+        """
+        from torch.fx._graph_pickler import _NodePickleData, Options
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        for node in gm.graph.nodes:
+            node.meta["source_fn_stack"] = "should_be_filtered"
+            node.meta["nn_module_stack"] = "should_be_filtered"
+            node.meta["keep_this"] = "should_remain"
+
+        options = Options()
+        node_mapping: dict[torch.fx.Node, _NodePickleData] = {}
+        for node in gm.graph.nodes:
+            node_mapping[node] = _NodePickleData(node, node_mapping, options)
+
+        for node in gm.graph.nodes:
+            pickle_data = node_mapping[node]
+            self.assertNotIn("source_fn_stack", pickle_data.meta)
+            self.assertNotIn("nn_module_stack", pickle_data.meta)
+            self.assertIn("keep_this", pickle_data.meta)
+            self.assertEqual(pickle_data.meta["keep_this"], "should_remain")
+
+    def test_custom_metadata_filter(self):
+        """
+        A custom node_metadata_key_filter should be respected. When provided,
+        only keys that pass the filter (return True) should be included.
+        """
+        from torch.fx._graph_pickler import _NodePickleData, Options
+
+        def custom_filter(key: str) -> bool:
+            return key.startswith("allowed_")
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        for node in gm.graph.nodes:
+            node.meta["allowed_key"] = "included"
+            node.meta["blocked_key"] = "excluded"
+            node.meta["val"] = "excluded_too"
+
+        options = Options(node_metadata_key_filter=custom_filter)
+        node_mapping: dict[torch.fx.Node, _NodePickleData] = {}
+        for node in gm.graph.nodes:
+            node_mapping[node] = _NodePickleData(node, node_mapping, options)
+
+        for node in gm.graph.nodes:
+            pickle_data = node_mapping[node]
+            self.assertIn("allowed_key", pickle_data.meta)
+            self.assertNotIn("blocked_key", pickle_data.meta)
+            self.assertNotIn("val", pickle_data.meta)
+
+    def test_none_filter_includes_all_keys(self):
+        """
+        When node_metadata_key_filter is None, all metadata keys should be
+        included without filtering.
+        """
+        from torch.fx._graph_pickler import _NodePickleData, Options
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        for node in gm.graph.nodes:
+            node.meta["source_fn_stack"] = "normally_filtered"
+            node.meta["nn_module_stack"] = "normally_filtered"
+            node.meta["custom_key"] = "included"
+
+        options = Options(node_metadata_key_filter=None)
+        node_mapping: dict[torch.fx.Node, _NodePickleData] = {}
+        for node in gm.graph.nodes:
+            node_mapping[node] = _NodePickleData(node, node_mapping, options)
+
+        for node in gm.graph.nodes:
+            pickle_data = node_mapping[node]
+            self.assertIn("source_fn_stack", pickle_data.meta)
+            self.assertIn("nn_module_stack", pickle_data.meta)
+            self.assertIn("custom_key", pickle_data.meta)
 
 
 if __name__ == "__main__":
