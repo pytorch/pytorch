@@ -103,7 +103,7 @@ jobs:
         ADDITIONAL_LINTRUNNER_ARGS="--take PYREFLY --all-files" .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
-    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    uses: zklaus/test-infra/.github/workflows/linux_job_v2.yml@update-linux-job-v2
     name: lintrunner-noclang-${{ needs.get-changed-files.outputs.changed-files == '*' && 'all' || 'partial' }}
     needs: [get-label-type, get-changed-files]
     with:
@@ -115,6 +115,7 @@ jobs:
       fetch-depth: 0
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      checkout-mode: treeless
       script: |
         CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
         echo "Running all other linters"
