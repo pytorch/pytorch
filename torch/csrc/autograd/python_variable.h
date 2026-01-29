@@ -92,11 +92,6 @@ void pushPyOutToStack(
 
 py::handle get_dtensor_class();
 
-// Check if a PyObject is a DTensor. This is used to determine whether
-// zeros_like() should be used for undefined gradients to preserve the
-// tensor subclass type. We specifically check for DTensor (rather than all
-// tensor subclasses) to avoid affecting other subclasses that may not need
-// this behavior.
 bool is_dtensor(PyObject* obj);
 
 py::object dispatchDTensorOp(
