@@ -14870,6 +14870,7 @@ class FallbackLoggingTests(torch._dynamo.test_case.TestCase):
     def test_device_fallback_logs_debug(self):
         """Test debug log is emitted when device falls back to CPU."""
         import logging
+
         from torch._dynamo.backends.common import device_from_inputs
 
         # Enable debug logging temporarily
@@ -14884,6 +14885,7 @@ class FallbackLoggingTests(torch._dynamo.test_case.TestCase):
     def test_dtype_fallback_logs_debug(self):
         """Test debug log is emitted when dtype falls back to float32."""
         import logging
+
         from torch._dynamo.backends.common import dtype_from_inputs
 
         logger = logging.getLogger("torch._dynamo.backends.common")
