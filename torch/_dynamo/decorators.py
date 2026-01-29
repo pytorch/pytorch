@@ -197,7 +197,7 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
     return fn
 
 
-def _check_mutually_exclusive_decorators(fn: Callable, decorator_name: str) -> None:
+def _check_mutually_exclusive_decorators(fn: Callable[..., Any], decorator_name: str) -> None:
     mutually_exclusive = {
         "leaf_function": trace_rules.is_leaf_function,
         "nonstrict_trace": trace_rules.is_nonstrict_trace_callable,

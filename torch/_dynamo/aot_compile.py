@@ -86,7 +86,7 @@ class AOTCompilePickler(pickle.Pickler):
         return _.__closure__[0]
 
     @classmethod
-    def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
+    def _unpickle_bound_method(cls, func: Callable[..., Any], base: object) -> types.MethodType:
         return types.MethodType(func, base)
 
     @classmethod
