@@ -227,6 +227,8 @@ static void hypot_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void gcd_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      c10::isIntegralType(iter.common_dtype(), false), "gcd_mps not implemented for ", iter.common_dtype());
   lib.exec_binary_kernel(iter, "gcd");
 }
 
