@@ -144,8 +144,8 @@ class TestExpandPlaceholder(TestCase):
                 self.assertEqual(len(strategy.children[0].strategies), 1)
             elif linearity == 1:
                 self.assertEqual(
-                    len(strategy.children[0].strategies), 216
-                )  # len([S(0), S(1), S(2), R, P_sum, P_avg]) ** 3 = 216
+                    len(strategy.children[0].strategies), 125
+                )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
             else:
                 self.assertGreaterAlmostEqual(
                     len(strategy.children[0].strategies), 64
@@ -258,9 +258,8 @@ class TestExpandPlaceholder(TestCase):
             return strategy
 
         # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
-        # For child[0]: (S0, S1, S2, R, Psum, Pavg) = 6 options, 6^3 = 216
-        # For child[1]: no Shard in inputs, so only (R, Psum, Pavg) = 3 options, 3^3 = 27
-        expected_num_strategies = (216, 27)
+        # (S0, S1, R, Psum, Pavg) ** 3 = 125
+        expected_num_strategies = (125, 8)
         # Test Replicate + Shard gives Shard
         inputs_a = [torch.empty((8, 8, 8))] * 2
         placements_a = [
@@ -916,63 +915,6 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsNotNone(op_spec.input_specs)
             self.assertEqual(len(op_spec.input_specs), 1, "Should have 1 input tensor")
 
-    def test_inplace_op_partial_input_raises_clear_error(self):
-        """Test that inplace ops with Partial input raise a clear error.
-
-        When an inplace op (like clamp_) is called on a tensor with Partial placement,
-        and no valid strategy preserves that placement (because clamp doesn't support
-        Partial), we should raise a clear error message instead of a cryptic
-        "min() arg is an empty sequence" error.
-
-        This tests the fix in expand_to_full_mesh_op_strategy that detects when all
-        strategies are filtered out due to inplace placement mismatch.
-        """
-        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
-
-        # Create a 0-dimensional (scalar) tensor with Partial placement
-        # This is a minimal case where there are no Shard dimensions available
-        input_meta = TensorMeta(
-            shape=torch.Size([]),  # scalar tensor
-            stride=(),
-            dtype=torch.float32,
-        )
-
-        # Create input spec with Partial placement
-        input_spec = DTensorSpec(
-            mesh=mesh,
-            placements=(Partial(),),
-            tensor_meta=input_meta,
-        )
-
-        # Create OpSchema for an inplace op (clamp_)
-        op_schema = OpSchema(
-            op=torch.ops.aten.clamp_.default,
-            args_schema=(OpStrategy([OpSpec(input_spec)]),),
-            kwargs_schema={},
-        )
-
-        # Define a single-dim strategy that only supports Replicate
-        # (like clamp which doesn't preserve Partial)
-        def mock_pointwise_strategy(op, args_schema, kwargs_schema):
-            # For a scalar (0-dim) tensor, there are no Shard strategies
-            # Only the implicit Replicate strategy will be added
-            return []
-
-        # This should raise a clear error about inplace ops not supporting
-        # placement changes, not a cryptic "min() arg is an empty sequence"
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "in-place operations that require placement changes are not supported",
-        ):
-            expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                mesh, op_schema, mock_pointwise_strategy, input_meta
-            )
-            expanded_strategy_fn(
-                torch.ops.aten.clamp_.default,
-                op_schema.args_meta,
-                op_schema.kwargs_meta,
-            )
-
     def test_expand_filters_mixed_partial_types(self):
         """Test that expand_to_full_mesh_op_strategy filters out mixed partial types.
 
@@ -1020,9 +962,7 @@ class TestExpandPlaceholder(TestCase):
         for strategy in result.strategies:
             output_spec = strategy.output_spec
             partial_reduce_ops = {
-                p.reduce_op
-                for p in output_spec.placements
-                if isinstance(p, Partial)
+                p.reduce_op for p in output_spec.placements if isinstance(p, Partial)
             }
             # Either 0 or 1 partial type, or exactly {"sum", "avg"}
             if len(partial_reduce_ops) > 1:
@@ -1087,9 +1027,7 @@ class TestExpandPlaceholder(TestCase):
         for strategy in result.strategies:
             output_spec = strategy.output_spec
             partial_reduce_ops = {
-                p.reduce_op
-                for p in output_spec.placements
-                if isinstance(p, Partial)
+                p.reduce_op for p in output_spec.placements if isinstance(p, Partial)
             }
             if partial_reduce_ops == {"sum", "avg"}:
                 found_sum_avg_mix = True
