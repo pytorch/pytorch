@@ -785,7 +785,10 @@ static void _wrap_outputs(
         bool output_is_dtensor = is_dtensor(obj);
         bool use_zeros_like = is_differentiable && num_outputs > 1 &&
             (wrapped_output->is_nested() || output_is_dtensor);
-        if (use_zeros_like && output_is_dtensor) {
+        // Only warn if materialize_grads is true. If the user has already
+        // called ctx.set_materialize_grads(False), gradients won't be
+        // materialized anyway, so no need to warn.
+        if (use_zeros_like && output_is_dtensor && self->materialize_grads) {
           // Strip "Backward" suffix from name for clearer user messaging.
           // The autograd function's backward class is named "<Name>Backward",
           // but users define "<Name>" in their code.

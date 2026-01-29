@@ -649,6 +649,8 @@ class DTensorTest(DTensorTestBase):
 
                     @staticmethod
                     def forward(ctx, x, y):
+                        # Uncomment this line to make warning dispears for eager
+                        # ctx.set_materialize_grads(False)
                         return (x * 2), (y * 3)
 
                     @staticmethod
@@ -657,7 +659,7 @@ class DTensorTest(DTensorTestBase):
                         if not use_compile:
                             MultiOutputFunc.gout1 = grad_out1
                             MultiOutputFunc.gout2 = grad_out2
-                        return grad_out1 * 2, grad_out2 * 3
+                        return grad_out1 * 2, grad_out2
 
                 x_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
                 y_local = torch.randn(4, 4, device=self.device_type, requires_grad=True)
@@ -706,6 +708,7 @@ DTensorTestWithLocalTensor = create_local_tensor_test_class(
         # integration
         "test_dtensor_save_load",
         "test_dtensor_save_load_import",
+        "test_undefined_grad_preserves_dtensor_type",
     ],
 )
 
