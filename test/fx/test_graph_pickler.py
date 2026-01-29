@@ -238,6 +238,247 @@ class TestDebugDumps(TestCase):
         self.assertIn("data", result)
 
 
+class TestHigherOrderOperatorPickle(TestCase):
+    """Tests for HigherOrderOperator pickling support in GraphPickler."""
+
+    def setUp(self):
+        super().setUp()
+        from torch.fx._graph_pickler import _OpPickleData, GraphPickler, Options
+
+        self.GraphPickler = GraphPickler
+        self.Options = Options
+        self._OpPickleData = _OpPickleData
+
+    def test_higher_order_operator_pickle_roundtrip(self):
+        """
+        Test that a HigherOrderOperator (e.g., cond) can be pickled and
+        unpickled correctly through the _OpPickleData.
+        """
+        from torch._higher_order_ops.cond import cond_op
+
+        options = self.Options(ops_filter=None)
+        pickle_data = self._OpPickleData.pickle(cond_op, options)
+
+        from torch.fx._graph_pickler import _HigherOrderOperatorPickleData
+
+        self.assertIsInstance(pickle_data, _HigherOrderOperatorPickleData)
+        self.assertEqual(pickle_data.name, "cond")
+
+    def test_higher_order_operator_unpickle(self):
+        """
+        Test that a pickled HigherOrderOperator can be unpickled back
+        to the same operator.
+        """
+        from torch._higher_order_ops.cond import cond_op
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import (
+            _HigherOrderOperatorPickleData,
+            _UnpickleState,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        pickle_data = _HigherOrderOperatorPickleData("cond")
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        unpickle_state = _UnpickleState(fake_mode)
+        unpickled_op = pickle_data.unpickle(unpickle_state)
+        self.assertIs(unpickled_op, cond_op)
+
+    def test_higher_order_operator_not_found_error(self):
+        """
+        Test that unpickling a non-existent HigherOrderOperator raises
+        a helpful error message.
+        """
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import (
+            _HigherOrderOperatorPickleData,
+            _UnpickleState,
+        )
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        pickle_data = _HigherOrderOperatorPickleData("non_existent_op")
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        unpickle_state = _UnpickleState(fake_mode)
+        with self.assertRaises(RuntimeError) as cm:
+            pickle_data.unpickle(unpickle_state)
+        self.assertIn("non_existent_op", str(cm.exception))
+        self.assertIn("not found", str(cm.exception))
+
+
+class TestHopSchemaPickle(TestCase):
+    """Tests for HopSchema pickling support."""
+
+    def test_hop_schema_pickle_roundtrip(self):
+        """
+        Test that a HopSchema can be pickled and unpickled correctly.
+        The schema should be reconstructed from its string representation.
+        """
+        import pickle
+
+        from torch._higher_order_ops.schema import HopSchema
+
+        schema = HopSchema(
+            name="test_op",
+            overload_name="",
+            arguments=[],
+            returns=[],
+            is_vararg=False,
+            is_varret=False,
+            schema_tree_spec=None,
+        )
+        pickled = pickle.dumps(schema)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, HopSchema)
+        self.assertEqual(unpickled.name, "test_op")
+        self.assertEqual(unpickled.is_vararg, False)
+        self.assertEqual(unpickled.is_varret, False)
+        self.assertIsNone(unpickled.tree_spec)
+
+    def test_hop_schema_pickle_with_arguments(self):
+        """
+        Test that a HopSchema with arguments can be pickled and unpickled.
+        """
+        import pickle
+
+        from torch._higher_order_ops.schema import HopSchema
+
+        tensor_type = torch._C.TensorType.get()
+        arg = torch._C.Argument("x", tensor_type, None, None, False, None)
+        ret = torch._C.Argument("", tensor_type, None, None, False, None)
+        schema = HopSchema(
+            name="test_op_with_args",
+            overload_name="",
+            arguments=[arg],
+            returns=[ret],
+            is_vararg=True,
+            is_varret=True,
+            schema_tree_spec=None,
+        )
+        pickled = pickle.dumps(schema)
+        unpickled = pickle.loads(pickled)
+        self.assertIsInstance(unpickled, HopSchema)
+        self.assertEqual(unpickled.name, "test_op_with_args")
+        self.assertEqual(len(unpickled.arguments), 1)
+        self.assertEqual(len(unpickled.returns), 1)
+        self.assertEqual(unpickled.is_vararg, True)
+        self.assertEqual(unpickled.is_varret, True)
+
+
+class TestSerializedGraphModule(TestCase):
+    """Tests for SerializedGraphModule using GraphPickler."""
+
+    def test_simple_graph_module_roundtrip(self):
+        """
+        Test that a simple GraphModule can be serialized and deserialized.
+        """
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            SerializedGraphModule,
+        )
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+        serialized = SerializedGraphModule(gm)
+        deserialized = serialized.deserialize()
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        test_input = torch.tensor([1.0, 2.0, 3.0])
+        original_output = gm(test_input)
+        deserialized_output = deserialized(test_input)
+        self.assertEqual(original_output, deserialized_output)
+
+    def test_graph_module_with_multiple_ops(self):
+        """
+        Test serialization of a GraphModule with multiple operations.
+        """
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            SerializedGraphModule,
+        )
+
+        class MultiOpModule(torch.nn.Module):
+            def forward(self, x, y):
+                z = x + y
+                w = z * 2
+                return w - 1
+
+        gm = torch.fx.symbolic_trace(MultiOpModule())
+        serialized = SerializedGraphModule(gm)
+        deserialized = serialized.deserialize()
+        x = torch.tensor([1.0, 2.0])
+        y = torch.tensor([3.0, 4.0])
+        self.assertEqual(gm(x, y), deserialized(x, y))
+
+
+class TestGraphModuleGetState(TestCase):
+    """Tests that _GraphModulePickleData respects custom __getstate__ methods."""
+
+    def test_graph_module_getstate_is_called(self):
+        """
+        When a GraphModule subclass defines __getstate__, the pickler should
+        use it instead of copying __dict__ directly. This ensures that custom
+        serialization logic (e.g., filtering out unpicklable attributes) is
+        respected.
+        """
+        from unittest.mock import patch
+
+        from torch.fx._graph_pickler import _GraphModulePickleData, Options
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+
+        getstate_called = []
+
+        original_getstate = gm.__getstate__
+
+        def mock_getstate():
+            getstate_called.append(True)
+            return original_getstate()
+
+        with patch.object(gm, "__getstate__", mock_getstate):
+            _GraphModulePickleData(gm, Options())
+
+        self.assertEqual(
+            len(getstate_called),
+            1,
+            "__getstate__ should be called exactly once during serialization",
+        )
+
+    def test_graph_module_custom_getstate_filters_attributes(self):
+        """
+        Test that a custom __getstate__ that filters attributes is respected.
+        The filtered attribute should not appear in the pickled data.
+        """
+        from torch.fx._graph_pickler import _GraphModulePickleData, Options
+
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        gm = torch.fx.symbolic_trace(SimpleModule())
+        gm.unpicklable_attr = lambda: None
+
+        original_getstate = gm.__getstate__
+
+        def custom_getstate():
+            state = original_getstate()
+            if "unpicklable_attr" in state:
+                del state["unpicklable_attr"]
+            return state
+
+        gm.__getstate__ = custom_getstate
+
+        pickle_data = _GraphModulePickleData(gm, Options())
+
+        self.assertNotIn(
+            "unpicklable_attr",
+            pickle_data.gm_dict,
+            "Custom __getstate__ should filter out unpicklable_attr",
+        )
+
+
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests
 
