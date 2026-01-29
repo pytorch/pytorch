@@ -80,6 +80,16 @@ def has_pmin_pmax(input_placements, output_placement) -> bool:
     return False
 
 
+def has_any_partial(input_placements, output_placement) -> bool:
+    """Check if any placement is Partial (any reduce op)."""
+    for p in input_placements:
+        if isinstance(p, Partial):
+            return True
+    if isinstance(output_placement, Partial):
+        return True
+    return False
+
+
 def negate_scalar_tensors(tensors: list) -> list:
     """Return a new list with scalar tensors negated."""
     result = []
@@ -433,6 +443,39 @@ def compare_operator(
                 fully_negated_tensors = None
                 fully_negated_ground_truth = None
 
+            # For samples with rounding_mode, create a non-rounded variant to detect
+            # rounding-induced false positives (where trunc/floor masks real differences)
+            has_rounding_mode = "rounding_mode" in sample.kwargs
+            non_rounded_sample = None
+            non_rounded_ground_truth = None
+
+            if has_rounding_mode:
+                from torch.testing._internal.common_methods_invocations import SampleInput
+                try:
+                    non_rounded_kwargs = {k: v for k, v in sample.kwargs.items() if k != "rounding_mode"}
+                    non_rounded_sample = SampleInput(
+                        sample.input, args=sample.args, kwargs=non_rounded_kwargs
+                    )
+
+                    if isinstance(non_rounded_sample.input, torch.Tensor):
+                        non_rounded_ground_truth = op(
+                            non_rounded_sample.input,
+                            *non_rounded_sample.args,
+                            **non_rounded_sample.kwargs
+                        )
+                    else:
+                        non_rounded_ground_truth = op(
+                            *non_rounded_sample.input,
+                            *non_rounded_sample.args,
+                            **non_rounded_sample.kwargs
+                        )
+
+                    if not isinstance(non_rounded_ground_truth, torch.Tensor):
+                        non_rounded_sample = None
+                except Exception:
+                    non_rounded_sample = None
+                    non_rounded_ground_truth = None
+
             # Get all possible input placement combinations (including Partial)
             input_placement_options = [
                 get_1d_input_placements_for_tensor(t, include_partial=True)
@@ -550,6 +593,16 @@ def compare_operator(
                                 fully_negated_ground_truth, world_size, mesh
                             )
                             is_valid = is_valid and negated_valid
+
+                        # For samples with rounding_mode, check if the non-rounded version also passes
+                        # If rounded passes but non-rounded fails, the rounding is masking real differences
+                        if is_valid and non_rounded_sample and has_any_partial(input_placements, output_placement):
+                            non_rounded_combo = PlacementCombination(input_placements, output_placement)
+                            non_rounded_valid, _ = validate_combination(
+                                op, non_rounded_sample, tensors, non_rounded_combo,
+                                non_rounded_ground_truth, world_size, mesh
+                            )
+                            is_valid = is_valid and non_rounded_valid
 
                         combo_key = (
                             tuple(str(p) for p in input_placements),
