@@ -5590,6 +5590,13 @@ class Scheduler:
                 # nodes.
                 read = read.normalize()
                 write = write.normalize()
+            # Operations like index_add_, scatter_add_, etc. require global
+            # synchronization - all threads must complete writes before any reads.
+            # These cannot be safely fused into the same kernel.
+            if write.mode == "atomic_add":
+                # This is an atomic/scatter operation
+                # Don't allow fusion with subsequent reads
+                return False
 
             return (
                 read.index == write.index
