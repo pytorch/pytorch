@@ -155,3 +155,135 @@ def higher_order_scan(
         scan_input_directions=[(1 if reverse else 0) for _ in scan_inputs],
         scan_output_directions=[(1 if reverse else 0) for _ in range(n_outputs)],
     )
+
+
+@onnx_impl(torch.ops.higher_order.while_loop, no_compile=True)
+def higher_order_while_loop(
+    cond_func: ir.Function,
+    body_func: ir.Function,
+    carried_inputs: Sequence[ir.Value],
+    additional_inputs: Sequence[ir.Value],
+) -> Sequence[ir.Value]:
+    """Implementation of while_loop using ONNX Loop operator.
+
+    The ONNX Loop operator implements a generic looping construct with the signature:
+    Loop(M, cond, v_initial) -> (v_final_and_scan_outputs)
+
+    For while_loop, we use:
+    - M: empty string (no trip count limit)
+    - cond: initial condition value
+    - v_initial: carried_inputs (loop-carried dependencies)
+
+    The body subgraph takes:
+    - iteration_num (int): current iteration number
+    - condition_in (bool): loop continuation condition from previous iteration
+    - loop_carried_dependencies: the carried values
+    - additional_inputs: any additional inputs (constants/parameters)
+
+    The body subgraph returns:
+    - condition_out (bool): whether to continue looping
+    - loop_carried_dependencies: updated carried values
+    """
+
+    # Create subgraph inputs for the Loop body
+    # ONNX Loop body signature: (iter_num, cond_in, loop_carried_deps..., additional_inputs...)
+    subgraph_inputs = [
+        # Iteration number (int scalar)
+        ir.Value(
+            name=f"iter_num_{body_func.name}",
+            shape=ir.Shape([]),
+            type=ir.TensorType(ir.DataType.INT64),
+        ),
+        # Condition input (bool scalar)
+        ir.Value(
+            name=f"cond_in_{body_func.name}",
+            shape=ir.Shape([]),
+            type=ir.TensorType(ir.DataType.BOOL),
+        ),
+        # Loop-carried dependencies
+        *[
+            ir.Value(
+                name=f"{inp.name}_{body_func.name}__subgraph_in",
+                shape=inp.shape,
+                type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
+            )
+            for inp in carried_inputs
+        ],
+        # Additional inputs (constants/parameters)
+        *[
+            ir.Value(
+                name=f"{inp.name}_{body_func.name}__subgraph_in",
+                shape=inp.shape,
+                type=ir.TensorType(inp.dtype),  # type: ignore[arg-type]
+            )
+            for inp in additional_inputs
+        ],
+    ]
+
+    # Create the combined body function that handles both condition and body logic
+    # First, call the condition function with carried inputs + additional inputs
+    cond_node = ir.Node(
+        cond_func.domain,
+        cond_func.name,
+        [
+            *subgraph_inputs[2:2+len(carried_inputs)],  # carried inputs
+            *subgraph_inputs[2+len(carried_inputs):],   # additional inputs
+        ],
+        num_outputs=len(cond_func.outputs),
+    )
+
+    # Then call the body function with the same inputs
+    body_node = ir.Node(
+        body_func.domain,
+        body_func.name,
+        [
+            *subgraph_inputs[2:2+len(carried_inputs)],  # carried inputs
+            *subgraph_inputs[2+len(carried_inputs):],   # additional inputs
+        ],
+        num_outputs=len(body_func.outputs),
+    )
+
+    # ONNX Runtime complains about duplicate output names if we don't rename them
+    for func_out, out in zip(cond_func.outputs, cond_node.outputs):
+        out.name = f"{func_out.name}_{cond_func.name}"
+    for func_out, out in zip(body_func.outputs, body_node.outputs):
+        out.name = f"{func_out.name}_{body_func.name}"
+
+    # The Loop body must return: (cond_out, loop_carried_deps...)
+    # We use the condition output and the body outputs
+    loop_body_outputs = [
+        cond_node.outputs[0],  # condition output (bool)
+        *body_node.outputs,    # updated carried inputs
+    ]
+
+    # Get initial condition by calling cond_func with initial inputs
+    initial_cond_node = ir.Node(
+        cond_func.domain,
+        cond_func.name,
+        [*carried_inputs, *additional_inputs],
+        num_outputs=len(cond_func.outputs),
+    )
+
+    # Rename initial condition output to avoid conflicts
+    for func_out, out in zip(cond_func.outputs, initial_cond_node.outputs):
+        out.name = f"{func_out.name}_initial_{cond_func.name}"
+
+    # Create the Loop operator call
+    # Loop(M, cond, v_initial) where M is empty (no trip count limit)
+    loop_outputs = call_op(
+        "Loop",
+        # M (trip count) - empty string means no limit
+        # cond - initial condition
+        initial_cond_node.outputs[0],
+        # v_initial - carried inputs (loop-carried dependencies)
+        *carried_inputs,
+        _num_outputs=len(carried_inputs),
+        body=ir.Graph(
+            subgraph_inputs,
+            loop_body_outputs,
+            nodes=[cond_node, body_node],
+            name=f"{body_func.name}_loop_body",
+        ),
+    )
+
+    return loop_outputs
