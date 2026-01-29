@@ -4029,7 +4029,9 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 
 
 @_exception_logger
-def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
+def all_gather_into_tensor(
+    output_tensor, input_tensor, group=None, async_op=False, profiling_name=""
+):
     """
     Gather tensors from all ranks and put them in a single output tensor.
 
@@ -4050,6 +4052,8 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
+        profiling_name (str, optional): Custom name to use for profiling. If empty,
+            defaults to "nccl:_all_gather_base".
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4112,6 +4116,8 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
     opts = AllgatherOptions()
     opts.asyncOp = async_op
+    if profiling_name:
+        opts.profilingName = profiling_name
 
     group = group or _get_default_group()
 
