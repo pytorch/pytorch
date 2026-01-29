@@ -283,6 +283,7 @@ def define_qnnpack(third_party, labels = []):
             "-O2",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
             "-fvisibility=default",
+            "-Wno-vla",
         ] + select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": [
@@ -388,6 +389,8 @@ def define_qnnpack(third_party, labels = []):
             "-Wno-error=unused-variable",
             "-Wno-shadow",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
+            "-Wno-empty-translation-unit",
+            "-Wno-gnu-pointer-arith",
         ] + select({
             "DEFAULT": [],
             "ovr_config//cpu:arm32": [
