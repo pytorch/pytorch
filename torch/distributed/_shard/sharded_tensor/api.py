@@ -859,7 +859,7 @@ class ShardedTensor(ShardedTensorBase):
         Examples:
             >>> # xdoctest: +SKIP
             >>> # All tensors below are of torch.int64 type.
-            >>> # We have 2 process groups, 2 ranks.
+            >>> # We have 2 ranks.
             >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
             >>> local_tensor = torch.unsqueeze(torch.cat([tensor, tensor + 2]))
             >>> local_tensor
@@ -1096,7 +1096,7 @@ class ShardedTensor(ShardedTensorBase):
 
         Examples:
             >>> # xdoctest: +SKIP
-            >>> # We have 2 process groups, 2 ranks.
+            >>> # We have 2 ranks.
             >>> tensor = torch.arange(4, dtype=torch.int64) + 1 + 2 * rank
             >>> tensor = torch.stack([tensor, tensor])
             >>> tensor
