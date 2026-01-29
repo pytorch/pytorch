@@ -2935,12 +2935,6 @@ def _constrain_as_size(
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
 
-from torch import _logging
-
-
-_logging._init_logs()
-
-
 def _import_device_backends():
     """
     Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
@@ -3002,3 +2996,9 @@ def _as_tensor_fullprec(t):
 # an autoloaded backend are defined
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+
+from torch import _logging
+
+
+_logging._init_logs()
