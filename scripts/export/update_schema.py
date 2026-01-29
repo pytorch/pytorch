@@ -73,6 +73,12 @@ if __name__ == "__main__":
     cpp_header += "\n// clang-format on"
     cpp_header += "\n"
 
+    enum_converter_header = "// " + first_line
+    enum_converter_header += "\n// clang-format off"
+    enum_converter_header += "\n" + commit.enum_converter_header
+    enum_converter_header += "\n// clang-format on"
+    enum_converter_header += "\n"
+
     yaml_content = yaml_header + "\n" + yaml_payload
 
     thrift_schema = "// " + first_line
@@ -87,5 +93,9 @@ if __name__ == "__main__":
             f.write(yaml_content)
         with open(os.path.join(args.prefix, commit.cpp_header_path), "w") as f:
             f.write(cpp_header)
+        with open(
+            os.path.join(args.prefix, commit.enum_converter_header_path), "w"
+        ) as f:
+            f.write(enum_converter_header)
         with open(os.path.join(args.prefix, commit.thrift_schema_path), "w") as f:
             f.write(thrift_schema)
