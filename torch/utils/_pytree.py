@@ -654,6 +654,19 @@ class SequenceKey(Generic[T]):
     def __str__(self) -> str:
         return f"[{self.idx!r}]"
 
+    def __repr__(self) -> str:
+        try:
+            return f"SequenceKey(idx={self.idx!r})"
+        except AttributeError as e:
+            # During dynamo tracing, attributes might not be accessible due to missing implementation
+            raise AttributeError(
+                f"Unable to access attributes of SequenceKey during torch.compile tracing. "
+                f"This likely indicates a missing or incomplete implementation in TorchDynamo for this operation. "
+                f"Original error: {e}. "
+                f"If you encounter this error, please report it at https://github.com/pytorch/pytorch/issues "
+                f"with a minimal reproduction script."
+            ) from e
+
     def get(self, sequence: Sequence[T]) -> T:
         return sequence[self.idx]
 
@@ -668,6 +681,19 @@ class MappingKey(Generic[K, T]):
     def __str__(self) -> str:
         return f"[{self.key!r}]"
 
+    def __repr__(self) -> str:
+        try:
+            return f"MappingKey(key={self.key!r})"
+        except AttributeError as e:
+            # During dynamo tracing, attributes might not be accessible due to missing implementation
+            raise AttributeError(
+                f"Unable to access attributes of MappingKey during torch.compile tracing. "
+                f"This likely indicates a missing or incomplete implementation in TorchDynamo for this operation. "
+                f"Original error: {e}. "
+                f"If you encounter this error, please report it at https://github.com/pytorch/pytorch/issues "
+                f"with a minimal reproduction script."
+            ) from e
+
     def get(self, mapping: Mapping[K, T]) -> T:
         return mapping[self.key]
 
@@ -678,6 +704,19 @@ class GetAttrKey:
 
     def __str__(self) -> str:
         return f".{self.name}"
+
+    def __repr__(self) -> str:
+        try:
+            return f"GetAttrKey(name={self.name!r})"
+        except AttributeError as e:
+            # During dynamo tracing, attributes might not be accessible due to missing implementation
+            raise AttributeError(
+                f"Unable to access attributes of GetAttrKey during torch.compile tracing. "
+                f"This likely indicates a missing or incomplete implementation in TorchDynamo for this operation. "
+                f"Original error: {e}. "
+                f"If you encounter this error, please report it at https://github.com/pytorch/pytorch/issues "
+                f"with a minimal reproduction script."
+            ) from e
 
     def get(self, obj: Any) -> Any:
         return getattr(obj, self.name)
