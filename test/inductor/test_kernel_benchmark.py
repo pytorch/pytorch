@@ -194,6 +194,9 @@ class TestKernelBenchmark(TestCase):
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", shape_padding=False
     )
+    @unittest.skipIf(
+        not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
+    )
     @fresh_cache()
     def test_mm_triton_kernel_benchmark(self):
         M = 2048
