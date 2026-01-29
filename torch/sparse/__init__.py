@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 # The Tensor classes are added to this module by python_tensor.cpp
 # A workaround to support both TorchScript and MyPy:
+
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
+import torch.sparse
 from torch import Tensor
 from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 
@@ -40,6 +42,10 @@ __all__ = [
     "to_sparse_semi_structured",
     "as_sparse_gradcheck",
 ]
+if input.is_sparse:
+    output = input.coalesce()
+if input.is_sparse:
+    ```python output = input.coalesce() output = torch.sparse.addmm(output, mat1, mat2, beta=beta, alpha=alpha) return output ```
 
 addmm = _add_docstr(
     _sparse._sparse_addmm,
