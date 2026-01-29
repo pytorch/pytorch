@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import argparse
 import os
+from collections.abc import Container, Iterable
 from enum import Enum
 from typing import cast
 
@@ -10,13 +11,13 @@ from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
 from torch.distributed.checkpoint._nested_dict import flatten_state_dict
 from torch.distributed.checkpoint.default_planner import (
-    _EmptyStateDictLoadPlanner,
     DefaultLoadPlanner,
+    _EmptyStateDictLoadPlanner,
 )
 from torch.distributed.checkpoint.metadata import (
-    Metadata,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
+    Metadata,
     TensorProperties,
     TensorStorageMetadata,
 )
@@ -26,7 +27,6 @@ from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
 from torch.distributed.checkpoint.state_dict_saver import _save_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
 from torch.futures import Future
-
 
 __all__ = [
     "dcp_to_torch_save",
@@ -208,25 +208,41 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
 def dcp_to_torch_save(
     dcp_checkpoint_dir: str | os.PathLike,
     torch_save_path: str | os.PathLike,
+    keys: Container[str] | None = None,
+    sub_dictionary_path: Iterable[str] | None = None,
 ):
     """
     Given a directory containing a DCP checkpoint, this function will convert it into a
     Torch save file.
+    The optional arguments can be used to load only a subset of the DCP checkpoint. For
+    example, if a checkpoint contains a model and an optimizer state dict under the key
+    "app", the parameters keys=["app.model"] and sub_dictionary_path=["app"]
+    can be used to load only the model parameters.
 
     Args:
         dcp_checkpoint_dir: Directory containing the DCP checkpoint.
         torch_save_path: Filename to store the converted Torch save file.
+        keys: If provided, only these keys will be loaded from the DCP checkpoint.
+        sub_dictionary_path: If provided, after loading the state dict, will take the
+            sub-dictionary at this path.
 
     .. warning::
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
     sd: STATE_DICT_TYPE = {}
+    planner = _EmptyStateDictLoadPlanner(keys=keys, allow_partial_load=keys is not None)
     _load_state_dict(
         sd,
         storage_reader=FileSystemReader(dcp_checkpoint_dir),
-        planner=_EmptyStateDictLoadPlanner(),
+        planner=planner,
         no_dist=True,
     )
+    for elem in sub_dictionary_path or []:
+        if elem not in sd:
+            raise KeyError(
+                f"Key {elem} not found in the loaded state dict with keys {list(sd.keys())}."
+            )
+        sd = sd[elem]
     torch.save(sd, torch_save_path)
 
 
