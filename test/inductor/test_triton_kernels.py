@@ -3737,8 +3737,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-                capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
 
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
             return output
 
         def f(x, y):
