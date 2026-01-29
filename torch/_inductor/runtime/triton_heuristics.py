@@ -458,13 +458,14 @@ class CachingAutotuner(KernelInterface):
         )
         self.autotune_cache_info = autotune_cache_info
         # I.e. there was an autotune cache hit
-        if len(cached_configs) == 1 and len(configs) > 1:
+        if len(cached_configs) == 1 and len(configs) >= 1:
             best_config = cached_configs[0]
             # Grab the best compiled config, if it's in the list of available ones
             best_config_hash = triton_config_to_hashable(best_config)
 
             for compile_result in self.compile_results:
                 if triton_config_to_hashable(compile_result.config) == best_config_hash:
+                    compile_result.config.found_by_coordesc = True
                     self.compile_results = [compile_result]
                     return
 
