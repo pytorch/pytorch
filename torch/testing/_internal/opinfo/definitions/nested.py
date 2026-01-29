@@ -411,7 +411,10 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
         ):
             num_returns = len(out_ref_components[0])
             # ensure we get the same number of returns for each invocation
-            assert all(len(o) == num_returns for o in out_ref_components)
+            if any(len(o) != num_returns for o in out_ref_components):
+                raise AssertionError(
+                    f"All output components must have {num_returns} returns"
+                )
             # construct NJTs from same index returns from each invocation
             njt_returns = [
                 torch.nested.as_nested_tensor(
@@ -428,32 +431,40 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 # Computes the reference value for a non-reduction unary op with dim-wise application.
 def unary_dimwise_reference(op, sample, batchwise_reference=None):
     # extract info about the dim args this op supports
-    assert op._extra_op_data.dim_args is not None
+    if op._extra_op_data.dim_args is None:
+        raise AssertionError(f"op {op.name} must have _extra_op_data.dim_args defined")
     single_dim_argname, dimlist_argname = op._extra_op_data.get_dim_argnames()
     # only support a single non-list dim arg for now
-    assert dimlist_argname is None
-    assert single_dim_argname is not None
+    if dimlist_argname is not None:
+        raise AssertionError(f"dimlist_argname must be None, got {dimlist_argname}")
+    if single_dim_argname is None:
+        raise AssertionError(f"single_dim_argname must be defined for op {op.name}")
     if sample.kwargs[single_dim_argname] == 0:
         # unbind reference won't work for batch-wise operation; handle this case here
-        assert batchwise_reference is not None
+        if batchwise_reference is None:
+            raise AssertionError("batchwise_reference must be provided when dim=0")
         return batchwise_reference(op, sample)
     return unbind_reference(op, sample)
 
 
 # Computes the reference value for a reduction op.
 def reduction_reference(op, sample):
-    assert sample.input.is_nested
+    if not sample.input.is_nested:
+        raise AssertionError("sample.input must be a nested tensor")
 
     # extract info about the dim args this op supports
-    assert op._extra_op_data.dim_args is not None
+    if op._extra_op_data.dim_args is None:
+        raise AssertionError(f"op {op.name} must have _extra_op_data.dim_args defined")
     single_dim_argname, dimlist_argname = op._extra_op_data.get_dim_argnames()
-    assert single_dim_argname is not None
+    if single_dim_argname is None:
+        raise AssertionError(f"single_dim_argname must be defined for op {op.name}")
 
     dim = sample.kwargs.get(
         dimlist_argname, sample.kwargs.get(single_dim_argname, None)
     )
     keepdim = sample.kwargs.get("keepdim", False)
-    assert dim != 0, "reductions over just the batch dim are not supported"
+    if dim == 0:
+        raise AssertionError("reductions over just the batch dim are not supported")
     if isinstance(dim, (tuple, list)):
         reduce_on_ragged = sample.input._ragged_idx in dim
         reduce_on_batch = 0 in dim
@@ -470,7 +481,8 @@ def reduction_reference(op, sample):
         from torch.nested._internal.ops import _outer_to_inner_dim
 
         ref_kwargs = dict(sample.kwargs)
-        assert dimlist_argname is not None
+        if dimlist_argname is None:
+            raise AssertionError(f"dimlist_argname must be defined for op {op.name}")
         ref_kwargs[dimlist_argname] = _outer_to_inner_dim(
             sample.input.dim(), dim, sample.input._ragged_idx, canonicalize=True
         )
@@ -492,7 +504,10 @@ def reduction_reference(op, sample):
             # some ops return multiple things; stack all of them
             num_returns = len(out_ref_components[0])
             # ensure we get the same number of returns for each invocation
-            assert all(len(o) == num_returns for o in out_ref_components)
+            if any(len(o) != num_returns for o in out_ref_components):
+                raise AssertionError(
+                    f"All output components must have {num_returns} returns"
+                )
             # stack same index returns from each invocation
             stacked_returns = [
                 torch.stack([o[r] for o in out_ref_components], dim=0)
@@ -675,12 +690,18 @@ def sample_inputs_njt_reduction(
         op_kwargs = {}
 
     # extract info about the dim args this op supports
-    assert op_info._extra_op_data.dim_args is not None
+    if op_info._extra_op_data.dim_args is None:
+        raise AssertionError(
+            f"op_info {op_info.name} must have _extra_op_data.dim_args defined"
+        )
     (
         single_dim_argname,
         dimlist_argname,
     ) = op_info._extra_op_data.get_dim_argnames()
-    assert single_dim_argname is not None
+    if single_dim_argname is None:
+        raise AssertionError(
+            f"single_dim_argname must be defined for op {op_info.name}"
+        )
     supports_dimlist = dimlist_argname is not None
 
     for njt in _sample_njts(
@@ -794,10 +815,15 @@ def sample_inputs_unary_dimwise(
         op_kwargs = {}
 
     # only support a single non-list dim arg for now
-    assert op_info._extra_op_data is not None
+    if op_info._extra_op_data is None:
+        raise AssertionError(f"op_info {op_info.name} must have _extra_op_data defined")
     single_dim_argname, dimlist_argname = op_info._extra_op_data.get_dim_argnames()
-    assert single_dim_argname is not None
-    assert dimlist_argname is None
+    if single_dim_argname is None:
+        raise AssertionError(
+            f"single_dim_argname must be defined for op {op_info.name}"
+        )
+    if dimlist_argname is not None:
+        raise AssertionError(f"dimlist_argname must be None, got {dimlist_argname}")
 
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
