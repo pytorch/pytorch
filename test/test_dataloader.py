@@ -3805,7 +3805,7 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
 
-
+@instantiate_parametrized_tests
 class TestRandomBatchSampler(TestCase):
     """
     Test RandomBatchSampler is equal to BatchSampler(RandomSampler)
@@ -3831,7 +3831,6 @@ class TestRandomBatchSampler(TestCase):
             self.assertEqual(batches1[i], list(batches2[i]))
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
-instantiate_parametrized_tests(TestRandomBatchSampler)
 
 
 if __name__ == "__main__":
