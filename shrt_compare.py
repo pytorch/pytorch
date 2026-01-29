@@ -392,28 +392,31 @@ def compare_operator(
             ground_truth_valid = set()  # Set of (input_placements, output_placement) strings
 
             gt_start = time.time()
-            for input_placements in itertools.product(*input_placement_options):
-                if is_fully_replicated(input_placements):
-                    continue
+            # Create LocalTensorMode and mesh once per sample for performance
+            device = tensors[0][1].device.type if tensors else "cpu"
+            with LocalTensorMode(frozenset(range(world_size))):
+                mesh = init_device_mesh(device, (world_size,))
 
-                for output_placement in output_placement_options:
-                    total_combinations += 1
-                    combo = PlacementCombination(input_placements, output_placement)
+                for input_placements in itertools.product(*input_placement_options):
+                    if is_fully_replicated(input_placements):
+                        continue
 
-                    # Validate using ground truth
-                    with LocalTensorMode(frozenset(range(world_size))):
-                        mesh = init_device_mesh("cpu", (world_size,))
+                    for output_placement in output_placement_options:
+                        total_combinations += 1
+                        combo = PlacementCombination(input_placements, output_placement)
+
+                        # Validate using ground truth, passing pre-created mesh
                         is_valid, error_msg = validate_combination(
-                            op, sample, tensors, combo, ground_truth, world_size
+                            op, sample, tensors, combo, ground_truth, world_size, mesh
                         )
 
-                    combo_key = (
-                        tuple(str(p) for p in input_placements),
-                        str(output_placement)
-                    )
+                        combo_key = (
+                            tuple(str(p) for p in input_placements),
+                            str(output_placement)
+                        )
 
-                    if is_valid:
-                        ground_truth_valid.add(combo_key)
+                        if is_valid:
+                            ground_truth_valid.add(combo_key)
             ground_truth_time += time.time() - gt_start
 
             # Compare ground truth vs DTensor rules

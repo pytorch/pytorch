@@ -275,6 +275,7 @@ def validate_combination(
     combination: PlacementCombination,
     ground_truth: torch.Tensor,
     world_size: int = 2,
+    mesh=None,
 ) -> tuple[bool, str]:
     """
     Validate a single placement combination.
@@ -288,97 +289,107 @@ def validate_combination(
     For Partial inputs, we create inputs with different local values per rank
     to properly test the mathematical properties of the operation.
 
+    Args:
+        op: The operator function
+        sample_input: The SampleInput with original arguments
+        tensors: List of (name, tensor) pairs extracted from sample
+        combination: The placement combination to validate
+        ground_truth: Expected output tensor
+        world_size: Number of simulated ranks
+        mesh: Optional pre-created device mesh (for performance).
+            If None, creates one internally.
+
     Returns:
         (is_valid, error_message)
     """
     try:
-        with LocalTensorMode(frozenset(range(world_size))):
-            # Create a 1-D device mesh matching input tensor device
+        # Use provided mesh or create one
+        if mesh is None:
             device = tensors[0][1].device.type if tensors else "cpu"
             mesh = init_device_mesh(device, (world_size,))
 
-            # Distribute input tensors according to placements, then get local tensors
-            local_tensors = []
-            for tensor_idx, ((name, tensor), placement) in enumerate(
-                zip(tensors, combination.input_placements)
-            ):
-                if isinstance(placement, Partial):
-                    # For Partial inputs, create truly different local values
-                    # Pass tensor_idx so different inputs get different patterns
-                    local_tensor = _create_partial_input(
-                        tensor, placement, world_size, tensor_idx
-                    )
-                    local_tensors.append(local_tensor)
-                elif isinstance(placement, Replicate):
-                    # For Replicate inputs, all ranks have the same value
-                    local_tensor = LocalTensor({r: tensor.clone() for r in range(world_size)})
-                    local_tensors.append(local_tensor)
-                else:
-                    # For Shard inputs, use distribute_tensor
-                    dt = distribute_tensor(tensor.clone(), mesh, (placement,))
-                    local_tensors.append(dt.to_local())
-
-            # Build args with local tensors
-            local_idx = 0
-
-            def _replace_with_local(a):
-                nonlocal local_idx
-                if isinstance(a, torch.Tensor):
-                    local = local_tensors[local_idx]
-                    local_idx += 1
-                    return local
-                return a
-
-            # Replace tensors in args with local tensors
-            if isinstance(sample_input.input, torch.Tensor):
-                local_input = _replace_with_local(sample_input.input)
+        # Distribute input tensors according to placements, then get local tensors
+        local_tensors = []
+        for tensor_idx, ((name, tensor), placement) in enumerate(
+            zip(tensors, combination.input_placements)
+        ):
+            if isinstance(placement, Partial):
+                # For Partial inputs, create truly different local values
+                # Pass tensor_idx so different inputs get different patterns
+                local_tensor = _create_partial_input(
+                    tensor, placement, world_size, tensor_idx
+                )
+                local_tensors.append(local_tensor)
+            elif isinstance(placement, Replicate):
+                # For Replicate inputs, all ranks have the same value
+                local_tensor = LocalTensor({r: tensor.clone() for r in range(world_size)})
+                local_tensors.append(local_tensor)
             else:
-                local_input = pytree.tree_map(_replace_with_local, sample_input.input)
+                # For Shard inputs, use distribute_tensor
+                dt = distribute_tensor(tensor.clone(), mesh, (placement,))
+                local_tensors.append(dt.to_local())
 
-            local_args = pytree.tree_map(_replace_with_local, sample_input.args)
-            local_kwargs = pytree.tree_map(_replace_with_local, sample_input.kwargs)
+        # Build args with local tensors
+        local_idx = 0
 
-            # Run the operator on local tensors (raw operation, not DTensor dispatch)
-            local_output = op(local_input, *local_args, **local_kwargs)
+        def _replace_with_local(a):
+            nonlocal local_idx
+            if isinstance(a, torch.Tensor):
+                local = local_tensors[local_idx]
+                local_idx += 1
+                return local
+            return a
 
-            if not isinstance(local_output, torch.Tensor):
-                return False, f"Local output is not a tensor: {type(local_output)}"
+        # Replace tensors in args with local tensors
+        if isinstance(sample_input.input, torch.Tensor):
+            local_input = _replace_with_local(sample_input.input)
+        else:
+            local_input = pytree.tree_map(_replace_with_local, sample_input.input)
 
-            # All inputs are LocalTensors, so output should be LocalTensor
-            if not isinstance(local_output, LocalTensor):
-                return False, f"LocalTensor inputs produced non-LocalTensor output: {type(local_output)}"
+        local_args = pytree.tree_map(_replace_with_local, sample_input.args)
+        local_kwargs = pytree.tree_map(_replace_with_local, sample_input.kwargs)
 
-            # Wrap local output in DTensor with the claimed output placement
-            # Pass the expected global shape for correct handling of uneven sharding
-            output_dt = DTensor.from_local(
-                local_output, mesh, (combination.output_placement,),
-                shape=ground_truth.shape, stride=ground_truth.stride()
-            )
+        # Run the operator on local tensors (raw operation, not DTensor dispatch)
+        local_output = op(local_input, *local_args, **local_kwargs)
 
-            # For Replicate outputs, verify that local values are identical
-            if isinstance(combination.output_placement, Replicate):
-                local_values = [local_output._local_tensors[r] for r in range(world_size)]
-                all_same = all(torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5) for lv in local_values[1:])
-                if not all_same:
-                    return False, "Replicate output but local values differ across ranks"
+        if not isinstance(local_output, torch.Tensor):
+            return False, f"Local output is not a tensor: {type(local_output)}"
 
-            # Redistribute to replicate to compare
-            full_output = output_dt.redistribute(mesh, (Replicate(),)).to_local()
+        # All inputs are LocalTensors, so output should be LocalTensor
+        if not isinstance(local_output, LocalTensor):
+            return False, f"LocalTensor inputs produced non-LocalTensor output: {type(local_output)}"
 
-            # If full_output is a LocalTensor, extract rank 0's value for comparison
-            # (after redistribution to Replicate, all ranks should have the same value)
-            if isinstance(full_output, LocalTensor):
-                full_output = full_output._local_tensors[0]
+        # Wrap local output in DTensor with the claimed output placement
+        # Pass the expected global shape for correct handling of uneven sharding
+        output_dt = DTensor.from_local(
+            local_output, mesh, (combination.output_placement,),
+            shape=ground_truth.shape, stride=ground_truth.stride()
+        )
 
-            # Compare with ground truth
-            if ground_truth.shape != full_output.shape:
-                return False, f"Shape mismatch: expected {ground_truth.shape}, got {full_output.shape}"
+        # For Replicate outputs, verify that local values are identical
+        if isinstance(combination.output_placement, Replicate):
+            local_values = [local_output._local_tensors[r] for r in range(world_size)]
+            all_same = all(torch.allclose(local_values[0], lv, atol=1e-5, rtol=1e-5) for lv in local_values[1:])
+            if not all_same:
+                return False, "Replicate output but local values differ across ranks"
 
-            if not torch.allclose(ground_truth, full_output, atol=1e-5, rtol=1e-5):
-                max_diff = (ground_truth - full_output).abs().max().item()
-                return False, f"Value mismatch: max_diff={max_diff:.6f}"
+        # Redistribute to replicate to compare
+        full_output = output_dt.redistribute(mesh, (Replicate(),)).to_local()
 
-            return True, ""
+        # If full_output is a LocalTensor, extract rank 0's value for comparison
+        # (after redistribution to Replicate, all ranks should have the same value)
+        if isinstance(full_output, LocalTensor):
+            full_output = full_output._local_tensors[0]
+
+        # Compare with ground truth
+        if ground_truth.shape != full_output.shape:
+            return False, f"Shape mismatch: expected {ground_truth.shape}, got {full_output.shape}"
+
+        if not torch.allclose(ground_truth, full_output, atol=1e-5, rtol=1e-5):
+            max_diff = (ground_truth - full_output).abs().max().item()
+            return False, f"Value mismatch: max_diff={max_diff:.6f}"
+
+        return True, ""
 
     except Exception as e:
         return False, f"Exception: {type(e).__name__}: {e}"
