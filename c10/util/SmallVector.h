@@ -1405,11 +1405,6 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
 };
 
 template <typename T, unsigned N>
-inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
-  return X.capacity_in_bytes();
-}
-
-template <typename T, unsigned N>
 std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   int i = 0;
   out << '[';
@@ -1420,28 +1415,6 @@ std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   }
   out << ']';
   return out;
-}
-
-template <typename RangeType>
-using ValueTypeFromRangeType = std::remove_const_t<
-    std::remove_reference_t<decltype(*std::begin(std::declval<RangeType&>()))>>;
-
-/// Given a range of type R, iterate the entire range and return a
-/// SmallVector with elements of the vector.  This is useful, for example,
-/// when you want to iterate a range and then sort the results.
-template <unsigned Size, typename R>
-// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(R&& Range) {
-  return {std::begin(Range), std::end(Range)};
-}
-template <typename R>
-SmallVector<
-    ValueTypeFromRangeType<R>,
-    CalculateSmallVectorDefaultInlinedElements<
-        ValueTypeFromRangeType<R>>::value>
-// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-to_vector(R&& Range) {
-  return {std::begin(Range), std::end(Range)};
 }
 
 } // end namespace c10
