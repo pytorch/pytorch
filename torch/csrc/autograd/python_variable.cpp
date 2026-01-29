@@ -1143,27 +1143,13 @@ class NativeOpSchema {
     ss << "(";
     bool first = true;
     for (const auto& item : comparison_key_) {
-      if (!first) ss << ", ";
+      if (!first)
+        ss << ", ";
       first = false;
       if (item.dtensor_spec) {
         ss << py::str(item.dtensor_spec).cast<std::string>();
       } else if (!item.iv.isNone()) {
-        // Only print non-None IValues that are useful for debugging
-        // Skip large integers that are likely hashes
-        if (item.iv.isInt()) {
-          auto val = item.iv.toInt();
-          if (val >= -1000 && val <= 1000) {
-            ss << val;
-          } else {
-            ss << "...";
-          }
-        } else if (item.iv.isList()) {
-          ss << item.iv;
-        } else if (item.iv.isTuple()) {
-          ss << item.iv;
-        } else {
-          ss << item.iv;
-        }
+        ss << item.iv;
       }
     }
     ss << ")";
@@ -1233,30 +1219,14 @@ void log_sharding_prop_cache_hit(
   if (!logger.attr("isEnabledFor")(logging.attr("DEBUG")).cast<bool>()) {
     return;
   }
-  try {
-    // Format: op(input_specs) -> output_spec
-    std::ostringstream ss;
-    ss << "sharding_prop HIT (C++ fast path): ";
-    ss << schema.format_inputs();
-    // Get output spec from cached_sharding
-    auto output_spec = cached_sharding.attr("output_spec");
-    if (!output_spec.is_none()) {
-      ss << " -> " << py::str(output_spec).cast<std::string>();
-    }
-    logger.attr("debug")(ss.str());
-  } catch (const py::error_already_set& e) {
-    // Python exception - fallback to simple op name
-    std::ostringstream ss;
-    ss << "sharding_prop HIT (C++ fast path): "
-       << schema.op().operator_name().name;
-    logger.attr("debug")(ss.str());
-  } catch (const std::exception& e) {
-    // C++ exception - fallback to simple op name
-    std::ostringstream ss;
-    ss << "sharding_prop HIT (C++ fast path): "
-       << schema.op().operator_name().name;
-    logger.attr("debug")(ss.str());
+  std::ostringstream ss;
+  ss << "sharding_prop HIT (C++ fast path): ";
+  ss << schema.format_inputs();
+  auto output_spec = cached_sharding.attr("output_spec");
+  if (!output_spec.is_none()) {
+    ss << " -> " << py::str(output_spec).cast<std::string>();
   }
+  logger.attr("debug")(ss.str());
 }
 } // namespace
 
