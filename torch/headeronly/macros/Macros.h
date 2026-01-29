@@ -430,6 +430,25 @@ __host__ __device__
                static_cast<unsigned>(__LINE__)),                      \
            0);                                                        \
   }
+#ifdef __SYCL_DEVICE_ONLY__
+// SYCL Device assertions on Windows do not work properly with MSVC _wassert.
+// So we define SYCL_KERNEL_ASSERT macro to call __devicelib_assert_fail
+// directly and bypass _wassert.
+#define SYCL_KERNEL_ASSERT(cond)        \
+  if (C10_UNLIKELY(!(cond))) {          \
+    (void)__devicelib_assert_fail(      \
+        #cond,                          \
+        __FILE__,                       \
+        __LINE__,                       \
+        nullptr,                        \
+        __spirv_GlobalInvocationId_x(), \
+        __spirv_GlobalInvocationId_y(), \
+        __spirv_GlobalInvocationId_z(), \
+        __spirv_LocalInvocationId_x(),  \
+        __spirv_LocalInvocationId_y(),  \
+        __spirv_LocalInvocationId_z()); \
+  }
+#else // else __SYCL_DEVICE_ONLY__
 #define SYCL_KERNEL_ASSERT(cond)                 \
   if (C10_UNLIKELY(!(cond))) {                   \
     (void)(_wassert(                             \
@@ -438,6 +457,7 @@ __host__ __device__
                static_cast<unsigned>(__LINE__)), \
            0);                                   \
   }
+#endif // endif __SYCL_DEVICE_ONLY__
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
