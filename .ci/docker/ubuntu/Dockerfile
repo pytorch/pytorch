@@ -155,6 +155,7 @@ ARG CUDA_VERSION
 # TPU=yes -> install JAX with TPU support
 # PALLAS=yes + CUDA_VERSION -> install JAX with CUDA support
 # PALLAS=yes (no CUDA) -> install JAX CPU-only
+COPY ./common/requirements_tpu.txt requirements_tpu.txt
 COPY ./common/install_jax.sh install_jax.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
