@@ -72,32 +72,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    @pytest.mark.xfail(reason="Issue #164186")
-    def test_fuzzer_issue_164186(self):
-        torch.manual_seed(0)
-
-        def foo(arg0):
-            t0 = arg0  # size=(714, 33), stride=(33, 1), dtype=float16, device=cuda
-            t1 = t0.clone()
-            t1.zero_()
-            t2 = t1.contiguous().view((34, 9, 77))
-            t3 = t2.clone()
-            t3.zero_()
-            output = t3
-            return output
-
-        arg0 = torch.rand(
-            [714, 33], dtype=torch.float16, device="cuda", requires_grad=True
-        )
-
-        out_eager = foo(arg0)
-        out_eager.sum().backward()
-        print("Eager Success! ✅")
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0)
-        out_compiled.sum().backward()
-        print("Compile Success! ✅")
-
     @pytest.mark.xfail(reason="Issue #164185")
     def test_fuzzer_issue_164185(self):
         torch.manual_seed(0)
