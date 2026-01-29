@@ -218,6 +218,12 @@ class InputObserverInfo:
         Instead of running inference on new samples, argument `set_batch_dimension_for`
         can be used to tell the first dimension is a dynamic dimension for a particular
         set of inputs referenced by their name (str) or their position (int).
+
+        Args:
+            set_batch_dimension_for (set[int | str] | None): Set of input identifiers,
+                by name (``str``) or position (``int``), for which the first dimension
+                should be treated as a dynamic batch dimension. If ``None`` or empty,
+                no additional batch dimensions are marked as dynamic.
         """
 
         def _set_batch_dimension(name_or_position):
