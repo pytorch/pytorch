@@ -1094,6 +1094,24 @@ class CompileTest(TestCase):
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
         torch.accelerator.synchronize()
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_inductor_all_reduce_output_stride_matches_eager(self):
+        def func(x):
+            x = x.t()
+            y = all_reduce(x, "sum", dist.group.WORLD)
+            z = torch.ops._c10d_functional.wait_tensor.default(y)
+            return y, z
+
+        arg = torch.rand(16, 8, device=self.device)
+
+        with self.assertRaises(AssertionError):
+            eager_y, eager_z = func(arg)
+
+        compiled_f = torch.compile(func)
+        with self.assertRaises(AssertionError):
+            compiled_y, compiled_z = compiled_f(arg)
+
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
     @fresh_cache()
     def test_wait_tensor(self):

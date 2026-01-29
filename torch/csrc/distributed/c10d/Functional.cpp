@@ -329,7 +329,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, c10d::all_reduce),
-      {at::Tag::pt2_compliant_tag});
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
       "all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
