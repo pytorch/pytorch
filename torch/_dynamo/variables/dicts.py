@@ -65,6 +65,8 @@ def was_instancecheck_override(obj: Any) -> bool:
 def raise_unhashable(
     arg: VariableTracker, tx: Optional["InstructionTranslator"] = None
 ) -> None:
+    from .builder import SourcelessBuilder
+
     if tx is None:
         from torch._dynamo.symbolic_convert import InstructionTranslator
 
@@ -78,8 +80,9 @@ def raise_unhashable(
         TypeError,
         tx,
         args=[
-            ConstantVariable(
-                f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}"
+            SourcelessBuilder.create(
+                tx,
+                f"unhashable type: {arg_type!r} and variable tracker = {type(arg.realize())}",
             )
         ],
     )
@@ -458,11 +461,12 @@ class ConstDictVariable(VariableTracker):
         # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
         # guard to be conservative.
         from . import BuiltinVariable, ConstantVariable
+        from .builder import SourcelessBuilder
 
         Hashable = ConstDictVariable._HashableTracker
 
         if name == "__init__":
-            temp_dict_vt = variables.BuiltinVariable(dict).call_dict(
+            temp_dict_vt = SourcelessBuilder.create(tx, dict).call_dict(
                 tx, *args, **kwargs
             )
             tx.output.side_effects.mutation(self)
@@ -727,7 +731,7 @@ class ConstDictVariable(VariableTracker):
             if len(args) != 1:
                 raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
 
-            return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
+            return SourcelessBuilder.create(tx, polyfills.dict___eq__).call_function(
                 tx, [self, args[0]], {}
             )
         elif name == "__ne__":
@@ -1096,6 +1100,7 @@ class SetVariable(ConstDictVariable):
     ) -> VariableTracker:
         # We forward the calls to the dictionary model
         from ..utils import check_constant_args
+        from .builder import SourcelessBuilder
 
         if (
             name
@@ -1113,7 +1118,9 @@ class SetVariable(ConstDictVariable):
             return self._fast_set_method(tx, getattr(py_type, name), args, kwargs)
 
         if name == "__init__":
-            temp_set_vt = variables.BuiltinVariable(set).call_set(tx, *args, **kwargs)
+            temp_set_vt = SourcelessBuilder.create(tx, set).call_set(
+                tx, *args, **kwargs
+            )
             tx.output.side_effects.mutation(self)
             self.items.clear()
             self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
@@ -1155,14 +1162,14 @@ class SetVariable(ConstDictVariable):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return variables.UserFunctionVariable(
-                polyfills.set_isdisjoint
-            ).call_function(tx, [self, args[0]], {})
+            return SourcelessBuilder.create(tx, polyfills.set_isdisjoint).call_function(
+                tx, [self, args[0]], {}
+            )
         elif name == "intersection":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(
-                polyfills.set_intersection
+            return SourcelessBuilder.create(
+                tx, polyfills.set_intersection
             ).call_function(
                 tx,
                 [self, *args],
@@ -1171,13 +1178,13 @@ class SetVariable(ConstDictVariable):
         elif name == "intersection_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(
-                polyfills.set_intersection_update
+            return SourcelessBuilder.create(
+                tx, polyfills.set_intersection_update
             ).call_function(tx, [self, *args], {})
         elif name == "union":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(polyfills.set_union).call_function(
+            return SourcelessBuilder.create(tx, polyfills.set_union).call_function(
                 tx,
                 [self, *args],
                 {"cls": self.python_type_var()},
@@ -1187,9 +1194,7 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(
                     tx, name, f"Expect: 0 kwargs, Actual: {len(kwargs)} kwargs"
                 )
-            return variables.UserFunctionVariable(
-                polyfills.set_difference
-            ).call_function(
+            return SourcelessBuilder.create(tx, polyfills.set_difference).call_function(
                 tx,
                 [self, *args],
                 {"cls": self.python_type_var()},
@@ -1197,8 +1202,8 @@ class SetVariable(ConstDictVariable):
         elif name == "difference_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(
-                polyfills.set_difference_update
+            return SourcelessBuilder.create(
+                tx, polyfills.set_difference_update
             ).call_function(tx, [self, *args], {})
         elif name == "symmetric_difference":
             if kwargs or len(args) != 1:
@@ -1208,8 +1213,8 @@ class SetVariable(ConstDictVariable):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return variables.UserFunctionVariable(
-                polyfills.set_symmetric_difference
+            return SourcelessBuilder.create(
+                tx, polyfills.set_symmetric_difference
             ).call_function(
                 tx,
                 [self, *args],
@@ -1223,13 +1228,13 @@ class SetVariable(ConstDictVariable):
                     "1 args and 0 kwargs",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
-            return variables.UserFunctionVariable(
-                polyfills.set_symmetric_difference_update
+            return SourcelessBuilder.create(
+                tx, polyfills.set_symmetric_difference_update
             ).call_function(tx, [self, *args], {})
         elif name == "update" and self.is_mutable():
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            return variables.UserFunctionVariable(polyfills.set_update).call_function(
+            return SourcelessBuilder.create(tx, polyfills.set_update).call_function(
                 tx, [self, *args], {}
             )
         elif name == "remove":
@@ -1265,8 +1270,8 @@ class SetVariable(ConstDictVariable):
             }
             other = args[0].realize()
             if not istype(other, SetVariable):
-                other = variables.BuiltinVariable(set).call_function(tx, [other], {})
-            return variables.BuiltinVariable(op.get(name)).call_function(
+                other = SourcelessBuilder.create(tx, set).call_function(tx, [other], {})
+            return SourcelessBuilder.create(tx, op.get(name)).call_function(
                 tx, [self, other], {}
             )
         elif name in ("__and__", "__or__", "__xor__", "__sub__"):
