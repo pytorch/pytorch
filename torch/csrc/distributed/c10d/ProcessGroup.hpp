@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <memory>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -372,14 +373,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 at::Tensor&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 bool,
-                int64_t)>();
+                int64_t,
+                std::string_view)>();
 
     auto work = std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         opts.asyncOp,
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.profilingName));
 
     if (c10d::allow_inflight_collective_as_graph_input()) {
       c10d::register_work(outputBuffer, work);
