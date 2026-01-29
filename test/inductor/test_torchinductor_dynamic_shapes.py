@@ -132,6 +132,10 @@ if (HAS_GPU or HAS_MPS) and not TEST_WITH_ASAN:
     copy_tests(
         DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
+    if HAS_MPS:
+        # Remove test_dropout3_dynamic_shapes xfail in mps
+        clean_test_func = DynamicShapesCommonTemplate.test_dropout3.__wrapped__
+        DynamicShapesGPUTests.test_dropout3_dynamic_shapes = clean_test_func
 
 
 class TestInductorDynamic(TestCase):
