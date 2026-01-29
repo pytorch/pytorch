@@ -288,6 +288,9 @@ class PallasKernelOverrides(OpOverrides):
         """Convert a sympy expression to a JAX array indexing expression."""
         from ..utils import get_bounds_index_expr
 
+        # Track which iteration variables are used
+        V.kernel.used_iter_vars.update(V.kernel._get_used_iter_vars(expr))
+
         # Prepare and rename indexing to register size symbols as kernel args
         prepared = V.kernel.prepare_indexing(expr)
         renamed = V.kernel.rename_indexing(prepared)
@@ -905,6 +908,8 @@ class PallasKernel(SIMDKernel):
         # Track if any load in this kernel used transpose
         # Used to avoid double transpose (load + store)
         self.has_transposed_load = False
+        # Track which iteration variables are actually used in the kernel
+        self.used_iter_vars: OrderedSet[sympy.Symbol] = OrderedSet()
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -2698,7 +2703,8 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
             # Generate iteration variables as jnp.arange arrays
             # These are used by index_expr operations like torch.arange
             # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
-            if self.range_tree_nodes and not self.is_gpu:
+            # Only emit definitions for variables that are actually used
+            if self.range_tree_nodes and not self.is_gpu and self.used_iter_vars:
                 kernel_body.writeline("# Define iteration variables as JAX arrays")
 
                 # Find reshape target: N-D shape whose numel matches an iteration
@@ -2755,6 +2761,9 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
                 num_broadcast_dims = len(broadcast_vars)
 
                 for idx, (var_sym, entry) in enumerate(var_items):
+                    # Skip variables that are not actually used
+                    if var_sym not in self.used_iter_vars:
+                        continue
                     var_name = str(var_sym)
                     length = entry.length
                     # Rename symbolic lengths to use kernel parameter names
