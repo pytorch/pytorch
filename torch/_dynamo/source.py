@@ -993,55 +993,27 @@ class GlobalStateSource(Source):
 
 
 @dataclass_with_cached_hash(frozen=True)
-class TorchSource(Source):
-    """Points to the actual `torch` module - used instead of GlobalSource
-    in case the user has overridden `torch` in their local namespace"""
+class ImportSource(Source):
+    """Points to an imported module - used instead of GlobalSource
+    in case the user has overridden the module name in their local namespace"""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    module_name: str
+
+    def __post_init__(self) -> None:
         from .guards import GuardBuilder, install_guard
 
         install_guard(self.make_guard(GuardBuilder.ID_MATCH))
 
-    @property
+    @functools.cached_property
     def _name_template(self) -> str:
-        return "__import__('torch')"
+        return f"__import__('{self.module_name}')"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.extend_output(
             [
                 codegen.create_load_const(0),  # level
                 create_build_tuple(0),  # fromlist
-                codegen.create_import_name("torch"),
-            ]
-        )
-
-    @property
-    def guard_source(self) -> GuardSource:
-        return GuardSource.GLOBAL
-
-
-@dataclass_with_cached_hash(frozen=True)
-class CollectionsSource(Source):
-    """Points to the actual `collections` module - used instead of GlobalSource
-    in case the user has overridden `collections` in their local namespace"""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        from .guards import GuardBuilder, install_guard
-
-        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
-
-    @property
-    def _name_template(self) -> str:
-        return "__import__('collections')"
-
-    def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.extend_output(
-            [
-                codegen.create_load_const(0),  # level
-                create_build_tuple(0),  # fromlist
-                codegen.create_import_name("collections"),
+                codegen.create_import_name(self.module_name),
             ]
         )
 
