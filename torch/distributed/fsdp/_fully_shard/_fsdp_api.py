@@ -108,7 +108,6 @@ class AllGather(Comm):
         input_tensor: torch.Tensor,
         group: dist.ProcessGroup,
         async_op: bool = False,
-        profiling_name: str = "",
     ) -> dist.Work | None: ...
 
 

@@ -172,6 +172,7 @@ class ReduceOptions:
 class AllgatherOptions:
     timeout: timedelta
     asyncOp: bool
+    profilingName: str
 
 class GatherOptions:
     rootRank: int
