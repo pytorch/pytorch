@@ -8696,32 +8696,32 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         linear.compile()
         linear(torch.randn(1, 2, device=device))
 
-        # TODO @azahed98: We wish to test that there are no weakrefs, but there are known issues
-        # with weakrefs from
-        # 1. TracingContext.tensor_to_context
-        # 2. MetaTensorDescriber.lookup_tensor
-
-        # Check for weakrefs
+        # There are WeakIdRef weakrefs from TracingContext.tensor_to_context and
+        # MetaTensorDescriber.lookup_tensor. swap_tensors clears these by
+        # invoking their callbacks before swapping.
         t1 = linear.weight
         self.assertEqual(len(weakref.getweakrefs(t1)), 2)
 
-        # TODO @azahed98: Once the aforementioned issue is fixed, we can remove the self.assertRaises
-        with self.assertRaises(RuntimeError):
-            # Move to cpu. Should work with no weakrefs
-            linear.cpu()
+        # Move to cpu. swap_tensors clears WeakIdRef entries and succeeds
+        import warnings
 
-            # Move back to cuda and check that there is no recompile
-            linear.to(device)
-            prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
-                "ok", 0
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            linear.cpu()
+            # Verify we got the expected warning about FakeTensor caches
+            self.assertTrue(
+                any("swap_tensors" in str(warning.message) for warning in w)
             )
-            linear(torch.randn(1, 2, device=device))
-            new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
-                "ok", 0
-            )
-            assert new_frame_count == prev_frame_count, (
-                "linear() call caused a recompile"
-            )
+        self.assertEqual(len(weakref.getweakrefs(t1)), 0)
+
+        # Move back to cuda and check that there is no recompile
+        linear.to(device)
+        prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
+        linear(torch.randn(1, 2, device=device))
+        new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
+        self.assertEqual(
+            new_frame_count, prev_frame_count, "linear() call caused a recompile"
+        )
 
 
 instantiate_parametrized_tests(ReproTests)

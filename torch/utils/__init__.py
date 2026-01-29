@@ -32,6 +32,29 @@ def set_module(obj, mod):
 cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
 
 
+def _clear_weakidref_weakrefs(t):
+    """
+    Clear all WeakIdRef weak references from a tensor by invoking their callbacks.
+
+    WeakIdRef is used by WeakIdKeyDictionary (e.g., TracingContext.tensor_to_context,
+    MetaTensorDescriber.lookup_tensor) to cache information during torch.compile.
+    Each WeakIdRef has a callback that removes its entry from the dictionary when
+    called.
+
+    Returns True if any WeakIdRef entries were cleared.
+    """
+    from torch.utils.weak import WeakIdRef
+
+    cleared = False
+    for wr in weakref.getweakrefs(t):
+        if type(wr) is WeakIdRef:
+            callback = getattr(wr, "__callback__", None)
+            if callback is not None:
+                callback(wr)
+                cleared = True
+    return cleared
+
+
 def swap_tensors(t1, t2):
     """
     This function swaps the content of the two Tensor objects.
@@ -40,11 +63,33 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
-    # Ensure there are no weakrefs
+    import warnings
+
+    # Clear WeakIdRef entries from any WeakIdKeyDictionary that holds these
+    # tensors. WeakIdRef is used by TracingContext.tensor_to_context and
+    # MetaTensorDescriber.lookup_tensor to cache information during
+    # torch.compile. After swap, these cached entries would have stale
+    # metadata, so we clear them proactively.
+    #
+    # Note: If you swap tensors and then swap back, re-fakeifying will create
+    # new fake tensors rather than recovering the original cached ones.
+    cleared1 = _clear_weakidref_weakrefs(t1)
+    cleared2 = _clear_weakidref_weakrefs(t2)
+
+    if cleared1 or cleared2:
+        warnings.warn(
+            "swap_tensors: Cleared WeakIdRef entries (from torch.compile caches) "
+            "for swapped tensors. If these tensors are re-fakeified, new fake "
+            "tensors will be created rather than recovering previously cached ones.",
+            stacklevel=2,
+        )
+
+    # Now check for any remaining weakrefs
     if weakref.getweakrefs(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
     if weakref.getweakrefs(t2):
         raise RuntimeError("Cannot swap t2 because it has weakref associated with it")
+
     t1_slots = set(copyreg._slotnames(t1.__class__))  # type: ignore[attr-defined]
     t2_slots = set(copyreg._slotnames(t2.__class__))  # type: ignore[attr-defined]
     if t1_slots != t2_slots:
