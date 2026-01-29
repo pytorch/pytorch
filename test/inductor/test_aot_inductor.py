@@ -331,10 +331,6 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "different # of input/output/constants in native matmul",
-    )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2551,10 +2547,6 @@ class AOTInductorTestsTemplate:
 
     # mps doesn't support float64
     @skipIfMPS
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "FIXME: cannot do get_size on FakeTensor during lowering.",
-    )
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(
@@ -7419,6 +7411,7 @@ class AOTInductorTestsTemplate:
         # the output should have int type
         self.check_model(Model2(), (x,))
 
+    @unittest.skipIf(not IS_BIG_GPU, "Test requires large GPU memory")
     def test_upper_bound_i64(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
@@ -7511,7 +7504,6 @@ class AOTInductorTestsTemplate:
 
         self.assertEqual(outputs, outputs_aoti)
 
-    @unittest.skipIf(config.triton.native_matmul, "different code generated")
     def test_pad_non_zero_memory_leak(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("test is only for GPU_TYPE")

@@ -291,6 +291,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedDictVariable,
+    UserDefinedEnumClassVariable,
     UserDefinedExceptionClassVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
@@ -640,7 +641,9 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
+        def build_key_value(
+            k: Any, v: Any
+        ) -> tuple[VariableTracker, LazyVariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -813,7 +816,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[VariableTracker, VariableTracker]:
+            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1495,6 +1498,12 @@ class VariableBuilder:
                     source=self.source,
                 )
 
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(
+                    value,
+                    source=self.source,
+                )
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1606,7 +1615,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[VariableTracker, VariableTracker]:
+            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -4085,6 +4094,8 @@ class SourcelessBuilder:
         ):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
+            if isinstance(value, type) and issubclass(value, enum.Enum):
+                return UserDefinedEnumClassVariable(value)
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
@@ -4178,6 +4189,16 @@ class SourcelessBuilder:
         handlers[collections.OrderedDict] = handlers[dict]
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
+        handlers[types.MappingProxyType] = lambda tx, value: MappingProxyVariable(
+            ConstDictVariable(
+                {create(tx, k): create(tx, v) for k, v in value.items()},
+                dict,
+                mutation_type=ValueMutationNew(),
+            ),
+        )
+        handlers[types.GetSetDescriptorType] = (
+            lambda tx, value: GetSetDescriptorVariable(value)
+        )
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
