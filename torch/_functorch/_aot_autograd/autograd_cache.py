@@ -1061,8 +1061,24 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             return None
 
     @staticmethod
+    def _handle_save_error(e: Exception, remote: bool, is_bypass: bool) -> None:
+        """Handle exceptions during save, re-raising if strict mode is enabled."""
+        if is_bypass:
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
+            bypass_reason = str(e)
+        else:
+            log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)  # noqa: G200
+            bypass_reason = "Unable to serialize: " + str(e)
+        if remote:
+            log_cache_bypass("bypass_aot_autograd", bypass_reason)
+        if config.strict_autograd_cache:
+            raise e
+
+    @staticmethod
     def save(key: str, entry: GenericAOTAutogradResult, remote: bool):
         """Save a single entry into the cache."""
+        content: Optional[bytes] = None
         try:
             entry.pre_save()
             content = AOTAutogradCache._pickle_entry(entry, remote)
@@ -1077,25 +1093,19 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             ):
                 precompile_key = entry.sanitized_aot_config.precompile_backend_id
                 artifact = BundledAOTAutogradCacheArtifact(precompile_key, entry)
-                # Now that we're saving it, the precompile_backend_id field is no longer
-                # useful, remove it from the entry.
                 entry.sanitized_aot_config.precompile_backend_id = None
                 PrecompileContext.record_artifact(artifact)
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
-            if config.strict_autograd_cache:
-                raise
-            counters["aot_autograd"]["autograd_cache_bypass"] += 1
-            log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
-            if remote:
-                log_cache_bypass("bypass_aot_autograd", str(e))
+            AOTAutogradCache._handle_save_error(e, remote, is_bypass=True)
+            return None
+        except Exception as e:
+            AOTAutogradCache._handle_save_error(e, remote, is_bypass=False)
             return None
 
         if remote:
-            remote_cache: Optional[RemoteCache[JsonDataTy]] = (
-                AOTAutogradCache.get_remote_cache()
-            )
+            remote_cache = AOTAutogradCache.get_remote_cache()
             if remote_cache is not None:
                 time_taken_ms = int(
                     (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
