@@ -646,8 +646,9 @@ class CodeGen:
                     for key, value in annotation.items():
                         value_str = str(value)
                         if len(value_str) > 40:
-                            value_str = value_str[:40] + "..."
-                        annotation_trunc[key] = value_str
+                            annotation_trunc[key] = value_str[:40] + "..."
+                        else:
+                            annotation_trunc[key] = value
                     annotation_str = f" Annotation: {annotation_trunc}"
 
                 stack_trace_str = "No stacktrace found for following nodes"
