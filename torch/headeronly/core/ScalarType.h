@@ -8,6 +8,7 @@
 #include <torch/headeronly/util/Float8_e5m2.h>
 #include <torch/headeronly/util/Float8_e5m2fnuz.h>
 #include <torch/headeronly/util/Float8_e8m0fnu.h>
+#include <torch/headeronly/util/Float8_e8m0fnu_x4.h>
 #include <torch/headeronly/util/Half.h>
 #include <torch/headeronly/util/bits.h>
 #include <torch/headeronly/util/complex.h>
@@ -146,7 +147,8 @@ struct dummy_int1_7_t {};
   _(c10::dummy_int1_7_t<6>, Int6) /* 42 */               \
   _(c10::dummy_int1_7_t<7>, Int7) /* 43 */               \
   _(c10::Float8_e8m0fnu, Float8_e8m0fnu) /* 44 */        \
-  _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */
+  _(c10::Float4_e2m1fn_x2, Float4_e2m1fn_x2) /* 45 */    \
+  _(c10::Float8_e8m0fnu_x4, Float8_e8m0fnu_x4) /* 46 */
 
 // NB: despite its generic sounding name, the macros that don't take _AND
 // are mostly only used by tensorexpr
