@@ -65,6 +65,76 @@ SKIP_OPS = frozenset([
 ])
 
 
+def has_scalar_tensors(tensors: list) -> bool:
+    """Check if any tensor in the list is a scalar (0-dim)."""
+    return any(t.dim() == 0 for _, t in tensors)
+
+
+def has_pmin_pmax(input_placements, output_placement) -> bool:
+    """Check if any placement is Partial(min) or Partial(max)."""
+    for p in input_placements:
+        if isinstance(p, Partial) and p.reduce_op in ("min", "max"):
+            return True
+    if isinstance(output_placement, Partial) and output_placement.reduce_op in ("min", "max"):
+        return True
+    return False
+
+
+def negate_scalar_tensors(tensors: list) -> list:
+    """Return a new list with scalar tensors negated."""
+    result = []
+    for name, t in tensors:
+        if t.dim() == 0:
+            result.append((name, -t))
+        else:
+            result.append((name, t))
+    return result
+
+
+def negate_all_tensors(tensors: list) -> list:
+    """Return a new list with all tensors negated."""
+    return [(name, -t) for name, t in tensors]
+
+
+def create_negated_sample(sample, tensors: list):
+    """Create a sample with scalar tensors negated."""
+    from torch.testing._internal.common_methods_invocations import SampleInput
+    from torch.utils import _pytree as pytree
+
+    # Track which tensors are scalars by their data_ptr
+    scalar_ptrs = {t.data_ptr() for _, t in tensors if t.dim() == 0}
+
+    def maybe_negate(x):
+        if isinstance(x, torch.Tensor) and x.data_ptr() in scalar_ptrs:
+            return -x
+        return x
+
+    new_input = pytree.tree_map(maybe_negate, sample.input)
+    new_args = pytree.tree_map(maybe_negate, sample.args)
+    new_kwargs = pytree.tree_map(maybe_negate, sample.kwargs)
+
+    return SampleInput(new_input, args=new_args, kwargs=new_kwargs)
+
+
+def create_fully_negated_sample(sample, tensors: list):
+    """Create a sample with ALL tensors negated (for P(min)/P(max) sign testing)."""
+    from torch.testing._internal.common_methods_invocations import SampleInput
+    from torch.utils import _pytree as pytree
+
+    tensor_ptrs = {t.data_ptr() for _, t in tensors}
+
+    def negate_tensor(x):
+        if isinstance(x, torch.Tensor) and x.data_ptr() in tensor_ptrs:
+            return -x
+        return x
+
+    new_input = pytree.tree_map(negate_tensor, sample.input)
+    new_args = pytree.tree_map(negate_tensor, sample.args)
+    new_kwargs = pytree.tree_map(negate_tensor, sample.kwargs)
+
+    return SampleInput(new_input, args=new_args, kwargs=new_kwargs)
+
+
 @dataclass
 class Discrepancy:
     """Represents a discrepancy between ground truth and DTensor's rules."""
@@ -337,6 +407,32 @@ def compare_operator(
                 k: v for k, v in sample.kwargs.items() if not isinstance(v, torch.Tensor)
             }
 
+            # For P(min)/P(max) combinations, create a fully negated variant to test
+            # sign-dependent behavior (e.g., R / P(max) -> P(max) only works for certain signs)
+            try:
+                fully_negated_sample = create_fully_negated_sample(sample, tensors)
+                fully_negated_tensors = negate_all_tensors(tensors)
+
+                if isinstance(fully_negated_sample.input, torch.Tensor):
+                    fully_negated_ground_truth = op(
+                        fully_negated_sample.input,
+                        *fully_negated_sample.args,
+                        **fully_negated_sample.kwargs
+                    )
+                else:
+                    fully_negated_ground_truth = op(
+                        *fully_negated_sample.input,
+                        *fully_negated_sample.args,
+                        **fully_negated_sample.kwargs
+                    )
+
+                if not isinstance(fully_negated_ground_truth, torch.Tensor):
+                    fully_negated_sample = None
+            except Exception:
+                fully_negated_sample = None
+                fully_negated_tensors = None
+                fully_negated_ground_truth = None
+
             # Get all possible input placement combinations (including Partial)
             input_placement_options = [
                 get_1d_input_placements_for_tensor(t, include_partial=True)
@@ -444,6 +540,16 @@ def compare_operator(
                         is_valid, error_msg = validate_combination(
                             op, sample, tensors, combo, ground_truth, world_size, mesh
                         )
+
+                        # For P(min)/P(max) combinations, also test with fully negated inputs
+                        # to catch sign-dependent behavior (e.g., R / P(max) -> P(max))
+                        if is_valid and fully_negated_sample and has_pmin_pmax(input_placements, output_placement):
+                            negated_combo = PlacementCombination(input_placements, output_placement)
+                            negated_valid, _ = validate_combination(
+                                op, fully_negated_sample, fully_negated_tensors, negated_combo,
+                                fully_negated_ground_truth, world_size, mesh
+                            )
+                            is_valid = is_valid and negated_valid
 
                         combo_key = (
                             tuple(str(p) for p in input_placements),
