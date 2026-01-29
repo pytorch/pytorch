@@ -47,6 +47,14 @@ class DistTensorOpsTest(DTensorTestBase):
         detached_mat = mat.detach()
         self.assertFalse(detached_mat is mat)
 
+        # Test with 0D scalar tensor
+        scalar_tensor = torch.tensor(2.5, requires_grad=True)
+        dist_scalar = distribute_tensor(scalar_tensor, device_mesh, [Replicate()])
+        detached_scalar = dist_scalar.detach()
+        self.assertFalse(detached_scalar is dist_scalar)
+        self.assertEqual(detached_scalar.shape, ())
+        self.assertEqual(detached_scalar.placements, (Replicate(),))
+
     @with_comms
     def test_clone(self):
         device_mesh = self.build_device_mesh()
@@ -57,6 +65,15 @@ class DistTensorOpsTest(DTensorTestBase):
             cloned_mat = mat.clone()
             self.assertFalse(cloned_mat is mat)
             self.assertEqual(cloned_mat.to_local(), mat.to_local())
+
+        # Test with 0D scalar tensor
+        scalar_tensor = torch.tensor(3.14, requires_grad=True)
+        dist_scalar = distribute_tensor(scalar_tensor, device_mesh, [Replicate()])
+        cloned_scalar = dist_scalar.clone()
+        self.assertFalse(cloned_scalar is dist_scalar)
+        self.assertEqual(cloned_scalar.shape, ())
+        self.assertEqual(cloned_scalar.placements, (Replicate(),))
+        self.assertEqual(cloned_scalar.to_local(), scalar_tensor)
 
     @with_comms
     def test_copy_(self):
@@ -180,6 +197,19 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertTrue(res is dt_to_inplace_add)
         self.assertTrue(res.placements == tuple(shard_spec))
 
+        # Test inplace op with sharded tensor and 0D scalar DTensor.
+        sharded_tensor = torch.randn(self.world_size * 4, 8)
+        scalar_tensor = torch.tensor(2.0)
+        dt_sharded = distribute_tensor(sharded_tensor.clone(), mesh, [Shard(0)])
+        dt_scalar = distribute_tensor(scalar_tensor, mesh, [Replicate()])
+        # Verify the 0D tensor has Replicate placement
+        self.assertEqual(dt_scalar.placements, (Replicate(),))
+        self.assertEqual(dt_scalar.shape, ())
+        expected = sharded_tensor + scalar_tensor
+        res = dt_sharded.add_(dt_scalar)
+        self.assertTrue(res is dt_sharded)
+        self.assertEqual(res.full_tensor(), expected)
+
     @with_comms
     def test_op_out_variant(self):
         mesh = self.build_device_mesh()
@@ -259,6 +289,14 @@ class DistTensorOpsTest(DTensorTestBase):
         full_expected = torch.full((4, 8), 42.0)
         self.assertEqual(full_expected, full_like_dt.to_local())
 
+        # Test with 0D scalar tensor
+        scalar_tensor = torch.tensor(5.0)
+        dist_scalar = distribute_tensor(scalar_tensor, device_mesh, [Replicate()])
+        full_like_scalar = torch.full_like(dist_scalar, 99.0)
+        self.assertEqual(full_like_scalar.shape, ())
+        self.assertEqual(full_like_scalar.placements, (Replicate(),))
+        self.assertEqual(full_like_scalar.to_local(), torch.tensor(99.0))
+
     @with_comms
     def test_ones_like(self):
         device_mesh = self.build_device_mesh()
@@ -269,6 +307,14 @@ class DistTensorOpsTest(DTensorTestBase):
         ones_like_dt = torch.ones_like(dist_tensor)
         ones_expected = torch.ones(4, 8)
         self.assertEqual(ones_expected, ones_like_dt.to_local())
+
+        # Test with 0D scalar tensor
+        scalar_tensor = torch.tensor(5.0)
+        dist_scalar = distribute_tensor(scalar_tensor, device_mesh, [Replicate()])
+        ones_like_scalar = torch.ones_like(dist_scalar)
+        self.assertEqual(ones_like_scalar.shape, ())
+        self.assertEqual(ones_like_scalar.placements, (Replicate(),))
+        self.assertEqual(ones_like_scalar.to_local(), torch.tensor(1.0))
 
     @with_comms
     def test_ones_like_partial_sum(self):
@@ -337,6 +383,14 @@ class DistTensorOpsTest(DTensorTestBase):
         # make sure there is no side effect on the input tensor dtype
         self.assertEqual(dist_tensor.dtype, torch.float32)
         self.assertEqual(zeros_like_dt.dtype, torch.bfloat16)
+
+        # Test with 0D scalar tensor
+        scalar_tensor = torch.tensor(5.0)
+        dist_scalar = distribute_tensor(scalar_tensor, device_mesh, [Replicate()])
+        zeros_like_scalar = torch.zeros_like(dist_scalar)
+        self.assertEqual(zeros_like_scalar.shape, ())
+        self.assertEqual(zeros_like_scalar.placements, (Replicate(),))
+        self.assertEqual(zeros_like_scalar.to_local(), torch.tensor(0.0))
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -445,6 +499,31 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertFalse(dist_tensor_2.equal(dist_tensor_3))
         self.assertTrue(dist_tensor_1.is_same_size(dist_tensor_3))
         self.assertFalse(input_tensor_2.is_same_size(dist_tensor_3))
+
+        # Test with sharded tensor and 0D scalar tensor.
+        sharded_tensor = torch.ones(self.world_size * 2)
+        scalar_tensor = torch.tensor(1.0)
+
+        dist_sharded = distribute_tensor(sharded_tensor, device_mesh, shard_spec)
+        dist_scalar = distribute_tensor(scalar_tensor, device_mesh, [Replicate()])
+
+        self.assertEqual(dist_scalar.placements, (Replicate(),))
+        self.assertEqual(dist_scalar.shape, ())
+        self.assertFalse(dist_sharded.equal(dist_scalar))
+
+        # Two 0D scalars (equal values)
+        scalar_a = torch.tensor(42.0)
+        scalar_b = torch.tensor(42.0)
+        dist_scalar_a = distribute_tensor(scalar_a, device_mesh, [Replicate()])
+        dist_scalar_b = distribute_tensor(scalar_b, device_mesh, [Replicate()])
+        self.assertTrue(dist_scalar_a.equal(dist_scalar_b))
+
+        # Two 0D scalars (different values)
+        scalar_c = torch.tensor(1.0)
+        scalar_d = torch.tensor(2.0)
+        dist_scalar_c = distribute_tensor(scalar_c, device_mesh, [Replicate()])
+        dist_scalar_d = distribute_tensor(scalar_d, device_mesh, [Replicate()])
+        self.assertFalse(dist_scalar_c.equal(dist_scalar_d))
 
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)
