@@ -408,6 +408,79 @@ class TestSerializedGraphModule(TestCase):
         y = torch.tensor([3.0, 4.0])
         self.assertEqual(gm(x, y), deserialized(x, y))
 
+    def test_graph_module_with_triton_kernel_wrapper_functional(self):
+        """
+        Test that a GraphModule containing triton_kernel_wrapper_functional
+        can be serialized and deserialized using GraphPickler.
+
+        This test would have failed with the old __reduce__-based serialization
+        because FX symbolic tracing during deserialization cannot handle
+        HigherOrderOperators like triton_kernel_wrapper_functional.
+        """
+        from torch.testing._internal.inductor_utils import HAS_GPU
+
+        if not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
+            triton_kernel_wrapper_functional,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.testing._internal.triton_utils import mul2_kernel
+
+        kernel_side_table.reset_table()
+
+        def f(x, output):
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_side_table.add_kernel(mul2_kernel),
+                constant_args_idx=kernel_side_table.add_constant_args(
+                    {"n_elements": output.numel(), "BLOCK_SIZE": 16}
+                ),
+                grid=[(x.numel(),)],
+                tma_descriptor_metadata={},
+                kwargs={
+                    "in_ptr0": x,
+                    "out_ptr": output,
+                },
+                tensors_to_clone=["in_ptr0", "out_ptr"],
+            )
+            return out["out_ptr"]
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            t1 = torch.randn(5)
+            t2 = torch.randn(5)
+        gm = make_fx(f, tracing_mode="fake")(t1, t2)
+
+        self.assertTrue(
+            any(
+                node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+                for node in gm.graph.nodes
+                if node.op == "call_function"
+            ),
+            "Graph should contain triton_kernel_wrapper_functional",
+        )
+
+        from torch._functorch._aot_autograd.aot_autograd_result import (
+            SerializedGraphModule,
+        )
+
+        serialized = SerializedGraphModule(gm)
+        deserialized = serialized.deserialize()
+
+        self.assertIsInstance(deserialized, torch.fx.GraphModule)
+        self.assertTrue(
+            any(
+                node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+                for node in deserialized.graph.nodes
+                if node.op == "call_function"
+            ),
+            "Deserialized graph should contain triton_kernel_wrapper_functional",
+        )
+
 
 class TestGraphModuleGetState(TestCase):
     """Tests that _GraphModulePickleData respects custom __getstate__ methods."""
