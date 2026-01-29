@@ -69,7 +69,7 @@ if use_buck:
     import libfb.py.build_info
 
 
-extra_deps = []
+extra_deps: list[str] = []
 extra_imports = ""
 cur_target = ""
 if use_buck:

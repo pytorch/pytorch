@@ -547,7 +547,7 @@ class AutogradCompilerInstance:
             # run over all nodes of the aot_backward graph.
             # copy and paste them all into the compiled autograd graph.
             args_idx = 0
-            value_remap = {}
+            value_remap: dict[Any, Any] = {}
             poutputs: Optional[list[torch.fx.Proxy]] = None
 
             # names of nodes must appear only once in the fx.Graph
@@ -1360,7 +1360,7 @@ class AutogradCompilerInstance:
             if len(output_nodes) > 0:
                 continue
 
-            input_nodes_and_users = []
+            input_nodes_and_users: list[Any] = []
             input_nodes_and_users.extend(list(input_nodes))
             for input_node in input_nodes:
                 input_nodes_and_users.extend(

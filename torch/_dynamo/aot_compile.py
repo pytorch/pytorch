@@ -86,7 +86,7 @@ class AOTCompilePickler(pickle.Pickler):
         return _.__closure__[0]
 
     @classmethod
-    def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
+    def _unpickle_bound_method(cls, func: Callable[..., Any], base: object) -> types.MethodType:
         return types.MethodType(func, base)
 
     @classmethod
@@ -492,7 +492,7 @@ def aot_compile_module(
                 backend=backend,
             )
 
-    compiled_results = []
+    compiled_results: list[Any] = []
     for model_input in inputs:
         log.info("Compiling input %s..", model_input)
         compiled_results.append(compile_single_graph(model_input))

@@ -548,7 +548,7 @@ def _load_gb_type_to_gb_id_map() -> dict[str, Any]:
             registry = json.load(f)
     except Exception:
         log.exception("Error accessing the registry file")
-        registry = {}
+        registry: dict[str, Any] = {}
 
     mapping = {}
     for k, v in registry.items():

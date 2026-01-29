@@ -44,7 +44,7 @@ class CodeContextDict:
     def get_context(self, code: types.CodeType) -> dict[str, Any]:
         ctx = self.code_context.get(code)
         if ctx is None:
-            ctx = {}
+            ctx: dict[str, Any] = {}
             self.code_context[code] = ctx
         return ctx
 

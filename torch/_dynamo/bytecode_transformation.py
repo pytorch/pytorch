@@ -1820,7 +1820,7 @@ def bytecode_from_template(
                     new_insts.append(inst)
             insts = new_insts
 
-        returns = []
+        returns: list[Instruction] = []
         for inst in insts:
             if inst.opname == "RETURN_VALUE":
                 returns.append(inst)

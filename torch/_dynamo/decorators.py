@@ -904,13 +904,13 @@ def mark_unbacked(
             return
 
         if not hasattr(t, "_specialized_on"):
-            t._specialize_on = {}
+            t._specialize_on = {}  # pyrefly: ignore[implicit-any]
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
             t._dynamo_unbacked_indices = set()
 
         if not hasattr(t, "_dynamo_hint_overrides"):
-            t._dynamo_hint_overrides = {}
+            t._dynamo_hint_overrides = {}  # pyrefly: ignore[implicit-any]
 
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
@@ -998,10 +998,10 @@ def mark_dynamic(
 
             t._dynamo_dynamic_range = set()
 
-            t._dynamo_hint_overrides = {}
+            t._dynamo_hint_overrides = {}  # pyrefly: ignore[implicit-any]
 
         if not hasattr(t, "_specialize_on"):
-            t._specialize_on = {}
+            t._specialize_on = {}  # pyrefly: ignore[implicit-any]
 
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
