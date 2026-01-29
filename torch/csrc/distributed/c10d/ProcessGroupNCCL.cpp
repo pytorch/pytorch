@@ -911,6 +911,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
+  // NOTE: This default value (2000) is duplicated in FlightRecorder.hpp.
+  // Keep in sync. See FlightRecorder.hpp for details.
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -1306,8 +1308,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   ncclOpts->split_from =
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
   ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
-  auto color = genNcclSplitColor(ranks);
-  ncclOpts->split_color = color;
+  // We use the lowest rank in the group as the split_color as each rank can
+  // only participate in one group.
+  // This value must be non-negative int32 and all ranks are.
+  ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION

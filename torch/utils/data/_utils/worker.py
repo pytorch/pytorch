@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 # mypy: allow-untyped-defs
 r"""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
 
@@ -70,32 +73,28 @@ else:
             return not self.manager_dead
 
 
-_worker_info: Optional["WorkerInfo"] = None
+_worker_info: Optional[WorkerInfo] = None
 
 
+@dataclass(frozen=True)
 class WorkerInfo:
+    """Information about the current DataLoader worker process or thread.
+
+    Attributes:
+        id: The current worker id (0 to num_workers - 1)
+        num_workers: Total number of workers
+        seed: Random seed set for this worker
+        dataset: Copy of the dataset object in this worker
+        rng: RNG state container
+        worker_method: The worker method ("multiprocessing" or "thread")
+    """
+
     id: int
     num_workers: int
     seed: int
-    dataset: "Dataset"
-    __initialized = False
-
-    def __init__(self, **kwargs) -> None:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        self.__keys = tuple(kwargs.keys())
-        self.__initialized = True
-
-    def __setattr__(self, key, val) -> None:
-        if self.__initialized:
-            raise RuntimeError(
-                f"Cannot assign attributes to {self.__class__.__name__} objects"
-            )
-        return super().__setattr__(key, val)
-
-    def __repr__(self) -> str:
-        items = [f"{k}={getattr(self, k)}" for k in self.__keys]
-        return f"{self.__class__.__name__}({', '.join(items)})"
+    dataset: Dataset
+    rng: _RNG
+    worker_method: str = "multiprocessing"
 
 
 def get_worker_info() -> WorkerInfo | None:
@@ -127,20 +126,36 @@ def get_worker_info() -> WorkerInfo | None:
     return _worker_info
 
 
-r"""Dummy class used to signal the end of an IterableDataset"""
-
-
 @dataclass(frozen=True)
 class _IterableDatasetStopIteration:
+    """Dummy class used to signal the end of an IterableDataset"""
+
     worker_id: int
-
-
-r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 
 
 @dataclass(frozen=True)
 class _ResumeIteration:
+    """Dummy class used to resume the fetching when worker reuse is enabled"""
+
     seed: int | None = None
+
+
+@dataclass(frozen=True)
+class _RNG:
+    """Container for thread-local random number generator state.
+
+    Used by thread workers to maintain separate RNG state per worker thread
+    to avoid race conditions.
+
+    Attributes:
+        random_generator: Python random.Random generator for this thread
+        torch_generator: PyTorch Generator for this thread
+        numpy_generator: NumPy Generator for this thread (None if numpy not available)
+    """
+
+    random_generator: random.Random
+    torch_generator: torch.Generator
+    numpy_generator: Optional[object] = None
 
 
 # The function `_generate_state` is adapted from `numpy.random.SeedSequence`
@@ -257,12 +272,24 @@ def _worker_loop(
         torch.set_num_threads(1)
         seed = base_seed + worker_id
         random.seed(seed)
-        torch.manual_seed(seed)
+        torch_generator = torch.manual_seed(seed)
+
+        # Extract the global generators
+        random_generator = random._inst
+        numpy_generator = None
+
         if HAS_NUMPY:
             np_seed = _generate_state(base_seed, worker_id)
             import numpy as np
 
             np.random.seed(np_seed)
+            numpy_generator = np.random.mtrand._rand
+
+        rng = _RNG(
+            random_generator=random_generator,
+            torch_generator=torch_generator,
+            numpy_generator=numpy_generator,
+        )
 
         from torch.utils.data import IterDataPipe
         from torch.utils.data.graph_settings import apply_random_seed
@@ -278,7 +305,7 @@ def _worker_loop(
 
         global _worker_info
         _worker_info = WorkerInfo(
-            id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset
+            id=worker_id, num_workers=num_workers, seed=seed, dataset=dataset, rng=rng
         )
 
         from torch.utils.data import _DatasetKind
