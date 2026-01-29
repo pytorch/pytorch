@@ -311,7 +311,6 @@ class DTensorRedistributePlanner:
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
         self.strided_shard_placements_in_target: set[_StridedShard] = set()
-        self.partial_reduce_ops_in_target: set[str] = set()
         self.setup_cost_callbacks()
 
     def setup_cost_callbacks(
@@ -535,30 +534,19 @@ class DTensorRedistributePlanner:
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
-        # handle case 6: Replicate() -> Partial()
-        # Generate transitions only for reduce_ops that are present in the src/dst
-        # placements for this redistribution, avoiding unnecessary graph expansion.
+        # handle case 6: Replicate() -> Partial(), default to partial(sum)
         for mesh_dim, placement in enumerate(placements):
             if not isinstance(placement, Replicate):
                 continue
-            for reduce_op in self.partial_reduce_ops_in_target:
-                new_placements = list(placements)
-                new_placements[mesh_dim] = Partial(reduce_op)
-
-                # Skip if this would create mixed partial types (except sum+avg which commute)
-                partial_reduce_ops = {
-                    p.reduce_op for p in new_placements if isinstance(p, Partial)
-                }
-                if len(partial_reduce_ops) > 1 and partial_reduce_ops != {"sum", "avg"}:
-                    continue
-
-                dist_state = self.DistState(
-                    self._to_tuple(new_placements), tensor_mesh_dim_tuple
-                )
-                all_next_state[dist_state] = self.cost_function(
-                    cur_dist_state,
-                    dist_state,
-                )
+            new_placements = list(placements)
+            new_placements[mesh_dim] = Partial()
+            dist_state = self.DistState(
+                self._to_tuple(new_placements), tensor_mesh_dim_tuple
+            )
+            all_next_state[dist_state] = self.cost_function(
+                cur_dist_state,
+                dist_state,
+            )
 
         # Additional cases handling for _StridedShard
 
@@ -754,13 +742,6 @@ class DTensorRedistributePlanner:
         for placement in dst_placements:
             if isinstance(placement, _StridedShard):
                 self.strided_shard_placements_in_target.add(placement)
-
-        # Collect Partial reduce ops from src and dst placements. These are used
-        # to generate R->P transitions only for reduce ops that are actually
-        # present in the redistribution, avoiding unnecessary graph expansion.
-        for placement in itertools.chain(src_placements, dst_placements):
-            if isinstance(placement, Partial):
-                self.partial_reduce_ops_in_target.add(placement.reduce_op)
 
         src_state = self.DistState(src_placements, src_shard_order)
         dst_state = self.DistState(dst_placements, dst_shard_order)
