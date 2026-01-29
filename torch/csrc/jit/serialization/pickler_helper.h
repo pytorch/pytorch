@@ -103,7 +103,7 @@ struct WriteableTensorData {
   friend TORCH_API WriteableTensorData
   getWriteableTensorData(const at::Tensor& tensor, bool to_cpu);
   at::Tensor tensor_;
-  uint64_t size_;
+  uint64_t size_{};
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

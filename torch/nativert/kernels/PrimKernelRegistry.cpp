@@ -43,7 +43,7 @@ class OpKernel_prim_listpack : public OpKernel {
         list.push_back(KernelInput(i));
       }
     }
-    KernelOutput(0) = std::move(list);
+    KernelOutput(0) = list;
   }
 
  private:

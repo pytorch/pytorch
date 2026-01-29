@@ -8,12 +8,11 @@ namespace torch::profiler::impl {
 namespace {
 static constexpr TensorImplAddress NoTensorImpl{nullptr};
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct RawTensorInfo {
   TensorImplAddress impl_;
   StorageImplData storage_;
   c10::Device device_;
-  bool is_free_;
+  bool is_free_{false};
 
   // Used to assign back to the original structs.
   std::reference_wrapper<std::optional<AllocationID>> allocation_id_ref_;
