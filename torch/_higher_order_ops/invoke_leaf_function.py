@@ -285,21 +285,11 @@ def _make_forward(
             for idx, arg in enumerate(flat_args)
         ]
 
-        # NB: fake_impl can be called in two different contexts:
-        # - At tracing time: with fake tensors, where PythonDispatcher is active
-        # - At runtime: for output validation (when leaf_function_validate_outputs=True),
-        #   where PythonDispatcher is NOT active
-        #
-        # We capture the dispatch keys when the wrapper is created (at tracing time),
-        # but the wrapper may be invoked later at runtime for validation. Since
-        # PythonDispatcher should only be active during tracing, we detect runtime
-        # by checking if it's currently in the TLS include set—if not, we remove it
-        # from the captured keys.
+        # NB: we capture dispatch keys at creation time (during tracing), where PythonDispatcher
+        # is active, but at runtime it's not so we remove it from the effective keys.
         effective_keys = include_keys
         if include_keys.has(DispatchKey.PythonDispatcher):
-            current_include = torch._C._dispatch_tls_local_include_set()
-            if not current_include.has(DispatchKey.PythonDispatcher):
-                effective_keys = include_keys.remove(DispatchKey.PythonDispatcher)
+            effective_keys = include_keys.remove(DispatchKey.PythonDispatcher)
         with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
                 outputs = fn(*inputs)
