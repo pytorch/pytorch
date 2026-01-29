@@ -70,6 +70,7 @@ extensions = [
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
     "sphinx_reredirects",
+    "pytorch_sphinx_theme2",
     "sphinx_tippy",
 ]
 
