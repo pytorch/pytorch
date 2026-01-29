@@ -9,6 +9,7 @@ from typing import Any, cast, Optional, Union
 import sympy
 from sympy import Integer, Symbol
 
+import torch
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, metrics
@@ -749,8 +750,13 @@ class ComboKernel(Kernel):
                     continue
 
                 if not tree.is_reduction or sub_kernel.inside_reduction:
+                    meta_hint = sub_kernel.hint_override if torch.version.hip else None
                     extra_args.append(
-                        str(V.graph.sizevars.optimization_hint(tree.numel))
+                        str(
+                            V.graph.sizevars.optimization_hint_with_override(
+                                tree.numel, meta_hint
+                            )
+                        )
                     )
         return extra_args
 

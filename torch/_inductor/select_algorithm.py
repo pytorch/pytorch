@@ -1545,10 +1545,14 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_workspace_deallocation(self.workspace_arg)
 
     def kernel_benchmark_extra_args(self) -> list[str]:
+        meta_hint = self.hint_override if torch.version.hip else None
         return [
             str(x)
             for x in self.grid_fn(
-                *V.graph.sizevars.size_hints(self.call_sizes), self.meta
+                *V.graph.sizevars.optimization_hints_with_override(
+                    self.call_sizes, meta_hint
+                ),
+                self.meta,
             )
         ]
 

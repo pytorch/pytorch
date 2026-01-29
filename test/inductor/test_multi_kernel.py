@@ -16,7 +16,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
@@ -108,8 +107,6 @@ class MultiKernelTest(TestCase):
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @requires_triton()
-    # TODO: bobrenjc93 to fix multi-kernel for ROCM
-    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2295")
     def test_triton_gemm(self):
@@ -127,7 +124,7 @@ class MultiKernelTest(TestCase):
         y = torch.randn(4096, 4096, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(x, 0)
         act, wrapper_code = run_and_get_code(compiled_fn, x, y)
-        ref = fn(x, y)
+        ref = fn(x.cpu(), y.cpu()).to(GPU_TYPE) if torch.version.hip else fn(x, y)
 
         # wrapper_code will contains 2 entries if cpp_wrapper=True.
         # One for the first pass and one for the second pass.
@@ -138,8 +135,6 @@ class MultiKernelTest(TestCase):
 
     @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2295")
     @requires_triton()
-    # TODO: bobrenjc93 to fix multi-kernel for ROCM
-    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):
@@ -156,7 +151,7 @@ class MultiKernelTest(TestCase):
         y = torch.randn(4096, 4096, device=GPU_TYPE)
         torch._dynamo.mark_dynamic(x, 0)
         act, wrapper_code = run_and_get_code(compiled_fn, x, y)
-        ref = fn(x, y)
+        ref = fn(x.cpu(), y.cpu()).to(GPU_TYPE) if torch.version.hip else fn(x, y)
 
         # wrapper_code will contains 2 entries if cpp_wrapper=True.
         # One for the first pass and one for the second pass.
