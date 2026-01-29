@@ -3233,7 +3233,7 @@ class TestHelperModules:
             x = self.relu(self.fc(x))
             return x
 
-def _generate_qdq_linear_module(N, K, bias, example_input):
+def _ref_quant_linear_module(N, K, bias, example_input):
     """
     Generate a linear module with quantize-dequantize (reference quantized)
     A simulation to PT2E quantization in Torchao.
@@ -3252,8 +3252,8 @@ def _generate_qdq_linear_module(N, K, bias, example_input):
             super().__init__()
             self.x_scale, self.x_zp = torch.ops.quantized_decomposed.choose_qparams.tensor(
                 example_input,
-                qmin=0,
-                qmax=127,
+                quant_min=0,
+                quant_max=127,
                 eps=torch.finfo(torch.float32).eps,
                 dtype=torch.uint8,
             )

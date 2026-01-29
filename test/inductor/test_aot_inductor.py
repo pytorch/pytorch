@@ -2897,12 +2897,10 @@ class AOTInductorTestsTemplate:
         and the CodeCache computes the constant buffer size wrong.
         Original PR: https://github.com/pytorch/pytorch/pull/139054
         """
-        from torch.testing._internal.common_quantization import (
-            _generate_qdq_linear_module,
-        )
+        from torch.testing._internal.common_quantization import _ref_quant_linear_module
 
         example_inputs = (torch.randn(32, 16),)
-        model = _generate_qdq_linear_module(
+        model = _ref_quant_linear_module(
             N=15, K=16, bias=True, example_input=example_inputs[0]
         )
         model = torch.export.export(model, example_inputs, strict=True).module()
