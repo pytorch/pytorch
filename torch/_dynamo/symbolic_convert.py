@@ -522,75 +522,81 @@ def get_comprehension_bytecode_prefix() -> list[str]:
 
 
 @functools.cache
-def get_comprehension_result_patterns() -> dict[str, Optional[str]]:
-    """Discover bytecode patterns for comprehension result handling.
+def get_comprehension_result_patterns() -> dict[str, dict[str, list[str]]]:
+    """Discover bytecode sequence patterns for comprehension result handling.
 
-    Returns dict with:
-        - "stored_indicator": opcode after END_FOR when result is stored in variable
-        - "on_stack_indicator": opcode after END_FOR when result stays on stack
-        - "discard_indicator": opcode that discards result from stack
-        - "return_indicator": opcode that returns result directly
+    Returns dict mapping disposition names to pattern info with full sequences:
+        - "stored": {"prefix": list[str], "postfix": list[str]}
+        - "discarded": {"prefix": list[str], "postfix": list[str]}
+        - "returned": {"prefix": list[str], "postfix": list[str]}
+
+    The structure after END_FOR is: PREFIX + STORE_FASTs + POSTFIX
+    We compare prefix sequences to determine the disposition.
+    For returned vs consumed, we also check if postfix starts with RETURN.
     """
 
     assert sys.version_info >= (3, 12)
 
-    # Pattern 1: Result assigned to variable
-    def fn_assigned() -> list[int]:
+    def fn_stored() -> list[int]:
         result = [i for i in range(1)]  # noqa: C416
         return result
 
-    # Pattern 2: Result discarded
     def fn_discarded() -> int:
         [i for i in range(1)]  # noqa: C416
         return 1
 
-    # Pattern 3: Result returned directly
     def fn_returned() -> list[int]:
         return [i for i in range(1)]  # noqa: C416
 
-    def find_post_end_for_opcode(fn: Callable[..., Any]) -> Optional[str]:
-        insts = list(dis.get_instructions(fn))
-        for i, inst in enumerate(insts):
-            if inst.opname == "END_FOR" and i + 1 < len(insts):
-                return insts[i + 1].opname
-        return None
+    def extract_sequences(fn: Callable[..., Any]) -> tuple[list[str], list[str]]:
+        """Extract (prefix, postfix) from function bytecode.
 
-    def find_discard_opcode(fn: Callable[..., Any]) -> Optional[str]:
+        prefix: all opcodes from END_FOR+1 until first STORE_FAST
+        postfix: just the first opcode after all STORE_FASTs (for disambiguation)
+        """
         insts = list(dis.get_instructions(fn))
-        for i, inst in enumerate(insts):
-            if inst.opname == "END_FOR":
-                # Look for STORE_FAST after END_FOR (iterator restoration)
-                j = i + 1
-                while j < len(insts) and insts[j].opname in ("SWAP", "STORE_FAST"):
-                    j += 1
-                if j < len(insts):
-                    return insts[j].opname
-        return None
 
-    def find_return_after_iterator_restore(
-        fn: Callable[..., Any],
-    ) -> Optional[str]:
-        insts = list(dis.get_instructions(fn))
+        # Find outermost END_FOR (handle nested comprehensions)
+        depth = 0
+        end_for_idx = -1
         for i, inst in enumerate(insts):
-            if inst.opname == "END_FOR":
-                # Look for STORE_FAST after END_FOR (iterator restoration)
-                j = i + 1
-                while j < len(insts) and insts[j].opname in ("SWAP", "STORE_FAST"):
-                    j += 1
-                if j < len(insts) and insts[j].opname.startswith("RETURN"):
-                    return insts[j].opname
-        return None
+            if inst.opname == "FOR_ITER":
+                depth += 1
+            elif inst.opname == "END_FOR":
+                depth -= 1
+                if depth == 0:
+                    end_for_idx = i
+                    break
 
-    stored_indicator = find_post_end_for_opcode(fn_assigned)
-    on_stack_indicator = find_post_end_for_opcode(fn_discarded)
-    discard_indicator = find_discard_opcode(fn_discarded)
-    return_indicator = find_return_after_iterator_restore(fn_returned)
+        if end_for_idx == -1:
+            return [], []
+
+        # Extract prefix: ALL opcodes from END_FOR+1 until first STORE_FAST
+        prefix: list[str] = []
+        idx = end_for_idx + 1
+        while idx < len(insts) and insts[idx].opname != "STORE_FAST":
+            prefix.append(insts[idx].opname)
+            idx += 1
+
+        # Consume all STORE_FASTs to find postfix start
+        while idx < len(insts) and insts[idx].opname == "STORE_FAST":
+            idx += 1
+
+        # Extract postfix: just the first opcode (for returned vs consumed)
+        postfix: list[str] = []
+        if idx < len(insts):
+            postfix.append(insts[idx].opname)
+
+        return prefix, postfix
+
+    stored_prefix, stored_postfix = extract_sequences(fn_stored)
+    discarded_prefix, discarded_postfix = extract_sequences(fn_discarded)
+    returned_prefix, returned_postfix = extract_sequences(fn_returned)
 
     return {
-        "stored_indicator": stored_indicator,
-        "on_stack_indicator": on_stack_indicator,
-        "discard_indicator": discard_indicator,
-        "return_indicator": return_indicator,
+        "stored": {"prefix": stored_prefix, "postfix": []},  # postfix ignored
+        "discarded": {"prefix": discarded_prefix, "postfix": []},  # postfix ignored
+        "returned": {"prefix": returned_prefix, "postfix": returned_postfix},
     }
 
 
@@ -4585,29 +4591,63 @@ class InstructionTranslatorBase(
                 if inst.opname == "STORE_FAST":
                     defined_inside.add(inst.argval)
                 # Detect LOAD_FAST instructions that reference outer variables
-                elif inst.opname == "LOAD_FAST":
-                    var_name = inst.argval
-                    # Skip if it's defined inside the comprehension or already captured
-                    if var_name not in defined_inside and var_name not in captured_vars:
-                        captured_vars.append(var_name)
+                # Python 3.14+ uses LOAD_FAST_BORROW and combined opcodes
+                elif inst.opname.startswith("LOAD_FAST"):
+                    # Handle combined opcodes like LOAD_FAST_BORROW_LOAD_FAST_BORROW
+                    # which have tuple argval
+                    var_names = (
+                        inst.argval
+                        if isinstance(inst.argval, tuple)
+                        else (inst.argval,)
+                    )
+                    for var_name in var_names:
+                        # Skip if it's defined inside the comprehension or already captured
+                        if (
+                            var_name not in defined_inside
+                            and var_name not in captured_vars
+                        ):
+                            captured_vars.append(var_name)
 
                 scan_ip += 1
 
-        # Check what happens after END_FOR
+        # Extract prefix: all opcodes from END_FOR+1 until first STORE_FAST
         ip = end_for_ip + 1
-        post_end_for_inst = self.instructions[ip]
-
-        if post_end_for_inst.opname == patterns["stored_indicator"]:
-            result_var = post_end_for_inst.argval
+        prefix: list[str] = []
+        while (
+            ip < len(self.instructions)
+            and self.instructions[ip].opname != "STORE_FAST"
+        ):
+            prefix.append(self.instructions[ip].opname)
             ip += 1
-            # Consume iterator STORE_FASTs
+
+        store_fast_start_ip = ip
+
+        # Consume all STORE_FASTs to find postfix start
+        while (
+            ip < len(self.instructions)
+            and self.instructions[ip].opname == "STORE_FAST"
+        ):
+            ip += 1
+
+        postfix_start_ip = ip
+
+        # Extract first postfix opcode (for returned vs consumed disambiguation)
+        first_postfix_opcode = None
+        if postfix_start_ip < len(self.instructions):
+            first_postfix_opcode = self.instructions[postfix_start_ip].opname
+
+        # Check STORED: prefix matches stored pattern
+        if prefix == patterns["stored"]["prefix"]:
+            result_var = self.instructions[store_fast_start_ip].argval
+            # end_ip is after all STORE_FASTs
+            end_ip = store_fast_start_ip + 1
             while (
-                ip < len(self.instructions)
-                and self.instructions[ip].opname == "STORE_FAST"
+                end_ip < len(self.instructions)
+                and self.instructions[end_ip].opname == "STORE_FAST"
             ):
-                ip += 1
+                end_ip += 1
             return ComprehensionAnalysis(
-                end_ip=ip,
+                end_ip=end_ip,
                 result_var=result_var,
                 result_on_stack=False,
                 result_disposition="stored",
@@ -4616,81 +4656,53 @@ class InstructionTranslatorBase(
                 captured_vars=captured_vars,
             )
 
-        elif post_end_for_inst.opname == patterns["on_stack_indicator"]:
-            # Result stays on stack, skip SWAP and iterator STORE_FASTs
-            ip += 1  # Skip SWAP
-            while (
-                ip < len(self.instructions)
-                and self.instructions[ip].opname == "STORE_FAST"
-            ):
-                ip += 1
-
-            # Check what happens to the result on stack
-            if ip < len(self.instructions):
-                disposition_inst = self.instructions[ip]
-
-                if disposition_inst.opname == patterns["discard_indicator"]:
-                    return ComprehensionAnalysis(
-                        end_ip=ip + 1,  # After POP_TOP
-                        result_var=None,
-                        result_on_stack=True,
-                        result_disposition="discarded",
-                        iterator_vars=iterator_vars,
-                        walrus_vars=walrus_vars,
-                        captured_vars=captured_vars,
-                    )
-
-                elif disposition_inst.opname == patterns["return_indicator"]:
-                    return ComprehensionAnalysis(
-                        end_ip=ip,  # At RETURN_VALUE (resume will handle it)
-                        result_var=None,
-                        result_on_stack=True,
-                        result_disposition="returned",
-                        iterator_vars=iterator_vars,
-                        walrus_vars=walrus_vars,
-                        captured_vars=captured_vars,
-                    )
-
-                else:
-                    # We don't expand to include the consuming call - just mark as consumed
-                    return ComprehensionAnalysis(
-                        end_ip=ip,  # At the consuming instruction
-                        result_var=None,
-                        result_on_stack=True,
-                        result_disposition="consumed",
-                        iterator_vars=iterator_vars,
-                        walrus_vars=walrus_vars,
-                        captured_vars=captured_vars,
-                    )
-
-            # Fallback - result on stack but no disposition found
+        # Check DISCARDED: prefix matches discarded pattern
+        if prefix == patterns["discarded"]["prefix"]:
             return ComprehensionAnalysis(
-                end_ip=ip,
-                result_var=None,
-                result_on_stack=True,
-                result_disposition="consumed",
-                iterator_vars=iterator_vars,
-                walrus_vars=walrus_vars,
-                captured_vars=captured_vars,
-            )
-
-        else:
-            # Unexpected pattern - fallback to old behavior
-            ip = end_for_ip + 1
-            while (
-                ip < len(self.instructions)
-                and self.instructions[ip].opname == "STORE_FAST"
-            ):
-                ip += 1
-            return ComprehensionAnalysis(
-                end_ip=ip,
+                end_ip=postfix_start_ip,
                 result_var=None,
                 result_on_stack=False,
-                result_disposition="stored",
+                result_disposition="discarded",
                 iterator_vars=iterator_vars,
                 walrus_vars=walrus_vars,
                 captured_vars=captured_vars,
             )
+
+        # Check RETURNED: prefix matches returned pattern AND first postfix is RETURN
+        returned_postfix = patterns["returned"]["postfix"]
+        if prefix == patterns["returned"]["prefix"]:
+            if returned_postfix and first_postfix_opcode == returned_postfix[0]:
+                return ComprehensionAnalysis(
+                    end_ip=postfix_start_ip,  # At RETURN_VALUE
+                    result_var=None,
+                    result_on_stack=True,
+                    result_disposition="returned",
+                    iterator_vars=iterator_vars,
+                    walrus_vars=walrus_vars,
+                    captured_vars=captured_vars,
+                )
+            else:
+                # CONSUMED: prefix matches but postfix doesn't match RETURN
+                return ComprehensionAnalysis(
+                    end_ip=postfix_start_ip,  # At consuming instruction
+                    result_var=None,
+                    result_on_stack=True,
+                    result_disposition="consumed",
+                    iterator_vars=iterator_vars,
+                    walrus_vars=walrus_vars,
+                    captured_vars=captured_vars,
+                )
+
+        # Fallback for completely unexpected patterns
+        return ComprehensionAnalysis(
+            end_ip=postfix_start_ip,
+            result_var=None,
+            result_on_stack=False,
+            result_disposition="stored",
+            iterator_vars=iterator_vars,
+            walrus_vars=walrus_vars,
+            captured_vars=captured_vars,
+        )
 
     def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
         """Handle graph break for a comprehension by skipping the comprehension bytecode.
