@@ -1035,6 +1035,7 @@ def prepare_aot_module_simplified(
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
         dynamic_shapes=dynamic_shapes,
+        # pyrefly: ignore[bad-argument-type]
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         static_input_indices=static_input_indices,
         is_export=False,

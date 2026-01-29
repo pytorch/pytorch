@@ -612,8 +612,10 @@ def jacrev(
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
         aux: Any = None
         if has_aux:
+            # pyrefly: ignore[bad-unpacking]
             output, vjp_fn, aux = vjp_out
         else:
+            # pyrefly: ignore[bad-unpacking]
             output, vjp_fn = vjp_out
 
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
