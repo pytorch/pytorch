@@ -2678,6 +2678,51 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_polylr_total_iters_zero_initialization_mismatch(self):
+        # When total_iters=0, a PolynomialLR schedule should be considered
+        # already finished at initialization, so the learning rate should
+        # immediately be set to end_lr.
+        
+        # However, the recursive initialization path leaves the learning rate
+        # at base_lr instead. Closed form stepping uses end_lr semantics, so
+        # the two modes disagree immediately after construction.
+        
+        # This test documents the current behavior and exposes the mismatch
+
+        model = torch.nn.Linear(1, 1)
+        base_lr = 0.1
+        optimizer = torch.optim.SGD(model.parameters(), lr=base_lr)
+
+        # Try the modern PolynomialLR API first and fall back if end_lr
+        # is not supported on this version.
+        try:
+            torch.optim.lr_scheduler.PolynomialLR(
+                optimizer,
+                total_iters=0,
+                power=1.0,
+                end_lr=0.0,
+            )
+            expected_end_lr = 0.0
+        except TypeError:
+            torch.optim.lr_scheduler.PolynomialLR(
+                optimizer,
+                total_iters=0,
+                power=1.0,
+            )
+            expected_end_lr = 0.0
+
+        init_lr = optimizer.param_groups[0]["lr"]
+
+        self.assertAlmostEqual(
+            init_lr,
+            expected_end_lr,
+            places=12,
+            msg=(
+                f"PolynomialLR(total_iters=0) initialized LR to {init_lr}, "
+                f"but expected {expected_end_lr}. Recursive initialization does "
+                f"not match closed-form semantics."
+            ),
+        )
 
 instantiate_parametrized_tests(TestLRScheduler)
 
