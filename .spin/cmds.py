@@ -456,6 +456,11 @@ PYREFLY_BASE_CMD = [
 ]
 
 
+def _pyrefly_init():
+    cmd = PYREFLY_BASE_CMD + ["init"]
+    spin.util.run(cmd)
+
+
 @click.group()
 def pyrefly():
     """Commands for managing PyRefly stubs and checks."""
