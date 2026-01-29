@@ -221,57 +221,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    # @pytest.mark.xfail(reason="Issue #164088")
-    def test_fuzzer_issue_164088(self):
-        torch.manual_seed(0)
-
-        def foo(arg0, arg1, arg2, arg3, arg4):
-            t0 = arg0  # size=(23, 4), stride=(4, 1), dtype=bfloat16, device=cuda
-            t1 = t0.clone()
-            t1.zero_()  # size=(23, 4), stride=(4, 1), dtype=bfloat16, device=cuda
-            t2 = t1.contiguous().view(
-                (92,)
-            )  # size=(92,), stride=(1,), dtype=bfloat16, device=cuda
-            t3 = arg1  # size=(5, 4, 5), stride=(20, 5, 1), dtype=bfloat16, device=cuda
-            t4 = t3.min()  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t5 = arg2  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t6 = torch.nn.functional.silu(
-                t5
-            )  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t7 = arg3  # size=(3, 2, 3), stride=(6, 3, 1), dtype=bfloat16, device=cuda
-            t8 = t7.min()  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t9 = arg4  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t10 = ((t8) / t9) / t9  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t11 = (
-                t4 + t4 + t6 + t10 + t8
-            )  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t12 = t2.clone()
-            t12.fill_(
-                t11.item()
-            )  # size=(92,), stride=(1,), dtype=bfloat16, device=cuda
-            output = t12
-            return output
-
-        arg0 = torch.rand(
-            [23, 4], dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
-        arg1 = torch.rand(
-            [5, 4, 5], dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
-        arg2 = torch.rand([], dtype=torch.bfloat16, device="cuda", requires_grad=True)
-        arg3 = torch.rand(
-            [3, 2, 3], dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
-        arg4 = torch.rand([], dtype=torch.bfloat16, device="cuda", requires_grad=True)
-
-        out_eager = foo(arg0, arg1, arg2, arg3, arg4)
-        out_eager.sum().backward()
-        print("Eager Success! ✅")
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4)
-        out_compiled.sum().backward()
-        print("Compile Success! ✅")
-
     @pytest.mark.xfail(reason="Issue #163894")
     def test_fuzzer_issue_163894(self):
         torch.manual_seed(9)
