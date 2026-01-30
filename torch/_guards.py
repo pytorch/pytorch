@@ -901,6 +901,12 @@ class InlineFunctionTiming:
     caller_func_name: str | None = None
     caller_filename: str | None = None
     caller_firstlineno: int | None = None
+    # Whether this is a primitive (non-recursive) call
+    # A call is primitive if the function doesn't appear anywhere in the call stack
+    is_primitive_call: bool = True
+    # Full call stack at the time of this call (for proper snakeviz drill-down)
+    # Each entry is (func_name, filename, firstlineno)
+    call_stack: tuple[tuple[str, str, int], ...] = ()
 
     # Backwards compatibility alias
     @property
@@ -1173,10 +1179,21 @@ class TracingContext:
     @staticmethod
     def push_inline_timing(
         func_name: str, filename: str, firstlineno: int, start_time_ns: int
-    ) -> None:
-        """Push a new entry onto the inline timing stack."""
+    ) -> bool:
+        """Push a new entry onto the inline timing stack.
+
+        Returns True if this is a primitive (non-recursive) call, i.e., the function
+        does not already appear anywhere in the call stack.
+        """
         tc = TracingContext.try_get()
         if tc is not None:
+            # Check if this function already exists in the stack (indirect recursion)
+            is_primitive = not any(
+                entry.func_name == func_name
+                and entry.filename == filename
+                and entry.firstlineno == firstlineno
+                for entry in tc.inline_timing_stack
+            )
             tc.inline_timing_stack.append(
                 _InlineTimingStackEntry(
                     func_name=func_name,
@@ -1186,6 +1203,8 @@ class TracingContext:
                     child_time_ns=0,
                 )
             )
+            return is_primitive
+        return True
 
     @staticmethod
     def pop_inline_timing() -> _InlineTimingStackEntry | None:
@@ -1210,6 +1229,17 @@ class TracingContext:
             entry = tc.inline_timing_stack[-1]
             return (entry.func_name, entry.filename, entry.firstlineno)
         return None
+
+    @staticmethod
+    def get_current_call_stack() -> tuple[tuple[str, str, int], ...]:
+        """Get the full current call stack as tuple of (func_name, filename, firstlineno)."""
+        tc = TracingContext.try_get()
+        if tc is not None and tc.inline_timing_stack:
+            return tuple(
+                (entry.func_name, entry.filename, entry.firstlineno)
+                for entry in tc.inline_timing_stack
+            )
+        return ()
 
 
 @contextmanager

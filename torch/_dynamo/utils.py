@@ -1048,13 +1048,8 @@ def format_inline_function_timings_aggregated(
         agg["min_depth"] = min(agg["min_depth"], t.inline_depth)
         agg["max_depth"] = max(agg["max_depth"], t.inline_depth)
 
-        # Check if this is a recursive call
-        is_recursive = (
-            t.caller_func_name == t.func_name
-            and t.caller_filename == t.filename
-            and t.caller_firstlineno == t.firstlineno
-        )
-        if not is_recursive:
+        # Use the is_primitive_call flag to detect recursion (including indirect)
+        if t.is_primitive_call:
             agg["prim_count"] += 1
             # Only add cumtime for primitive calls to avoid double counting
             agg["cumtime_ns"] += t.cumtime_ns
@@ -1116,9 +1111,127 @@ def format_inline_function_timings_aggregated(
     return "\n".join(lines)
 
 
+def _generate_pstats_with_call_paths(
+    timings: list[InlineFunctionTiming],
+    output_file: str | None = None,
+) -> Any:
+    """
+    Generate pstats with call paths encoded in function names.
+
+    This creates separate entries for each unique call path, making snakeviz
+    correctly show per-caller timing when drilling down.
+    """
+    import cProfile
+    import io
+    import pstats
+
+    # Build entries keyed by full call path
+    # Key: tuple of func names in the call stack + current func
+    aggregated: dict[tuple[str, ...], dict[str, Any]] = {}
+    # Track caller->callee edges based on call paths
+    caller_edges: dict[tuple[str, ...], dict[tuple[str, ...], list[float]]] = {}
+
+    for t in timings:
+        # Build the full path: call_stack + current function
+        stack_names = tuple(entry[0] for entry in t.call_stack)  # func names only
+        full_path = stack_names + (t.func_name,)
+
+        if full_path not in aggregated:
+            aggregated[full_path] = {
+                "ncalls": 0,
+                "pcalls": 0,
+                "tottime": 0.0,
+                "cumtime": 0.0,
+                "filename": _shorten_filename(t.filename, max_len=50),
+                "lineno": t.firstlineno,
+                "func_name": t.func_name,
+            }
+            caller_edges[full_path] = {}
+
+        agg = aggregated[full_path]
+        agg["ncalls"] += 1
+        agg["tottime"] += t.tottime_ns / 1e9
+
+        if t.is_primitive_call:
+            agg["pcalls"] += 1
+            agg["cumtime"] += t.cumtime_ns / 1e9
+
+        # Build caller edge (parent path -> this path)
+        if stack_names:
+            if stack_names not in caller_edges[full_path]:
+                caller_edges[full_path][stack_names] = [0, 0, 0.0, 0.0]
+            edge = caller_edges[full_path][stack_names]
+            edge[0] += 1
+            if t.is_primitive_call:
+                edge[1] += 1
+            edge[2] += t.tottime_ns / 1e9
+            edge[3] += t.cumtime_ns / 1e9
+
+    # Build the stats dict in pstats format
+    # Use path-encoded function names for proper drill-down
+    stats_dict: dict[tuple[str, int, str], tuple[int, int, float, float, dict[Any, Any]]] = {}
+
+    for path, agg in aggregated.items():
+        # Encode the path in the function name
+        if len(path) > 1:
+            path_prefix = "->".join(path[:-1]) + "->"
+            display_name = path_prefix + agg["func_name"]
+        else:
+            display_name = agg["func_name"]
+
+        key = (agg["filename"], agg["lineno"], display_name)
+
+        # Build callers dict for this entry
+        callers: dict[tuple[str, int, str], tuple[int, int, float, float]] = {}
+        for caller_path, edge_data in caller_edges[path].items():
+            if caller_path in aggregated:
+                caller_agg = aggregated[caller_path]
+                if len(caller_path) > 1:
+                    caller_prefix = "->".join(caller_path[:-1]) + "->"
+                    caller_display = caller_prefix + caller_agg["func_name"]
+                else:
+                    caller_display = caller_agg["func_name"]
+                caller_key = (caller_agg["filename"], caller_agg["lineno"], caller_display)
+                callers[caller_key] = tuple(edge_data)  # type: ignore[assignment]
+
+        stats_dict[key] = (
+            agg["pcalls"],
+            agg["ncalls"],
+            agg["tottime"],
+            agg["cumtime"],
+            callers,
+        )
+
+    # Create a pstats.Stats object
+    # We need to create a dummy profile to get a valid Stats object
+    import cProfile
+    import io
+
+    dummy_profile = cProfile.Profile()
+    dummy_profile.enable()
+    dummy_profile.disable()
+    stats = pstats.Stats(dummy_profile, stream=io.StringIO())
+
+    stats.stats = stats_dict
+    stats.total_calls = sum(s[1] for s in stats_dict.values())
+    stats.prim_calls = sum(s[0] for s in stats_dict.values())
+    stats.total_tt = sum(s[2] for s in stats_dict.values())
+
+    if output_file:
+        stats.dump_stats(output_file)
+        log.info(
+            "Saved pstats (with call paths) to %s. Visualize with: snakeviz %s",
+            output_file,
+            output_file,
+        )
+
+    return stats
+
+
 def generate_pstats_from_timings(
     timings: list[InlineFunctionTiming],
     output_file: str | None = None,
+    use_call_paths: bool = False,
 ) -> Any:
     """
     Generate a pstats.Stats-compatible object from inline function timings.
@@ -1129,6 +1242,9 @@ def generate_pstats_from_timings(
     Args:
         timings: List of InlineFunctionTiming from Dynamo tracing
         output_file: If provided, save the stats to this file (can be loaded with pstats.Stats(file))
+        use_call_paths: If True, generate separate entries for each unique call path.
+            This makes snakeviz correctly show per-caller timing when drilling down.
+            Function names will be prefixed with their call path (e.g., "main->caller_a->common_fn").
 
     Returns:
         A pstats.Stats object that can be used for visualization
@@ -1142,6 +1258,9 @@ def generate_pstats_from_timings(
         stats.print_callees()  # Show what each function called
     """
     import pstats
+
+    if use_call_paths:
+        return _generate_pstats_with_call_paths(timings, output_file)
 
     # Aggregate timings by function and build caller edges
     # pstats key format: (filename, lineno, funcname)
@@ -1168,14 +1287,8 @@ def generate_pstats_from_timings(
         agg["ncalls"] += 1
         agg["tottime"] += t.tottime_ns / 1e9  # tottime is always added (exclusive)
 
-        # Check if this is a primitive (non-recursive) call
-        # A call is primitive if the caller is not the same function
-        is_recursive = (
-            t.caller_func_name == t.func_name
-            and t.caller_filename == t.filename
-            and t.caller_firstlineno == t.firstlineno
-        )
-        if not is_recursive:
+        # Use the is_primitive_call flag to detect recursion (including indirect)
+        if t.is_primitive_call:
             agg["pcalls"] += 1
             # Only add cumtime for primitive calls to avoid double counting
             # The primitive call's cumtime already includes all recursive calls
@@ -1191,7 +1304,7 @@ def generate_pstats_from_timings(
 
             edge = caller_edges[key][caller_key]
             edge[0] += 1  # nc (total calls from this caller)
-            if not is_recursive:
+            if t.is_primitive_call:
                 edge[1] += 1  # cc (primitive calls)
             edge[2] += t.tottime_ns / 1e9  # tt
             edge[3] += t.cumtime_ns / 1e9  # ct

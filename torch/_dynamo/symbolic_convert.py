@@ -4854,13 +4854,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     ) -> VariableTracker:
         code = func.get_code()
 
-        # Get caller info from the timing stack before we push ourselves
+        # Get caller info and full call stack before we push ourselves
         caller_info = TracingContext.get_current_caller()
+        call_stack = TracingContext.get_current_call_stack()
 
         # Push ourselves onto the timing stack BEFORE building the tracer
         # so that build_inline_tracer overhead is included in this function's time
         trace_start_ns = time.time_ns()
-        TracingContext.push_inline_timing(
+        is_primitive_call = TracingContext.push_inline_timing(
             code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
         )
 
@@ -4892,6 +4893,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     caller_func_name=caller_info[0] if caller_info else None,
                     caller_filename=caller_info[1] if caller_info else None,
                     caller_firstlineno=caller_info[2] if caller_info else None,
+                    is_primitive_call=is_primitive_call,
+                    call_stack=call_stack,
                 )
                 TracingContext.record_inline_function_timing(timing)
 

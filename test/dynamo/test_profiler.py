@@ -700,6 +700,242 @@ def forward(self, arg0_1):
             msg="Sum of tottime should equal root main_fn's cumtime"
         )
 
+    def test_profiler_indirect_recursion(self):
+        """
+        Test profiling with indirect recursion: cmn -> A -> B -> cmn.
+
+        This tests that the is_primitive_call flag correctly detects recursion
+        through multiple layers, not just direct caller == callee.
+        """
+        import inspect
+
+        from torch._dynamo.utils import (
+            format_inline_function_timings_aggregated,
+            generate_pstats_from_timings,
+        )
+        from torch._guards import TracingContext
+
+        trace_timings = []
+
+        def sample_fn(a, b, c=10, d=20, e=30):
+            return a + b + c + d + e
+
+        # cmn calls A, which calls B, which calls cmn (indirect recursion)
+        def fn_b(x, depth):
+            # Some work
+            sig = inspect.signature(sample_fn)
+            for name, param in sig.parameters.items():
+                if param.default is not inspect.Parameter.empty:
+                    x = x + param.default
+            # Indirectly recurse back to cmn
+            if depth > 0:
+                return fn_cmn(x, depth - 1)
+            return x
+
+        def fn_a(x, depth):
+            # Some work
+            sig = inspect.signature(sample_fn)
+            for _ in sig.parameters:
+                x = x + 1
+            # Call B
+            return fn_b(x, depth)
+
+        def fn_cmn(x, depth):
+            # Some work
+            sig = inspect.signature(sample_fn)
+            result = x
+            for name, param in sig.parameters.items():
+                if param.default is not inspect.Parameter.empty:
+                    result = result + param.default
+                else:
+                    result = result * 2
+            # Call A (which will call B, which will call us back)
+            return fn_a(result, depth)
+
+        def timing_backend(gm, example_inputs):
+            timings = TracingContext.get_inline_function_timings()
+            if timings:
+                trace_timings.extend(timings)
+            return gm.forward
+
+        torch._dynamo.reset()
+
+        @torch.compile(backend=timing_backend)
+        def compiled_fn(x):
+            return fn_cmn(x, 10)  # cmn -> A -> B -> cmn ... 11 times
+
+        x = torch.randn(10)
+        compiled_fn(x)
+
+        # Verify we captured timing data
+        self.assertGreater(len(trace_timings), 0)
+
+        # Count function calls
+        func_counts = {}
+        for t in trace_timings:
+            func_counts[t.func_name] = func_counts.get(t.func_name, 0) + 1
+
+        print("\nFunction call counts:")
+        for name, count in sorted(func_counts.items()):
+            print(f"  {name}: {count}")
+
+        # Verify expected call counts
+        # fn_cmn: 11 (depth 10, 9, ..., 0)
+        # fn_a: 11 (called by each fn_cmn)
+        # fn_b: 11 (called by each fn_a)
+        self.assertEqual(func_counts.get("fn_cmn", 0), 11)
+        self.assertEqual(func_counts.get("fn_a", 0), 11)
+        self.assertEqual(func_counts.get("fn_b", 0), 11)
+
+        # Check is_primitive_call for fn_cmn
+        fn_cmn_calls = [t for t in trace_timings if t.func_name == "fn_cmn"]
+        primitive_cmn_calls = [t for t in fn_cmn_calls if t.is_primitive_call]
+        recursive_cmn_calls = [t for t in fn_cmn_calls if not t.is_primitive_call]
+
+        # Only the first call to fn_cmn should be primitive
+        self.assertEqual(len(primitive_cmn_calls), 1, "Only root fn_cmn should be primitive")
+        self.assertEqual(len(recursive_cmn_calls), 10, "10 calls should be detected as recursive")
+
+        # Verify the recursive calls have fn_b as their caller (not fn_cmn)
+        for t in recursive_cmn_calls:
+            self.assertEqual(t.caller_func_name, "fn_b",
+                            "Recursive fn_cmn should be called by fn_b, not fn_cmn")
+
+        # Print aggregated timings
+        print("\nAggregated timings:")
+        print(format_inline_function_timings_aggregated(trace_timings))
+
+        # Generate pstats and verify
+        stats = generate_pstats_from_timings(trace_timings)
+        print("\nPSTATS:")
+        stats.sort_stats(SortKey.CUMULATIVE).print_stats()
+
+        # Verify the key invariant: sum of all tottime should equal the root fn_cmn's cumtime
+        total_tottime_ns = sum(t.tottime_ns for t in trace_timings)
+        root_cmn = primitive_cmn_calls[0]
+
+        print(f"\nTotal tottime: {total_tottime_ns / 1e6:.2f}ms")
+        print(f"Root fn_cmn cumtime: {root_cmn.cumtime_ns / 1e6:.2f}ms")
+
+        # They should be approximately equal
+        self.assertAlmostEqual(
+            total_tottime_ns / 1e6,
+            root_cmn.cumtime_ns / 1e6,
+            delta=50.0,
+            msg="Sum of tottime should equal root fn_cmn's cumtime"
+        )
+
+    def test_profiler_save_for_snakeviz(self):
+        """
+        Test saving profile data that can be loaded into snakeviz.
+
+        This test creates a scenario where a common function is called by multiple
+        callers with different frequencies, then saves the profile to a file that
+        can be visualized with snakeviz to verify per-caller timing works.
+
+        To visualize: snakeviz /tmp/dynamo_profile.prof
+        """
+        import inspect
+        import os
+
+        from torch._dynamo.utils import generate_pstats_from_timings
+        from torch._guards import TracingContext
+
+        trace_timings = []
+
+        def sample_fn(a, b, c=10, d=20):
+            return a + b + c + d
+
+        # Common function called by multiple callers with different frequencies
+        def common_fn(x):
+            sig = inspect.signature(sample_fn)
+            for name, param in sig.parameters.items():
+                if param.default is not inspect.Parameter.empty:
+                    x = x + param.default
+            return x
+
+        # Caller A calls common_fn 3 times
+        def caller_a(x):
+            y = common_fn(x)
+            y = common_fn(y)
+            y = common_fn(y)
+            return y
+
+        # Caller B calls common_fn 1 time
+        def caller_b(x):
+            return common_fn(x)
+
+        def main_fn(x):
+            # Call caller_a 10 times -> 30 calls to common_fn from A
+            # Call caller_b 10 times -> 10 calls to common_fn from B
+            result = x
+            for _ in range(10):
+                result = caller_a(result)
+                result = caller_b(result)
+            return result
+
+        def timing_backend(gm, example_inputs):
+            timings = TracingContext.get_inline_function_timings()
+            if timings:
+                trace_timings.extend(timings)
+            return gm.forward
+
+        torch._dynamo.reset()
+
+        @torch.compile(backend=timing_backend)
+        def compiled_fn(x):
+            return main_fn(x)
+
+        x = torch.randn(10)
+        compiled_fn(x)
+
+        # Verify expected call distribution
+        common_fn_timings = [t for t in trace_timings if t.func_name == "common_fn"]
+        from_caller_a = [t for t in common_fn_timings if t.caller_func_name == "caller_a"]
+        from_caller_b = [t for t in common_fn_timings if t.caller_func_name == "caller_b"]
+
+        self.assertEqual(len(from_caller_a), 30, "common_fn should be called 30 times from caller_a")
+        self.assertEqual(len(from_caller_b), 10, "common_fn should be called 10 times from caller_b")
+
+        # Calculate per-caller timing
+        time_from_a = sum(t.cumtime_ns for t in from_caller_a) / 1e6
+        time_from_b = sum(t.cumtime_ns for t in from_caller_b) / 1e6
+
+        print(f"\ncommon_fn called from caller_a: 30 times, {time_from_a:.2f}ms cumtime")
+        print(f"common_fn called from caller_b: 10 times, {time_from_b:.2f}ms cumtime")
+
+        # Save to /tmp for easy snakeviz access - generate both versions
+        # Version 1: Without call paths (aggregated by function)
+        profile_path = "/tmp/dynamo_profile.prof"
+        stats = generate_pstats_from_timings(trace_timings, profile_path)
+
+        # Version 2: With call paths (separate entries per call path)
+        # This makes snakeviz correctly show per-caller timing when drilling down
+        profile_path_with_paths = "/tmp/dynamo_profile_with_paths.prof"
+        stats_with_paths = generate_pstats_from_timings(
+            trace_timings, profile_path_with_paths, use_call_paths=True
+        )
+
+        self.assertTrue(os.path.exists(profile_path))
+        self.assertTrue(os.path.exists(profile_path_with_paths))
+        print(f"\nProfile saved to: {profile_path}")
+        print(f"Profile with call paths saved to: {profile_path_with_paths}")
+        print("\nVisualize with:")
+        print("  snakeviz /tmp/dynamo_profile.prof  # aggregated view")
+        print("  snakeviz /tmp/dynamo_profile_with_paths.prof  # per-caller drill-down")
+
+        # Print the call-path version to show it works
+        print("\nCall-path pstats output:")
+        stats_with_paths.sort_stats(SortKey.CUMULATIVE).print_stats()
+
+        # Verify the file can be loaded and has correct caller edges
+        import pstats
+        loaded = pstats.Stats(profile_path)
+
+        # Print callers to show per-caller breakdown
+        print("\nPer-caller breakdown for common_fn:")
+        loaded.sort_stats(SortKey.CUMULATIVE).print_callers("common_fn")
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
