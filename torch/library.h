@@ -230,14 +230,6 @@ class TORCH_API CppFunction final {
     return makeFromBoxedKernel(c10::BoxedKernel::makeFallthrough());
   }
 
-  /// \private
-  ///
-  /// Creates a function that raises an error saying that named tensors
-  /// are not supported when called.
-  static CppFunction makeNamedNotSupported() {
-    return makeFromBoxedKernel(c10::BoxedKernel::makeNamedNotSupported());
-  }
-
   /// Create a function from a boxed kernel function with signature
   /// `void(const OperatorHandle&, Stack*)`; i.e., they receive a
   /// stack of arguments in a boxed calling convention, rather than

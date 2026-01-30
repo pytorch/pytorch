@@ -65,12 +65,10 @@ class Unflatten(Module):
     r"""
     Unflattens a tensor dim expanding it to a desired shape. For use with :class:`~nn.Sequential`.
 
-    * :attr:`dim` specifies the dimension of the input tensor to be unflattened, and it can
-      be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
+    * :attr:`dim` specifies the dimension of the input tensor to be unflattened.
 
     * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
-      a `tuple` of ints or a `list` of ints or `torch.Size` for `Tensor` input;  a `NamedShape`
-      (tuple of `(name, size)` tuples) for `NamedTensor` input.
+      a `tuple` of ints or a `list` of ints or `torch.Size` for `Tensor` input.
 
     Shape:
         - Input: :math:`(*, S_{\text{dim}}, *)`, where :math:`S_{\text{dim}}` is the size at
@@ -79,8 +77,8 @@ class Unflatten(Module):
           :math:`\prod_{i=1}^n U_i = S_{\text{dim}}`.
 
     Args:
-        dim (Union[int, str]): Dimension to be unflattened
-        unflattened_size (Union[torch.Size, Tuple, List, NamedShape]): New shape of the unflattened dimension
+        dim (int): Dimension to be unflattened
+        unflattened_size (Union[torch.Size, Tuple, List]): New shape of the unflattened dimension
 
     Examples:
         >>> input = torch.randn(2, 50)

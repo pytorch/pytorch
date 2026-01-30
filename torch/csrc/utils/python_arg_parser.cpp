@@ -51,8 +51,6 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"c10::string_view", ParameterType::STRING},
     {"std::string_view", ParameterType::STRING},
     {"::std::string_view", ParameterType::STRING},
-    {"Dimname", ParameterType::DIMNAME},
-    {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
     {"DispatchKeySet", ParameterType::DISPATCH_KEY_SET},
 };
@@ -1154,16 +1152,6 @@ auto FunctionParameter::_check(
       }
       return false;
     }
-    case ParameterType::DIMNAME:
-      return THPUtils_checkDimname(obj);
-    case ParameterType::DIMNAME_LIST: {
-      if (THPUtils_checkDimnameList(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. DimnameList[1]) we also allow passing a
-      // single Dimname
-      return size == 1 && THPUtils_checkDimname(obj);
-    }
     case ParameterType::TENSOR_LIST: {
       return is_tensor_list_and_append_overloaded(
           obj, &overloaded_args, argnum, true /* throw_error */);
@@ -1253,10 +1241,6 @@ std::string FunctionParameter::type_name() const {
       return "torch.device";
     case ParameterType::STRING:
       return "str";
-    case ParameterType::DIMNAME:
-      return "name";
-    case ParameterType::DIMNAME_LIST:
-      return "tuple of names";
     case ParameterType::SCALAR_LIST:
       return "tuple of Scalars";
     case ParameterType::SYM_INT_LIST:
@@ -1451,10 +1435,6 @@ void FunctionParameter::set_default_str(const std::string& str) {
     // throw std::runtime_error("ParameterType::PYOBJECT");
   } else if (type_ == ParameterType::MEMORY_FORMAT) { // NOLINT
     // throw std::runtime_error("ParameterType::MEMORY_FORMAT");
-  } else if (type_ == ParameterType::DIMNAME) { // NOLINT
-    // throw std::runtime_error("ParameterType::DIMNAME");
-  } else if (type_ == ParameterType::DIMNAME_LIST) { // NOLINT
-    // throw std::runtime_error("ParameterType::DIMNAME_LIST");
   } else if (type_ == ParameterType::SCALAR_LIST) { // NOLINT
     // throw std::runtime_error("ParameterType::SCALAR_LIST");
   } else if (type_ == ParameterType::STORAGE) { // NOLINT

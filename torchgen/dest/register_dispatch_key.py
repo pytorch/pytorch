@@ -586,7 +586,7 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
         self, k: SchemaKind, parent_class: str, generate_super: bool
     ) -> str:
         if generate_super:
-            set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options, names);"
+            set_output_super = f"{parent_class}::set_output_raw_strided(output_idx, sizes, strides, options);"
         else:
             set_output_super = ""
 
@@ -594,12 +594,9 @@ class StructuredRegisterDispatchKey(RegisterDispatchKey):
             return f"""
 void set_output_{name}(
     int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-    TensorOptions options, DimnameList names
+    TensorOptions options
 ) override {{
 {textwrap.indent(self.gen_class_set_output_body(k, maybe_create_proxy), "    ")}
-    if (!names.empty()) {{
-      namedinference::propagate_names(outputs_[output_idx], names);
-    }}
     // super must happen after, so that downstream can use maybe_get_output
     // to retrieve the output
 {textwrap.indent(set_output_super, "    ")}

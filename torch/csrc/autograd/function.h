@@ -155,7 +155,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     // In the first iteration of named tensors, autograd ignores names and
     // operates on unnamed tensors. In the long term, autograd should
     // probably operate with names.
-    at::NoNamesGuard no_names_guard;
 
 #ifdef USE_ROCM
     // Keep track of backward pass for rocblas.

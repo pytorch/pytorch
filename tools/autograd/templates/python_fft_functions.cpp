@@ -36,8 +36,6 @@ using at::TensorOptions;
 using at::IntArrayRef;
 using at::Generator;
 using at::TensorList;
-using at::Dimname;
-using at::DimnameList;
 
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;

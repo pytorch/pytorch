@@ -11,6 +11,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
@@ -1759,7 +1760,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
     mask.device(), " and self on ", self.device());
   TORCH_CHECK(mask.scalar_type() == kBool,
     "masked_fill only supports boolean masks, but got dtype ", mask.scalar_type());
-  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
@@ -1780,7 +1780,6 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .build();
 
   masked_fill_kernel(iter, value);
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 

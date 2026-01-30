@@ -2,7 +2,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/Distance.h>
 #include <c10/util/accumulate.h>
@@ -152,9 +151,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<i
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.sym_size(-1) == x2.sym_size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.sym_size(-1), " X2: ", x2.sym_size(-1));
-  auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
-    NoNamesGuard guard;
     SymInt r1 = x1.sym_size(-2);
     SymInt r2 = x2.sym_size(-2);
     // Special case for empty input: always call the version with explicit autograd to ensure the graph is properly connected
@@ -172,7 +169,6 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, std::optional<i
         return at::_cdist_forward(x1, x2, p, compute_mode);
     }
   }();
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 
@@ -180,12 +176,9 @@ Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, std::o
   TORCH_CHECK(x1.dim() >= 2, "cdist only supports at least 2D tensors, X1 got: ", x1.dim(), "D");
   TORCH_CHECK(x2.dim() >= 2, "cdist only supports at least 2D tensors, X2 got: ", x2.dim(), "D");
   TORCH_CHECK(x1.size(-1) == x2.size(-1), "X1 and X2 must have the same number of columns. X1: ", x1.size(-1), " X2: ", x2.size(-1));
-  auto maybe_outnames = namedinference::compute_cdist_outnames(x1, x2);
   auto result = [&]() {
-    NoNamesGuard guard;
     return cdist_impl(x1, x2, p, compute_mode);
   }();
-  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
 

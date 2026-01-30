@@ -304,21 +304,15 @@ TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
   // fp32_set_opt_dtype
   KERNEL_MPS(prod, fp32)
   KERNEL_MPS(prod, dim_int, fp32)
-  KERNEL_MPS(prod, dim_Dimname, fp32)
   KERNEL_MPS(softmax, int, fp32)
-  KERNEL_MPS(softmax, Dimname, fp32)
   KERNEL_MPS(log_softmax, int, fp32)
-  KERNEL_MPS(log_softmax, Dimname, fp32)
   KERNEL_MPS(cumprod, fp32)
-  KERNEL_MPS(cumprod, dimname, fp32)
   KERNEL_MPS(cumsum, fp32)
-  KERNEL_MPS(cumsum, dimname, fp32)
   KERNEL_MPS(linalg_vector_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, fp32)
   KERNEL_MPS(linalg_matrix_norm, str_ord, fp32)
   KERNEL_MPS(sum, fp32)
   KERNEL_MPS(sum, dim_IntList, fp32)
-  KERNEL_MPS(sum, dim_DimnameList, fp32)
   //
   // promote
   KERNEL_MPS(addcdiv, promote)
@@ -372,7 +366,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(polar, fp32)
   KERNEL_CPU(prod, fp32)
   KERNEL_CPU(prod, dim_int, fp32)
-  KERNEL_CPU(prod, dim_Dimname, fp32)
   KERNEL_CPU(quantile, fp32)
   KERNEL_CPU(quantile, scalar, fp32)
   KERNEL_CPU(nanquantile, fp32)
@@ -472,7 +465,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(stack, promote)
   KERNEL_CPU(cat, promote)
   KERNEL_CPU(index_copy, promote)
-  KERNEL_CPU(index_copy, dimname, promote)
 
 }
 

@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/NamedTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -17,13 +16,6 @@ TORCH_API at::Tensor eq(const at::Tensor & self, const at::Tensor & other);
 namespace native {
 
 bool mps_equal(const Tensor& self, const Tensor &src) {
-  if (!at::namedinference::are_names_equal(
-          self.unsafeGetTensorImpl(), src.unsafeGetTensorImpl())) {
-    return false;
-  }
-  at::NoNamesGuard guard;
-  TORCH_CHECK(self.device() == src.device(), "Cannot compare two tensors on "
-              "different devices. Got: ", self.device(), " and ", src.device());
   if (self.sizes() != src.sizes()) {
     return false;
   }

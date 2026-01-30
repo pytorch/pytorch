@@ -9032,19 +9032,6 @@ for shape in [(1,), ()]:
         ):
             Func.apply(b)
 
-    def test_named_tensor_for_complex_views(self):
-        names = ["batch", "height", "width", "complex"]
-        z = torch.ones((2, 1, 2, 2), requires_grad=True)
-        z_named = z.refine_names(*names)
-        z_complex = torch.view_as_complex(z_named.rename(None)).refine_names(
-            *names[:-1]
-        )
-        z_complex.sum().abs().backward()
-        expected = torch.ones_like(z_complex).rename(None)
-        abs_1_1j = abs(1 + 1j)
-        expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
-        self.assertEqual(z.grad, torch.view_as_real(expected))
-
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO and sys.version_info >= (3, 14), "Fails in python 3.14.2"
     )
