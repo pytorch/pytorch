@@ -386,6 +386,10 @@ skip_tensor_guards_with_matching_dict_tags = True
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
 skip_guards_on_constant_func_defaults = True
 
+# Guard on dynamo config hash to detect config changes between compilations.
+# This is opt-in to avoid excessive recompilations when config is modified.
+guard_on_config_hash = False
+
 
 # The recursive-dict-tag guard relies on the class/function identity staying
 # stable.  We therefore assume that the following function dunder attributes
