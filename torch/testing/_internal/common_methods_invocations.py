@@ -9041,6 +9041,28 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
                     torch.bfloat16,  # out_dtype
                 )
             )
+            # Single-level NVFP4
+            # [M, K] -> [M, K // 2]
+            # [K, N] -> [K // 2, N]
+            mat1_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat1.to(torch.bfloat16))
+            mat2_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat2.to(torch.bfloat16).t()).t()
+            scale1 = make_scale((M, K // 16)).to(torch.float8_e4m3fn)
+            scale2 = make_scale((K // 16, N)).to(torch.float8_e4m3fn)
+            samples.append(
+                SampleInput(
+                    mat1_fp4,
+                    mat2_fp4,
+                    [scale1, ],
+                    [ScalingType.BlockWise1x16, ],
+                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    [scale2, ],
+                    [ScalingType.BlockWise1x16, ],
+                    [SwizzleType.SWIZZLE_32_4_4, ],
+                    None,  # bias
+                    torch.bfloat16,  # out_dtype
+                )
+            )
+
             # NVFP4
             # [M, K] -> [M, K // 2]
             # [K, N] -> [K // 2, N]
