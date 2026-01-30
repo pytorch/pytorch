@@ -58,10 +58,15 @@ def broadcast_one_three(a: list[int], b: Any, c: list[int]):
 
 
 def adaptive_avg_pool2d(self: list[int], out: list[int]):
-    assert len(out) == 2
-    assert len(self) == 3 or len(self) == 4
+    if len(out) != 2:
+        raise AssertionError(f"Expected out to have length 2, but got {len(out)}")
+    if not (len(self) == 3 or len(self) == 4):
+        raise AssertionError(
+            f"Expected self to have length 3 or 4, but got {len(self)}"
+        )
     for i in range(1, len(self)):
-        assert self[i] != 0
+        if self[i] == 0:
+            raise AssertionError(f"Expected self[{i}] to be non-zero, but got 0")
 
     shape: list[int] = []
     for i in range(0, len(self) - 2):
@@ -103,7 +108,10 @@ def broadcast_inplace(a: list[int], b: list[int]):
 
 
 def expand(self: list[int], sizes: list[int]):
-    assert len(sizes) >= len(self)
+    if len(sizes) < len(self):
+        raise AssertionError(
+            f"Expected len(sizes) ({len(sizes)}) >= len(self) ({len(self)})"
+        )
     ndim = len(sizes)
     tensor_dim = len(self)
     if ndim == 0:
@@ -115,10 +123,14 @@ def expand(self: list[int], sizes: list[int]):
         size = self[dim] if dim >= 0 else 1
         targetSize = sizes[i]
         if targetSize == -1:
-            assert dim >= 0
+            if dim < 0:
+                raise AssertionError(f"Expected dim ({dim}) >= 0 when targetSize is -1")
             targetSize = size
         if size != targetSize:
-            assert size == 1
+            if size != 1:
+                raise AssertionError(
+                    f"Expected size ({size}) == 1 when size != targetSize ({targetSize})"
+                )
             size = targetSize
         out.append(size)
     return out
@@ -233,7 +245,8 @@ def pooling_output_shape(
     dilation: int,
     ceil_mode: bool,
 ):
-    assert stride != 0, "stride should not be zeero"
+    if stride == 0:
+        raise AssertionError("stride should not be zero")
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad_l, pad_l, stride, dilation, ceil_mode
     )
@@ -257,20 +270,34 @@ def pool2d_shape_check(
 ):
     ndim = len(input)
 
-    assert kW > 0 and kH > 0
-    assert dW > 0 and dH > 0
-    assert dilationH > 0 and dilationW > 0
+    if not (kW > 0 and kH > 0):
+        raise AssertionError(f"Expected kW ({kW}) > 0 and kH ({kH}) > 0")
+    if not (dW > 0 and dH > 0):
+        raise AssertionError(f"Expected dW ({dW}) > 0 and dH ({dH}) > 0")
+    if not (dilationH > 0 and dilationW > 0):
+        raise AssertionError(
+            f"Expected dilationH ({dilationH}) > 0 and dilationW ({dilationW}) > 0"
+        )
 
     valid_dims = input[1] != 0 and input[2] != 0
-    assert (
+    if not (
         ndim == 3
         and input[0] != 0
         and valid_dims
         or (ndim == 4 and valid_dims and input[3] != 0)
-    )
+    ):
+        raise AssertionError(f"Invalid input dimensions: ndim={ndim}, input={input}")
 
-    assert kW // 2 >= padW and kH // 2 >= padH
-    assert outputWidth >= 1 and outputHeight >= 1
+    if not (kW // 2 >= padW and kH // 2 >= padH):
+        raise AssertionError(
+            f"Expected kW//2 ({kW // 2}) >= padW ({padW}) and "
+            f"kH//2 ({kH // 2}) >= padH ({padH})"
+        )
+    if not (outputWidth >= 1 and outputHeight >= 1):
+        raise AssertionError(
+            f"Expected outputWidth ({outputWidth}) >= 1 and "
+            f"outputHeight ({outputHeight}) >= 1"
+        )
 
 
 def max_pool2d(
@@ -281,15 +308,17 @@ def max_pool2d(
     dilation: list[int],
     ceil_mode: bool,
 ):
-    assert len(kernel_size) == 1 or len(kernel_size) == 2, (
-        "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
-    )
+    if not (len(kernel_size) == 1 or len(kernel_size) == 2):
+        raise AssertionError(
+            "max_pool2d: kernel_size must either be a single int, or a tuple of two ints"
+        )
     kH = kernel_size[0]
     kW = kH if len(kernel_size) == 1 else kernel_size[1]
 
-    assert len(stride) == 0 or len(stride) == 1 or len(stride) == 2, (
-        "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
-    )
+    if not (len(stride) == 0 or len(stride) == 1 or len(stride) == 2):
+        raise AssertionError(
+            "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
+        )
     dH = kH if len(stride) == 0 else stride[0]
     if len(stride) == 0:
         dW = kW
@@ -298,19 +327,22 @@ def max_pool2d(
     else:
         dW = stride[1]
 
-    assert len(padding) == 1 or len(padding) == 2, (
-        "max_pool2d: padding must either be a single int, or a tuple of two ints"
-    )
+    if not (len(padding) == 1 or len(padding) == 2):
+        raise AssertionError(
+            "max_pool2d: padding must either be a single int, or a tuple of two ints"
+        )
     padH = padding[0]
     padW = padH if len(padding) == 1 else padding[1]
 
-    assert len(dilation) == 1 or len(dilation) == 2, (
-        "max_pool2d: dilation must be either a single int, or a tuple of two ints"
-    )
+    if not (len(dilation) == 1 or len(dilation) == 2):
+        raise AssertionError(
+            "max_pool2d: dilation must be either a single int, or a tuple of two ints"
+        )
     dilationH = dilation[0]
     dilationW = dilationH if len(dilation) == 1 else dilation[1]
 
-    assert len(input) == 3 or len(input) == 4
+    if not (len(input) == 3 or len(input) == 4):
+        raise AssertionError(f"Expected input length 3 or 4, but got {len(input)}")
 
     nbatch = input[-4] if len(input) == 4 else 1
     nInputPlane = input[-3]
@@ -365,21 +397,29 @@ def upsample_nearest2d(
     out.append(input[1])
 
     if scale_factors is None and output_size is None:
-        assert 0, "Either output_size or scale_factors must be presented"
+        raise AssertionError("Either output_size or scale_factors must be presented")
 
     if output_size is not None:
-        assert scale_factors is None, (
-            "Must specify exactly one of output_size and scale_factors"
-        )
-        assert len(output_size) == 2
+        if scale_factors is not None:
+            raise AssertionError(
+                "Must specify exactly one of output_size and scale_factors"
+            )
+        if len(output_size) != 2:
+            raise AssertionError(
+                f"Expected output_size to have length 2, but got {len(output_size)}"
+            )
         out.append(output_size[0])
         out.append(output_size[1])
 
     if scale_factors is not None:
-        assert output_size is None, (
-            "Must specify exactly one of output_size and scale_factors"
-        )
-        assert len(scale_factors) == 2
+        if output_size is not None:
+            raise AssertionError(
+                "Must specify exactly one of output_size and scale_factors"
+            )
+        if len(scale_factors) != 2:
+            raise AssertionError(
+                f"Expected scale_factors to have length 2, but got {len(scale_factors)}"
+            )
         out.append(int(input[2] * scale_factors[0]))
         out.append(int(input[3] * scale_factors[1]))
 
@@ -387,23 +427,42 @@ def upsample_nearest2d(
 
 
 def mm(self: list[int], mat2: list[int]):
-    assert len(self) == 2, "self must be a matrix"
-    assert len(mat2) == 2, "mat2 must be a matrix"
+    if len(self) != 2:
+        raise AssertionError(f"self must be a matrix (got {len(self)} dimensions)")
+    if len(mat2) != 2:
+        raise AssertionError(f"mat2 must be a matrix (got {len(mat2)} dimensions)")
 
-    assert self[1] == mat2[0]
+    if self[1] != mat2[0]:
+        raise AssertionError(
+            f"Matrix dimensions don't match for mm: self[1]={self[1]}, mat2[0]={mat2[0]}"
+        )
     return [self[0], mat2[1]]
 
 
 def dot(self: list[int], tensor: list[int]):
-    assert len(self) == 1 and len(tensor) == 1
-    assert self[0] == tensor[0]
+    if not (len(self) == 1 and len(tensor) == 1):
+        raise AssertionError(
+            f"Expected 1D tensors for dot, got len(self)={len(self)}, "
+            f"len(tensor)={len(tensor)}"
+        )
+    if self[0] != tensor[0]:
+        raise AssertionError(
+            f"Dot product dimension mismatch: self[0]={self[0]}, tensor[0]={tensor[0]}"
+        )
     out: list[int] = []
     return out
 
 
 def mv(self: list[int], vec: list[int]):
-    assert len(self) == 2 and len(vec) == 1
-    assert self[1] == vec[0]
+    if not (len(self) == 2 and len(vec) == 1):
+        raise AssertionError(
+            f"Expected 2D matrix and 1D vector, got len(self)={len(self)}, "
+            f"len(vec)={len(vec)}"
+        )
+    if self[1] != vec[0]:
+        raise AssertionError(
+            f"Matrix-vector dimension mismatch: self[1]={self[1]}, vec[0]={vec[0]}"
+        )
     # TODO: return self
     return [self[0]]
 
@@ -454,8 +513,12 @@ def squeeze_dims(li: list[int], dims: list[int]):
 def index_select(self: list[int], dim: int, index: list[int]):
     dim = maybe_wrap_dim(dim, len(self))
     numel = multiply_integers(index)
-    assert len(index) <= 1
-    assert dim == 0 or dim < len(self)
+    if len(index) > 1:
+        raise AssertionError(f"Expected len(index) <= 1, but got {len(index)}")
+    if not (dim == 0 or dim < len(self)):
+        raise AssertionError(
+            f"Expected dim ({dim}) == 0 or dim < len(self) ({len(self)})"
+        )
     result_size: list[int] = []
     for i in range(len(self)):
         if dim == i:
@@ -472,7 +535,8 @@ def embedding(
     scale_grad_by_freq: bool = False,
     sparse: bool = False,
 ):
-    assert len(weight) == 2
+    if len(weight) != 2:
+        raise AssertionError(f"Expected weight to be 2D, but got {len(weight)}D")
     if len(indices) == 1:
         return index_select(weight, 0, indices)
     size = _copy(indices)
@@ -488,11 +552,13 @@ def slice(
     self: list[int], dim: int, start: Optional[int], end: Optional[int], step: int
 ):
     ndim = len(self)
-    assert ndim != 0
+    if ndim == 0:
+        raise AssertionError("Cannot slice a 0-dimensional tensor")
     dim = maybe_wrap_dim(dim, ndim)
     start_val = start if start is not None else 0
     end_val = end if end is not None else max_int()
-    assert step > 0
+    if step <= 0:
+        raise AssertionError(f"Expected step > 0, but got {step}")
     if start_val == max_int():
         start_val = 0
     if start_val < 0:
@@ -515,7 +581,8 @@ def slice(
 
 def check_cat_no_zero_dim(tensors: list[list[int]]):
     for tensor in tensors:
-        assert len(tensor) > 0
+        if len(tensor) <= 0:
+            raise AssertionError("Cannot concatenate tensor with 0 dimensions")
 
 
 def legacy_cat_wrap_dim(dim: int, tensor_sizes: list[list[int]]):
@@ -538,18 +605,25 @@ def check_cat_shape_except_dim(
 ):
     first_dims = len(first)
     second_dims = len(second)
-    assert first_dims == second_dims, "Tensors must have same number of dimensions"
+    if first_dims != second_dims:
+        raise AssertionError(
+            f"Tensors must have same number of dimensions, got {first_dims} and "
+            f"{second_dims}"
+        )
     for dim in range(0, first_dims):
         if dim != dimension:
-            assert first[dim] == second[dim], (
-                "Sizes of tensors must match except in dimension"
-            )
+            if first[dim] != second[dim]:
+                raise AssertionError(
+                    f"Sizes of tensors must match except in dimension {dimension}, "
+                    f"got {first[dim]} and {second[dim]} at dimension {dim}"
+                )
 
 
 def cat(tensors: list[list[int]], dim: int):
     check_cat_no_zero_dim(tensors)
     dim = legacy_cat_wrap_dim(dim, tensors)
-    assert len(tensors) > 0
+    if len(tensors) <= 0:
+        raise AssertionError("Cannot concatenate empty list of tensors")
     not_skipped_tensor: Optional[list[int]] = None
     for tensor in tensors:
         if not should_skip(tensor):
@@ -580,10 +654,14 @@ def stack(tensors: list[list[int]], dim: int):
 
 def select(self: list[int], dim: int, index: int):
     ndim = len(self)
-    assert ndim != 0
+    if ndim == 0:
+        raise AssertionError("Cannot select from a 0-dimensional tensor")
     dim = maybe_wrap_dim(dim, ndim)
     size = self[dim]
-    assert not (index < -size or index >= size)
+    if index < -size or index >= size:
+        raise AssertionError(
+            f"Index {index} is out of bounds for dimension {dim} with size {size}"
+        )
     if index < 0:
         index += size
     out: list[int] = []
@@ -631,11 +709,14 @@ def matmul(tensor1: list[int], tensor2: list[int]):
 
         return output_shape
     else:
-        assert False, "both  arguments to matmul need to be at least 1D"
+        raise AssertionError("both arguments to matmul need to be at least 1D")
 
 
 def t(self: list[int]):
-    assert len(self) <= 2
+    if len(self) > 2:
+        raise AssertionError(
+            f"Expected tensor to have <= 2 dimensions, but got {len(self)}"
+        )
     self_len = len(self)
     if self_len == 0:
         out: list[int] = []
@@ -666,7 +747,10 @@ def transpose(self: list[int], dim0: int, dim1: int):
 def linear(input: list[int], weight: list[int], bias: Optional[list[int]]):
     out = matmul(input, t(weight))
     if bias is not None:
-        assert broadcast(bias, out) == out
+        if broadcast(bias, out) != out:
+            raise AssertionError(
+                f"Bias shape {bias} is not broadcastable to output shape {out}"
+            )
     return out
 
 
@@ -696,20 +780,43 @@ def check_shape_forward(
     weight_dim = len(weight_sizes)
 
     # TODO: assertions could be expanded with the error messages
-    assert not check_non_negative(padding)
-    assert not check_non_negative(stride)
+    if check_non_negative(padding):
+        raise AssertionError(f"Padding must be non-negative, got {padding}")
+    if check_non_negative(stride):
+        raise AssertionError(f"Stride must be non-negative, got {stride}")
 
-    assert weight_dim == k
-    assert weight_sizes[0] >= groups
-    assert (weight_sizes[0] % groups) == 0
+    if weight_dim != k:
+        raise AssertionError(f"Expected weight_dim ({weight_dim}) == k ({k})")
+    if weight_sizes[0] < groups:
+        raise AssertionError(
+            f"Expected weight_sizes[0] ({weight_sizes[0]}) >= groups ({groups})"
+        )
+    if (weight_sizes[0] % groups) != 0:
+        raise AssertionError(
+            f"Expected weight_sizes[0] ({weight_sizes[0]}) to be divisible by "
+            f"groups ({groups})"
+        )
     # only handling not transposed
-    assert input[1] == weight_sizes[1] * groups
-    assert bias is None or (len(bias) == 1 and bias[0] == weight_sizes[0])
+    if input[1] != weight_sizes[1] * groups:
+        raise AssertionError(
+            f"Expected input[1] ({input[1]}) == weight_sizes[1] * groups "
+            f"({weight_sizes[1] * groups})"
+        )
+    if bias is not None and not (len(bias) == 1 and bias[0] == weight_sizes[0]):
+        raise AssertionError(
+            f"Expected bias to be None or have shape [1] with value "
+            f"weight_sizes[0]={weight_sizes[0]}, got {bias}"
+        )
 
     for i in range(2, k):
-        assert (input[i] + 2 * padding[i - 2]) >= (
+        if (input[i] + 2 * padding[i - 2]) < (
             dilation[i - 2] * (weight_sizes[i] - 1) + 1
-        )
+        ):
+            raise AssertionError(
+                f"Calculated padded input size ({input[i] + 2 * padding[i - 2]}) "
+                f"is smaller than effective kernel size "
+                f"({dilation[i - 2] * (weight_sizes[i] - 1) + 1}) at dimension {i}"
+            )
 
     # this is not handling transposed convolution yet
 
@@ -753,8 +860,10 @@ def conv1d(
     dilation: list[int],
     groups: int,
 ):
-    assert len(weight) == 3
-    assert len(input) == 3
+    if len(weight) != 3:
+        raise AssertionError(f"Expected 3D weight for conv1d, got {len(weight)}D")
+    if len(input) != 3:
+        raise AssertionError(f"Expected 3D input for conv1d, got {len(input)}D")
     return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
 
@@ -767,8 +876,10 @@ def conv2d(
     dilation: list[int],
     groups: int,
 ):
-    assert len(weight) == 4
-    assert len(input) == 4
+    if len(weight) != 4:
+        raise AssertionError(f"Expected 4D weight for conv2d, got {len(weight)}D")
+    if len(input) != 4:
+        raise AssertionError(f"Expected 4D input for conv2d, got {len(input)}D")
     return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
 
@@ -918,18 +1029,26 @@ def conv3d(
     dilation: list[int],
     groups: int,
 ):
-    assert len(weight) == 5
-    assert len(input) == 5
+    if len(weight) != 5:
+        raise AssertionError(f"Expected 5D weight for conv3d, got {len(weight)}D")
+    if len(input) != 5:
+        raise AssertionError(f"Expected 5D input for conv3d, got {len(input)}D")
     return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
 
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
-        assert wrap_scalar
+        if not wrap_scalar:
+            raise AssertionError(
+                "Expected wrap_scalar to be True when dim_post_expr <= 0"
+            )
         dim_post_expr = 1
     min = -dim_post_expr
     max = dim_post_expr - 1
-    assert not (dim < min or dim > max)
+    if dim < min or dim > max:
+        raise AssertionError(
+            f"Dimension {dim} out of range (expected to be in range [{min}, {max}])"
+        )
     if dim < 0:
         dim += dim_post_expr
     return dim
@@ -948,31 +1067,44 @@ def multiply_integers(li: list[int]):
 
 
 def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
-    assert end >= 0
+    if end < 0:
+        raise AssertionError(f"Expected end ({end}) >= 0")
     return [int(math.ceil(end))]
 
 
 def arange_start(
     start: number, end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any
 ):
-    assert end >= 0
-    assert end >= start
+    if end < 0:
+        raise AssertionError(f"Expected end ({end}) >= 0")
+    if end < start:
+        raise AssertionError(f"Expected end ({end}) >= start ({start})")
     return [int(math.ceil(end - start))]
 
 
 def arange_start_step(
     start: number, end: number, step: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any
 ):
-    assert step != 0
+    if step == 0:
+        raise AssertionError("step must not be zero")
     if step < 0:
-        assert start >= end
+        if start < end:
+            raise AssertionError(
+                f"Expected start ({start}) >= end ({end}) when step < 0"
+            )
     else:
-        assert end >= start
+        if end < start:
+            raise AssertionError(
+                f"Expected end ({end}) >= start ({start}) when step > 0"
+            )
     return [int(math.ceil((end - start) / step))]
 
 
 def permute(input: list[int], dims: list[int]):
-    assert len(input) == len(dims)
+    if len(input) != len(dims):
+        raise AssertionError(
+            f"Expected len(input) ({len(input)}) == len(dims) ({len(dims)})"
+        )
     ndim = len(dims)
     seen_dims: list[int] = []
     newSizes: list[int] = []
@@ -982,7 +1114,10 @@ def permute(input: list[int], dims: list[int]):
         newSizes.append(input[dim])
     for i in range(1, ndim):
         for j in range(i):
-            assert seen_dims[i] != seen_dims[j]
+            if seen_dims[i] == seen_dims[j]:
+                raise AssertionError(
+                    f"Repeated dimension {seen_dims[i]} in permute dimensions"
+                )
     return newSizes
 
 
@@ -1022,7 +1157,8 @@ def movedim(self: list[int], source: list[int], destination: list[int]) -> list[
 def flatten(input: list[int], start_dim: int, end_dim: int):
     start_dim = maybe_wrap_dim(start_dim, len(input))
     end_dim = maybe_wrap_dim(end_dim, len(input))
-    assert start_dim <= end_dim
+    if start_dim > end_dim:
+        raise AssertionError(f"Expected start_dim ({start_dim}) <= end_dim ({end_dim})")
     if len(input) == 0:
         return [1]
     if start_dim == end_dim:
@@ -1074,10 +1210,18 @@ def argmax(
 
 
 def bmm(self: list[int], mat2: list[int]) -> list[int]:
-    assert len(self) == 3, "bmm only supports 3D tensors"
-    assert len(mat2) == 3, "bmm only supports 3D tensors"
-    assert self[0] == mat2[0], "mismatching batch dimension"
-    assert self[2] == mat2[1], "mismatching contracting dimension"
+    if len(self) != 3:
+        raise AssertionError(f"bmm only supports 3D tensors, got {len(self)}D")
+    if len(mat2) != 3:
+        raise AssertionError(f"bmm only supports 3D tensors, got {len(mat2)}D")
+    if self[0] != mat2[0]:
+        raise AssertionError(
+            f"mismatching batch dimension: self[0]={self[0]}, mat2[0]={mat2[0]}"
+        )
+    if self[2] != mat2[1]:
+        raise AssertionError(
+            f"mismatching contracting dimension: self[2]={self[2]}, mat2[1]={mat2[1]}"
+        )
     return [self[0], self[1], mat2[2]]
 
 
@@ -1089,9 +1233,10 @@ def topk(self: list[int], k: int, dim: int = -1) -> tuple[list[int], list[int]]:
     if len(self) == 0:
         result: list[int] = []
     else:
-        assert k <= self[dim], (
-            f"k ({k}) is too big for dimension {dim} of size {self[dim]}"
-        )
+        if k > self[dim]:
+            raise AssertionError(
+                f"k ({k}) is too big for dimension {dim} of size {self[dim]}"
+            )
         result = _copy(self)
         result[dim] = k
     return result, result
@@ -1103,13 +1248,22 @@ def nll_loss_forward(
     # This is taken shamelessly from the meta function in LossNLL.cpp
     self_dim = len(self)
     target_dim = len(target)
-    assert 0 < self_dim <= 2
-    assert target_dim <= 1
+    if not (0 < self_dim <= 2):
+        raise AssertionError(f"Expected 0 < self_dim <= 2, but got self_dim={self_dim}")
+    if target_dim > 1:
+        raise AssertionError(f"Expected target_dim <= 1, but got {target_dim}")
     no_batch_dim = self_dim == 1 and target_dim == 0
-    assert no_batch_dim or (self[0] == target[0])
+    if not (no_batch_dim or (self[0] == target[0])):
+        raise AssertionError(
+            f"Batch size mismatch: self[0]={self[0]}, target[0]={target[0]}"
+        )
     n_classes = self[-1]
     scalar_shape: list[int] = []
-    assert weight is None or (len(weight) == 1 and weight[0] == n_classes)
+    if weight is not None and not (len(weight) == 1 and weight[0] == n_classes):
+        raise AssertionError(
+            f"Expected weight to be None or have shape [n_classes], "
+            f"got {weight} with n_classes={n_classes}"
+        )
     if reduction == 0 and self_dim == 2:
         reduction_shape = [self[0]]
     else:
@@ -1122,7 +1276,11 @@ def native_layer_norm(
 ) -> tuple[list[int], list[int], list[int]]:
     reduction_shape: list[int] = []
     num_unreduced_dimensions = len(input) - len(normalized_shape)
-    assert num_unreduced_dimensions >= 0
+    if num_unreduced_dimensions < 0:
+        raise AssertionError(
+            f"Expected len(input) ({len(input)}) >= len(normalized_shape) "
+            f"({len(normalized_shape)})"
+        )
     for i in range(num_unreduced_dimensions):
         reduction_shape.append(input[i])
     for i in range(num_unreduced_dimensions, len(input)):

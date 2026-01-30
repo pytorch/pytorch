@@ -3659,9 +3659,12 @@ class DistributedTest:
                         ]
                         for rank_iter in group
                     ]
-                    assert self._run_all_gather_coalesced_and_verify(
+                    if not self._run_all_gather_coalesced_and_verify(
                         output_tensor_lists, input_tensors, expected_tensors, group_id
-                    ), "output tensors do not match expected outputs"
+                    ):
+                        raise AssertionError(
+                            "output tensors do not match expected outputs"
+                        )
 
             self._barrier()
 
@@ -3733,9 +3736,10 @@ class DistributedTest:
                 ]
                 for r in group
             ]
-            assert self._run_all_gather_coalesced_and_verify(
+            if not self._run_all_gather_coalesced_and_verify(
                 output_tensors_lists, input_tensors, expected_tensors, group_id
-            )
+            ):
+                raise AssertionError("output tensors do not match expected outputs")
             self._barrier()
 
         # AllToAll
@@ -5024,7 +5028,8 @@ class DistributedTest:
                 for n, param in net.named_parameters():
                     self.assertEqual(param.dtype, torch.float32)
                     if param.grad is None:
-                        assert n == "module.p"  # Only param that doesn't require grad
+                        if n != "module.p":  # Only param that doesn't require grad
+                            raise AssertionError(f"Expected n == 'module.p', got {n!r}")
                     else:
                         self.assertEqual(param.grad.dtype, torch.float32)
                         tensor_list = [
@@ -9398,7 +9403,8 @@ class DistributedTest:
                     x = self.fc2(F.relu(self.fc1(x)))
                     y = x.clone()
                     x = x.detach()
-                    assert not x.requires_grad
+                    if x.requires_grad:
+                        raise AssertionError("Expected x.requires_grad to be False")
                     return (x, y)
 
             model = MyModel().to(self.rank)
@@ -9833,7 +9839,8 @@ class DistributedTest:
                 torch.cuda.synchronize()
 
             run_iteration()
-            assert 0 == get_num_torch_recompiles()
+            if get_num_torch_recompiles() != 0:
+                raise AssertionError(f"Expected 0 torch recompiles, got {get_num_torch_recompiles()}")
 
             if new_pg:
                 # Now reduce world_size and run iteration.
@@ -9880,7 +9887,8 @@ class DistributedTest:
                 )
 
             # Validate no more recompiles.
-            assert 0 == get_num_torch_recompiles()
+            if get_num_torch_recompiles() != 0:
+                raise AssertionError(f"Expected 0 torch recompiles, got {get_num_torch_recompiles()}")
 
         @skip_if_lt_x_gpu(4)
         @require_world_size(4)
