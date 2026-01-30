@@ -351,6 +351,7 @@ test_python_smoke_b200() {
   install_cutlass_api
   time python test/run_test.py \
     --include \
+      test_fused_attention \
       test_matmul_cuda \
       test_scaled_matmul_cuda \
       inductor/test_fp8 \
