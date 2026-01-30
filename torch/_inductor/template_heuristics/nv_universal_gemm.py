@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+    get_nvmatmul_gpu_enum,
+)
 from torch._inductor.utils import ensure_nvmatmul_heuristics_available
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
@@ -305,10 +308,13 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # - flags=PERF_MODEL_BASED_AUTO_TUNING: Rank kernels using analytical
         #   performance model (faster than empirical profiling)
         # - load_discovery_implicitly=True: Auto-load kernel discovery sets on demand
+        # - gpu: Set to detected GPU for accurate performance predictions
+        gpu_enum = get_nvmatmul_gpu_enum()
         lh = nvMatmulHeuristics.NvMatmulHeuristicsInterfaceEx(
             backend=nvMatmulHeuristics.NvMatmulHeuristicsTarget.CUTLASS3,
             flags=nvMatmulHeuristics.NvMatmulHeuristicsFlags.PERF_MODEL_BASED_AUTO_TUNING,
             load_discovery_implicitly=True,
+            gpu=gpu_enum,
         )
 
         backend = lh.createBackend(nvMatmulHeuristics.NvMatmulHeuristicsTarget.CUTLASS3)
