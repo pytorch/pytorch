@@ -66,11 +66,13 @@ def get_1d_input_placements_for_tensor(t: torch.Tensor, include_partial: bool = 
         t: The tensor to get placements for
         include_partial: If True, include Partial placements for inputs.
             Only includes sum/avg (not min/max) since those compose well.
+            Skipped for scalars (0-dim) where all placements are equivalent.
     """
     placements = [Replicate()]
     for dim in range(t.ndim):
         placements.append(Shard(dim))
-    if include_partial:
+    # Skip Partial for scalars - all placements are equivalent to Replicate
+    if include_partial and t.ndim > 0:
         for reduce_op in PARTIAL_INPUT_REDUCE_OPS:
             placements.append(Partial(reduce_op))
     return placements
@@ -80,11 +82,27 @@ def get_1d_output_placements_for_tensor(t: torch.Tensor):
     """
     Get all possible 1-D mesh placements for an OUTPUT tensor.
     Outputs can be Replicate, Shard, or Partial.
+
+    For integer outputs, only P(min) and P(max) are included since
+    P(sum) and P(avg) don't make semantic sense for discrete values
+    like indices (and integer division causes false positives).
+
+    For scalars (0-dim), Partial is skipped since all placements are
+    equivalent to Replicate.
     """
     placements = [Replicate()]
     for dim in range(t.ndim):
         placements.append(Shard(dim))
+
+    # Skip Partial for scalars - all placements are equivalent to Replicate
+    if t.ndim == 0:
+        return placements
+
+    is_integer = not t.dtype.is_floating_point and not t.dtype.is_complex
     for reduce_op in PARTIAL_REDUCE_OPS:
+        # Skip sum/avg for integer outputs - semantically meaningless
+        if is_integer and reduce_op in ("sum", "avg"):
+            continue
         placements.append(Partial(reduce_op))
     return placements
 
