@@ -2187,7 +2187,7 @@ class GraphModule(torch.nn.Module):
 def forward(self, p_linear_weight, p_linear_bias, obj_lifted_custom_0, x):
     noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(x, obj_lifted_custom_0);  obj_lifted_custom_0 = noisy_inject = None
     linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
-    return (linear,)""",
+    return (linear,)""",  # noqa: B950
         )
 
 
