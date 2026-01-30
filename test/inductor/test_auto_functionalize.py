@@ -1792,6 +1792,8 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
         when passed to mutating custom ops. The fix_auto_functionalized_dtype_views
         pass detects dtype views that alias graph inputs and removes unnecessary
         clone operations.
+
+        Also tests negative cases where clones SHOULD be retained.
         """
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -1810,16 +1812,15 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             def mutate_inplace_meta(x, y):
                 pass
 
-            def f(cache_int32, data_float32):
-                # Create a dtype view: int32 -> float32 (shares storage, different dtype)
+            # Dtype view (int32 -> float32) - clone should be eliminated
+            def f_dtype_view(cache_int32, data_float32):
                 cache_float = cache_int32.view(torch.float32)
                 torch.ops.mylib.mutate_inplace(cache_float, data_float32)
                 return cache_int32
 
             cache = torch.zeros((10, 10), dtype=torch.int32)
             data = torch.randn((10, 10), dtype=torch.float32)
-
-            result_eager = f(cache.clone(), data)
+            result_eager = f_dtype_view(cache.clone(), data)
 
             for mode_name, mode_ctx in [
                 ("inference", torch.inference_mode()),
@@ -1828,18 +1829,49 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
                 with mode_ctx:
                     counters.clear()
                     torch._dynamo.reset()
-
-                    compiled_f = torch.compile(f, fullgraph=True, backend="inductor")
+                    compiled_f = torch.compile(
+                        f_dtype_view, fullgraph=True, backend="inductor"
+                    )
                     result = compiled_f(cache.clone(), data)
 
                     self.assertEqual(result.dtype, torch.int32)
                     self.assertTrue(torch.equal(result, result_eager))
-
-                    # Verify clone was eliminated (counter increments when optimization applied)
                     self.assertEqual(
-                        counters["inductor"]["fix_auto_functionalized_dtype_views"],
-                        1,
-                        f"fix_auto_functionalized_dtype_views should eliminate clone in {mode_name} mode",
+                        counters["inductor"]["fix_auto_functionalized_dtype_views"], 1
+                    )
+
+            # Negative cases (slice view, intermediate tensor) - clone should be retained
+            def f_slice(cache, data):
+                cache_slice = cache[0:10, 0:10]
+                torch.ops.mylib.mutate_inplace(cache_slice, data)
+                return cache
+
+            def f_intermediate(data):
+                temp = torch.zeros((10, 10), dtype=torch.int32)
+                torch.ops.mylib.mutate_inplace(temp.view(torch.float32), data)
+                return temp
+
+            for func, args in [
+                (
+                    f_slice,
+                    [
+                        torch.zeros((20, 20), dtype=torch.float32),
+                        torch.randn((10, 10), dtype=torch.float32),
+                    ],
+                ),
+                (f_intermediate, [torch.randn((10, 10), dtype=torch.float32)]),
+            ]:
+                result_eager_neg = func(*[a.clone() for a in args])
+
+                with torch.no_grad():
+                    counters.clear()
+                    torch._dynamo.reset()
+                    compiled_f = torch.compile(func, fullgraph=True, backend="inductor")
+                    result = compiled_f(*[a.clone() for a in args])
+
+                    self.assertTrue(torch.equal(result, result_eager_neg))
+                    self.assertEqual(
+                        counters["inductor"]["fix_auto_functionalized_dtype_views"], 0
                     )
 
 
