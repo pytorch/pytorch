@@ -31,6 +31,59 @@ log = logging.getLogger(__name__)
 from torch._inductor.pattern_matcher import stable_topological_sort
 
 
+def make_all_device_put_sync(gm: torch.fx.GraphModule) -> int:
+    """
+    Convert all non_blocking=True device_put operations to non_blocking=False.
+
+    Only performs the conversion if at least one non_blocking=True device_put
+    exists in the graph.
+
+    Returns:
+        The number of device_put operations converted to sync.
+    """
+    g = gm.graph
+    device_put_nodes = list(
+        g.find_nodes(op="call_function", target=torch.ops.prims.device_put.default)
+    )
+
+    # Check if any non_blocking=True device_put exists
+    has_async_device_put = False
+    for n in device_put_nodes:
+        opt_args_kwargs = normalize_function(
+            n.target,
+            args=n.args,
+            kwargs=n.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is not None:
+            _, kwargs = opt_args_kwargs
+            if kwargs.get("non_blocking", False):
+                has_async_device_put = True
+                break
+
+    if not has_async_device_put:
+        return 0
+
+    # Convert all non_blocking=True to non_blocking=False
+    count = 0
+    for n in device_put_nodes:
+        opt_args_kwargs = normalize_function(
+            n.target,
+            args=n.args,
+            kwargs=n.kwargs,
+            normalize_to_only_use_kwargs=True,
+        )
+        if opt_args_kwargs is not None:
+            _, kwargs = opt_args_kwargs
+            if kwargs.get("non_blocking", False):
+                kwargs["non_blocking"] = False
+                n.args = n.args[0], kwargs["device"], kwargs["non_blocking"]
+                n.kwargs = {}
+                count += 1
+
+    return count
+
+
 def estimate_runtime_analytical(n: torch.fx.Node) -> float:
     """Estimate runtime using analytical roofline model for mm operations."""
     if n.target != torch.ops.aten.mm.default:
@@ -334,6 +387,18 @@ class OverlapScheduler:
         self.max_off_bucket_bytes: int | None = (
             gb_to_bytes(max_off_bucket_gb) if max_off_bucket_gb is not None else None
         )
+
+        # Make all to(device) non_blocking=False,
+        # They can be implicitly depending by user logic on other to(device) non_blocking=True.
+        # OverlapScheduler can put reads of non_blocking device_put before blocking one.
+        # This results in dirty reads.
+        num_device_put_converted = make_all_device_put_sync(gm)
+        if num_device_put_converted > 0:
+            log.warning(
+                "overlap_scheduling converted %d device_put operations from "
+                "non_blocking=True to non_blocking=False. This may affect performance.",
+                num_device_put_converted,
+            )
 
         # Build and collapse fusion regions FIRST so all subsequent operations
         # work on the collapsed graph where fused ops are atomic units
@@ -1440,9 +1505,9 @@ class OverlapScheduler:
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
+            bucket_mode=self.bucket_mode,
             bucket_exposed_first=self.bucket_exposed_first,
             bucket_only_fsdp_groups=self.bucket_only_fsdp_groups,
-            bucket_mode=self.bucket_mode,
         )
         bucketer.bucket_collectives()
 

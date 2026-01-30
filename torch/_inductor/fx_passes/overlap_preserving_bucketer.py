@@ -23,6 +23,7 @@ from torch._inductor.fx_passes.overlap_scheduling import (
     CollectiveInfo,
     get_group_name,
     is_compute_node,
+    log as overlap_scheduling_log,
 )
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
@@ -139,11 +140,10 @@ class OverlapPreservingBucketer:
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         collective_bucketing: bool = True,
-        region_of: dict[fx.Node, Any] | None = None,
-        bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
-        bucket_only_fsdp_groups: bool = True,
         bucket_mode: BucketMode = "custom_ops_multidtype",
-        verbose: bool = True,
+        bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
+        region_of: dict[fx.Node, Any] | None = None,
+        bucket_only_fsdp_groups: bool = True,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -157,7 +157,6 @@ class OverlapPreservingBucketer:
         self.bucket_mode = bucket_mode
         self.collective_bucketing = collective_bucketing
         self.region_of: dict[fx.Node, Any] = region_of or {}
-        self.verbose = verbose
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
@@ -380,7 +379,7 @@ class OverlapPreservingBucketer:
         reference the final inlined nodes, not the erased fusion modules.
         """
         # Step 1: Bucket collectives
-        all_buckets: list[ColBucket] | None  = None
+        all_buckets: list[CollBucket] | None = None
         if self.collective_bucketing:
             all_buckets = self._bucket_collectives_impl()
 
@@ -400,7 +399,10 @@ class OverlapPreservingBucketer:
         self._apply_deps_and_effect_tokens()
         self.graph.lint()
 
-        if self.verbose and all_buckets is not None:
+        if (
+            overlap_scheduling_log.isEnabledFor(logging.DEBUG)
+            and all_buckets is not None
+        ):
             log_strs: list[str] = []
             stats_num_buckets_per_key = defaultdict(int)
             stats_num_bucketed_collectives_per_key = defaultdict(int)
@@ -445,7 +447,6 @@ class OverlapPreservingBucketer:
                 },
                 payload_fn=lambda: bucket_logs,
             )
-
 
     def _compute_overlap_ratio(self, node: fx.Node) -> float:
         """
@@ -1090,7 +1091,7 @@ def finalize_overlap_scheduling(
         max_coll_distance=max_coll_distance,
         insert_overlap_deps=insert_overlap_deps,
         collective_bucketing=collective_bucketing,
-        region_of=region_of,
         bucket_exposed_first=bucket_exposed_first,
+        region_of=region_of,
     )
     bucketer.bucket_collectives()

@@ -911,6 +911,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   cudaEventCacheEnabled_.store(getCvarBool(TORCH_NCCL_CUDA_EVENT_CACHE, true));
+  // NOTE: This default value (2000) is duplicated in FlightRecorder.hpp.
+  // Keep in sync. See FlightRecorder.hpp for details.
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
   enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
@@ -993,19 +995,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", SPLIT_COLOR: " << options_->split_color
             << ", PG Name: " << options_->group_name;
 
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
-            << "NCCL version: " << ncclVersion
-            << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
-            << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
-            << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
+  if (local_id_ == 0) {
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
+              << "NCCL version: " << ncclVersion
+              << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+              << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
+              << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
+              << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
-            << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
-            << shouldAllCommunicatorsRegisterAllTensors()
+              << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
+              << shouldAllCommunicatorsRegisterAllTensors()
 #endif // NCCL_HAS_COMM_REGISTER
-            << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
-            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
-            << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
+              << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << traceBufferSize_
+              << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
+              << ", TORCH_NCCL_CUDA_EVENT_CACHE: " << cudaEventCacheEnabled_;
+  }
 
   getGlobalRankStartAndStride(
       options_->global_ranks_in_group,
@@ -1050,12 +1054,14 @@ bool ProcessGroupNCCL::useNonblocking() {
     useNonblocking_ = nbEnv;
   }
   // 3rd priority: automatically use nonblocking if we are in eager init mode
-  // Note: this automatic selection is disabled in torch 2.7.1 to work around a
-  // hang in NCCL 2.26 in non-blocking mode. We can revisit if NCCL fixes the
-  // bug. See https://github.com/pytorch/pytorch/issues/153960
-  // else if (getBoundDeviceId()) {
-  //   useNonblocking_ = true;
-  // }
+  // Note: this automatic selection was once disabled in torch 2.7.1 to work
+  // around a hang in NCCL 2.26 in non-blocking mode. See
+  // https://github.com/pytorch/pytorch/issues/153960. The cause was NCCL
+  // requiring thread-exclusive access to the communicator. PR #170424 added
+  // that in torch 2.10.
+  else if (getBoundDeviceId()) {
+    useNonblocking_ = true;
+  }
   // 4th priority: otherwise, nonblocking = false to preserve old behavior
   else {
     useNonblocking_ = false;
@@ -1304,8 +1310,10 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   ncclOpts->split_from =
       c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(this);
   ncclOpts->global_ranks_in_group = std::move(globalRanksInGroup);
-  auto color = genNcclSplitColor(ranks);
-  ncclOpts->split_color = color;
+  // We use the lowest rank in the group as the split_color as each rank can
+  // only participate in one group.
+  // This value must be non-negative int32 and all ranks are.
+  ncclOpts->split_color = *std::min_element(ranks.cbegin(), ranks.cend());
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
@@ -1715,16 +1723,18 @@ ProcessGroupNCCL::HeartbeatMonitor::HeartbeatMonitor(ProcessGroupNCCL* pg) {
       getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true);
 
   // print out ENV settings for the heartbeat monitor thread.
-  LOG(INFO)
-      << pg_->logPrefix() << "HeartbeatMonitor environments: "
-      << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
-      << watchdogHeartbeatMonitorEnabled_
-      << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
-      << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
-      << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
-      << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-      << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
-      << logCppStackOnUncleanShutdown_;
+  if (pg_->getUid() == 0) {
+    LOG(INFO)
+        << pg_->logPrefix() << "HeartbeatMonitor environments: "
+        << "TORCH_NCCL_ENABLE_MONITORING (Whether to kill program when no watchdog heartbeat detected): "
+        << watchdogHeartbeatMonitorEnabled_
+        << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
+        << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: " << waitTimeoutDumpInMilSec_
+        << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
+        << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
+        << ", TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN: "
+        << logCppStackOnUncleanShutdown_;
+  }
 }
 
 void ProcessGroupNCCL::HeartbeatMonitor::stop() {
@@ -2046,10 +2056,12 @@ ProcessGroupNCCL::Watchdog::Watchdog(ProcessGroupNCCL* pg) {
       (pg_->dist_debug_level_ >= DebugLevel::Detail);
 
   // print out ENV settings for the watchdog thread.
-  LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
-            << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
-            << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
-            << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
+  if (pg_->getUid() == 0) {
+    LOG(INFO) << pg_->logPrefix() << "PGNCCL Watchdog environments: "
+              << "TORCH_NCCL_RETHROW_CUDA_ERRORS: " << rethrowCUDAErrors_
+              << ", TORCH_NCCL_PROPAGATE_ERROR: " << propagatePgError_
+              << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_;
+  }
 
   // Enable Desync Debugger per user setting
   if (desyncDebug_) {

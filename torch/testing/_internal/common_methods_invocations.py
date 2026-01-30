@@ -14630,6 +14630,8 @@ op_db: list[OpInfo] = [
                             }),
                             'TestCommon', device_type='cpu',
                         ),
+                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=4e-5, rtol=6e-6)}),
+                                     'TestConsistency', 'test_output_grad_match', device_type='mps'),
                     ], ),
     BinaryUfuncInfo('logaddexp',
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
@@ -15347,11 +15349,6 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_small_values',
                                      dtypes=(torch.int8,)),
-                        # NotImplementedError: The operator 'aten::gcd.out' is not currently implemented for the MPS device
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                     )),
     BinaryUfuncInfo('isclose',
                     ref=np.isclose,
@@ -15638,6 +15635,9 @@ op_db: list[OpInfo] = [
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.float32,)
                ),
+               # See https://github.com/pytorch/pytorch/issues/173525
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
+                            'TestConsistency', 'test_output_grad_match', device_type='mps'),
            )),
     OpInfo('native_batch_norm',
            aten_name='native_batch_norm',
@@ -16402,6 +16402,9 @@ op_db: list[OpInfo] = [
                    unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
                    device_type='mps', dtypes=(torch.float32,)
                ),
+               # See https://github.com/pytorch/pytorch/issues/173525
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=2e-5)}),
+                            'TestConsistency', 'test_output_grad_match', device_type='mps'),
            ],
            sample_inputs_func=sample_inputs_layer_norm,
            supports_expanded_weight=True,),
@@ -16563,6 +16566,8 @@ op_db: list[OpInfo] = [
                # RuntimeError: Failed to create function state object for: col2im_kernel_float2
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+               DecorateInfo(toleranceOverride({torch.float16: tol(atol=0.004, rtol=0.002)}),
+                            'TestConsistency', 'test_output_grad_match', device_type='mps'),
            )),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -16833,6 +16838,8 @@ op_db: list[OpInfo] = [
                 "test_comprehensive",
                 device_type="cuda"
             ),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=4e-5, rtol=0.013)}),
+                         'TestConsistency', 'test_output_grad_match', device_type='mps'),
         ),
         skips=(
             # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 4096
@@ -19076,6 +19083,8 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=3e-5, rtol=3e-6)}),
                    'TestConsistency', 'test_output_match', device_type='cpu',
                ),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=6e-5, rtol=3e-6)}),
+                            'TestConsistency', 'test_output_grad_match', device_type='mps'),
            ],
            skips=(
                # AssertionError: Scalars are not equal!
@@ -21678,6 +21687,8 @@ op_db: list[OpInfo] = [
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=3.1e-6)}),
+                                    'TestConsistency', 'test_output_grad_match', device_type='mps'),
                    ),
                    promotes_int_to_float=True),
     UnaryUfuncInfo('erf',
@@ -21776,7 +21787,10 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('lgamma',
                    ref=reference_lgamma if TEST_SCIPY else None,
                    aliases=('special.gammaln', ),
-                   decorators=(precisionOverride({torch.float16: 7e-1}),),
+                   decorators=(precisionOverride({torch.float16: 7e-1}),
+                               DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-4, rtol=4e-6)}),
+                                            'TestConsistency', 'test_output_grad_match', device_type='mps'),
+                               ),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
@@ -22104,7 +22118,10 @@ op_db: list[OpInfo] = [
             # Dispatches in Python to vector_norm. Not sure how to make this test happy
             # Happens to pass on complex64. Also a mystery
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
-                         dtypes=(torch.float32,)),)
+                         dtypes=(torch.float32,)),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=0.2, rtol=0.002)}),
+                         'TestConsistency', 'test_output_grad_match', device_type='mps'),
+        )
     ),
     OpInfo('norm',
            variant_test_name='nuc',
@@ -22428,6 +22445,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # Not a problem: embedding_bag does weird stuff to its input (it renormalizes)
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=0.006, rtol=0.047)}),
+                         'TestConsistency', 'test_output_grad_match', device_type='mps'),
         ),
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         supports_out=False,
@@ -25677,13 +25696,6 @@ python_ref_db = [
                          'TestBinaryUfuncs',
                          'test_reference_numerics_small_values',
                          dtypes=(torch.int8,)),
-            # NotImplementedError: The operator 'aten::gcd.out' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -25738,11 +25750,7 @@ python_ref_db = [
         torch_opinfo_name="lcm",
         skips=(
             # The operator 'aten::lcm.out' is not currently implemented for the MPS device.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
         ),
     ),
