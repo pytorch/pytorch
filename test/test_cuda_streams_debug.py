@@ -3,12 +3,14 @@
 import gc
 import sys
 import threading
+import unittest
 import warnings
 
 import torch
 import torch.nn.functional as F
 from torch.autograd import Function
 from torch.cuda import warn_on_null_stream_use
+from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     NoTest,
@@ -370,6 +372,25 @@ class TestCudaStreamsDebug(TestCase):
                     _warns(op, torch.cuda.Stream()),
                     f"{name} should not warn on non-NULL stream",
                 )
+
+    # TODO: This should work. Currently, the CUpti Python package doesn't compose
+    # with the CUpti C++ API. The profiler will fail to launch regardless if all the
+    # CUpti Python subscribers have already unsubscribed (and vice versa).
+    @unittest.expectedFailure
+    def test_profiler_subscriber_conflict(self):
+        # Dummy subscribe / unsubscribe to make the test below fail.
+        from cupti import cupti
+
+        cupti.unsubscribe(cupti.subscribe(lambda: None, None))
+
+        with profile(activities=[ProfilerActivity.CUDA]):
+            torch.randn(1, device="cuda")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"CUPTI subscriber already exists .*existing subscriber:",
+            ):
+                with warn_on_null_stream_use():
+                    torch.randn(1, device="cuda")
 
 
 class TestCudaStreamsDebugMultithreaded(TestCase):

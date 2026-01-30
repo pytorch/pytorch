@@ -26,6 +26,7 @@ from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
 from . import _device_limits, gds
+from ._debug_streams import warn_on_null_stream_use
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -36,7 +37,6 @@ from .graphs import (
 )
 from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
-from ._debug_streams import warn_on_null_stream_use
 
 
 try:

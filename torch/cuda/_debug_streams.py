@@ -330,13 +330,23 @@ def _get_mode_class():
         def _subscribe_cupti(cls):
             cupti = _get_cupti()
             assert cls._subscriber is None  # noqa: S101
+            params = cupti.SubscriberParams()
+            params.struct_size = cupti.SUBSCRIBER_PARAMS_SIZE
+            params.subscriber_name = "torch.cuda.warn_on_null_stream_use"
             try:
-                cls._subscriber = cupti.subscribe(_callback, None)
+                cls._subscriber = cupti.subscribe_v2(_callback, None, params.ptr)
             except cupti.cuptiError as e:
                 if "MULTIPLE_SUBSCRIBERS" in str(e):
+                    old_subscriber_name = None
+                    try:
+                        old_subscriber_name = params.old_subscriber_name
+                    except Exception:
+                        pass
                     raise RuntimeError(
-                        "CUPTI subscriber already exists. Only one CUPTI callback "
-                        "subscriber is allowed at a time. This can happen if:\n"
+                        "CUPTI subscriber already exists "
+                        f"(existing subscriber: {old_subscriber_name}). Only one "
+                        "CUPTI callback subscriber is allowed at a time. This can "
+                        "happen if:\n"
                         "  - A profiler (nsys, ncu, nvprof) is attached\n"
                         "  - PyTorch profiler is running\n"
                         "  - Another tool is using CUPTI callbacks"
