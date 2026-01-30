@@ -14,9 +14,6 @@ if not hasattr(torch._C, "_XpuStreamBase"):
     torch._C.__dict__["_XpuEventBase"] = _dummy_type("_XpuEventBase")
 
 
-__all__ = ["Stream", "Event"]
-
-
 class Stream(torch._C._XpuStreamBase):
     r"""Wrapper around a XPU stream.
 
