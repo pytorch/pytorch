@@ -789,8 +789,7 @@ class Optimizer:
                 break
         if key == "step":
             if capturable or fused:
-                # Use float64 for step tensor to match python scalar precision
-                return value.to(dtype=torch.float64, device=param.device)
+                return value.to(device=param.device)
             else:
                 return value
         else:
