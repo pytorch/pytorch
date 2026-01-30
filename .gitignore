@@ -301,7 +301,7 @@ cmake-build-debug
 #
 # Below files are not deleted by "setup.py clean".
 
-# Vendored CuTeDSL kernel templates
+# Vendored CuTeDSL kernel templates (generated kernels are ignored, tracked ones are kept)
 torch/_inductor/kernel/vendored_templates/cutedsl/kernels/*
 !torch/_inductor/kernel/vendored_templates/cutedsl/kernels/__init__.py
 !torch/_inductor/kernel/vendored_templates/cutedsl/kernels/dense_gemm_persistent.py
