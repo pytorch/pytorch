@@ -159,8 +159,12 @@ COPY ./common/requirements_tpu.txt requirements_tpu.txt
 COPY ./common/install_jax.sh install_jax.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
-RUN if [ -n "${TPU}" ]; then bash ./install_jax.sh tpu; \
-    elif [ -n "${PALLAS}" ]; then bash ./install_jax.sh ${CUDA_VERSION:-cpu}; fi
+RUN if [ -n "${TPU}" ]; then \
+      bash -c "source ./common_utils.sh && pip_install -r requirements_tpu.txt" && \
+      bash ./install_jax.sh tpu; \
+    elif [ -n "${PALLAS}" ]; then \
+      bash ./install_jax.sh ${CUDA_VERSION:-cpu}; \
+    fi
 RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
 
 ARG ONNX

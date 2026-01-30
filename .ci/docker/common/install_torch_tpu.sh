@@ -16,9 +16,10 @@ TORCH_TPU_REPO="${TORCH_TPU_REPO:-https://github.com/google-ml-infra/torch_tpu.g
 TORCH_TPU_BRANCH="${TORCH_TPU_BRANCH:-main}"
 
 # Pin File Configuration
-# Defaults to .txt as requested. Ensure .ci/ci_commit_pins/torch_tpu.txt exists in the repo.
-TORCH_TPU_TEXT_FILE="${TORCH_TPU_TEXT_FILE:-/ci_commit_pins/torch_tpu.txt}"
-TORCH_TPU_PINNED_COMMIT=$(get_pinned_commit ${TORCH_TPU_TEXT_FILE})
+TORCH_TPU_TEXT_FILE="${TORCH_TPU_TEXT_FILE:-/var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt}"
+if [ -f "${TORCH_TPU_TEXT_FILE}" ]; then
+    TORCH_TPU_PINNED_COMMIT=$(cat "${TORCH_TPU_TEXT_FILE}")
+fi
 
 # 3. Install Bazel (Root Step)
 # We install to /usr/local/bin so it is available to all users (root & jenkins)
@@ -34,8 +35,6 @@ bazel --version
 # 4. Preparation
 mkdir -p /var/lib/jenkins/torch_tpu
 chown -R jenkins /var/lib/jenkins/torch_tpu
-chgrp -R jenkins /var/lib/jenkins/torch_tpu
-
 pushd /var/lib/jenkins/
 
 # 5. Clone
@@ -47,14 +46,14 @@ if [ -n "${TORCH_TPU_PINNED_COMMIT}" ]; then
     echo "Checking out pinned commit: ${TORCH_TPU_PINNED_COMMIT}"
     as_jenkins git checkout "${TORCH_TPU_PINNED_COMMIT}"
 else
-    echo "No pinned commit found. Checking out branch: ${TORCH_TPU_BRANCH}"
+    echo "No pinned commit found at ${TORCH_TPU_TEXT_FILE}. Checking out branch: ${TORCH_TPU_BRANCH}"
     as_jenkins git checkout "${TORCH_TPU_BRANCH}"
 fi
 
 as_jenkins git submodule update --init --recursive
 
 # 7. JAX/LibTPU Dependencies (Runtime)
-SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ -f "${SCRIPT_DIR}/requirements_tpu.txt" ]; then
     pip_install -r "${SCRIPT_DIR}/requirements_tpu.txt"
 else
@@ -77,12 +76,12 @@ pip_install -r requirements/requirements.txt
 
 # 9. Build
 echo "Building TorchTPU Wheel..."
-export TORCH_SOURCE=$(python -c "import torch; import os; print(os.path.dirname(torch.__file__))")
+export TORCH_SOURCE=$(python -c "import torch; import os; print(os.path.dirname(os.path.dirname(torch.__file__)))")
 
-as_jenkins bazel build //ci/wheel:torch_tpu_wheel --define WHEEL_VERSION=0.1.0 --define TORCH_SOURCE=local
+as_jenkins env TORCH_SOURCE="${TORCH_SOURCE}" bazel build //ci/wheel:torch_tpu_wheel --config=local --define WHEEL_VERSION=0.1.0 --define TORCH_SOURCE=local
 
 # 10. Install
-pip_install bazel-bin/ci/wheel/dist/*.whl
+pip_install bazel-bin/ci/wheel/*.whl
 
 # 11. Cleanup
 popd # Back to /var/lib/jenkins
