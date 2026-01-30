@@ -303,6 +303,8 @@ cmake-build-debug
 
 # Vendored CuTeDSL kernel templates
 torch/_inductor/kernel/vendored_templates/cutedsl/kernels/*
+!torch/_inductor/kernel/vendored_templates/cutedsl/kernels/__init__.py
+!torch/_inductor/kernel/vendored_templates/cutedsl/kernels/dense_gemm_persistent.py
 
 # Downloaded bazel
 tools/bazel
