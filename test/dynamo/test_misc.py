@@ -14708,6 +14708,195 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(str(mod.fc.weight.device), "cpu")
 
 
+class CacheSizeWeakrefTests(torch._dynamo.test_case.TestCase):
+    """Tests for cache_size weakref comparison fix."""
+
+    def test_same_object_validation(self):
+        """Weakref comparison should compare actual objects, not containers."""
+        from torch._dynamo.cache_size import _has_same_id_matched_objs
+
+        class WeakRefableObject:
+            def __init__(self, value):
+                self.value = value
+
+        obj = WeakRefableObject("test")
+        ref1 = weakref.ref(obj)
+
+        mock_frame = mock.MagicMock()
+        mock_frame.f_locals = {"local_var": obj}
+
+        mock_cache_entry = mock.MagicMock()
+        mock_cache_entry.guard_manager.id_matched_objs = {"local_var": ref1}
+
+        result = _has_same_id_matched_objs(mock_frame, mock_cache_entry)
+        self.assertTrue(result)
+
+    def test_different_objects_detected(self):
+        """Different objects should not be considered equal."""
+        from torch._dynamo.cache_size import _has_same_id_matched_objs
+
+        class WeakRefableObject:
+            def __init__(self, value):
+                self.value = value
+
+        obj1 = WeakRefableObject("value1")
+        obj2 = WeakRefableObject("value2")
+        ref1 = weakref.ref(obj1)
+
+        mock_frame = mock.MagicMock()
+        mock_frame.f_locals = {"local_var": obj2}
+
+        mock_cache_entry = mock.MagicMock()
+        mock_cache_entry.guard_manager.id_matched_objs = {"local_var": ref1}
+
+        result = _has_same_id_matched_objs(mock_frame, mock_cache_entry)
+        self.assertFalse(result)
+
+    def test_dead_weakref_skipped(self):
+        """Dead weakrefs should be skipped in validation."""
+        from torch._dynamo.cache_size import _has_same_id_matched_objs
+
+        class WeakRefableObject:
+            def __init__(self, value):
+                self.value = value
+
+        obj = WeakRefableObject("test")
+        ref = weakref.ref(obj)
+        del obj
+        gc.collect()
+
+        self.assertIsNone(ref())
+
+        mock_frame = mock.MagicMock()
+        mock_frame.f_locals = {"local_var": WeakRefableObject("different")}
+
+        mock_cache_entry = mock.MagicMock()
+        mock_cache_entry.guard_manager.id_matched_objs = {"local_var": ref}
+
+        result = _has_same_id_matched_objs(mock_frame, mock_cache_entry)
+        self.assertTrue(result)
+
+    def test_different_weakref_containers_same_object(self):
+        """Different weakref containers pointing to same object should return True."""
+        from unittest.mock import patch
+
+        from torch._dynamo.cache_size import _has_same_id_matched_objs
+
+        class WeakRefableObject:
+            def __init__(self, value):
+                self.value = value
+
+        obj = WeakRefableObject("test")
+        ref_for_cache = weakref.ref(obj)
+        ref_for_frame = weakref.ref(obj, lambda r: None)  # Different container!
+
+        # Verify setup: different containers, same object
+        self.assertIsNot(ref_for_cache, ref_for_frame)
+        self.assertIs(ref_for_cache(), ref_for_frame())
+
+        mock_frame = mock.MagicMock()
+        mock_cache_entry = mock.MagicMock()
+        mock_cache_entry.guard_manager.id_matched_objs.items.return_value = [
+            ("local_var", ref_for_cache)
+        ]
+
+        with patch(
+            "torch._dynamo.cache_size._get_weakref_from_f_locals",
+            return_value=ref_for_frame,
+        ):
+            result = _has_same_id_matched_objs(mock_frame, mock_cache_entry)
+
+        # Should be True - same underlying object
+        self.assertTrue(result)
+
+
+class SideEffectsFalsyTests(torch._dynamo.test_case.TestCase):
+    """Tests for side_effects falsy value handling."""
+
+    def test_load_cell_with_falsy_zero(self):
+        """Cell containing integer 0 should be returned correctly."""
+        from torch._dynamo import variables
+        from torch._dynamo.side_effects import SideEffects
+        from torch._dynamo.variables.base import AttributeMutationExisting
+
+        mock_output = mock.MagicMock()
+        side_effects = SideEffects(mock_output)
+
+        zero_var = variables.ConstantVariable.create(0)
+        cell_var = variables.CellVariable(
+            mutation_type=AttributeMutationExisting(),
+            pre_existing_contents=zero_var,
+            source=LocalSource("test_cell"),
+        )
+
+        result = side_effects.load_cell(cell_var)
+        self.assertIs(result, zero_var)
+
+    def test_load_cell_with_falsy_false(self):
+        """Cell containing False should be returned correctly."""
+        from torch._dynamo import variables
+        from torch._dynamo.side_effects import SideEffects
+        from torch._dynamo.variables.base import AttributeMutationExisting
+
+        mock_output = mock.MagicMock()
+        side_effects = SideEffects(mock_output)
+
+        false_var = variables.ConstantVariable.create(False)
+        cell_var = variables.CellVariable(
+            mutation_type=AttributeMutationExisting(),
+            pre_existing_contents=false_var,
+            source=LocalSource("test_cell"),
+        )
+
+        result = side_effects.load_cell(cell_var)
+        self.assertIs(result, false_var)
+
+    def test_load_cell_with_falsy_empty_string(self):
+        """Cell containing empty string should be returned correctly."""
+        from torch._dynamo import variables
+        from torch._dynamo.side_effects import SideEffects
+        from torch._dynamo.variables.base import AttributeMutationExisting
+
+        mock_output = mock.MagicMock()
+        side_effects = SideEffects(mock_output)
+
+        empty_str_var = variables.ConstantVariable.create("")
+        cell_var = variables.CellVariable(
+            mutation_type=AttributeMutationExisting(),
+            pre_existing_contents=empty_str_var,
+            source=LocalSource("test_cell"),
+        )
+
+        result = side_effects.load_cell(cell_var)
+        self.assertIs(result, empty_str_var)
+
+    def test_ignore_mutations_logging(self):
+        """ignore_mutations_on should log when called."""
+        from torch._dynamo.side_effects import side_effects_log, SideEffects
+
+        mock_output = mock.MagicMock()
+        side_effects = SideEffects(mock_output)
+
+        mock_var = mock.MagicMock()
+
+        with patch.object(side_effects_log, "debug") as mock_debug:
+            side_effects.ignore_mutations_on(mock_var)
+            mock_debug.assert_called()
+
+    def test_stop_ignoring_mutations_logging(self):
+        """stop_ignoring_mutations_on should log when var wasn't being ignored."""
+        from torch._dynamo.side_effects import side_effects_log, SideEffects
+
+        mock_output = mock.MagicMock()
+        side_effects = SideEffects(mock_output)
+
+        mock_var = mock.MagicMock()
+
+        with patch.object(side_effects_log, "debug") as mock_debug:
+            side_effects.stop_ignoring_mutations_on(mock_var)
+            mock_debug.assert_called()
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
