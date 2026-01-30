@@ -214,6 +214,8 @@ static PyObject* THPStream_record_event(
     TORCH_CHECK(false, "parse record_event arg fails");
   }
   if (_event != Py_None) {
+    TORCH_CHECK(
+        THPEvent_Check(_event), "expected event to be a torch.Event object");
     // Increase the refcount of the event to avoid it being destroyed.
     Py_INCREF(_event);
     _new_event = _event;
