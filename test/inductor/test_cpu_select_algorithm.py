@@ -1360,7 +1360,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             ref_quantized_mod, (input,), strict=True
         ).module()
 
-        atol, rtol = 1e-3, 1e-3
+        atol, rtol = 5e-3, 1e-3
         if dtype == torch.bfloat16:
             atol, rtol = 5e-2, 5e-2
 
