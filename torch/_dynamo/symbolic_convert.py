@@ -561,7 +561,7 @@ def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
                 started = started or bool(instr.starts_line)
                 insts.append(instr.opname)
 
-        ops = insts[insts.index("END_FOR") + 1:]
+        ops = insts[insts.index("END_FOR") + 1 :]
         idx = 0
 
         pre_store_ops = []
