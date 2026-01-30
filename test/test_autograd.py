@@ -8309,6 +8309,7 @@ for shape in [(1,), ()]:
         self.assertEqual(y.grad_fn.saved_tensors, ())
         self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
+    @skipIfTorchDynamo("dynamo accesses saved_tensors multiple times")
     def test_clear_saved_tensors_on_access(self):
         class MyFn(Function):
             clear_saved_tensors_on_access = True
