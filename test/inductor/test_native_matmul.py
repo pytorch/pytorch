@@ -233,7 +233,7 @@ class TestTritonDotReduction(TestCase):
             z = torch.bmm(x, y)
             return z
 
-        B, M, K, N = 65537,16,16,16 
+        B, M, K, N = 65537, 16, 16, 16
         x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
         y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
 
