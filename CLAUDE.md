@@ -1,3 +1,12 @@
+# Environment
+
+Always ask for which python environment to use before running any build, test or lint.
+
+# Build
+
+Always ask for build configuration environment variables before running build.
+All build (both codegen, C++ and python) is done via `pip install -e . -v --no-build-isolation`.
+
 # Testing
 
 Use our test class and test runner:
@@ -16,9 +25,8 @@ To test Tensor equality, use assertEqual.
 
 # Linting
 
-Always use `spin lint` to check if lint passes and `spin fixlint` to auto-fix lint issues. Never use `lintrunner` directly.
-
-If `spin` is not found, ask the user if a particular environment needs to be enabled to find it.
+Only use commands provided via `spin` for linting.
+Use `spin help` to list available commands and use `spin lint` as to run the lint.
 
 # Commit messages
 
