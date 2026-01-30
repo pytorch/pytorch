@@ -235,8 +235,6 @@ def only_consist_of(
 def _make_inlined(
     tx: "InstructionTranslator", f: Callable[..., Any]
 ) -> Callable[..., VariableTracker]:
-    from .builder import SourcelessBuilder
-
     assert callable(f), "Expect f to be a python callable."
 
     def inline_call(
@@ -245,7 +243,7 @@ def _make_inlined(
         from torch._dynamo.trace_rules import _force_inline
 
         with _force_inline():
-            return SourcelessBuilder.create(tx, f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
+            return UserFunctionVariable(f).call_function(tx, args, kwargs)  # type: ignore[arg-type]
 
     return inline_call
 
