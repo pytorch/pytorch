@@ -22,13 +22,7 @@ This rubric guides labeling decisions for PT2 oncall triage.
 When component isn't clear from the issue body:
 
 1. **Check comments first** - often contains debugging info
-2. **If unclear, run repro with different backends:**
-   ```python
-   torch.compile(fn, backend="eager")      # baseline
-   torch.compile(fn, backend="aot_eager")  # AOT dispatch, no inductor
-   torch.compile(fn, backend="inductor")   # full compile
-   ```
-
+2. **Look for information with backends:**
 | Result | Label |
 |--------|-------|
 | Fails on `aot_eager`, not `eager` | `module: pt2-dispatcher` |
