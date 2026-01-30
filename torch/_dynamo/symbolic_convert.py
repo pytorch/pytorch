@@ -4556,7 +4556,7 @@ class InstructionTranslatorBase(
         elif matches("discarded"):
             result_var = None
             result_on_stack = False
-            scan_ip = scan_ip + 1 if post_store_op else scan_ip
+            scan_ip = scan_ip + 1 if patterns["discarded"]["post_store_op"] else scan_ip
         elif (
             matches("returned")
             or pre_store_ops == patterns["consumed"]["pre_store_ops"]
