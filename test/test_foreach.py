@@ -1128,6 +1128,29 @@ class TestForeach(TestCase):
             ),
         )
 
+    @ops(
+        [o for o in foreach_reduce_op_db if o.name == "_foreach_max"],
+    )
+    def test_foreach_max_empty_tensor_error(self, device, dtype, op):
+        """Test that _foreach_max errors on empty tensors"""
+        # Test with single empty tensor
+        empty_tensor = torch.empty(0, dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "max\\(\\): Expected reduction dim to be specified for input\\.numel\\(\\) == 0\\."
+            " Specify the reduction dim with the 'dim' argument\\.",
+        ):
+            torch._foreach_max([empty_tensor])
+
+        # Test with mixed empty and non-empty tensors
+        non_empty_tensor = make_tensor((4,), dtype=dtype, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "max\\(\\): Expected reduction dim to be specified for input\\.numel\\(\\) == 0\\."
+            " Specify the reduction dim with the 'dim' argument\\.",
+        ):
+            torch._foreach_max([empty_tensor, non_empty_tensor])
+
     @onlyCUDA
     @ops(
         foreach_unary_op_db
