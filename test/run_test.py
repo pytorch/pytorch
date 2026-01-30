@@ -960,6 +960,36 @@ def _test_autoload(test_directory, options, enable=True):
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
+def test_custom_backend_logging(test_module, test_directory, options):
+    mock_backend_dir = os.path.join(test_directory, "custom_backend/mock_backend/")
+    install_directory, return_code = install_cpp_extensions(mock_backend_dir)
+    if return_code != 0:
+        return return_code
+
+    cmd = [sys.executable, "test_log_registration.py"]
+    with extend_python_path([install_directory]):
+        env = os.environ.copy()
+        env["TORCH_LOGS"] = "+test_component,+test_artifact"
+        r, w = os.pipe()
+        with os.fdopen(w, "w", encoding="utf-8") as wfile:
+            return_code = shell(cmd, cwd=test_directory, env=env, stderr=wfile)
+
+        if return_code != 0:
+            return return_code
+
+        with os.fdopen(r, "r", encoding="utf-8") as rfile:
+            logs_outputs = rfile.read()
+
+        assert "custom backend component info log" in logs_outputs, (
+            "custom backend's component log should be captured"
+        )
+        assert "custom backend artifact info log" in logs_outputs, (
+            "custom backend's artifact log should be captured"
+        )
+
+        return return_code
+
+
 # test_openreg is designed to run all tests under torch_openreg, which
 # is an torch backend similar to CUDA or MPS and implemented by using
 # third-party accelerator integration mechanism. Therefore, if all the
@@ -1315,6 +1345,7 @@ CUSTOM_HANDLERS = {
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
     "test_openreg": test_openreg,
+    "test_custom_backend_logging": test_custom_backend_logging,
 }
 
 
