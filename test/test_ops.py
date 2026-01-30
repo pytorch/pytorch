@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     is_iterable_of_tensors,
     IS_SANDCASTLE,
+    MACOS_VERSION,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -78,6 +79,16 @@ from torch.testing._internal.inductor_utils import maybe_skip_size_asserts
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
+
+# If env var PYTORCH_TEST_OPS_ONLY_MPS is set, add 'mps' to the PYTORCH_TESTING_DEVICE_ONLY_FOR env var
+# so that only MPS tests (and any others in PYTORCH_TESTING_DEVICE_ONLY_FOR) are run.
+if os.getenv("PYTORCH_TEST_OPS_ONLY_MPS"):
+    key = "PYTORCH_TESTING_DEVICE_ONLY_FOR"
+    value = os.environ.get(key)
+    devices = value.split(",") if value else []
+    if "mps" not in devices:
+        devices.append("mps")
+        os.environ[key] = ",".join(devices)
 
 assert torch.get_default_dtype() == torch.float32
 
@@ -3024,7 +3035,9 @@ class TestForwardADWithScalars(TestCase):
                 )
 
 
-instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(
+    TestCommon, globals(), allow_xpu=True, allow_mps=MACOS_VERSION >= 15.0
+)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")

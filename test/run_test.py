@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     get_report_path,
     IS_CI,
     IS_MACOS,
-    MACOS_VERSION,
     retry_shell,
     set_cwd,
     shell,
@@ -1393,7 +1392,7 @@ def parse_args():
         "--mps",
         action="store_true",
         help=(
-            "If this flag is present, we will only run test_mps, test_metal, and test_ops"
+            "If this flag is present, we will only run subset of tests, such as test_mps, test_nn, ..."
         ),
     )
     parser.add_argument(
@@ -1682,8 +1681,9 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(CPP_TESTS)
 
     if options.mps:
+        os.environ["PYTORCH_TEST_OPS_ONLY_MPS"] = "1"
         selected_tests = [
-            *(["test_ops"] if MACOS_VERSION >= 15.0 else []),
+            "test_ops",
             "test_mps",
             "test_metal",
             "test_modules",
