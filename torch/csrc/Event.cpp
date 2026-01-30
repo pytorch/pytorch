@@ -48,7 +48,7 @@ static PyObject* THPEvent_pynew(
   self->weakreflist = nullptr;
 
   // TODO: blocking and interprocess are not supported yet. To support them, the
-  // flag system of c10::Event needs to be refactored. C10::Event should also
+  // flag system of c10::Event needs to be refactored. c10::Event should also
   // provide a generic constructor to support blocking and interprocess events.
   (void)blocking;
   (void)interprocess;
@@ -213,6 +213,8 @@ static PyObject* THPEvent_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPEvent*>(_self);
+  TORCH_CHECK(
+      THPEvent_Check(_other), "expected other to be a torch.Event object");
   auto other = reinterpret_cast<THPEvent*>(_other);
   return PyFloat_FromDouble(self->event.elapsedTime(other->event));
   END_HANDLE_TH_ERRORS
