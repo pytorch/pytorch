@@ -213,8 +213,10 @@ static PyObject* THPEvent_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPEvent*>(_self);
+  // We expect it to be an explicit torch.Event instance.
   TORCH_CHECK(
-      THPEvent_Check(_other), "expected other to be a torch.Event object");
+      Py_TYPE(_event) == THPEventClass,
+      "expected other to be a torch.Event object");
   auto other = reinterpret_cast<THPEvent*>(_other);
   return PyFloat_FromDouble(self->event.elapsedTime(other->event));
   END_HANDLE_TH_ERRORS
