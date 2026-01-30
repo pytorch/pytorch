@@ -2,6 +2,10 @@ name: Build Flash Attention 3 wheels
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/_binary-build-flash-attention-wheel-linux.yml
+      - .ci/flash-attention/*.sh
 
 permissions:
   id-token: write
