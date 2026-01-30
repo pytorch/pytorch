@@ -14,7 +14,6 @@ from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import OrderedSet
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_device_type import skipCUDAIf
-from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -166,7 +165,7 @@ def fn(accum, buf1, buf2):
 return tmp_0, tmp_2, D""",
         )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_disjoint_read_indexing(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -215,7 +214,7 @@ return tmp_0, tmp_2, D""",
 index strides [200, 60000, 1], and layout stride [60000, 200, 1]""",
             )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen_broadcasting(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -275,7 +274,7 @@ def fn(accum, buf1, buf2):
 return tmp_0, tmp_2, D""",
         )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_py_codegen(self):
         from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
@@ -331,7 +330,7 @@ def fn(accum, buf1, buf2):
 return tmp_1, D""",
         )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_example_tensor_creation(self):
         from torch._inductor.codegen.cutlass.lib_extensions.evt_extensions import (
@@ -496,9 +495,6 @@ def fn(accum, bias):
 """,
             )
 
-    @skipIfXpu(
-        msg="Sycl-tla generated code has blank line contains whitespace, which can not pass the linter."
-    )
     @skipCUDAIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(not try_import_cutlass(), "requires cutlass")
     def test_evt_codegen(self):
@@ -523,9 +519,9 @@ using TileShape_MNK = cute::Shape<_128, _128, _8>;
 
 using ElementC = float;
 using StrideC = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
-using TensorC = cutlass::epilogue::fusion::Sm90SrcFetch<float>;
+using TensorC = cutlass::epilogue::fusion::XeSrcFetch<float>;
 
-using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
+using Accum = cutlass::epilogue::fusion::XeAccFetch;
 
 using Aux = cutlass::epilogue::fusion::XeAuxLoad<
     float,
@@ -537,24 +533,24 @@ using Bias = cutlass::epilogue::fusion::XeColBroadcast<
     cute::Stride<cute::Int<1>, cute::Int<0>, cute::Int<0>>
 >;
 
-using Compute0 = cutlass::epilogue::fusion::Xe12Compute<
+using Compute0 = cutlass::epilogue::fusion::XeCompute<
     cutlass::plus, float, float,
     cutlass::FloatRoundStyle::round_to_nearest
 >;
 
-    using EVTCompute0 = cutlass::epilogue::fusion::Xe12EVT<
-        Compute0,
-        Accum,
+using EVTCompute0 = cutlass::epilogue::fusion::XeEVT<
+    Compute0,
+    Accum,
     TensorC>;
 
-using Compute1 = cutlass::epilogue::fusion::Xe12Compute<
+using Compute1 = cutlass::epilogue::fusion::XeCompute<
     cutlass::plus, float, float,
     cutlass::FloatRoundStyle::round_to_nearest
 >;
 
-    using EVTCompute1 = cutlass::epilogue::fusion::Xe12EVT<
-        Compute1,
-        EVTCompute0,
+using EVTCompute1 = cutlass::epilogue::fusion::XeEVT<
+    Compute1,
+    EVTCompute0,
     Aux>;
 
 using F = cutlass::epilogue::fusion::XeAuxStore<
@@ -562,40 +558,40 @@ using F = cutlass::epilogue::fusion::XeAuxStore<
     cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>
 >;
 
-    using EVTF = cutlass::epilogue::fusion::Xe12EVT<
-        F,
-        EVTCompute1>;
+using EVTF = cutlass::epilogue::fusion::XeEVT<
+    F,
+    EVTCompute1>;
 
-using Compute2 = cutlass::epilogue::fusion::Xe12Compute<
+using Compute2 = cutlass::epilogue::fusion::XeCompute<
     cutlass::epilogue::thread::ReLu, float, float,
     cutlass::FloatRoundStyle::round_to_nearest
 >;
 
-using Compute3 = cutlass::epilogue::fusion::Xe12Compute<
+using Compute3 = cutlass::epilogue::fusion::XeCompute<
     cutlass::plus, float, float,
     cutlass::FloatRoundStyle::round_to_nearest
 >;
 
-using Compute4 = cutlass::epilogue::fusion::Xe12Compute<
+using Compute4 = cutlass::epilogue::fusion::XeCompute<
     cutlass::plus, float, float,
     cutlass::FloatRoundStyle::round_to_nearest
 >;
 
-            using DagCompute4 = cutlass::epilogue::fusion::Xe12TopologicalVisitor<
-                float,
-                cute::tuple<
+using DagCompute4 = cutlass::epilogue::fusion::XeTopologicalVisitor<
+    float,
+    cute::tuple<
         cute::seq<>,
         cute::seq<>,
         cute::seq<0>,
         cute::seq<2, 1>,
         cute::seq<3, 0>
     >,
-                EVTF,
+    EVTF,
     Bias,
     Compute2,
     Compute3,
     Compute4
-            >;
+>;
 
 using ElementD = float;
 using StrideD = cute::Stride<int64_t, cute::Int<1>, cute::Int<0>>;
