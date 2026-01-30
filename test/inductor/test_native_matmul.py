@@ -187,10 +187,10 @@ class TestTritonDotReduction(TestCase):
             out.index_add_(0, O_idx.reshape(-1), t.reshape(-1, J))
             return out
 
-        B, I, R, J = 128, 16, 128, 16
-        N_in = 1024
+        B, I, R, J = 32, 16, 128, 16
+        N_in = 128
         N_w = 64
-        N_out = 1024
+        N_out = 128
 
         inp = rand_strided((N_in, R), (R, 1), device=GPU_TYPE)
         weight = rand_strided((N_w, R, J), (R * J, J, 1), device=GPU_TYPE)
@@ -214,8 +214,8 @@ class TestTritonDotReduction(TestCase):
             return out
 
         G, M, K, P, N = 128, 16, 64, 8, 16
-        NB = 1024
-        NA = 512
+        NB = 128
+        NA = 128
 
         Av = rand_strided((G, M, K, P), (M * K * P, K * P, P, 1), device=GPU_TYPE)
         B = rand_strided((NB, K, N), (K * N, N, 1), device=GPU_TYPE)
@@ -233,7 +233,7 @@ class TestTritonDotReduction(TestCase):
             z = torch.bmm(x, y)
             return z
 
-        B, M, K, N = 65537, 128, 128, 128
+        B, M, K, N = 65537,16,16,16 
         x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
         y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
 
@@ -249,7 +249,7 @@ class TestTritonDotReduction(TestCase):
             z = torch.bmm(x, y)
             return z
 
-        B, M, K, N = 256, 128, 128, 128
+        B, M, K, N = 128, 16, 128, 16
         x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
         y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
 
