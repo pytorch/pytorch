@@ -279,13 +279,15 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         p = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts.dtype(at::kByte));
     }
     else {
-        p = at::empty({ 0 }, opts.dtype(at::kByte));
+        p = at::empty({ 0, 0, 0, 0 }, opts.dtype(at::kByte));
     }
 
-
     uint64_t drop_seed = 1, drop_offset = 0;
+    at::Tensor seed_t, offset_t;
     int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
 
+
+    // rng_state is used to pass philox params to CK in a type it likes i.e. uint64
     auto rng_state_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
     auto rng_state = at::zeros({2}, rng_state_options.dtype(at::kUInt64));
     auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
@@ -300,20 +302,22 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         auto philox_args = gen->philox_cuda_state(counter_offset);
 
         std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
+        rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
+        rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
 
+    } else {
+        seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+        offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
-    rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
-    rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
-    auto drop_options = at::TensorOptions().dtype(at::kLong).device(at::kCUDA);
-
     std::optional<at::Tensor> attn_bias;
+    std::pair<uint64_t*, uint64_t*> drop_seed_offset;
     if( attn_bias_.has_value())
     {
       attn_bias = attn_bias_;
     }
     if (seqlen_k > 0) {
-        auto drop_seed_offset = std::make_pair(rng_state[0].data_ptr<uint64_t>(),
-                                               rng_state[1].data_ptr<uint64_t>());
+        drop_seed_offset.first = rng_state[0].data_ptr<uint64_t>();
+        drop_seed_offset.second = rng_state[1].data_ptr<uint64_t>();
         auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};
 
@@ -329,7 +333,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         auto args =
             get_ck_fmha_fwd_args(
                 has_lse,
-                has_dropout,
+                return_dropout_randval,
                 mask,
                 batch_size,
                 seqlen_q,
@@ -360,6 +364,23 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    return {out, q_padded, k_padded, v_padded, softmax_lse, rng_state, _unused, p};
+    // Before returning populate seed_t and offset_t if dropout is used
+    if(p_dropout > 0.0)
+    {
+        seed_t = at::scalar_tensor(at::Scalar(reinterpret_cast<uint64_t>(*(drop_seed_offset.first))),
+                                   at::dtype(at::kUInt64).device(at::kCUDA));
+        offset_t = at::scalar_tensor(at::Scalar(reinterpret_cast<uint64_t>(*(drop_seed_offset.second))),
+                                   at::dtype(at::kUInt64).device(at::kCUDA));
+    }
+    // Note: These are propagated up to the return of mha_fwd(). comments
+    //       represent the assignments at that level
+    return {out,            // output
+            q_padded,       // q_padded
+            k_padded,       // k_padded
+            v_padded,       // v_padded
+            softmax_lse,    // logsumexp
+            seed_t,         // philox_seed
+            offset_t,       // philox_offset
+            p};             // debug_attn_mask
 }
 } //namespace pytorch_flash
