@@ -14776,6 +14776,39 @@ class CacheSizeWeakrefTests(torch._dynamo.test_case.TestCase):
         result = _has_same_id_matched_objs(mock_frame, mock_cache_entry)
         self.assertTrue(result)
 
+    def test_different_weakref_containers_same_object(self):
+        """Different weakref containers pointing to same object should return True."""
+        from unittest.mock import patch
+
+        from torch._dynamo.cache_size import _has_same_id_matched_objs
+
+        class WeakRefableObject:
+            def __init__(self, value):
+                self.value = value
+
+        obj = WeakRefableObject("test")
+        ref_for_cache = weakref.ref(obj)
+        ref_for_frame = weakref.ref(obj, lambda r: None)  # Different container!
+
+        # Verify setup: different containers, same object
+        self.assertIsNot(ref_for_cache, ref_for_frame)
+        self.assertIs(ref_for_cache(), ref_for_frame())
+
+        mock_frame = mock.MagicMock()
+        mock_cache_entry = mock.MagicMock()
+        mock_cache_entry.guard_manager.id_matched_objs.items.return_value = [
+            ("local_var", ref_for_cache)
+        ]
+
+        with patch(
+            "torch._dynamo.cache_size._get_weakref_from_f_locals",
+            return_value=ref_for_frame,
+        ):
+            result = _has_same_id_matched_objs(mock_frame, mock_cache_entry)
+
+        # Should be True - same underlying object
+        self.assertTrue(result)
+
 
 class SideEffectsFalsyTests(torch._dynamo.test_case.TestCase):
     """Tests for side_effects falsy value handling."""
