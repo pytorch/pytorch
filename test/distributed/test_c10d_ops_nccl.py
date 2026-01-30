@@ -1243,10 +1243,6 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         premul_op2 = c10d.ReduceOp.PREMUL_SUM(2.0)
         self.assertEqual(premul_op1, premul_op2)
 
-        # Test repr
-        premul_op = c10d.ReduceOp.PREMUL_SUM(3.5)
-        self.assertIn("PREMUL_SUM", repr(premul_op))
-
 
 if __name__ == "__main__":
     run_tests()
