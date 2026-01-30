@@ -22,6 +22,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
     requires_gloo,
+    requires_nccl,
     skip_if_lt_x_gpu,
     with_dist_debug_levels,
 )
@@ -377,7 +378,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             ):
                 self._create_wrapper_pg()
 
-        @requires_accelerator_dist_backend(["nccl", "xccl"])
+        @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
         def test_wrapper_forwards_nccl_methods(self):
@@ -422,7 +423,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             tensor = backend.allocate_tensor(1024, dtype=torch.float32, device=device)
             self.assertEqual(tensor.shape, torch.Size([1024]))
 
-        @requires_nccl()
+        @requires_accelerator_dist_backend(["nccl", "xccl"])
         @skip_if_lt_x_gpu(2)
         @patch("torch.distributed.distributed_c10d._GLOO_AVAILABLE", False)
         def test_new_group_no_gloo(self):
