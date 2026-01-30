@@ -115,9 +115,9 @@ class DecompShardingStrategy:
         # decomposition tracing, avoiding potential SPMD divergence.
         #
         # Using a fake mesh could potentially cause false negatives/positives
-        # (in terms of valid sharding strategies). The size-1 mesh attempts to avoid
-        # false negatives from unevenness (all sizes % 1 == 0), while false positives
-        # are meant to be caught when expanding to to the real, multi-dim device mesh.
+        # (in terms of valid sharding strategies). The size-1 mesh should theoretically avoid
+        # all false negatives (e.g. no unevenness problems; all sizes % 1 == 0), while false
+        # positives are meant to be caught on expandsion to to the real, multi-dim device mesh.
         fake_mesh = DeviceMesh(mesh.device_type, [0], _init_backend=False, _rank=0)
         single_dim_strategies = []
         output_placements: list[Placement | tuple[Placement, ...]] = []
