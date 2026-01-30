@@ -188,7 +188,7 @@ def _get_flattened_mesh_by_layout(
 
     # Compute expected layout WITHOUT creating a submesh (avoids tracing issues)
     # _get_slice_mesh_layout does pure layout math, no tensor operations
-    sliced_layout = root_mesh._get_slice_mesh_layout(dim_names)
+    sliced_layout = mesh._get_slice_mesh_layout(dim_names)
     expected_layout = sliced_layout.coalesce()
     if len(expected_layout) > 1:
         expected_layout = expected_layout.nest()
