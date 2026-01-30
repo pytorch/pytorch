@@ -361,6 +361,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         from torch._inductor.fx_passes.decompose_functional_to_out import (
             decompose_functional_to_out,
         )
+
         GraphTransformObserver(gm, "decompose_functional_to_out").apply_graph_pass(
             decompose_functional_to_out
         )
