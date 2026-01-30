@@ -2315,7 +2315,11 @@ class SIMDScheduling(BaseScheduling):
 
         Returns a list of (src_code, kernel, node_group) tuples.
         """
+        from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
+
+        # This is currently the only type supported by this method
+        assert issubclass(self.kernel_type, TritonKernel)
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         node_schedule_map: dict[Any, NodeInfo] = {}
@@ -2376,6 +2380,7 @@ class SIMDScheduling(BaseScheduling):
             else:
                 # Multi-node: create ComboKernel with combo subkernels
                 kernel = ComboKernel(
+                    triton_kernel_cls=self.kernel_type,
                     enable_autotune=enable_autotune,
                     mixed_sizes=mixed_sizes,
                 )
@@ -2385,6 +2390,7 @@ class SIMDScheduling(BaseScheduling):
                         node_info.tiling,
                         features=node_info.features,
                         optimize_mask=not mixed_sizes,
+                        triton_kernel_cls=self.kernel_type,
                     )
                     self.process_kernel(
                         kernel.create_sub_kernel(subkernel),
@@ -2827,7 +2833,7 @@ class SIMDScheduling(BaseScheduling):
             # TODO: incorporate exact bitwidth, and read/write
             # coalesced write is 2x more important
             for i in range(len(splits)):
-                s = V.graph.sizevars.size_hint(splits[i], fallback=32)
+                s = V.graph.sizevars.optimization_hint(splits[i], fallback=32)
                 s = min(s, 8)
                 split_scores[i] = int(split_scores[i] * s / 8)
 
@@ -3176,7 +3182,7 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s, fallback=8192)
+        s = V.graph.sizevars.optimization_hint(s, fallback=8192)
         return s >= 32 and (s % 32 == 0)
 
 
