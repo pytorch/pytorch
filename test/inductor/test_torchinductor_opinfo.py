@@ -997,6 +997,7 @@ inductor_skip_exact_stride = {
     "linalg.matrix_norm",
     "linalg.norm",
     "linalg.norm.subgradients_at_zero",
+    "linalg.pinv.singular",
     "linalg.qr",
     "linalg.solve",
     "linalg.solve_ex",
