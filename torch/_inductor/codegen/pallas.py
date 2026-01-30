@@ -983,6 +983,9 @@ class PallasKernel(SIMDKernel):
         # Find which iteration variable(s) are used
         used_vars = self._get_used_iter_vars(index)
 
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_vars)
+
         if len(used_vars) == 0:
             # No iteration variables, this is a constant index
             return str(index)
@@ -1067,6 +1070,9 @@ class PallasKernel(SIMDKernel):
             raise Unsupported(
                 f"Pallas backend does not yet support mixed index pattern: {index}"
             )
+
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_vars)
 
         # Convert sympy expression to Python/JAX code string
         # The iteration variables are already defined as jnp.arange arrays
@@ -2085,6 +2091,9 @@ class PallasKernel(SIMDKernel):
         """
         used_iter_vars_set = self._get_used_iter_vars(index)
 
+        # Track which iteration variables are used
+        self.used_iter_vars.update(used_iter_vars_set)
+
         if len(used_iter_vars_set) == 0:
             return self.kexpr(index)
 
@@ -2897,6 +2906,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
                 if out_ptr in full_kernel_params:
                     code.writeline(store_line)
 
+        code.writeline("")
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
         # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
@@ -3339,6 +3349,7 @@ from torch._inductor.runtime.runtime_utils import pallas_partial_reduce, torch_d
                     code.writeline(f"    {', '.join(kernel_input_params)},")
                 code.writeline(")")
 
+        code.writeline("")
         main_name = f"{kernel_name}_main"
         code.writeline(
             f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
