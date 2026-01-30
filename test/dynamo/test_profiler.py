@@ -422,64 +422,6 @@ def forward(self, arg0_1):
         formatted_agg = format_inline_function_timings_aggregated(captured_timings)
         self.assertIn("Aggregated", formatted_agg)
 
-    def test_inline_function_timing_with_python_comparison(self):
-        """Test slowdown analysis comparing trace time to Python execution time."""
-        from torch._dynamo.utils import (
-            format_inline_timings_with_slowdown,
-            merge_python_timings_with_trace_timings,
-            PythonExecutionProfiler,
-        )
-        from torch._guards import TracingContext
-
-        def helper_fn(x):
-            return x * 2 + 1
-
-        def main_fn(x):
-            return helper_fn(x)
-
-        # Step 1: Profile Python execution
-        profiler = PythonExecutionProfiler()
-        x = torch.randn(10)
-        with profiler:
-            main_fn(x)
-        python_timings = profiler.get_timings()
-
-        # Should have captured timing for helper_fn and main_fn
-        self.assertGreater(len(python_timings), 0)
-
-        # Step 2: Compile and capture trace timings
-        trace_timings = []
-
-        def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_inline_function_timings()
-            if timings:
-                trace_timings.extend(timings)
-            return gm.forward
-
-        torch._dynamo.reset()
-
-        @torch.compile(backend=timing_backend)
-        def compiled_fn(x):
-            return main_fn(x)
-
-        compiled_fn(x)
-
-        # Step 3: Merge and verify
-        merged = merge_python_timings_with_trace_timings(trace_timings, python_timings)
-        self.assertEqual(len(merged), len(trace_timings))
-
-        # Verify some entries have python_time_ns populated
-        with_python_time = [t for t in merged if t.python_time_ns > 0]
-        self.assertGreater(len(with_python_time), 0)
-
-        # Verify slowdown ratio is computed
-        for t in with_python_time:
-            self.assertGreater(t.slowdown_ratio, 0)
-
-        # Verify formatting works
-        formatted = format_inline_timings_with_slowdown(merged)
-        self.assertIn("Slowdown", formatted)
-
     def test_generate_pstats_from_timings(self):
         """Test generating pstats-compatible output from trace timings."""
         import pstats

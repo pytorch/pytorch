@@ -901,9 +901,6 @@ class InlineFunctionTiming:
     caller_func_name: str | None = None
     caller_filename: str | None = None
     caller_firstlineno: int | None = None
-    # Optional: Python execution time for comparison (in nanoseconds)
-    python_time_ns: int = 0
-    python_call_count: int = 0
 
     # Backwards compatibility alias
     @property
@@ -923,17 +920,6 @@ class InlineFunctionTiming:
         return self.tottime_ns / 1e6
 
     @property
-    def python_time_ms(self) -> float:
-        return self.python_time_ns / 1e6
-
-    @property
-    def slowdown_ratio(self) -> float:
-        """Ratio of trace time to Python execution time. Higher = slower to trace."""
-        if self.python_time_ns > 0:
-            return self.cumtime_ns / self.python_time_ns
-        return 0.0
-
-    @property
     def caller_key(self) -> tuple[str, str, int] | None:
         """Return caller as a pstats-compatible key tuple."""
         if self.caller_func_name is not None:
@@ -950,13 +936,10 @@ class InlineFunctionTiming:
         return (self.filename, self.firstlineno, self.func_name)
 
     def __repr__(self) -> str:
-        ratio_str = (
-            f", slowdown={self.slowdown_ratio:.1f}x" if self.python_time_ns > 0 else ""
-        )
         return (
             f"InlineFunctionTiming({self.func_name} at {self.filename}:{self.firstlineno}, "
             f"cumtime={self.cumtime_ms:.2f}ms, tottime={self.tottime_ms:.2f}ms, "
-            f"bytecode={self.bytecode_count}, depth={self.inline_depth}{ratio_str})"
+            f"bytecode={self.bytecode_count}, depth={self.inline_depth})"
         )
 
 
