@@ -798,7 +798,7 @@ static void _wrap_outputs(
               node_name.compare(
                   node_name.size() - suffix.size(), suffix.size(), suffix) ==
                   0) {
-            node_name =node_name.substr(0, node_name.size() - suffix.size());
+            node_name = node_name.substr(0, node_name.size() - suffix.size());
           }
           TORCH_WARN_ONCE(
               "Autograd is calling zeros_like() on a DTensor to materialize "
