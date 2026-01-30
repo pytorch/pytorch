@@ -4852,8 +4852,51 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        tracer = cls.build_inline_tracer(parent, func, args, kwargs)
-        return tracer.inline_call_()
+        code = func.get_code()
+
+        # Get caller info from the timing stack before we push ourselves
+        caller_info = TracingContext.get_current_caller()
+
+        # Push ourselves onto the timing stack BEFORE building the tracer
+        # so that build_inline_tracer overhead is included in this function's time
+        trace_start_ns = time.time_ns()
+        TracingContext.push_inline_timing(
+            code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
+        )
+
+        tracer = None
+        trace_success = False
+        try:
+            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            result = tracer.inline_call_()
+            trace_success = True
+            return result
+        finally:
+            # Pop ourselves from the timing stack
+            stack_entry = TracingContext.pop_inline_timing()
+            trace_end_ns = time.time_ns()
+
+            # Record timing for successful traces
+            if trace_success and stack_entry is not None and tracer is not None:
+                cumtime_ns = trace_end_ns - trace_start_ns
+                tottime_ns = cumtime_ns - stack_entry.child_time_ns
+
+                timing = InlineFunctionTiming(
+                    func_name=code.co_name,
+                    filename=code.co_filename,
+                    firstlineno=code.co_firstlineno,
+                    cumtime_ns=cumtime_ns,
+                    tottime_ns=tottime_ns,
+                    bytecode_count=len(code.co_code),
+                    inline_depth=tracer.inline_depth,
+                    caller_func_name=caller_info[0] if caller_info else None,
+                    caller_filename=caller_info[1] if caller_info else None,
+                    caller_firstlineno=caller_info[2] if caller_info else None,
+                )
+                TracingContext.record_inline_function_timing(timing)
+
+                # Add our cumtime to the parent's child_time accumulator
+                TracingContext.add_child_time_to_parent(cumtime_ns)
 
     @staticmethod
     def check_inlineable(
@@ -5065,63 +5108,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if parent.strict_checks_fn:
             strict_ctx = self.strict_translation_mode(parent.strict_checks_fn)
 
-        # Get caller info from the timing stack before we push ourselves
-        caller_info = TracingContext.get_current_caller()
-
-        # Push ourselves onto the timing stack
-        trace_start_ns = time.time_ns()
-        TracingContext.push_inline_timing(
-            code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
-        )
-
-        trace_success = False
         try:
             with strict_ctx:
                 self.run()
-            trace_success = True
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
             log.debug(msg)
-            # bubble up the exception to the parent frame.
             raise
         except Unsupported as e:
-            # If this graph break has skip_frame set, unset it
-            # since it refers to the current frame and not the parent.
             e.skip_frame = False
             raise
         except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
         finally:
-            # Pop ourselves from the timing stack
-            stack_entry = TracingContext.pop_inline_timing()
-            trace_end_ns = time.time_ns()
-
-            # Record timing for successful traces
-            if trace_success and stack_entry is not None:
-                cumtime_ns = trace_end_ns - trace_start_ns
-                tottime_ns = cumtime_ns - stack_entry.child_time_ns
-
-                timing = InlineFunctionTiming(
-                    func_name=code.co_name,
-                    filename=code.co_filename,
-                    firstlineno=code.co_firstlineno,
-                    cumtime_ns=cumtime_ns,
-                    tottime_ns=tottime_ns,
-                    bytecode_count=len(code.co_code),
-                    inline_depth=self.inline_depth,
-                    caller_func_name=caller_info[0] if caller_info else None,
-                    caller_filename=caller_info[1] if caller_info else None,
-                    caller_firstlineno=caller_info[2] if caller_info else None,
-                )
-                TracingContext.record_inline_function_timing(timing)
-
-                # Add our cumtime to the parent's child_time accumulator
-                TracingContext.add_child_time_to_parent(cumtime_ns)
-
-            # Pass inlined tx's error_on_graph_break to parent.
-            # Deals with the case where the parent's error_on_graph_break is True
-            # while the inlined tx's error_on_graph_break was set to False.
             parent.error_on_graph_break = self.error_on_graph_break
             parent.is_child_tracer_active = False
 
