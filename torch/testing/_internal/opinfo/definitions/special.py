@@ -1079,6 +1079,22 @@ python_ref_db: list[OpInfo] = [
                 "test_reference_numerics_normal",
                 dtypes=(torch.bool,),
             ),
+            # Seems to fail on M2 but not M4:
+            # Exception: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip("Platform-specific error"),
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+            DecorateInfo(
+                unittest.skip("Platform-specific error"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
         ),
     ),
     #

@@ -8,13 +8,6 @@ from collections.abc import Callable
 from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
-from torch.utils._import_utils import import_dill
-
-
-dill = import_dill()
-if dill is not None:
-    pickle = dill  # noqa: F811
-
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
@@ -65,7 +58,6 @@ class Options:
     )
 
 
-# pyrefly: ignore [invalid-inheritance]
 class GraphPickler(pickle.Pickler):
     """
     GraphPickler is a Pickler which helps pickling fx graph - in particular
@@ -131,7 +123,6 @@ class GraphPickler(pickle.Pickler):
             return NotImplemented
 
     @override
-    # pyrefly: ignore [bad-override]
     def persistent_id(self, obj: object) -> Optional[str]:
         if obj is self._unpickle_state:
             return "unpickle_state"
@@ -358,14 +349,12 @@ class _UnpickleState:
 _UnpickleStateToken = NewType("_UnpickleStateToken", object)
 
 
-# pyrefly: ignore [invalid-inheritance]
 class _GraphUnpickler(pickle.Unpickler):
     def __init__(self, stream: io.BytesIO, unpickle_state: _UnpickleState) -> None:
         super().__init__(stream)
         self._unpickle_state = unpickle_state
 
     @override
-    # pyrefly: ignore [bad-override]
     def persistent_load(self, pid: object) -> object:
         if pid == "unpickle_state":
             return self._unpickle_state
