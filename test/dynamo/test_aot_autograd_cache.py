@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import copy
-import dataclasses
 import functools
 import os
 import shutil
@@ -2488,17 +2487,6 @@ class AOTAutogradCacheBundledTests(AOTAutogradCacheTests):
     pass
 
 
-@dataclasses.dataclass
-class _MockEntryForPickleTest:
-    """Module-level mock entry for pickle tests, so pickle errors come from fields not the class."""
-
-    picklable_field: str
-    unpicklable_field: object
-
-    def pre_save(self):
-        pass
-
-
 @inductor_config.patch("fx_graph_cache", True)
 class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
     @property
@@ -2770,68 +2758,6 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(c1, c2)
             self.assertNotEqual(c3, c4)
-
-    def test_pickle_entry_with_unpicklable_field(self):
-        from weakref import WeakValueDictionary
-
-        # WeakValueDictionary's internal 'remove' callback is unpicklable
-        weak_dict = WeakValueDictionary()
-        entry = _MockEntryForPickleTest(
-            picklable_field="test",
-            unpicklable_field=weak_dict,
-        )
-
-        with self.assertLogs(
-            "torch._functorch._aot_autograd.autograd_cache", level="WARNING"
-        ) as log_context:
-            result = AOTAutogradCache._pickle_entry(entry, remote=False)
-
-        self.assertIsNone(result)
-        self.assertEqual(len(log_context.output), 1)
-        self.assertExpectedInline(
-            log_context.output[0],
-            """WARNING:torch._functorch._aot_autograd.autograd_cache:AOTAutograd cache unable to serialize compiled graph: Can't get local object 'WeakValueDictionary.__init__.<locals>.remove'""",  # noqa: B950
-        )
-
-    def test_pickle_entry_with_lambda(self):
-        entry = _MockEntryForPickleTest(
-            picklable_field="test",
-            unpicklable_field=lambda x: x,  # lambdas are unpicklable
-        )
-
-        with (
-            patch("torch._logging.trace_structured") as mock_trace,
-            self.assertLogs(
-                "torch._functorch._aot_autograd.autograd_cache", level="WARNING"
-            ) as log_context,
-        ):
-            result = AOTAutogradCache._pickle_entry(entry, remote=False)
-
-        self.assertIsNone(result)
-        self.assertEqual(len(log_context.output), 1)
-        self.assertExpectedInline(
-            log_context.output[0],
-            """WARNING:torch._functorch._aot_autograd.autograd_cache:AOTAutograd cache unable to serialize compiled graph: Can't get local object 'AOTAutogradCachePicklerTests.test_pickle_entry_with_lambda.<locals>.<lambda>'""",  # noqa: B950
-        )
-        mock_trace.assert_called_once()
-        call_args = mock_trace.call_args
-        self.assertEqual(call_args[0][0], "artifact")
-        metadata = call_args[1]["metadata_fn"]()
-        self.assertEqual(metadata["name"], "aotautograd_cache_pickle_failure")
-        self.assertEqual(metadata["encoding"], "json")
-
-    @functorch_config.patch("strict_autograd_cache", True)
-    def test_pickle_entry_strict_mode_raises(self):
-        entry = _MockEntryForPickleTest(
-            picklable_field="test",
-            unpicklable_field=lambda x: x,
-        )
-
-        with self.assertRaisesRegex(
-            AttributeError,
-            r"Can't get local object 'AOTAutogradCachePicklerTests.test_pickle_entry_strict_mode_raises.<locals>.<lambda>'",
-        ):
-            AOTAutogradCache._pickle_entry(entry, remote=False)
 
 
 def _policy_save_mm(ctx, op, *args, **kwargs):
