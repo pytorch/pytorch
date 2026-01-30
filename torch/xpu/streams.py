@@ -154,7 +154,7 @@ class Event(torch._C._XpuEventBase):
         """
         return super().query()
 
-    def elapsed_time(self, end_event: torch.xpu.Event):
+    def elapsed_time(self, end_event: Event):
         r"""Return the time elapsed.
 
         Time reported in milliseconds after the event was recorded and
