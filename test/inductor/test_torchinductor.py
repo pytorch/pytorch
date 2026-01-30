@@ -536,7 +536,7 @@ def check_model(
     def to_dtype_preserve_strides(src, dtype):
         if any(s == 0 for s in src.stride()):
             return src.to(dtype)
-        # Preseve strides when casting.
+        # Preserve strides when casting.
         result = torch.empty_strided(
             src.size(), src.stride(), device=src.device, dtype=dtype
         )
