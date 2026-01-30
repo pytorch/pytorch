@@ -2591,9 +2591,10 @@ class GuardBuilder(GuardBuilderBase):
         if config.skip_nnmodule_hook_guards:
             # This is unsafe if you add/remove a hook on nn module variable
             log.debug(
-                f"Skipping NN module hooks guard for {guard.name}. This may cause silent "
-                f"incorrectness if hooks are added/removed between compilations. "
-                f"Set skip_nnmodule_hook_guards=False to guard on hooks."
+                "Skipping NN module hooks guard for %s. This may cause silent "
+                "incorrectness if hooks are added/removed between compilations. "
+                "Set skip_nnmodule_hook_guards=False to guard on hooks.",
+                guard.name,
             )
             return
         self.SEQUENCE_LENGTH(guard)
