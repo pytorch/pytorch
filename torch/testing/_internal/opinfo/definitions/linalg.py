@@ -32,7 +32,6 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
-    MACOS_VERSION,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
@@ -1297,15 +1296,6 @@ op_db: list[OpInfo] = [
                 "test_comprehensive",
                 device_type="cuda",
             ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=(torch.float32,),
-                active_if=lambda _: MACOS_VERSION < 15.0,
-            ),
         ),
     ),
     OpInfo(
@@ -2037,15 +2027,6 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 device_type="mps",
                 dtypes=(torch.complex64,),
-            ),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestCommon",
-                "test_out",
-                device_type="mps",
-                dtypes=(torch.float32,),
-                active_if=lambda _: MACOS_VERSION < 15.0,
             ),
         ),
     ),
