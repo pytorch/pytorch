@@ -330,6 +330,13 @@ OPS = [
     ("stream_sync", lambda: torch.cuda.current_stream().synchronize()),
 ]
 
+LEGACY_STREAM_OPS = {
+    "fft",
+    "fft2",
+    "ifft",
+    "rfft",
+}
+
 
 class TestCudaStreamsDebug(TestCase):
     def setUp(self):
@@ -353,10 +360,16 @@ class TestCudaStreamsDebug(TestCase):
     @parametrize("name,op", OPS)
     def test_non_null_stream_no_warn(self, name, op):
         with warn_on_null_stream_use():
-            self.assertFalse(
-                _warns(op, torch.cuda.Stream()),
-                f"{name} should not warn on non-NULL stream",
-            )
+            if name in LEGACY_STREAM_OPS:
+                self.assertTrue(
+                    _warns(op, torch.cuda.Stream()),
+                    f"{name} should warn on legacy stream",
+                )
+            else:
+                self.assertFalse(
+                    _warns(op, torch.cuda.Stream()),
+                    f"{name} should not warn on non-NULL stream",
+                )
 
 
 class TestCudaStreamsDebugMultithreaded(TestCase):
