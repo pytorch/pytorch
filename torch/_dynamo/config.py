@@ -427,6 +427,11 @@ use_recursive_dict_tags_for_guards = True
 # useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256
 
+# If True, profile guard evaluation latency during compilation. This is
+# expensive (~30ms) because it flushes CPU cache for accurate measurement.
+# Disable for faster compilation when guard latency metrics are not needed.
+profile_guard_latency = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 

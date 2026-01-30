@@ -1201,21 +1201,24 @@ class DisableContext(_TorchDynamoContext):
             f"A callable function is expected, but {type(fn)} is provided."
         )
 
+        # Pre-compute fn_name once at decoration time, not on every call.
+        # This avoids repeated getattr() calls (913+ times per compile).
+        fn_name = getattr(fn, "__name__", type(fn).__name__)
+        # Pre-compute whether this is __torch_dispatch__ to skip the export
+        # annotation path entirely for this common case.
+        is_torch_dispatch = fn_name == "__torch_dispatch__"
+
         def _fn(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
-                    fn_name = getattr(fn, "__name__", type(fn).__name__)
                     # Skip annotation for __torch_dispatch__ to avoid polluting
                     # node metadata during export. The disable on __torch_dispatch__
                     # is an internal implementation detail, not user-facing.
                     # TODO: Ideally we shouldn't need this check because nested
                     # annotate() calls shouldn't override existing keys.
-                    if (
-                        torch.compiler.is_exporting()
-                        and fn_name != "__torch_dispatch__"
-                    ):
+                    if not is_torch_dispatch and torch.compiler.is_exporting():
                         with fx_traceback.annotate(
                             {
                                 "_torchdynamo_disable": True,

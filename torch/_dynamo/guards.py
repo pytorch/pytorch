@@ -3925,24 +3925,26 @@ class CheckFunctionManager:
 
             # NB for developers: n_iters is chosen to be 1 to prevent excessive
             # increase in compile time. We first do a cache flush to measure the
-            # guard latency more accurately. This cache flush is expensive.
+            # guard latency more accurately. This cache flush is expensive
+            # (~30ms due to CPU cache eviction). Skip when not needed.
             # Note  - If you are working on a guard optimization, it might be a
             # good idea to increase this number for more stability during
             # development.
-            latency = profile_guard_manager(
-                self.guard_manager.root, output_graph.local_scope, 1
-            )
-            guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
-            # Note: We use `increment_toplevel` instead of `compilation_metric`
-            # here.  This is because, in scenarios where `torch._dynamo.reset`
-            # is invoked, the same frame ID and compile ID may be reused during
-            # a new compilation cycle.  This behavior causes issues with
-            # `compilation_metric`, as it expects the metric field to be empty.
-            # Ideally, we would overwrite the existing entry in such cases, but
-            # we currently lack an API to support overwriting metrics.  However,
-            # since these situations are rare and typically impractical to
-            # account for, we simply increment at the toplevel instead.
-            CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
+            if config.profile_guard_latency:
+                latency = profile_guard_manager(
+                    self.guard_manager.root, output_graph.local_scope, 1
+                )
+                guards_log.debug("Guard eval latency = %s us", f"{latency:.2f}")
+                # Note: We use `increment_toplevel` instead of `compilation_metric`
+                # here.  This is because, in scenarios where `torch._dynamo.reset`
+                # is invoked, the same frame ID and compile ID may be reused during
+                # a new compilation cycle.  This behavior causes issues with
+                # `compilation_metric`, as it expects the metric field to be empty.
+                # Ideally, we would overwrite the existing entry in such cases, but
+                # we currently lack an API to support overwriting metrics.  However,
+                # since these situations are rare and typically impractical to
+                # account for, we simply increment at the toplevel instead.
+                CompileEventLogger.increment_toplevel("guard_latency_us", int(latency))
 
         self.guards_state: Optional[bytes] = None
         if save_guards:
