@@ -162,13 +162,8 @@ def setup_fake_process_groups(
     """
     Set up fake process groups for repro execution.
 
-    This function initializes a fake distributed environment and registers all the
-    process groups with the correct names and sizes as they were during
-    the original graph capture.
-
     Args:
-        group_info: A dict mapping group_name -> {'size': group_size, 'rank': rank}
-                    Example: {'tp': {'size': 4, 'rank': 0}, 'dp': {'size': 2, 'rank': 0}}
+        group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
     """
     import torch.distributed as dist
     from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -176,14 +171,10 @@ def setup_fake_process_groups(
     if not group_info:
         return
 
-    # Calculate world_size as the maximum of all group sizes
-    # (a simplification that works for most common mesh configurations)
     world_size = max(info["size"] for info in group_info.values())
 
-    # Use the rank from the first group matching world_size
-    # In most cases, rank 0 is used for repro
     global_rank = 0
-    for _name, info in group_info.items():
+    for info in group_info.values():
         if info["size"] == world_size:
             global_rank = info["rank"]
             break
@@ -196,60 +187,29 @@ def setup_fake_process_groups(
         store=store,
     )
 
-    # Get the default process group
     default_pg = dist.distributed_c10d._get_default_group()
-
-    # Unregister all process groups first to avoid conflicts
     torch._C._distributed_c10d._unregister_all_process_groups()
 
-    # Register each group with its name
-    # For fake PG, we create subgroups of appropriate sizes
     for group_name, info in group_info.items():
         group_size = info["size"]
         if group_size == world_size:
-            # Use the default PG for groups matching world_size
+            # pyrefly: ignore[bad-argument-type]
             torch._C._distributed_c10d._register_process_group(group_name, default_pg)
         else:
-            # Create a new group with the appropriate size
             ranks = list(range(group_size))
             new_pg = dist.new_group(ranks)
+            # pyrefly: ignore[bad-argument-type]
             torch._C._distributed_c10d._register_process_group(group_name, new_pg)
 
 
 def generate_standalone_repro(
     gm: torch.fx.GraphModule,
-    args: "Sequence[Any]",
+    args: Sequence[Any],
     *,
     save_path: Optional[str] = None,
 ) -> str:
     """
-    Generate a self-contained Python script that reproduces an FX graph execution.
-
-    This function creates a standalone script that includes all imports, utility
-    functions, and the FX graph module definition. The script can be run directly
-    to reproduce the graph execution, including proper setup for distributed
-    operations if the graph contains collectives.
-
-    Args:
-        gm: The FX GraphModule to export
-        args: Example input arguments used for tracing
-        save_path: Optional path to save the repro script. If provided, the script
-                   will be written to this file.
-
-    Returns:
-        The generated Python script as a string.
-
-    Example:
-        >>> import torch
-        >>> from torch.fx.experimental.proxy_tensor import make_fx
-        >>> from torch._dynamo.repro.after_aot import generate_standalone_repro
-        >>>
-        >>> def f(x):
-        ...     return x * 2 + 1
-        >>>
-        >>> gm = make_fx(f)(torch.randn(4, 4))
-        >>> repro = generate_standalone_repro(gm, [torch.randn(4, 4)])
-        >>> # repro is a self-contained Python script string
+    Generate a self-contained repro script from an FX graph.
     """
     buf = io.StringIO()
     save_graph_repro(buf, gm, args, "inductor", save_dir=None)
