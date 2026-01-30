@@ -798,8 +798,7 @@ static void _wrap_outputs(
               node_name.compare(
                   node_name.size() - suffix.size(), suffix.size(), suffix) ==
                   0) {
-            node_name =
-                node_name.substr(0, node_name.size() - suffix.size());
+            node_name =node_name.substr(0, node_name.size() - suffix.size());
           }
           TORCH_WARN_ONCE(
               "Autograd is calling zeros_like() on a DTensor to materialize "
@@ -808,10 +807,12 @@ static void _wrap_outputs(
               "'. This preserves the DTensor type but may have performance "
               "implications. To avoid this:\n"
               "(1) In eager mode (i.e., the function name is not "
-              "'CompiledFunction' or 'ApplyTemplate'): One of the "
+              "'CompiledFunction'): One of the "
               "autograd.Function's outputs is unused. Call "
               "ctx.set_materialize_grads(False) in forward() and handle None "
-              "gradients in backward().\n"
+              "gradients in backward(). Note that if the function name "
+              "is ApplyTemplate, turn off torch.compile and rerun to see "
+              "the actual name.\n"
               "(2) In compile mode: One of the compiled region's outputs is "
               "unused. Call detach() on unused outputs that are returned from "
               "the compiled region, whether explicitly or implicitly (e.g., "
