@@ -72,6 +72,7 @@ from torch.testing._internal.common_utils import (
     skipIfMPS,
     skipIfRocm,
     skipIfRocmArch,
+    NAVI_ARCH,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -7535,6 +7536,7 @@ class AOTInductorTestsTemplate:
         aot_inductor_module = torch._inductor.aoti_load_package(package_path)
         self.assertEqual(aot_inductor_module(*example_inputs), model(*example_inputs))
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_copy_non_blocking_is_pinned(self):
         if self.device == "cpu" or self.device == "mps":
             raise unittest.SkipTest("only matters for device-to-cpu copy")
