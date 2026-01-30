@@ -1351,3 +1351,68 @@ def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
     - None if method is not a disable decorator
     """
     return getattr(method, "_torchdynamo_disable_recursive", None)
+
+
+@forbid_in_graph
+def cudagraph_exclude_sym_shape(
+    t: torch.Tensor, index: Union[int, list[int], tuple[int, ...]]
+) -> None:
+    """
+    Mark a tensor dimension's symbolic shape to be excluded from cudagraph partitions.
+
+    When compiling with dynamic shapes (cudagraph_skip_dynamic_graphs=False),
+    this API excludes the specified dimension's symbolic shape from being
+    included in cudagraph partitions. Nodes using this shape will be
+    partitioned out of cudagraph regions when graph_partition is enabled,
+    or cudagraphs will be disabled for the entire graph otherwise.
+
+    Only affects dimensions that become SymInts during dynamic compilation.
+    Has no effect on static/concrete dimensions.
+
+    This API must be called before torch.compile, not during tracing.
+
+    Args:
+        t: The tensor whose dimension should be excluded from cudagraphs
+        index: The dimension index (or list/tuple of indices) to exclude
+    """
+    if isinstance(index, int):
+        if not hasattr(t, "_cudagraph_excluded_sym_dims"):
+            t._cudagraph_excluded_sym_dims: set[int] = set()
+        t._cudagraph_excluded_sym_dims.add(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        cudagraph_exclude_sym_shape(t, i)
+
+
+@forbid_in_graph
+def cudagraph_include_sym_shape(
+    t: torch.Tensor, index: Union[int, list[int], tuple[int, ...]]
+) -> None:
+    """
+    Mark a tensor dimension's symbolic shape to be included in cudagraph partitions.
+
+    When cudagraph_skip_dynamic_graphs=True (which normally excludes all
+    dynamic shapes from cudagraphs), this API includes the specified
+    dimension's symbolic shape in cudagraph partitions.
+
+    Only affects dimensions that become SymInts during dynamic compilation.
+    Has no effect on static/concrete dimensions.
+
+    This API must be called before torch.compile, not during tracing.
+
+    Args:
+        t: The tensor whose dimension should be included in cudagraphs
+        index: The dimension index (or list/tuple of indices) to include
+    """
+    if isinstance(index, int):
+        if not hasattr(t, "_cudagraph_included_sym_dims"):
+            t._cudagraph_included_sym_dims: set[int] = set()
+        t._cudagraph_included_sym_dims.add(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        cudagraph_include_sym_shape(t, i)
+

@@ -1242,6 +1242,78 @@ if HAS_CUDA_AND_TRITON:
             # 1 partition since ops using unbacked symints are excluded from graph partitions
             self.assertEqual(num_partitions_overload, 1)
 
+        def test_cudagraph_sym_shape_apis_eager_noop(self):
+            """Test that the APIs are no-op in eager mode (don't crash)."""
+            x = torch.randn(8, 8, device="cuda")
+            # Should not raise
+            torch.compiler.cudagraph_exclude_sym_shape(x, 0)
+            torch.compiler.cudagraph_include_sym_shape(x, 1)
+
+            # Tensor should have the attributes set
+            self.assertIn(0, x._cudagraph_excluded_sym_dims)
+            self.assertIn(1, x._cudagraph_included_sym_dims)
+
+        @parametrize("graph_partition", [True, False])
+        @parametrize("dynamic", [True, False])
+        def test_cudagraph_exclude_sym_shape(self, graph_partition, dynamic):
+            """Test cudagraph_exclude_sym_shape with various configurations."""
+            with torch._inductor.config.patch("graph_partition", graph_partition):
+
+                def f(x):
+                    return x + 1
+
+                x = torch.randn(8, 8, device="cuda")
+                torch.compiler.cudagraph_exclude_sym_shape(x, 0)
+
+                f_compiled = torch.compile(f, mode="reduce-overhead", dynamic=dynamic)
+
+                scheduler_log_stream, scheduler_ctx = logs_to_string(
+                    "torch._inductor.scheduler", "cudagraphs"
+                )
+                with scheduler_ctx():
+                    result = f_compiled(x)
+
+                self.assertEqual(result.shape, x.shape)
+
+                if dynamic and graph_partition:
+                    # With dynamic shapes and partition enabled, should see excluded symint
+                    FileCheck().check("reason=uses cudagraph-excluded symint").run(
+                        scheduler_log_stream.getvalue()
+                    )
+                elif not dynamic:
+                    # Static shapes - no symints, so no exclusion message
+                    self.assertNotIn(
+                        "cudagraph-excluded", scheduler_log_stream.getvalue()
+                    )
+
+        @parametrize("graph_partition", [True, False])
+        def test_cudagraph_include_sym_shape(self, graph_partition):
+            """Test cudagraph_include_sym_shape with skip_dynamic_graphs=True."""
+            with torch._inductor.config.patch("graph_partition", graph_partition), \
+                 torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True):
+
+                def f(x):
+                    return x + 1
+
+                x = torch.randn(8, 8, device="cuda")
+                torch.compiler.cudagraph_include_sym_shape(x, 0)
+
+                f_compiled = torch.compile(f, mode="reduce-overhead", dynamic=True)
+
+                scheduler_log_stream, scheduler_ctx = logs_to_string(
+                    "torch._inductor.scheduler", "cudagraphs"
+                )
+                with scheduler_ctx():
+                    result = f_compiled(x)
+
+                self.assertEqual(result.shape, x.shape)
+
+                if graph_partition:
+                    # With partition enabled, included dims should NOT trigger "dynamic shape ops"
+                    self.assertNotIn(
+                        "reason=dynamic shape ops", scheduler_log_stream.getvalue()
+                    )
+
         @torch._inductor.config.patch("graph_partition", True)
         @torch._inductor.config.patch("implicit_fallbacks", True)
         def test_graph_partition_with_memory_plan_reuse(self):
