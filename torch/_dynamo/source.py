@@ -280,18 +280,47 @@ class CallFunctionNoArgsSource(WeakRefCallSource):
     pass
 
 
+# Cache for AttrSource interning - avoids creating duplicate objects for same (base, member)
+# Key is (base, original_member) before any dot-splitting
+_attr_source_cache: dict[tuple[Source, str], "AttrSource"] = {}
+
+
+def _clear_attr_source_cache() -> None:
+    """Clear the AttrSource cache. Called during dynamo reset."""
+    _attr_source_cache.clear()
+
+
 @dataclass_with_cached_hash(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 
+    def __new__(cls, base: Source, member: str, **kwargs: Any) -> "AttrSource":
+        # Only cache AttrSource itself, not subclasses
+        if cls is not AttrSource:
+            return object.__new__(cls)
+        key = (base, member)
+        cached = _attr_source_cache.get(key)
+        if cached is not None:
+            return cached
+        instance = object.__new__(cls)
+        return instance
+
     def __post_init__(self) -> None:
+        # Skip if already initialized (cache hit) - check for marker set at end of __post_init__
+        if getattr(self, "_attr_source_initialized", False):
+            return
         assert self.base, "Can't construct an AttrSource without a valid base source"
+        original_key = (self.base, self.member)
         if "." in self.member:
             member_parts = self.member.split(".")
             object.__setattr__(
                 self, "base", AttrSource(self.base, ".".join(member_parts[:-1]))
             )
             object.__setattr__(self, "member", member_parts[-1])
+        # Cache with original key and mark as initialized (only for AttrSource, not subclasses)
+        if type(self) is AttrSource:
+            _attr_source_cache[original_key] = self
+            object.__setattr__(self, "_attr_source_initialized", True)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
