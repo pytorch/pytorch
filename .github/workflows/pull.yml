@@ -149,18 +149,19 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.test-matrix }}
     secrets: inherit
-  linux-jammy-py3_10-gcc11-torchfuzz:
-    name: linux-jammy-py3.10-gcc11 / torchfuzz
+
+  linux-jammy-cuda12_8-py3_10-gcc11-torchfuzz:
+    name: linux-jammy-cuda12.8-py3.10-gcc11 / torchfuzz
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_10-gcc11-build
+      - linux-jammy-cuda12_8-py3_10-gcc11-inductor-build
       - target-determination
     with:
-      build-environment: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.docker-image }}
       test-matrix: |
         { include: [
-          { config: "torchfuzz", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "torchfuzz", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
       timeout-minutes: 30
     secrets: inherit

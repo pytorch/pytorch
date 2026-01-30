@@ -476,6 +476,10 @@ def run_multi_process_fuzzer(
     # Aggregate and print operation distribution
     _print_operation_distribution(results)
 
+    # Exit with non-zero code if there were failures (excluding ignored failures)
+    if failed:
+        sys.exit(1)
+
 
 def _print_operation_distribution(results: list[FuzzerResult]) -> None:
     """Helper function to print operation distribution statistics."""
