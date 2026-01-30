@@ -94,6 +94,9 @@ torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
+STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
+
+
 class LogCaptureHandler(logging.Handler):
     def __init__(self, level):
         super().__init__(level)
@@ -297,9 +300,11 @@ class TestFxGraphCache(TestCase):
             and not SM80OrLater
         ):
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_triton_launcher and not (device == "cuda" and bundle_triton):
+        if use_static_triton_launcher and not (
+            device in STATIC_LAUNCHER_DEVICES and bundle_triton
+        ):
             raise unittest.SkipTest(
-                "Static cuda launcher requires cuda and triton bundling"
+                "Static triton launcher requires cuda/xpu and triton bundling"
             )
         if use_static_triton_launcher and TEST_WITH_ROCM:
             raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
@@ -364,7 +369,7 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
+                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"], 0
@@ -412,11 +417,11 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
+                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
+                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
 
             self.reset()
@@ -460,11 +465,11 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier * 2 if device == "cuda" else 0,
+                        grad_multiplier * 2 if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
+                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
 
     @requires_triton()
@@ -486,7 +491,9 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_triton_launcher and not (device == "cuda" and bundle_triton):
+        if use_static_triton_launcher and not (
+            device in STATIC_LAUNCHER_DEVICES and bundle_triton
+        ):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
@@ -2842,6 +2849,44 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler(gm).dumps(
                 torch.fx.experimental._backward_state.BackwardState()
             )
+
+    def test_bypass_on_runtime_error(self):
+        """
+        Test that RuntimeError raised by pybind11 during pickling (e.g., from
+        OpOverload._op which is a C++ function pointer) is caught and converted
+        to BypassFxGraphCache.
+        """
+
+        class Pybind11LikeUnpickleableObject:
+            """An object that raises RuntimeError like pybind11 does when pickled."""
+
+            def __reduce__(self):
+                raise RuntimeError(
+                    "<pybind11_builtins.pybind11_object> is not pickleable."
+                )
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        with self.assertRaises(BypassFxGraphCache):
+            pickler.dumps(Pybind11LikeUnpickleableObject())
+
+    def test_non_pybind11_runtime_error_propagates(self):
+        """
+        Test that RuntimeErrors not matching pybind11 pickle pattern propagate up.
+        """
+
+        class OtherRuntimeErrorObject:
+            """An object that raises a non-pybind11 RuntimeError when pickled."""
+
+            def __reduce__(self):
+                raise RuntimeError("Some other runtime error")
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        with self.assertRaises(RuntimeError):
+            pickler.dumps(OtherRuntimeErrorObject())
 
     def test_stable_strings(self):
         """
