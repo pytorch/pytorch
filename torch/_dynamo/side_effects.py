@@ -165,11 +165,18 @@ class SideEffects:
         """Mutations to this variable will be executed but not not tracked,
         typically used for temporary mutations that are later restored."""
         self.ignore_mutation_on_these_variables.add(var)
+        side_effects_log.debug("Started ignoring mutations on %s", var)
 
     def stop_ignoring_mutations_on(self, var: VariableTracker) -> None:
         """Remove a variable from the skip mutation set, restoring normal mutation tracking."""
         if var in self.ignore_mutation_on_these_variables:
             self.ignore_mutation_on_these_variables.remove(var)
+            side_effects_log.debug("Stopped ignoring mutations on %s", var)
+        else:
+            side_effects_log.debug(
+                "Attempted to stop ignoring mutations on %s but it was not being ignored",
+                var,
+            )
 
     def _capture_user_stack(self, key: VariableTracker) -> None:
         """Capture the current user stack from the instruction translator."""
@@ -343,7 +350,7 @@ class SideEffects:
         assert isinstance(cellvar, variables.CellVariable)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
-        if cellvar.pre_existing_contents:
+        if cellvar.pre_existing_contents is not None:
             return cellvar.pre_existing_contents
         unimplemented(
             gb_type="Read uninitialized cell",
