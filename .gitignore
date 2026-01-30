@@ -127,7 +127,6 @@ torch/test/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
 torch/version.py
-torch/_inductor/kernel/vendored_templates/cutedsl/kernels/*
 test/inductor/test_tlx*
 minifier_launcher.py
 aten/src/ATen/native/transformers/hip/flash_attn/ck/fmha_fwd_d*
@@ -301,6 +300,9 @@ cmake-build-debug
 # BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)
 #
 # Below files are not deleted by "setup.py clean".
+
+# Vendored CuTeDSL kernel templates
+torch/_inductor/kernel/vendored_templates/cutedsl/kernels/*
 
 # Downloaded bazel
 tools/bazel
