@@ -92,6 +92,7 @@ from .constant import (
     CONSTANT_VARIABLE_TRUE,
     ConstantVariable,
 )
+from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -1638,7 +1639,16 @@ def invoke_and_store_as_constant(
     def convert(x: VariableTracker) -> Any:
         if x.is_tensor():
             return cast("TensorVariable", x).get_real_value()
-        return x.as_python_constant()
+        if isinstance(x, UserDefinedObjectVariable):
+            if x.source is not None:
+                install_guard(x.make_guard(GuardBuilder.ID_MATCH))
+            return x.value
+        try:
+            return x.as_python_constant()
+        except AsPythonConstantNotImplementedError:
+            unimplemented(
+                f"assume_constant_result: cannot convert arguments to Python constants for {name}"
+            )
 
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}
