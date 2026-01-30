@@ -129,8 +129,8 @@ class PersistentDenseGemmKernel:
         mma_tiler_mn: Tuple[int, int],
         cluster_shape_mn: Tuple[int, int],
         use_tma_store: bool,
-        swizzle_size: int = 1,
-        raster_along_m: bool = True,
+        swizzle_factor: int = 1,
+        cta_order: int = 0,
     ):
         """Initializes the configuration for a Blackwell dense GEMM kernel.
 
@@ -167,8 +167,8 @@ class PersistentDenseGemmKernel:
         self.mma_tiler_mn = mma_tiler_mn
         self.mma_tiler = (*mma_tiler_mn, 1)
         self.use_tma_store = use_tma_store
-        self.swizzle_size = swizzle_size
-        self.raster_along_m = raster_along_m
+        self.swizzle_factor = swizzle_factor
+        self.cta_order = cta_order
 
         self.cta_group = (
             tcgen05.CtaGroup.TWO if use_2cta_instrs else tcgen05.CtaGroup.ONE
@@ -1275,8 +1275,8 @@ class PersistentDenseGemmKernel:
         tile_sched_params = utils.PersistentTileSchedulerParams(
             num_ctas_mnl,
             cluster_shape_mnl,
-            raster_along_m=self.raster_along_m,
-            swizzle_size=self.swizzle_size,
+            raster_along_m=(self.cta_order == 0),
+            swizzle_size=self.swizzle_factor,
         )
         grid = utils.StaticPersistentTileScheduler.get_grid_shape(
             tile_sched_params, max_active_clusters
