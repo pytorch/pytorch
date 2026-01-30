@@ -93,8 +93,8 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
           { config: "libtorch_agnostic_targetting", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-        ]}
+            { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          ]}
     secrets: inherit
 
   linux-jammy-py3_10-gcc11-test:
@@ -148,6 +148,22 @@ jobs:
       build-environment: linux-jammy-py3.14t-clang15
       docker-image: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_14t-clang15-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-cuda12_8-py3_10-gcc11-torchfuzz:
+    name: linux-jammy-cuda12.8-py3.10-gcc11 / torchfuzz
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda12_8-py3_10-gcc11-inductor-build
+      - target-determination
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "torchfuzz", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+      timeout-minutes: 30
     secrets: inherit
 
   linux-docs:
