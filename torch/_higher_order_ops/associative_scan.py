@@ -37,9 +37,10 @@ aten = torch._ops.ops.aten
 
 
 def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
-    assert len(args) == 2 * num_leaves, (
-        f"Combin_fn received wrong number of arguments, expected {2 * num_leaves}, but got {len(args)}"
-    )
+    if len(args) != 2 * num_leaves:
+        raise AssertionError(
+            f"Combine_fn received wrong number of arguments, expected {2 * num_leaves}, but got {len(args)}"
+        )
     lhs = pytree.tree_unflatten(args[:num_leaves], spec)
     rhs = pytree.tree_unflatten(args[num_leaves:], spec)
     return combine_fn(lhs, rhs)
@@ -86,9 +87,10 @@ class AssociativeScanOp(HigherOrderOperator):
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
         # and the tuple cast should be removed
-        assert isinstance(additional_inputs, (tuple, list)), (
-            "additional_inputs must be a tuple."
-        )
+        if not isinstance(additional_inputs, (tuple, list)):
+            raise AssertionError(
+                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
+            )
         additional_inputs = (
             tuple(additional_inputs)
             if isinstance(additional_inputs, list)
@@ -423,15 +425,21 @@ def trace_associative_scan(
     outputs = None
     for node in combine_graph.graph.nodes:
         if node.op == "output":
-            assert outputs is None
-            assert len(node.args) == 1
+            if outputs is not None:
+                raise AssertionError("found multiple output nodes in combine_graph")
+            if len(node.args) != 1:
+                raise AssertionError(
+                    f"expected output node to have 1 arg, got {len(node.args)}"
+                )
             outputs = node.args[0]
 
-    assert outputs is not None
+    if outputs is None:
+        raise AssertionError("no output node found in combine_graph")
     outputs = pytree.tree_leaves(outputs)
-    assert len(outputs) == len(xs), (
-        f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
-    )
+    if len(outputs) != len(xs):
+        raise AssertionError(
+            f"expected combine_fn to return {len(xs)} results but got {len(outputs)}"
+        )
 
     xs_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
         first_slice_copy(x) for x in xs

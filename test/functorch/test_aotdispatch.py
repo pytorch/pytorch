@@ -5084,17 +5084,17 @@ class <lambda>(torch.nn.Module):
 
             body_graph_0 = self.body_graph_0
             map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
-            getitem_2: "f32[2, 2]" = map_impl[0];  map_impl = None
+            getitem: "f32[2, 2]" = map_impl[0];  map_impl = None
 
-            sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+            sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
 
             add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
 
             body_graph_1 = self.body_graph_1
             map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
-            getitem_5: "f32[2, 2]" = map_impl_1[0];  map_impl_1 = None
+            getitem_1: "f32[2, 2]" = map_impl_1[0];  map_impl_1 = None
 
-            sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_5);  getitem_5 = None
+            sum_2: "f32[]" = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
 
             add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
             return (add_1,)
@@ -5149,9 +5149,9 @@ class <lambda>(torch.nn.Module):
 
         body_graph_0 = self.body_graph_0
         map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
-        getitem_2: "f32[2, 2]" = map_impl[0];  map_impl = None
+        getitem: "f32[2, 2]" = map_impl[0];  map_impl = None
 
-        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem_2);  getitem_2 = None
+        sum_1: "f32[]" = torch.ops.aten.sum.default(getitem);  getitem = None
         add: "f32[2, 2]" = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
         return (
             add,  # PlainAOTOutput(idx=0)
@@ -8316,6 +8316,14 @@ aot_autograd_failures = {
         # This delta is coming entirely from the clone() on tangents
         # in AOTDispatcher to make them contiguous
         decorator=toleranceOverride({torch.float32: tol(atol=1e-02, rtol=1e-02)}),
+    ),
+    decorate(
+        "cholesky_inverse",
+        # Numerical differences due to tangent stride differences between
+        # eager (.sum().backward() uses contiguous tangent) and compiled
+        # (tangent strides match output strides). With ill-conditioned inputs,
+        # matmul accumulates rounding errors differently for different layouts.
+        decorator=toleranceOverride({torch.float32: tol(atol=3e02, rtol=2e-03)}),
     ),
     decorate(
         "nn.functional.interpolate",
