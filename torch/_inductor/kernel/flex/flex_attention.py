@@ -893,7 +893,9 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        USE_TMA_DEFAULT = bool(torch.xpu.is_available())
+        # Temporarily enable TMA for CI testing on CUDA
+        USE_TMA_DEFAULT = bool(torch.xpu.is_available() or torch.cuda.is_available())
+        # USE_TMA_DEFAULT = bool(torch.xpu.is_available())
         # The shape dtype of tensor desc is i32
         if V.graph.sizevars.statically_known_true(
             seq_len_q > 2**31 - 1
