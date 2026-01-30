@@ -1167,7 +1167,10 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
     // max_values_per_thread
     config.ctas_per_output = std::max(std::min<int>(ctas_per_output1, ctas_per_output2), ctas_per_output3);
     if (config.ctas_per_output > 1) {
+#ifdef USE_ROCM
+      // Set min ctas value as 64. Having more reductions (i.e less values_per_thread) seems to improve perf.
       config.ctas_per_output = std::max(config.ctas_per_output, 64);
+#endif
       config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
   }
