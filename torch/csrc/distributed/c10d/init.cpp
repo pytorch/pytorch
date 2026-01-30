@@ -3264,9 +3264,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_property_readonly(
               "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg)
           .def_property_readonly(
-              "options",
-              &::c10d::ProcessGroupWrapper::getBackendOptions,
-              py::call_guard<py::gil_scoped_release>())
+              "options", &::c10d::ProcessGroupWrapper::getBackendOptions)
           .def(
               "get_error",
               &::c10d::ProcessGroupWrapper::getError,
