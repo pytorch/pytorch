@@ -2,11 +2,6 @@ name: Build Flash Attention 3 wheels
 
 on:
   workflow_dispatch:
-  # TODO: Remove this trigger before merging - only for testing from PR branch
-  pull_request:
-    paths:
-      - .github/workflows/build-flash-attention-wheel.yml
-      - .ci/flash-attention/*.sh
 
 permissions:
   id-token: write
