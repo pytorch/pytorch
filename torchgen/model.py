@@ -1065,7 +1065,7 @@ class NativeFunction:
                 )
                 # Backwards of dropout is typically deterministic
                 and "backward" not in str(self.func.name)
-                and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]
+                and str(self.func.name.name) != "_cudnn_init_dropout_state"
             )
             or self.func.arguments.has_generator_arg()
         ):

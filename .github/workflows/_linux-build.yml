@@ -359,7 +359,12 @@ jobs:
           )
 
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
-            docker exec -t "${container_name}" sh -c "python3 -m pip install -r requirements.txt"
+            # sometimes there are intermittent network errors, do a couple of retries
+            docker exec -t "${container_name}" sh -c "python3 -m pip install -r requirements.txt || \
+                (sleep 15 && python3 -m pip install -r requirements.txt) || \
+                (sleep 30 && python3 -m pip install -r requirements.txt) || \
+                (sleep 60 && python3 -m pip install -r requirements.txt) || \
+                (sleep 300 && python3 -m pip install -r requirements.txt)"
           fi
 
           docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'

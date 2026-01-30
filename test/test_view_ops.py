@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     skipLazy,
     skipMeta,
     skipXLA,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
@@ -130,7 +131,7 @@ class TestViewOps(TestCase):
             return False
         # Note: only validates storage on native device types
         # because some accelerators, like XLA, do not expose storage
-        if base.device.type == "cpu" or base.device.type == "cuda":
+        if base.device.type in ["cpu", "cuda", "xpu"]:
             if base.untyped_storage().data_ptr() != other.untyped_storage().data_ptr():
                 return False
 
@@ -382,6 +383,21 @@ class TestViewOps(TestCase):
         self.assertEqual(result.shape, torch.Size([336, 1]))
         self.assertTrue(self.is_view_of(x, result))
 
+        # sparse matrix
+        x = torch.tensor([[2.0, 3.0], [4.0, 5.0]], device=device)
+        indices = torch.tensor([[0, 2], [0, 1]], device=device)
+        size = torch.Size([3, 3, 2])
+        xs = torch.sparse_coo_tensor(indices, x, size)
+        res = torch.view_as_complex(xs)
+        # self.is_view_of() does not work with sparse tensors
+        self.assertTrue(res._is_view())
+        self.assertIs(res._base, xs)
+        self.assertEqual(
+            res._values().untyped_storage().data_ptr(),
+            xs._values().untyped_storage().data_ptr(),
+        )
+        self.assertEqual(res.shape, xs.shape[:-1])
+
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
     @dtypesIfMPS(torch.cfloat, torch.chalf)
@@ -408,6 +424,21 @@ class TestViewOps(TestCase):
         res = torch.view_as_real(x)
         self.assertTrue(self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
+
+        # sparse matrix
+        x = torch.tensor(2 + 3j, dtype=dtype, device=device)
+        indices = torch.tensor([[0], [0]], device=device)
+        size = torch.Size([3, 3])
+        xs = torch.sparse_coo_tensor(indices, x, size, dtype=dtype)
+        res = torch.view_as_real(xs)
+        # self.is_view_of() does not work with sparse tensors
+        self.assertTrue(res._is_view())
+        self.assertIs(res._base, xs)
+        self.assertEqual(
+            res._values().untyped_storage().data_ptr(),
+            xs._values().untyped_storage().data_ptr(),
+        )
+        self.assertEqual(res.shape, xs.shape + (2,))
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
@@ -1108,6 +1139,10 @@ class TestViewOps(TestCase):
 
 
 class TestOldViewOps(TestCase):
+    @skipXPUIf(
+        True,
+        "NotImplementedError with test_ravel, https://github.com/intel/torch-xpu-ops/issues/2358",
+    )
     def test_ravel(self, device):
         def _test_ravel(tensors, size, nc=False):
             for src in tensors:
@@ -1268,6 +1303,10 @@ class TestOldViewOps(TestCase):
             RuntimeError, lambda: x.reshape_as(torch.rand(10, device=device))
         )
 
+    @skipXPUIf(
+        True,
+        "NotImplementedError with test_flatten,https://github.com/intel/torch-xpu-ops/issues/2358",
+    )
     def test_flatten(self, device):
         # Test that flatten returns 1-dim tensor when given a 0-dim tensor
         zero_dim_tensor = torch.tensor(123, device=device)
@@ -2130,8 +2169,10 @@ class TestOldViewOps(TestCase):
         t.col_indices()
 
 
-instantiate_device_type_tests(TestViewOps, globals(), include_lazy=True, allow_mps=True)
-instantiate_device_type_tests(TestOldViewOps, globals())
+instantiate_device_type_tests(
+    TestViewOps, globals(), include_lazy=True, allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(TestOldViewOps, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

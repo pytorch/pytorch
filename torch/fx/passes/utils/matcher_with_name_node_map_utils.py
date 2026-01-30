@@ -61,8 +61,8 @@ class SubgraphMatcherWithNameNodeMap(SubgraphMatcher):
             return relu
 
 
-        pattern_gm = export_for_training(pattern, example_inputs).module()
-        target_gm = export_for_training(target_graph, example_inputs).module()
+        pattern_gm = export(pattern, example_inputs).module()
+        target_gm = export(target_graph, example_inputs).module()
         matcher = SubgraphMatcherWithNameNodeMap(pattern_gm)
         matches = matcher.match(target_gm)
         for match in matches:
