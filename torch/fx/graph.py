@@ -560,7 +560,7 @@ class CodeGen:
                 return f"{clsname}.{arg.name}"
             elif isinstance(arg, torch.Tensor):
                 size = list(arg.size())
-                dtype = str(arg.dtype).split(".")[-1]
+                dtype = str(arg.dtype).rsplit(".", maxsplit=1)[-1]
                 return f"torch.Tensor(size={size}, dtype={dtype})"
             elif isinstance(arg, tuple):
                 if len(arg) == 1:

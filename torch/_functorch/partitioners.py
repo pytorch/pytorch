@@ -569,7 +569,8 @@ def get_allowed_dtypes() -> list[torch.dtype]:
         "activation_quantization_aten_pass"
     ].get("allowed_dtypes", "torch.bfloat16")
     allowed_dtypes = [
-        getattr(torch, dtype.split(".")[-1]) for dtype in allowed_dtypes.split(";")
+        getattr(torch, dtype.rsplit(".", maxsplit=1)[-1])
+        for dtype in allowed_dtypes.split(";")
     ]
     return allowed_dtypes
 
@@ -605,7 +606,7 @@ def get_quant_type() -> torch.dtype:
         "activation_quantization_aten_pass"
     ].get("quant_type", "torch.float8_e5m2")
 
-    return getattr(torch, quant_type.split(".")[-1])
+    return getattr(torch, quant_type.rsplit(".", maxsplit=1)[-1])
 
 
 def calculate_range(dtype: torch.dtype) -> tuple:

@@ -349,13 +349,13 @@ def _resolve_name_collision(mod: GraphModule, gm: GraphModule) -> None:
         for node in graph.nodes:
             if node.op == "get_attr" and node.target.startswith(prefix):
                 if len(node.target) > len(prefix):
-                    post_fix = node.target.split(prefix)[-1]
+                    post_fix = node.target.rsplit(prefix, maxsplit=1)[-1]
                     if post_fix.isdigit():
                         i = max(i, int(post_fix))
         for key in existing_keys:
             if key.startswith(prefix):
                 if len(key) > len(prefix):
-                    post_fix = key.split(prefix)[-1]
+                    post_fix = key.rsplit(prefix, maxsplit=1)[-1]
                     if post_fix.isdigit():
                         i = max(i, int(post_fix))
         return i + 1

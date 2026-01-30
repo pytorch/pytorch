@@ -421,7 +421,7 @@ if "__compile_source__" in globals():
                 if isinstance(kernel, JITFunction)
                 else kernel.fn._fn_name
             )
-            fn_name = fn_name.split(".")[-1]
+            fn_name = fn_name.rsplit(".", maxsplit=1)[-1]
 
             model_str += src_code
             model_str += "\n"

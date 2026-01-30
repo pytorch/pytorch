@@ -865,7 +865,9 @@ class _SplitterBase:
                 if user.op not in CALLABLE_NODE_OPS:
                     continue
 
-                if tag_id is None or (int(user.tag.split("_")[-1]) < tag_id):
+                if tag_id is None or (
+                    int(user.tag.rsplit("_", maxsplit=1)[-1]) < tag_id
+                ):
                     result[node].add(user)
 
         return result

@@ -264,7 +264,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
             ):  # If the parent node is not the top-level "self" node
                 parent_attr_key = parent.output().debugName()
                 parent_scope = attr_to_scope[parent_attr_key]
-                attr_scope = parent_scope.split("/")[-1]
+                attr_scope = parent_scope.rsplit("/", maxsplit=1)[-1]
                 attr_to_scope[attr_key] = f"{parent_scope}/{attr_scope}.{attr_name}"
             else:
                 attr_to_scope[attr_key] = f"__module.{attr_name}"
@@ -293,13 +293,13 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
     base_name = parse_traced_name(trace)
     for name, module in trace.named_modules(prefix="__module"):
         mod_name = parse_traced_name(module)
-        attr_name = name.split(".")[-1]
+        attr_name = name.rsplit(".", maxsplit=1)[-1]
         alias_to_name[name] = f"{mod_name}[{attr_name}]"
 
     for node in nodes_py.nodes_op:
         module_aliases = node.scopeName.split("/")
         replacements = [
-            alias_to_name[alias] if alias in alias_to_name else alias.split(".")[-1]
+            alias_to_name[alias] if alias in alias_to_name else alias.rsplit(".", maxsplit=1)[-1]
             for alias in module_aliases
         ]
         node.scopeName = base_name

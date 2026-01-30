@@ -121,7 +121,7 @@ def sample_inputs_sparse_reduction(
     op_info, device, dtype, requires_grad, layout, blocksize=None, **kwargs
 ):
     """Sample inputs for reduction operations on sparse tensors."""
-    layout_name = str(layout).split(".", 1)[-1].rsplit("_coo", 1)[0]
+    layout_name = str(layout).rsplit(".", 1, maxsplit=1)[-1].rsplit("_coo", 1)[0]
     op_supports_layout = getattr(op_info, "supports_" + layout_name)
     if not op_supports_layout:
         return

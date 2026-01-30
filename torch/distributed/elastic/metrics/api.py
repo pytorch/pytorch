@@ -97,7 +97,7 @@ def _get_metric_name(fn):
     if len(split) == 1:
         module = fn.__module__
         if module:
-            return module.split(".")[-1] + "." + split[0]
+            return module.rsplit(".", maxsplit=1)[-1] + "." + split[0]
         else:
             return split[0]
     else:

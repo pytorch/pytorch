@@ -615,7 +615,7 @@ def create_device(interface=None, lazy_init: bool = False):
 
 
 def get_timeout(test_id) -> int:
-    return TIMEOUT_OVERRIDE.get(test_id.split(".")[-1], TIMEOUT_DEFAULT)
+    return TIMEOUT_OVERRIDE.get(test_id.rsplit(".", maxsplit=1)[-1], TIMEOUT_DEFAULT)
 
 
 @contextmanager
@@ -826,7 +826,7 @@ class MultiProcessTestCase(TestCase):
 
     def _current_test_name(self) -> str:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
-        return self.id().split(".")[-1]
+        return self.id().rsplit(".", maxsplit=1)[-1]
 
     def _start_processes(self, proc) -> None:
         self.processes = []
@@ -1519,7 +1519,7 @@ class MultiThreadedTestCase(TestCase):
     @property
     def _current_test_name(self) -> str:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
-        return self.id().split(".")[-1]
+        return self.id().rsplit(".", maxsplit=1)[-1]
 
     def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
         """

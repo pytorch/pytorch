@@ -479,7 +479,7 @@ class GraphModule(torch.nn.Module):
         # address issue described at https://github.com/pytorch/pytorch/issues/63883
         # in other words, traverse class hierarchy to fix the redundant class definition problem
         for t in cls.__mro__:
-            c = t.__qualname__.split(".")[-1]
+            c = t.__qualname__.rsplit(".", maxsplit=1)[-1]
             if c != "GraphModuleImpl":
                 cls = t
                 break

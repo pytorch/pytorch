@@ -1467,7 +1467,7 @@ def test_foo(self, device, dtype, op):
 
     def supports_sparse_layout(self, layout):
         """Return True if OpInfo supports the specified sparse layout."""
-        layout_name = str(layout).split(".")[-1]
+        layout_name = str(layout).rsplit(".", maxsplit=1)[-1]
         # map torch.sparse_coo to OpInfo.supports_sparse:
         layout_name = layout_name.replace("_coo", "")
         return getattr(self, f"supports_{layout_name}")
@@ -1478,7 +1478,7 @@ def test_foo(self, device, dtype, op):
         """Returns an iterable of SampleInputs that contain inputs with a
         specified sparse layout.
         """
-        layout_name = str(layout).split(".")[-1]
+        layout_name = str(layout).rsplit(".", maxsplit=1)[-1]
         sample_inputs_mth = getattr(self, "sample_inputs_" + layout_name)
 
         def non_empty_sampler(op, generator):

@@ -22,7 +22,7 @@ def find_and_instantiate_subclasses(
         package.__path__, package.__name__ + "."
     ):
         try:
-            module_basename = module_name.split(".")[-1]
+            module_basename = module_name.rsplit(".", maxsplit=1)[-1]
             if not module_basename.startswith("_"):
                 # learned heuristics start with an underscore
                 continue

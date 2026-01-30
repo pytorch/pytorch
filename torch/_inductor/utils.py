@@ -459,7 +459,7 @@ def _type_of(key: Optional[torch.dtype]) -> str:
     # `None` is nullptr.  Implicitly convert to *i8.
     if key is None:
         return "*i8"
-    dtype_str = str(key).split(".")[-1]
+    dtype_str = str(key).rsplit(".", maxsplit=1)[-1]
     tys = {
         "bool": "i1",
         "float8e4nv": "fp8e4nv",
