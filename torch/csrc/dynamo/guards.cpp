@@ -612,6 +612,25 @@ struct AutocastState {
     return true;
   }
 
+  std::string reason(const AutocastState& o) const {
+    std::ostringstream os;
+    for (size_t i = 0; i < DEVICES.size(); i++) {
+      if (enabled[i] == false && o.enabled[i] == false) {
+        continue;
+      }
+      if (enabled[i] != o.enabled[i]) {
+        os << "autocast(" << DEVICES[i] << ")_enabled ";
+      }
+      if (enabled[i] && o.enabled[i] && dtype[i] != o.dtype[i]) {
+        os << "autocast(" << DEVICES[i] << ")_dtype ";
+      }
+    }
+    if (cache_enabled != o.cache_enabled) {
+      os << "autocast_cache_enabled ";
+    }
+    return os.str();
+  }
+
   template <typename T>
   friend void to_json(T& json_j, const AutocastState& json_t) {
     json_j["enabled"] = json_t.enabled;
@@ -679,8 +698,9 @@ struct GlobalStateGuard {
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
       os << "grad_mode ";
-    if (!(_autocast_state == AutocastState()))
-      os << "autocast ";
+    AutocastState current_autocast;
+    if (!(_autocast_state == current_autocast))
+      os << _autocast_state.reason(current_autocast);
     if (_torch_function != torch::torch_function_enabled())
       os << "torch_function ";
     if (_deterministic_algorithms != ctx.deterministicAlgorithms())
@@ -3487,7 +3507,10 @@ class GuardManager {
       num_guards_executed++;
       if (!debug_info.result) {
         return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+            false,
+            debug_info.verbose_code_parts,
+            num_guards_executed,
+            debug_info.user_stack);
       }
     }
 
@@ -3504,7 +3527,10 @@ class GuardManager {
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
         return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+            false,
+            debug_info.verbose_code_parts,
+            num_guards_executed,
+            debug_info.user_stack);
       }
     }
 
@@ -3815,7 +3841,10 @@ class RootGuardManager : public GuardManager {
         at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
-            false, tmp_debug_info.verbose_code_parts, num_guards_executed);
+            false,
+            tmp_debug_info.verbose_code_parts,
+            num_guards_executed,
+            tmp_debug_info.user_stack);
       }
     }
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
@@ -4132,7 +4161,10 @@ class DictGuardManager : public GuardManager {
           num_guards_executed += debug_info.num_guards_executed;
           if (!debug_info.result) {
             return GuardDebugInfo(
-                false, debug_info.verbose_code_parts, num_guards_executed);
+                false,
+                debug_info.verbose_code_parts,
+                num_guards_executed,
+                debug_info.user_stack);
           }
         }
         std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
@@ -4142,7 +4174,10 @@ class DictGuardManager : public GuardManager {
           num_guards_executed += debug_info.num_guards_executed;
           if (!debug_info.result) {
             return GuardDebugInfo(
-                false, debug_info.verbose_code_parts, num_guards_executed);
+                false,
+                debug_info.verbose_code_parts,
+                num_guards_executed,
+                debug_info.user_stack);
           }
         }
       }

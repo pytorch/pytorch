@@ -16,6 +16,7 @@ on:
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - 'ciflow/binaries/*'
       - 'ciflow/binaries_wheel/*'
+      - 'ciflow/s390/*'
   workflow_dispatch:
 
 permissions:

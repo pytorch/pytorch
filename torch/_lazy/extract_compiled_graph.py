@@ -77,7 +77,7 @@ class ReturnValueHandler:
 
         tensor_id_to_idx: dict[int, int] = {}
         for dup_idx, lazy_tensor in enumerate(lazy_out_list):
-            uniq_idx = tensor_id_to_idx.get(id(lazy_tensor), None)
+            uniq_idx = tensor_id_to_idx.get(id(lazy_tensor))
             if uniq_idx is not None:
                 self.index[uniq_idx].append(dup_idx)
             else:
