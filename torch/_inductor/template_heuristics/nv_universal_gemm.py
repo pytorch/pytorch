@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -22,12 +22,6 @@ log = logging.getLogger(__name__)
 # Enable with TORCH_LOGS="+autotuning"
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
-# Type alias for kernel config key tuple.
-# Currently matches on (tile_m, tile_n, tile_k, cluster_m, cluster_n).
-# #TODO(nikhilap) When cutlass_api adds support for stages/split_k, extend this tuple and
-# update the _make_config_key_* helper functions below.
-ConfigKey = tuple[int, int, int, int, int]
-
 
 @dataclass
 class HeuristicConfig:
@@ -43,41 +37,65 @@ class HeuristicConfig:
     warp_tile_m: int
     warp_tile_n: int
     warp_tile_k: int
+    instr_tile_m: int
+    instr_tile_n: int
+    instr_tile_k: int
+    swizzle_factor: int
+    cta_order: int  # 0 = raster along M, 1 = raster along N
     estimated_runtime: float
 
 
-def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
-    """Build config key from HeuristicConfig returned by nvMatmulHeuristics."""
-    return (cfg.tile_m, cfg.tile_n, cfg.tile_k, cfg.cluster_m, cfg.cluster_n)
+def _kernel_matches_heuristic(kernel, cfg: HeuristicConfig) -> tuple[bool, int]:
+    """
+    Check if kernel matches heuristic config on all fields it supports.
 
+    Returns (matches, missing_count) where:
+    - matches: True if kernel matches on all fields it supports
+    - missing_count: Number of heuristic fields the kernel doesn't have
+    """
+    design = kernel.metadata.design
+    missing = 0
 
-def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
-    """Build config key from cutlass_api kernel metadata.design."""
-    if (
-        hasattr(design, "tile_shape")
-        and len(design.tile_shape) >= 3
-        and hasattr(design, "cluster_shape")
-        and len(design.cluster_shape) >= 2
-    ):
-        return (
-            design.tile_shape[0],
-            design.tile_shape[1],
-            design.tile_shape[2],
-            design.cluster_shape[0],
-            design.cluster_shape[1],
-        )
-    return None
+    # tile_shape -> (tile_m, tile_n, tile_k)
+    if hasattr(design, "tile_shape") and len(design.tile_shape) >= 3:
+        if design.tile_shape[0] != cfg.tile_m:
+            return (False, 0)
+        if design.tile_shape[1] != cfg.tile_n:
+            return (False, 0)
+        if design.tile_shape[2] != cfg.tile_k:
+            return (False, 0)
+    else:
+        missing += 3
 
+    # cluster_shape -> (cluster_m, cluster_n)
+    if hasattr(design, "cluster_shape") and len(design.cluster_shape) >= 2:
+        if design.cluster_shape[0] != cfg.cluster_m:
+            return (False, 0)
+        if design.cluster_shape[1] != cfg.cluster_n:
+            return (False, 0)
+    else:
+        missing += 2
 
-def _make_config_key_from_heuristics_kernel(kernel) -> ConfigKey:
-    """Build config key from nvMatmulHeuristics kernel config struct."""
-    return (
-        kernel.cta[0],
-        kernel.cta[1],
-        kernel.cta[2],
-        kernel.cluster[0],
-        kernel.cluster[1],
-    )
+    # All other fields: match by same name
+    for field in dataclasses.fields(HeuristicConfig):
+        name = field.name
+        # Skip fields already handled or not config values
+        if name in (
+            "tile_m",
+            "tile_n",
+            "tile_k",
+            "cluster_m",
+            "cluster_n",
+            "estimated_runtime",
+        ):
+            continue
+        if hasattr(design, name):
+            if getattr(design, name) != getattr(cfg, name):
+                return (False, 0)
+        else:
+            missing += 1
+
+    return (True, missing)
 
 
 class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
@@ -128,12 +146,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         layout_a = "row" if strides[inputs._mat1_idx][-1] == 1 else "col"
         layout_b = "row" if strides[inputs._mat2_idx][-1] == 1 else "col"
 
-        config_to_kernels = self._extract_config_to_kernels(kernels)
-
-        if not config_to_kernels:
-            log.debug("Could not extract kernel configs, using first %d kernels", count)
-            return kernels[:count]
-
         heuristic_configs = self._get_heuristic_configs(
             m,
             n,
@@ -142,7 +154,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             layout_a,
             layout_b,
             count,
-            OrderedSet(config_to_kernels.keys()),
+            kernels,
             accumulator_type,
             batch_size,
         )
@@ -152,14 +164,13 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return kernels[:count]
 
         # Match kernels to heuristic configs
-        matched: list[tuple] = []
+        # Priority: kernels matching more heuristic fields rank higher
+        matched: list[tuple[object, float, int]] = []  # (kernel, runtime, missing)
         for cfg in heuristic_configs:
-            key = _make_config_key_from_heuristic(cfg)
-            kernels_for_key = config_to_kernels.get(key)
-            if not kernels_for_key:
-                continue
-            for kernel in kernels_for_key:
-                matched.append((kernel, cfg.estimated_runtime))
+            for kernel in kernels:
+                matches, missing_count = _kernel_matches_heuristic(kernel, cfg)
+                if matches:
+                    matched.append((kernel, cfg.estimated_runtime, missing_count))
 
         if not matched:
             log.debug(
@@ -167,48 +178,60 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
             return kernels[:count]
 
-        matched.sort(key=lambda x: x[1])
+        # Sort by (missing_count, runtime) - prefer kernels matching more fields
+        matched.sort(key=lambda x: (x[2], x[1]))
         selected = matched[:count]
-        result = [k for k, _ in selected]
+        result = [k for k, _, _ in selected]
 
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
         )
 
+        self._log_selected_kernels(heuristic_configs, matched, kernels, selected)
+
+        return result
+
+    def _log_selected_kernels(
+        self,
+        heuristic_configs: list[HeuristicConfig],
+        matched: list[tuple[object, float, int]],
+        kernels: list,
+        selected: list[tuple[object, float, int]],
+    ) -> None:
+        """Log details about selected kernels."""
         autotuning_log.info(
             "nvMatmulHeuristics kernel filtering: %d heuristic configs matched %d "
             "of %d available kernels, returning top %d",
             len(heuristic_configs),
             len(matched),
             len(kernels),
-            len(result),
+            len(selected),
         )
-        for i, (kernel, runtime) in enumerate(selected):
-            design = kernel.metadata.design
+        for i, (kernel, runtime, missing) in enumerate(selected):
+            design = kernel.metadata.design  # pyrefly: ignore[missing-attribute]
+            # Log fields the kernel supports
+            field_strs: list[str] = []
+            for field in dataclasses.fields(HeuristicConfig):
+                name = field.name
+                if name == "estimated_runtime":
+                    continue
+                if hasattr(design, name):
+                    field_strs.append(f"{name}={getattr(design, name)}")
+                elif name.startswith("tile_") and hasattr(design, "tile_shape"):
+                    idx = {"tile_m": 0, "tile_n": 1, "tile_k": 2}.get(name)
+                    if idx is not None:
+                        field_strs.append(f"{name}={design.tile_shape[idx]}")
+                elif name.startswith("cluster_") and hasattr(design, "cluster_shape"):
+                    idx = {"cluster_m": 0, "cluster_n": 1}.get(name)
+                    if idx is not None:
+                        field_strs.append(f"{name}={design.cluster_shape[idx]}")
             autotuning_log.info(
-                "  Selected kernel %d: tile=(%d, %d, %d), cluster=(%d, %d), "
-                "estimated_runtime=%.2f us",
+                "  Selected kernel %d: [%s], missing=%d, runtime=%.2f us",
                 i,
-                design.tile_shape[0],
-                design.tile_shape[1],
-                design.tile_shape[2],
-                design.cluster_shape[0],
-                design.cluster_shape[1],
+                ", ".join(field_strs),
+                missing,
                 runtime * 1e6,
             )
-
-        return result
-
-    def _extract_config_to_kernels(self, kernels: list) -> dict[ConfigKey, list]:
-        """Build a map from config key to kernels."""
-        config_to_kernels: dict[ConfigKey, list] = defaultdict(list)
-
-        for kernel in kernels:
-            key = _make_config_key_from_kernel_design(kernel.metadata.design)
-            if key is not None:
-                config_to_kernels[key].append(kernel)
-
-        return config_to_kernels
 
     def _get_layout_enum(self, layout_a: str, layout_b: str):
         """Map layout strings to NvMatmulHeuristicsMatmulLayout enum."""
@@ -219,19 +242,30 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         layout_str = f"{trans_a}{trans_b}_ROW_MAJOR"
         return nvMatmulHeuristics.NvMatmulHeuristicsMatmulLayout[layout_str]
 
-    def _make_validity_callback(
-        self,
-        valid_configs: OrderedSet[ConfigKey],
-    ):
+    def _make_validity_callback(self, kernels: list):
         """
         Create callback for nvMatmulHeuristics that only accepts configurations
-        matching the available cutlass_api kernel tile/cluster shapes.
+        matching the available kernel tile/cluster shapes.
         """
+        # Build set of (tile_m, tile_n, tile_k, cluster_m, cluster_n) tuples
+        valid_shapes: OrderedSet[tuple[int, int, int, int, int]] = OrderedSet()
+        for kernel in kernels:
+            design = kernel.metadata.design
+            if hasattr(design, "tile_shape") and hasattr(design, "cluster_shape"):
+                valid_shapes.add(
+                    (
+                        design.tile_shape[0],
+                        design.tile_shape[1],
+                        design.tile_shape[2],
+                        design.cluster_shape[0],
+                        design.cluster_shape[1],
+                    )
+                )
 
         def validity_check(kernel_config_ptr, problem_ptr):
-            kernel = kernel_config_ptr.contents
-            key = _make_config_key_from_heuristics_kernel(kernel)
-            return 1 if key in valid_configs else 0
+            k = kernel_config_ptr.contents
+            key = (k.cta[0], k.cta[1], k.cta[2], k.cluster[0], k.cluster[1])
+            return 1 if key in valid_shapes else 0
 
         return validity_check
 
@@ -244,7 +278,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         layout_a: str,
         layout_b: str,
         count: int,
-        valid_configs: OrderedSet[ConfigKey],
+        kernels: list,
         accumulator_type: torch.dtype = torch.float32,
         batch_size: int = 1,
     ) -> list[HeuristicConfig]:
@@ -279,7 +313,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         backend = lh.createBackend(nvMatmulHeuristics.NvMatmulHeuristicsTarget.CUTLASS3)
 
-        validity_callback = self._make_validity_callback(valid_configs)
+        validity_callback = self._make_validity_callback(kernels)
         lh.setBackendCallbackProperty(
             backend,
             nvMatmulHeuristics.NvMatmulHeuristicsBackendPropertyCallbackKind.KERNEL_ADDITIONAL_VALIDITY_CHECK,
@@ -325,6 +359,11 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     warp_tile_m=kernel.warp_tile_m,
                     warp_tile_n=kernel.warp_tile_n,
                     warp_tile_k=kernel.warp_tile_k,
+                    instr_tile_m=kernel.instr_tile_m,
+                    instr_tile_n=kernel.instr_tile_n,
+                    instr_tile_k=kernel.instr_tile_k,
+                    swizzle_factor=kernel.swizzle_factor,
+                    cta_order=kernel.cta_order,
                     estimated_runtime=cfg["runtime"],
                 )
             )
@@ -343,9 +382,11 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         )
         for i, cfg in enumerate(configs):
             runtime_us = cfg.estimated_runtime * 1e6
+            raster_dir = "M" if cfg.cta_order == 0 else "N"
             autotuning_log.info(
                 "  Config %d: tile=(%d, %d, %d), cluster=(%d, %d), "
-                "stages=%d, split_k=%d, warp_tile=(%d, %d, %d), "
+                "swizzle=%d, raster=%s, stages=%d, split_k=%d, "
+                "warp_tile=(%d, %d, %d), instr_tile=(%d, %d, %d), "
                 "estimated_runtime=%.2f us",
                 i,
                 cfg.tile_m,
@@ -353,11 +394,16 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 cfg.tile_k,
                 cfg.cluster_m,
                 cfg.cluster_n,
+                cfg.swizzle_factor,
+                raster_dir,
                 cfg.stages,
                 cfg.split_k,
                 cfg.warp_tile_m,
                 cfg.warp_tile_n,
                 cfg.warp_tile_k,
+                cfg.instr_tile_m,
+                cfg.instr_tile_n,
+                cfg.instr_tile_k,
                 runtime_us,
             )
 
