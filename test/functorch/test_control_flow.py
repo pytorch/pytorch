@@ -5211,7 +5211,7 @@ class GraphModule(torch.nn.Module):
 
         with self.assertRaisesRegex(
             AssertionError,
-            "Combin_fn received wrong number of arguments.*",
+            "Combine_fn received wrong number of arguments.*",
         ):
             associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
 
