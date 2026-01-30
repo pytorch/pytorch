@@ -2770,7 +2770,7 @@ def _compile_fx_main(
                     trace_joint=False,
                     decompositions=decompositions,
                 )
-
+                assert isinstance(gm, GraphModule)
                 from torch._export.utils import _detect_fake_mode_from_gm
 
                 fake_mode = _detect_fake_mode_from_gm(gm)  # type: ignore[assignment]

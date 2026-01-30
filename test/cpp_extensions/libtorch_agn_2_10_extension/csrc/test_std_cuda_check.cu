@@ -33,7 +33,9 @@ void test_std_cuda_kernel_launch_check_success() {
 void test_std_cuda_kernel_launch_check_error() {
   // Launch a kernel with invalid configuration
   // Using more blocks than allowed (2^31) will trigger a launch error
-  invalid_kernel<<<2147483648, 1>>>(0);
+  // HIP does not error on invalid grid size, but errors on invalid block size
+
+  invalid_kernel<<<2147483648, 2048>>>(0);
 
   STD_CUDA_KERNEL_LAUNCH_CHECK();
 }
