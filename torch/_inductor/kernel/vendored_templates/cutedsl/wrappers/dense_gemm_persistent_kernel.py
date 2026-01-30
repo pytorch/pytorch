@@ -49,12 +49,17 @@ class VendoredPersistentDenseGemmKernel(CuteDslKernel):
             metadata.design.cluster_shape[1],
         )
 
+        swizzle_size = getattr(metadata.design, "swizzle_size", 1)
+        raster_along_m = getattr(metadata.design, "raster_along_m", True)
+
         self.impl = PersistentDenseGemmKernelImpl(  # pyrefly: ignore[not-callable]
             metadata.operands.accumulator_type,
             metadata.design.use_2cta_mma,
             mma_tiler_mn,
             cluster_shape_mn,
             metadata.design.use_tma_store,
+            swizzle_size,
+            raster_along_m,
         )
         self.cluster_shape_mn = cluster_shape_mn
 
@@ -315,6 +320,8 @@ class VendoredPersistentDenseGemmKernel(CuteDslKernel):
         tile_n_values = list(range(32, 257, 32))
         cluster_m_values = [1, 2, 4, 8, 16]
         cluster_n_values = [1, 2, 4, 8, 16]
+        swizzle_size_values = [1, 2, 4]
+        raster_along_m_values = [True, False]
 
         kernel_list = []
 
@@ -333,42 +340,58 @@ class VendoredPersistentDenseGemmKernel(CuteDslKernel):
                                 if use_2cta and cluster_m % 2 != 0:
                                     continue
 
-                                design = Sm100DesignMetadata(
-                                    use_2cta_mma=use_2cta,
-                                    tile_shape=(tile_m, tile_n, 64),
-                                    cluster_shape=(cluster_m, cluster_n, 1),
-                                    use_tma_store=True,
-                                )
-
-                                kernel_name = (
-                                    f"inductor_vendored.PersistentDenseGemmKernel_sm100_"
-                                    f"{strides_to_layout_string(operands.A.stride, operands.B.stride, operands.out.stride)}_"
-                                    f"A{operands.A.dtype}_B{operands.B.dtype}_"
-                                    f"out{operands.out.dtype}_"
-                                    f"acc{operands.accumulator_type}_"
-                                    f"{'2cta' if use_2cta else '1cta'}_"
-                                    f"cluster{tuple_to_string(design.cluster_shape)}_"
-                                    f"tile{tuple_to_string(design.tile_shape)}"
-                                )
-
-                                metadata = KernelMetadata(
-                                    operands=operands,
-                                    design=design,
-                                    kernel_name=kernel_name,
-                                    kernel_class=VendoredPersistentDenseGemmKernel,
-                                    min_cc=100,
-                                    epilogue=None,
-                                )
-
-                                if VendoredPersistentDenseGemmKernel._valid_metadata(
-                                    metadata
-                                ):
-                                    if metadata_filter is None or metadata_filter(
-                                        metadata
-                                    ):
-                                        kernel_list.append(
-                                            VendoredPersistentDenseGemmKernel(metadata)
+                                for swizzle_size in swizzle_size_values:
+                                    for raster_along_m in raster_along_m_values:
+                                        design = Sm100DesignMetadata(
+                                            use_2cta_mma=use_2cta,
+                                            tile_shape=(tile_m, tile_n, 64),
+                                            cluster_shape=(cluster_m, cluster_n, 1),
+                                            use_tma_store=True,
                                         )
+                                        design.swizzle_size = swizzle_size
+                                        design.raster_along_m = raster_along_m
+
+                                        raster_str = (
+                                            "rasterM" if raster_along_m else "rasterN"
+                                        )
+                                        layout_str = strides_to_layout_string(
+                                            operands.A.stride,
+                                            operands.B.stride,
+                                            operands.out.stride,
+                                        )
+                                        kernel_name = (
+                                            f"inductor_vendored.PersistentDenseGemmKernel_sm100_"
+                                            f"{layout_str}_"
+                                            f"A{operands.A.dtype}_B{operands.B.dtype}_"
+                                            f"out{operands.out.dtype}_"
+                                            f"acc{operands.accumulator_type}_"
+                                            f"{'2cta' if use_2cta else '1cta'}_"
+                                            f"cluster{tuple_to_string(design.cluster_shape)}_"
+                                            f"tile{tuple_to_string(design.tile_shape)}_"
+                                            f"swizzle{swizzle_size}_{raster_str}"
+                                        )
+
+                                        metadata = KernelMetadata(
+                                            operands=operands,
+                                            design=design,
+                                            kernel_name=kernel_name,
+                                            kernel_class=VendoredPersistentDenseGemmKernel,
+                                            min_cc=100,
+                                            epilogue=None,
+                                        )
+
+                                        if VendoredPersistentDenseGemmKernel._valid_metadata(
+                                            metadata
+                                        ):
+                                            if (
+                                                metadata_filter is None
+                                                or metadata_filter(metadata)
+                                            ):
+                                                kernel_list.append(
+                                                    VendoredPersistentDenseGemmKernel(
+                                                        metadata
+                                                    )
+                                                )
 
         log.debug(
             "Generated %d PersistentDenseGemmKernel configurations", len(kernel_list)
