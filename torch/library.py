@@ -263,7 +263,7 @@ class Library:
                 "as the first argument"
             )
 
-        key = self.ns + "/" + name.rsplit("::", maxsplit=1)[-1] + "/" + dispatch_key
+        key = f"{self.ns}/{name.rsplit('::', maxsplit=1)[-1]}/{dispatch_key}"
         if key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when _impl_with_aoti_compile is called but we error out before that)
