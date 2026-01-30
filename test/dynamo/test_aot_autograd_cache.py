@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import functools
 import os
+import pickle
 import shutil
 import unittest
 from unittest.mock import patch
@@ -2827,9 +2828,11 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             unpicklable_field=lambda x: x,
         )
 
+        # Python 3.14+ raises PicklingError with "Can't pickle local object"
+        # Earlier versions raise AttributeError with "Can't get local object"
         with self.assertRaisesRegex(
-            AttributeError,
-            r"Can't get local object 'AOTAutogradCachePicklerTests.test_pickle_entry_strict_mode_raises.<locals>.<lambda>'",
+            (AttributeError, pickle.PicklingError),
+            r"AOTAutogradCachePicklerTests.test_pickle_entry_strict_mode_raises.<locals>.<lambda>",
         ):
             AOTAutogradCache._pickle_entry(entry, remote=False)
 
