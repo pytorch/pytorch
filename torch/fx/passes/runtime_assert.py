@@ -176,7 +176,10 @@ def insert_deferred_runtime_asserts(
         try:
             target = node.target
             if node.op == "call_method":
-                assert isinstance(node.target, str)
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"Expected str target, got {type(node.target)}"
+                    )
                 target = getattr(fake_args[0], node.target)
                 fake_args = fake_args[1:]
             node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
@@ -377,7 +380,8 @@ def insert_deferred_runtime_asserts(
                 )
 
                 def has_new_unbacked_bindings():
-                    assert resolved_unbacked_bindings is not None
+                    if resolved_unbacked_bindings is None:
+                        raise AssertionError("resolved_unbacked_bindings is None")
                     for key in resolved_unbacked_bindings:
                         if key not in expr_to_proxy:
                             return True
