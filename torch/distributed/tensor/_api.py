@@ -144,7 +144,6 @@ class _FromTorchTensor(torch.autograd.Function):
     ) -> "DTensor":
         ctx.forward_input_placements = placements
         ctx.forward_input_device_mesh = device_mesh
-
         ctx.set_materialize_grads(False)
 
         if shape and stride:

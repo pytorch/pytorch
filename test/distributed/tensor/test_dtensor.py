@@ -703,6 +703,7 @@ class DTensorTest(DTensorTestBase):
         device_mesh = self.build_device_mesh()
 
         class MultiOutputFunc(torch.autograd.Function):
+            @staticmethod
             def forward(ctx, x, y):
                 ctx.set_materialize_grads(False)
                 return (x * 2), (y * 3)
