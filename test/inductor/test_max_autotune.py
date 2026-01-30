@@ -501,6 +501,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @skipIfXpu("XPU TMA path does not support tensors with non-contiguous last dim")
     @parametrize("a_transposed", (False, True))
     @parametrize("b_transposed", (False, True))
     @parametrize("dynamic", (False, True))
