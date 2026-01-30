@@ -59,8 +59,6 @@ using at::TensorOptions;
 using at::IntArrayRef;
 using at::Generator;
 using at::TensorList;
-using at::Dimname;
-using at::DimnameList;
 using at::ArrayRef;
 
 using torch::utils::check_out_type_matches;

@@ -106,19 +106,6 @@ void UnflattenImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor UnflattenImpl::forward(const Tensor& input) {
-  auto namedshape = options.namedshape();
-  if (!namedshape.empty()) {
-    auto dimname =
-        torch::Dimname::fromSymbol(torch::Symbol::dimname(options.dimname()));
-    std::vector<int64_t> sizes;
-    std::vector<torch::Dimname> names;
-    for (auto i : namedshape) {
-      names.push_back(
-          torch::Dimname::fromSymbol(torch::Symbol::dimname(std::get<0>(i))));
-      sizes.push_back(std::get<1>(i));
-    }
-    return input.unflatten(dimname, sizes, names);
-  }
   return input.unflatten(options.dim(), options.sizes());
 }
 

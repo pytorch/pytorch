@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/utils/Factory.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/accumulate.h>
@@ -9,8 +8,7 @@ namespace at::native::mobile {
 Tensor empty_with_tail_padding(
     const IntArrayRef size,
     const caffe2::TypeMeta dtype,
-    const c10::MemoryFormat memory_format,
-    std::optional<DimnameList> maybe_names) {
+    const c10::MemoryFormat memory_format) {
   auto* const allocator_ptr = c10::GetDefaultMobileCPUAllocator();
   const int64_t nelements = c10::multiply_integers(size);
   size_t size_bytes = nelements * dtype.itemsize();
@@ -26,9 +24,7 @@ Tensor empty_with_tail_padding(
       DispatchKeySet{DispatchKey::CPU},
       dtype));
 
-  return namedinference::propagate_names_if_present_and_nonempty(
-      tensor.resize_(size, memory_format),
-      maybe_names);
+  return tensor;
 }
 
 Tensor allocate_padded_contiguous_if_needed(
@@ -53,8 +49,7 @@ Tensor allocate_padded_contiguous_if_needed(
   Tensor padded_input = empty_with_tail_padding(
       input.sizes(),
       input.options().dtype(),
-      memory_format,
-      input.opt_names());
+      memory_format);
 
   return padded_input.copy_(input);
 }

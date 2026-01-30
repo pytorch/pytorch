@@ -6,7 +6,6 @@
 #include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
@@ -637,7 +636,6 @@ TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tenso
 
 TORCH_IMPL_FUNC(baddbmm_out_cuda)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
   {
-    at::NoNamesGuard guard;
     baddbmm_out_cuda_impl(result, self, batch1, batch2, beta, alpha);
   }
 }
@@ -646,7 +644,6 @@ TORCH_IMPL_FUNC(bmm_out_cuda)(const Tensor& batch1, const Tensor& batch2, const 
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
-    NoNamesGuard guard;
     baddbmm_out_cuda_impl(result, result, batch1, batch2, beta, alpha);
   }
 }
@@ -700,7 +697,6 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     }
   }
 
-  at::NoNamesGuard guard;
   dot_check(self, other);
 
   const int n = static_cast<int>(self.numel());
@@ -751,7 +747,6 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     return (dot_cuda(self, other.conj())).conj();
   }
 
-  at::NoNamesGuard guard;
   dot_check(self, other);
 
   if (self._is_zerotensor() || other._is_zerotensor()) {
@@ -924,7 +919,6 @@ Tensor& _bmm_out_dtype_cuda(const Tensor& batch1, const Tensor& batch2, const at
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {
-    NoNamesGuard guard;
     baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha);
   }
 
@@ -943,7 +937,6 @@ Tensor& _baddbmm_out_dtype_cuda(const Tensor& self, const Tensor& batch1, const 
   // We need to copy the tensor
   out.copy_(self);
   {
-    NoNamesGuard guard;
     baddbmm_out_cuda_impl(out, out, batch1, batch2, beta, alpha);
   }
 

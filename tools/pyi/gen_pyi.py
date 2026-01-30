@@ -150,8 +150,6 @@ blocklist = [
     "einsum",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
-    # Manually define named tensor type stubs in __init__.pyi.in
-    "align_tensors",
     "meshgrid",
     "cartesian_prod",
     "block_diag",

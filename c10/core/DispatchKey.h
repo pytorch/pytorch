@@ -239,21 +239,6 @@ enum class DispatchKey : uint16_t {
   // See Note [Functionalization Pass In Core] for details.
   Functionalize,
 
-  // The named dispatch key is set for any tensors with named dimensions.
-  // Although we have a dispatch key for named tensors, for historical reasons,
-  // this dispatch key doesn't do any of the substantive functionality for named
-  // tensor (though, hypothetically, it could!)  At the moment, it's just
-  // responsible for letting us give good error messages when operations
-  // don't support named tensors.
-  //
-  // NB: If you ever consider moving named tensor functionality into
-  // this dispatch key, note that it might be necessary add another dispatch
-  // key that triggers before composite operators, in case a composite operator
-  // has named dimension propagation that doesn't match that of its
-  // constituent parts.
-  // TODO: delete this once torchdim lands in functorch
-  Named,
-
   // The Conjugate dispatch key is set for any tensors that need to perform
   // conjugation
   // This is implemented at a dispatch level right before any backends run

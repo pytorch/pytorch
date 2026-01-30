@@ -1955,12 +1955,6 @@ struct getTypePtr_<std::string_view> final {
     return StringType::get();
   }
 };
-template <>
-struct getTypePtr_<at::Dimname> final {
-  static decltype(auto) call() {
-    return StringType::get();
-  }
-};
 template <class T, bool fake>
 struct getMaybeFakeTypePtr_<std::vector<T>, fake> final {
   static const auto& call() {

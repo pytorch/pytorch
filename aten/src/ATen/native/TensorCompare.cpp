@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TensorMeta.h>
@@ -729,14 +728,9 @@ std::tuple<Tensor&, Tensor&> mode_out(
     return std::forward_as_tuple(values, indices);
   } else {
     auto result = [&]() {
-      NoNamesGuard guard;
       mode_stub(self.device().type(), values, indices, self, dim, keepdim);
       return std::tuple<Tensor&, Tensor&>{values, indices};
     }();
-    namedinference::propagate_names_for_reduction(
-        std::get<0>(result), self, dim, keepdim);
-    namedinference::propagate_names_for_reduction(
-        std::get<1>(result), self, dim, keepdim);
     return result;
   }
 }
@@ -749,7 +743,6 @@ static void minmax_out_impl(
     const Tensor& values,
     const Tensor& indices,
     Stub& stub) {
-  NoNamesGuard guard;
   if (self.numel() > 0) {
     if (self.numel() == 1 && self.dim() == 0) {
       values.fill_(self);
@@ -930,48 +923,6 @@ Tensor& clip_(
     const std::optional<Tensor>& min,
     const std::optional<Tensor>& max) {
   return at::clamp_(self, min, max);
-}
-
-// Named tensor overloads
-
-std::tuple<Tensor, Tensor> min(const Tensor& self, Dimname dim, bool keepdim) {
-  return at::min(self, dimname_to_position(self, dim), keepdim);
-}
-std::tuple<Tensor&, Tensor&> min_out(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim,
-    Tensor& min,
-    Tensor& min_indices) {
-  return at::min_out(
-      min, min_indices, self, dimname_to_position(self, dim), keepdim);
-}
-std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
-  return at::max(self, dimname_to_position(self, dim), keepdim);
-}
-std::tuple<Tensor&, Tensor&> max_out(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim,
-    Tensor& max,
-    Tensor& max_indices) {
-  return at::max_out(
-      max, max_indices, self, dimname_to_position(self, dim), keepdim);
-}
-Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
-  reportNYIDimnameOverload("argsort");
-}
-std::tuple<Tensor, Tensor> mode(const Tensor& self, Dimname dim, bool keepdim) {
-  return at::mode(self, dimname_to_position(self, dim), keepdim);
-}
-std::tuple<Tensor&, Tensor&> mode_out(
-    const Tensor& self,
-    Dimname dim,
-    bool keepdim,
-    Tensor& values,
-    Tensor& indices) {
-  return at::mode_out(
-      values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
 TORCH_IMPL_FUNC(isin_Tensor_Tensor_out)
