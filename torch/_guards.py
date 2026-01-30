@@ -876,7 +876,7 @@ class CompileContext:
 
 
 @dataclass
-class InlineFunctionTiming:
+class FunctionTraceTiming:
     """
     Timing data for a single inlined function trace.
 
@@ -943,14 +943,14 @@ class InlineFunctionTiming:
 
     def __repr__(self) -> str:
         return (
-            f"InlineFunctionTiming({self.func_name} at {self.filename}:{self.firstlineno}, "
+            f"FunctionTraceTiming({self.func_name} at {self.filename}:{self.firstlineno}, "
             f"cumtime={self.cumtime_ms:.2f}ms, tottime={self.tottime_ms:.2f}ms, "
             f"bytecode={self.bytecode_count}, depth={self.inline_depth})"
         )
 
 
 @dataclass
-class _InlineTimingStackEntry:
+class _TraceTimingStackEntry:
     """Stack entry for tracking inline function timing."""
 
     func_name: str
@@ -1031,9 +1031,9 @@ class TracingContext:
         # list of code objects for inlined functions
         self.traced_code: list[CodeType] = []
         # Timing data for inlined function tracing (for profiling Dynamo compile time)
-        self.inline_function_timings: list[InlineFunctionTiming] = []
+        self.function_trace_timings: list[FunctionTraceTiming] = []
         # Stack for tracking inline function call chain (for computing tottime)
-        self.inline_timing_stack: list[_InlineTimingStackEntry] = []
+        self.trace_timing_stack: list[_TraceTimingStackEntry] = []
 
     def clear(self) -> None:
         # Look at the note in output_graph.py in function `save_global_state`
@@ -1162,22 +1162,22 @@ class TracingContext:
         return tc.traced_code
 
     @staticmethod
-    def record_inline_function_timing(timing: InlineFunctionTiming) -> None:
+    def record_function_trace_timing(timing: FunctionTraceTiming) -> None:
         """Record timing data for an inlined function trace."""
         tc = TracingContext.try_get()
         if tc is not None:
-            tc.inline_function_timings.append(timing)
+            tc.function_trace_timings.append(timing)
 
     @staticmethod
-    def get_inline_function_timings() -> list[InlineFunctionTiming] | None:
+    def get_function_trace_timings() -> list[FunctionTraceTiming] | None:
         """Get timing data for all inlined function traces."""
         tc = TracingContext.try_get()
         if tc is None:
             return None
-        return tc.inline_function_timings
+        return tc.function_trace_timings
 
     @staticmethod
-    def push_inline_timing(
+    def push_trace_timing(
         func_name: str, filename: str, firstlineno: int, start_time_ns: int
     ) -> bool:
         """Push a new entry onto the inline timing stack.
@@ -1192,10 +1192,10 @@ class TracingContext:
                 entry.func_name == func_name
                 and entry.filename == filename
                 and entry.firstlineno == firstlineno
-                for entry in tc.inline_timing_stack
+                for entry in tc.trace_timing_stack
             )
-            tc.inline_timing_stack.append(
-                _InlineTimingStackEntry(
+            tc.trace_timing_stack.append(
+                _TraceTimingStackEntry(
                     func_name=func_name,
                     filename=filename,
                     firstlineno=firstlineno,
@@ -1207,26 +1207,26 @@ class TracingContext:
         return True
 
     @staticmethod
-    def pop_inline_timing() -> _InlineTimingStackEntry | None:
+    def pop_trace_timing() -> _TraceTimingStackEntry | None:
         """Pop the top entry from the inline timing stack."""
         tc = TracingContext.try_get()
-        if tc is not None and tc.inline_timing_stack:
-            return tc.inline_timing_stack.pop()
+        if tc is not None and tc.trace_timing_stack:
+            return tc.trace_timing_stack.pop()
         return None
 
     @staticmethod
     def add_child_time_to_parent(child_cumtime_ns: int) -> None:
         """Add the child's cumulative time to the parent's child_time accumulator."""
         tc = TracingContext.try_get()
-        if tc is not None and tc.inline_timing_stack:
-            tc.inline_timing_stack[-1].child_time_ns += child_cumtime_ns
+        if tc is not None and tc.trace_timing_stack:
+            tc.trace_timing_stack[-1].child_time_ns += child_cumtime_ns
 
     @staticmethod
     def get_current_caller() -> tuple[str, str, int] | None:
         """Get the current caller (top of stack) as (func_name, filename, firstlineno)."""
         tc = TracingContext.try_get()
-        if tc is not None and tc.inline_timing_stack:
-            entry = tc.inline_timing_stack[-1]
+        if tc is not None and tc.trace_timing_stack:
+            entry = tc.trace_timing_stack[-1]
             return (entry.func_name, entry.filename, entry.firstlineno)
         return None
 
@@ -1234,10 +1234,10 @@ class TracingContext:
     def get_current_call_stack() -> tuple[tuple[str, str, int], ...]:
         """Get the full current call stack as tuple of (func_name, filename, firstlineno)."""
         tc = TracingContext.try_get()
-        if tc is not None and tc.inline_timing_stack:
+        if tc is not None and tc.trace_timing_stack:
             return tuple(
                 (entry.func_name, entry.filename, entry.firstlineno)
-                for entry in tc.inline_timing_stack
+                for entry in tc.trace_timing_stack
             )
         return ()
 

@@ -2351,6 +2351,10 @@ class OutputGraph(OutputGraphCommon):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+            # Print/save dynamo profiler output if enabled
+            if config.dynamo_profiler:
+                self._dump_dynamo_profiler_stats()
+
             with self.restore_global_state():
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
 
@@ -2493,6 +2497,12 @@ class OutputGraph(OutputGraphCommon):
     @property
     def graphargs(self) -> list[GraphArg]:
         return [node.meta["grapharg"] for node in self.placeholders]
+
+    def _dump_dynamo_profiler_stats(self) -> None:
+        """Dump dynamo profiler stats if enabled."""
+        from torch._dynamo.profiler import dump_dynamo_profiler_stats
+
+        dump_dynamo_profiler_stats()
 
     def call_user_compiler(
         self, gm: fx.GraphModule, example_inputs: list[Tensor]

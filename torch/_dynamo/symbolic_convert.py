@@ -51,7 +51,7 @@ from typing_extensions import TypeIs
 import torch
 import torch._logging
 from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
-from torch._guards import InlineFunctionTiming, tracing, TracingContext
+from torch._guards import FunctionTraceTiming, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -4852,6 +4852,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Fast path: skip all timing overhead if profiler is disabled
+        if not config.dynamo_profiler:
+            tracer = cls.build_inline_tracer(parent, func, args, kwargs)
+            return tracer.inline_call_()
+
+        # Profiler enabled: collect timing data
         code = func.get_code()
 
         # Get caller info and full call stack before we push ourselves
@@ -4861,7 +4867,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # Push ourselves onto the timing stack BEFORE building the tracer
         # so that build_inline_tracer overhead is included in this function's time
         trace_start_ns = time.time_ns()
-        is_primitive_call = TracingContext.push_inline_timing(
+        is_primitive_call = TracingContext.push_trace_timing(
             code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
         )
 
@@ -4874,7 +4880,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return result
         finally:
             # Pop ourselves from the timing stack
-            stack_entry = TracingContext.pop_inline_timing()
+            stack_entry = TracingContext.pop_trace_timing()
             trace_end_ns = time.time_ns()
 
             # Record timing for successful traces
@@ -4882,7 +4888,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 cumtime_ns = trace_end_ns - trace_start_ns
                 tottime_ns = cumtime_ns - stack_entry.child_time_ns
 
-                timing = InlineFunctionTiming(
+                timing = FunctionTraceTiming(
                     func_name=code.co_name,
                     filename=code.co_filename,
                     firstlineno=code.co_firstlineno,
@@ -4896,7 +4902,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     is_primitive_call=is_primitive_call,
                     call_stack=call_stack,
                 )
-                TracingContext.record_inline_function_timing(timing)
+                TracingContext.record_function_trace_timing(timing)
 
                 # Add our cumtime to the parent's child_time accumulator
                 TracingContext.add_child_time_to_parent(cumtime_ns)

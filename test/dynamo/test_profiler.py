@@ -365,13 +365,14 @@ def forward(self, arg0_1):
             ],
         )
 
-    def test_inline_function_timing(self):
+    @torch._dynamo.config.patch(dynamo_profiler=True)
+    def test_function_trace_timing(self):
         """Test that inline function timing data is captured during compilation."""
-        from torch._dynamo.utils import (
-            format_inline_function_timings,
-            format_inline_function_timings_aggregated,
+        from torch._dynamo.profiler import (
+            format_function_trace_timings,
+            format_function_trace_timings_aggregated,
         )
-        from torch._guards import InlineFunctionTiming, TracingContext
+        from torch._guards import FunctionTraceTiming, TracingContext
 
         captured_timings = []
 
@@ -385,7 +386,7 @@ def forward(self, arg0_1):
             return nested_helper(x)
 
         def timing_capturing_backend(gm, example_inputs):
-            timings = TracingContext.get_inline_function_timings()
+            timings = TracingContext.get_function_trace_timings()
             if timings:
                 captured_timings.extend(timings)
             return gm.forward
@@ -402,9 +403,9 @@ def forward(self, arg0_1):
         # Verify timing data was captured
         self.assertGreater(len(captured_timings), 0)
 
-        # Verify all entries are InlineFunctionTiming instances
+        # Verify all entries are FunctionTraceTiming instances
         for t in captured_timings:
-            self.assertIsInstance(t, InlineFunctionTiming)
+            self.assertIsInstance(t, FunctionTraceTiming)
             self.assertGreater(t.trace_time_ns, 0)
             self.assertGreater(t.bytecode_count, 0)
             self.assertGreaterEqual(t.inline_depth, 1)
@@ -416,18 +417,19 @@ def forward(self, arg0_1):
         self.assertIn("main_fn", func_names)
 
         # Verify formatting functions work
-        formatted = format_inline_function_timings(captured_timings)
-        self.assertIn("Inline Function Tracing Times:", formatted)
+        formatted = format_function_trace_timings(captured_timings)
+        self.assertIn("Function Trace Times:", formatted)
 
-        formatted_agg = format_inline_function_timings_aggregated(captured_timings)
+        formatted_agg = format_function_trace_timings_aggregated(captured_timings)
         self.assertIn("Aggregated", formatted_agg)
 
+    @torch._dynamo.config.patch(dynamo_profiler=True)
     def test_generate_pstats_from_timings(self):
         """Test generating pstats-compatible output from trace timings."""
         import pstats
         import tempfile
 
-        from torch._dynamo.utils import generate_pstats_from_timings
+        from torch._dynamo.profiler import generate_pstats_from_timings
         from torch._guards import TracingContext
 
         trace_timings = []
@@ -439,7 +441,7 @@ def forward(self, arg0_1):
             return helper_fn(x)
 
         def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_inline_function_timings()
+            timings = TracingContext.get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -468,7 +470,8 @@ def forward(self, arg0_1):
             loaded_stats = pstats.Stats(f.name)
             self.assertEqual(loaded_stats.total_calls, stats.total_calls)
 
-    def test_inline_timing_inspect_signature(self):
+    @torch._dynamo.config.patch(dynamo_profiler=True)
+    def test_trace_timing_inspect_signature(self):
         """
         Test profiling Dynamo tracing of inspect.Signature.
 
@@ -477,8 +480,8 @@ def forward(self, arg0_1):
         """
         import inspect
 
-        from torch._dynamo.utils import (
-            format_inline_function_timings_aggregated,
+        from torch._dynamo.profiler import (
+            format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
         )
         from torch._guards import TracingContext
@@ -516,7 +519,7 @@ def forward(self, arg0_1):
         trace_timings = []
 
         def timing_capturing_backend(gm, example_inputs):
-            timings = TracingContext.get_inline_function_timings()
+            timings = TracingContext.get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -548,7 +551,7 @@ def forward(self, arg0_1):
             self.assertLessEqual(t.tottime_ns, t.cumtime_ns)
 
         # Verify aggregated formatting works
-        formatted = format_inline_function_timings_aggregated(trace_timings)
+        formatted = format_function_trace_timings_aggregated(trace_timings)
         self.assertIn("nested_signature_calls", formatted)
 
         # Verify pstats generation works with caller edges
@@ -561,6 +564,7 @@ def forward(self, arg0_1):
         print("\nCallers:")
         stats.print_callers()
 
+    @torch._dynamo.config.patch(dynamo_profiler=True)
     def test_profiler_recursive_and_shared_functions(self):
         """
         Test profiling with recursive functions and shared functions called by multiple callers.
@@ -572,8 +576,8 @@ def forward(self, arg0_1):
         """
         import inspect
 
-        from torch._dynamo.utils import (
-            format_inline_function_timings_aggregated,
+        from torch._dynamo.profiler import (
+            format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
         )
         from torch._guards import TracingContext
@@ -622,7 +626,7 @@ def forward(self, arg0_1):
             return a + b + main_fn(x, depth - 1)
 
         def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_inline_function_timings()
+            timings = TracingContext.get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -671,7 +675,7 @@ def forward(self, arg0_1):
 
         # Print aggregated timings
         print("\nAggregated timings:")
-        print(format_inline_function_timings_aggregated(trace_timings))
+        print(format_function_trace_timings_aggregated(trace_timings))
 
         # Generate pstats and verify
         stats = generate_pstats_from_timings(trace_timings)
@@ -700,6 +704,7 @@ def forward(self, arg0_1):
             msg="Sum of tottime should equal root main_fn's cumtime"
         )
 
+    @torch._dynamo.config.patch(dynamo_profiler=True)
     def test_profiler_indirect_recursion(self):
         """
         Test profiling with indirect recursion: cmn -> A -> B -> cmn.
@@ -709,8 +714,8 @@ def forward(self, arg0_1):
         """
         import inspect
 
-        from torch._dynamo.utils import (
-            format_inline_function_timings_aggregated,
+        from torch._dynamo.profiler import (
+            format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
         )
         from torch._guards import TracingContext
@@ -753,7 +758,7 @@ def forward(self, arg0_1):
             return fn_a(result, depth)
 
         def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_inline_function_timings()
+            timings = TracingContext.get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -803,7 +808,7 @@ def forward(self, arg0_1):
 
         # Print aggregated timings
         print("\nAggregated timings:")
-        print(format_inline_function_timings_aggregated(trace_timings))
+        print(format_function_trace_timings_aggregated(trace_timings))
 
         # Generate pstats and verify
         stats = generate_pstats_from_timings(trace_timings)
@@ -825,6 +830,7 @@ def forward(self, arg0_1):
             msg="Sum of tottime should equal root fn_cmn's cumtime"
         )
 
+    @torch._dynamo.config.patch(dynamo_profiler=True)
     def test_profiler_save_for_snakeviz(self):
         """
         Test saving profile data that can be loaded into snakeviz.
@@ -838,7 +844,7 @@ def forward(self, arg0_1):
         import inspect
         import os
 
-        from torch._dynamo.utils import generate_pstats_from_timings
+        from torch._dynamo.profiler import generate_pstats_from_timings
         from torch._guards import TracingContext
 
         trace_timings = []
@@ -875,7 +881,7 @@ def forward(self, arg0_1):
             return result
 
         def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_inline_function_timings()
+            timings = TracingContext.get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -935,6 +941,41 @@ def forward(self, arg0_1):
         # Print callers to show per-caller breakdown
         print("\nPer-caller breakdown for common_fn:")
         loaded.sort_stats(SortKey.CUMULATIVE).print_callers("common_fn")
+
+    @torch._dynamo.config.patch(dynamo_profiler=True)
+    def test_dynamo_profiler_config_flag(self):
+        """Test that the dynamo_profiler config flag prints pstats output."""
+        import io
+        import sys
+
+        def helper_fn(x):
+            return x * 2 + 1
+
+        def main_fn(x):
+            return helper_fn(x)
+
+        torch._dynamo.reset()
+
+        # Capture stdout to verify pstats output
+        old_stdout = sys.stdout
+        sys.stdout = captured = io.StringIO()
+
+        try:
+            @torch.compile(backend="eager")
+            def compiled_fn(x):
+                return main_fn(x)
+
+            x = torch.randn(10)
+            compiled_fn(x)
+        finally:
+            sys.stdout = old_stdout
+
+        output = captured.getvalue()
+        print(output)  # Print for debugging
+
+        # Verify pstats output was printed
+        self.assertIn("Dynamo Profiler", output)
+        self.assertIn("cumtime", output)
 
 
 if __name__ == "__main__":
