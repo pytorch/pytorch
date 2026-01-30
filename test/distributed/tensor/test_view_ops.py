@@ -590,6 +590,33 @@ class TestViewOps(DTensorTestBase):
             self.assertEqual(out, out_dt.full_tensor())
 
     @with_comms
+    def test_view_as_complex_no_pmax_pmin(self):
+        """
+        view_as_complex converts real tensors to complex. Complex numbers don't
+        have a total ordering, so P(max) and P(min) placements are invalid.
+        This test verifies that these placements are not propagated.
+        """
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        inp = torch.randn(8, 2)
+
+        # Create input with P(sum) - this should work
+        inp_dt_psum = DTensor.from_local(
+            inp.clone(), device_mesh, [Partial("sum")], run_check=False
+        )
+        result_psum = torch.view_as_complex(inp_dt_psum)
+        # P(sum) should propagate since sum is valid for complex
+        self.assertIsInstance(result_psum.placements[0], Partial)
+        self.assertEqual(result_psum.placements[0].reduce_op, "sum")
+
+        # Create input with P(max) - should redistribute to Replicate
+        inp_dt_pmax = DTensor.from_local(
+            inp.clone(), device_mesh, [Partial("max")], run_check=False
+        )
+        result_pmax = torch.view_as_complex(inp_dt_pmax)
+        # P(max) should NOT propagate - output should be Replicate
+        self.assertIsInstance(result_pmax.placements[0], Replicate)
+
+    @with_comms
     def test_dtensor_view_op_uneven(self):
         """
         When the sharded dimension is unchanged, the view op should not trigger any communication.
