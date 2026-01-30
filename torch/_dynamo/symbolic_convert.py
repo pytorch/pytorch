@@ -4607,10 +4607,32 @@ class InstructionTranslatorBase(
 
         stack_pops = 1 + len(analysis.iterator_vars)
 
+        # Calculate extra stack values beyond what the comprehension expects
+        num_extra_stack = len(self.stack) - stack_pops
+
+        # Variables to pass to resume function
+        vars_to_pass = (
+            [analysis.result_var] if analysis.result_var else []
+        ) + analysis.walrus_vars
+
+        # If there are extra stack values AND we need to pass variables to the
+        # resume function, fall back to normal graph break handling. The code that
+        # adds variables to frames[0] assumes frames_list is at TOS, but with extra
+        # stack values it's at a different position.
+        if num_extra_stack > 0 and vars_to_pass:
+            unimplemented(
+                gb_type="Comprehension graph break with extra stack values",
+                context="",
+                explanation="Cannot use comprehension optimization when there are "
+                "extra values on the stack and variables need to be passed to the "
+                "resume function.",
+                hints=[],
+            )
+
         # Ensure object identity preservation for captured mutable variables:
         # Reconstruct them once, store to local slots, and set LocalSource so
         # compile_subgraph loads from the same slots instead of reconstructing.
-        pre_subgraph_insts = []
+        pre_subgraph_insts: list[Instruction] = []
         if analysis.captured_vars:
             captured_vars_cg = PyCodegen(self)
             captured_vars_cg.value_from_source = False
@@ -4678,18 +4700,12 @@ class InstructionTranslatorBase(
 
         meta = all_stack_locals_metadata[0]
 
-        # Variables to pass to resume function
-        vars_to_pass = (
-            [analysis.result_var] if analysis.result_var else []
-        ) + analysis.walrus_vars
-
         # If result stays on stack, push placeholder for resume function
         if analysis.result_on_stack:
             self.push(UnknownVariable())
 
         for var_name in vars_to_pass:
-            if var_name not in meta.locals_names:
-                meta.locals_names[var_name] = len(meta.locals_names)
+            meta.locals_names[var_name] = len(meta.locals_names)
             self.symbolic_locals[var_name] = UnknownVariable()
 
         # Generate code to pass variables to resume function

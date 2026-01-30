@@ -523,6 +523,14 @@
       ]
     }
   ],
+  "GB5696": [
+    {
+      "Gb_type": "Comprehension graph break with extra stack values",
+      "Context": "",
+      "Explanation": "Cannot use comprehension optimization when there are extra values on the stack and variables need to be passed to the resume function.",
+      "Hints": []
+    }
+  ],
   "GB0048": [
     {
       "Gb_type": "Error getting associated real value",
