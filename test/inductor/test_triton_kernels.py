@@ -2129,12 +2129,27 @@ def forward(self, arg0_1, arg1_1):
 
         expected_out = a + b
         eager_out = f(a, b)
-        compiled_out = torch.compile(
-            f,
-            fullgraph=True,
-            backend=backend,
-            dynamic=dynamic,
-        )(a, b)
+
+        if backend == "inductor":
+            log_stream, ctx = logs_to_string("torch._inductor.debug", "ir_post_fusion")
+            with ctx():
+                compiled_out = torch.compile(
+                    f,
+                    fullgraph=True,
+                    backend=backend,
+                    dynamic=dynamic,
+                )(a, b)
+
+            FileCheck().check("op4.unmet_dependencies").check(
+                "WeakDep(name='buf3', mutating_buf='buf4', is_fake=False)"
+            ).run(log_stream.getvalue())
+        else:
+            compiled_out = torch.compile(
+                f,
+                fullgraph=True,
+                backend=backend,
+                dynamic=dynamic,
+            )(a, b)
 
         self.assertEqual(eager_out, expected_out)
         self.assertEqual(compiled_out, expected_out)
