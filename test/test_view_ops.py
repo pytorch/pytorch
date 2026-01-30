@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     skipLazy,
     skipMeta,
     skipXLA,
-    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_mps_types_and,
