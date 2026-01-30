@@ -720,11 +720,9 @@ inline torch::stable::Tensor from_blob(
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
 /// Creates a tensor from an existing data blob with a custom deleter.
 ///
-/// Creates a tensor that uses the provided data pointer as its storage.
-/// When the tensor's storage is deallocated, the deleter function will be
-/// called with the data pointer. This allows proper cleanup of externally
-/// owned memory.
-///
+/// This is the same as the from_blob function above, but allows specifying a
+/// custom deleter function that will be called when the tensor's storage is
+/// deallocated.
 /// Minimum compatible version: PyTorch 2.11.
 ///
 /// @param data Pointer to the data buffer.

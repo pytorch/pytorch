@@ -168,7 +168,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_from_blob(
     int32_t dtype,
     int32_t device_type,
     int32_t device_index,
-    AtenTensorHandle* ret,
+    AtenTensorHandle* ret, // returns new reference
     int32_t layout,
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size,

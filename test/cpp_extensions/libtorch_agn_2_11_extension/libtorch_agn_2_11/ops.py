@@ -6,7 +6,9 @@ def my_from_blob_with_deleter(data_ptr, sizes, strides, device, dtype) -> Tensor
     """
     Creates a Tensor from existing memory with a deleter callback.
 
-    The deleter will be called when the tensor's storage is deallocated.
+    The deleter will be called when the tensor's storage is deallocated. For
+    this test, the deleter just updates a global call count, which allows us to
+    assert that is was called from get_deleter_call_count().
 
     Args:
         data_ptr: int - pointer to the data buffer
