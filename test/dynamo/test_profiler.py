@@ -369,7 +369,6 @@ def forward(self, arg0_1):
     def test_function_trace_timing(self):
         """Test that inline function timing data is captured during compilation."""
         from torch._dynamo.profiler import (
-            format_function_trace_timings,
             format_function_trace_timings_aggregated,
         )
         from torch._guards import FunctionTraceTiming, TracingContext
@@ -416,10 +415,7 @@ def forward(self, arg0_1):
         self.assertIn("nested_helper", func_names)
         self.assertIn("main_fn", func_names)
 
-        # Verify formatting functions work
-        formatted = format_function_trace_timings(captured_timings)
-        self.assertIn("Function Trace Times:", formatted)
-
+        # Verify formatting function works
         formatted_agg = format_function_trace_timings_aggregated(captured_timings)
         self.assertIn("Aggregated", formatted_agg)
 

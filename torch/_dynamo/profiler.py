@@ -249,80 +249,6 @@ def _shorten_filename(filepath: str, max_len: int = 35) -> str:
     return ".." + short[-(max_len - 2) :]
 
 
-def format_function_trace_timings(
-    timings: list[FunctionTraceTiming] | None = None,
-    sort_by: str = "cumtime",
-    top_n: int | None = None,
-) -> str:
-    """
-    Format function trace timing data as a human-readable string.
-
-    Args:
-        timings: List of FunctionTraceTiming objects. If None, fetches from current TracingContext.
-        sort_by: How to sort results. Options: "cumtime", "tottime", "bytecode", "depth"
-        top_n: If provided, only show top N entries
-
-    Returns:
-        Formatted string with timing information, sorted by the specified metric.
-    """
-    if timings is None:
-        timings = get_function_trace_timings()
-
-    if not timings:
-        return "No function trace timing data available."
-
-    # Sort based on requested metric
-    if sort_by == "cumtime" or sort_by == "trace_time":
-        timings = sorted(timings, key=lambda x: x.cumtime_ns, reverse=True)
-    elif sort_by == "tottime":
-        timings = sorted(timings, key=lambda x: x.tottime_ns, reverse=True)
-    elif sort_by == "bytecode":
-        timings = sorted(timings, key=lambda x: x.bytecode_count, reverse=True)
-    elif sort_by == "depth":
-        timings = sorted(timings, key=lambda x: x.inline_depth, reverse=True)
-
-    if top_n is not None:
-        timings = timings[:top_n]
-
-    # Format output - similar to pstats format
-    lines = ["Function Trace Times:"]
-    lines.append("-" * 130)
-    lines.append(
-        f"{'Function':<35} {'File:Line':<30} {'cumtime':>10} {'tottime':>10} {'Bytecode':>8} {'Depth':>5} {'Caller':<25}"
-    )
-    lines.append("-" * 130)
-
-    for t in timings:
-        func_name = t.func_name[:33] + ".." if len(t.func_name) > 35 else t.func_name
-        short_path = _shorten_filename(t.filename, max_len=22)
-        file_loc = f"{short_path}:{t.firstlineno}"
-        if len(file_loc) > 30:
-            file_loc = ".." + file_loc[-28:]
-
-        caller_str = ""
-        if t.caller_func_name:
-            caller_str = (
-                t.caller_func_name[:23] + ".."
-                if len(t.caller_func_name) > 25
-                else t.caller_func_name
-            )
-
-        lines.append(
-            f"{func_name:<35} {file_loc:<30} {t.cumtime_ms:>10.2f} {t.tottime_ms:>10.2f} "
-            f"{t.bytecode_count:>8} {t.inline_depth:>5} {caller_str:<25}"
-        )
-
-    lines.append("-" * 130)
-    lines.append(f"Total functions traced: {len(timings)}")
-    total_cumtime_ms = sum(t.cumtime_ns for t in timings) / 1e6
-    total_tottime_ms = sum(t.tottime_ns for t in timings) / 1e6
-    lines.append(
-        f"Total cumtime: {total_cumtime_ms:.2f}ms, Total tottime: {total_tottime_ms:.2f}ms"
-    )
-
-    return "\n".join(lines)
-
-
 def format_function_trace_timings_aggregated(
     timings: list[FunctionTraceTiming] | None = None,
     sort_by: str = "cumtime",
@@ -681,52 +607,6 @@ def generate_pstats_from_timings(
         )
 
     return stats
-
-
-def generate_flamegraph_from_timings(
-    timings: list[FunctionTraceTiming],
-    output_file: str | None = None,
-) -> str:
-    """
-    Generate flamegraph-compatible collapsed stack format from function trace timings.
-
-    This format can be used with tools like:
-    - speedscope (https://speedscope.app) - just paste the output
-    - flamegraph.pl (https://github.com/brendangregg/FlameGraph)
-
-    Args:
-        timings: List of FunctionTraceTiming from Dynamo tracing
-        output_file: If provided, save to this file
-
-    Returns:
-        String in collapsed stack format: "func1;func2;func3 time_us"
-    """
-    # Group by inline_depth to reconstruct call stacks
-    # Sort by the order they were recorded (which reflects call order)
-    lines = []
-
-    # Build a simple representation: each function with its depth
-    for t in timings:
-        # Simplified stack: just the function at its depth
-        short_filename = (
-            t.filename.rsplit("/", 1)[-1] if "/" in t.filename else t.filename
-        )
-        func_id = f"{short_filename}:{t.func_name}"
-
-        # Create a pseudo-stack based on depth
-        stack = ";".join(["<trace>"] * t.inline_depth + [func_id])
-        time_us = t.trace_time_ns // 1000
-
-        lines.append(f"{stack} {time_us}")
-
-    output = "\n".join(lines)
-
-    if output_file:
-        with open(output_file, "w") as f:
-            f.write(output)
-        _profiler_log.info("Saved flamegraph data to %s", output_file)
-
-    return output
 
 
 def dump_dynamo_profiler_stats() -> None:

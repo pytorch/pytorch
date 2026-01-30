@@ -890,9 +890,7 @@ def dump_compile_times() -> None:
 
 # Re-export profiler functions from torch._dynamo.profiler for backward compatibility
 from torch._dynamo.profiler import (  # noqa: F401
-    format_function_trace_timings,
     format_function_trace_timings_aggregated,
-    generate_flamegraph_from_timings,
     generate_pstats_from_timings,
     get_function_trace_timings,
 )
