@@ -914,21 +914,15 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 #define AT_FORALL_FP32_SET_OPT_DTYPE(_) \
   _(prod)                               \
   _(prod, dim_int)                      \
-  _(prod, dim_Dimname)                  \
   _(softmax, int)                       \
-  _(softmax, Dimname)                   \
   _(log_softmax, int)                   \
-  _(log_softmax, Dimname)               \
   _(cumprod)                            \
-  _(cumprod, dimname)                   \
   _(cumsum)                             \
-  _(cumsum, dimname)                    \
   _(linalg_vector_norm)                 \
   _(linalg_matrix_norm)                 \
   _(linalg_matrix_norm, str_ord)        \
   _(sum)                                \
-  _(sum, dim_IntList)                   \
-  _(sum, dim_DimnameList)
+  _(sum, dim_IntList)
 
 #define AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(_)                         \
   _(ADD_NS(norm),                                                           \
@@ -943,16 +937,6 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
         const Tensor&,                                                      \
         const std::optional<Scalar>&,                                       \
         IntArrayRef,                                                        \
-        bool,                                                               \
-        ScalarType),                                                        \
-    fp32_append_dtype)                                                      \
-  _(ADD_NS(norm),                                                           \
-    "norm.names_ScalarOpt_dim",                                             \
-    Tensor(const Tensor&, const std::optional<Scalar>&, DimnameList, bool), \
-    Tensor(                                                                 \
-        const Tensor&,                                                      \
-        const std::optional<Scalar>&,                                       \
-        DimnameList,                                                        \
         bool,                                                               \
         ScalarType),                                                        \
     fp32_append_dtype)

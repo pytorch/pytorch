@@ -95,8 +95,7 @@ using supported_primitive_arg_types = guts::typelist::typelist<
     c10::Device,
     c10::DeviceIndex,
     c10::Layout,
-    c10::MemoryFormat,
-    at::Dimname>;
+    c10::MemoryFormat>;
 
 // We have an unboxed functor in hand that takes C++ arguments, and
 // we're building a boxed functor wrapper for it that takes IValues.

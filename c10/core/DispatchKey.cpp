@@ -117,9 +117,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Functionalize:
       return "Functionalize";
 
-    case DispatchKey::Named:
-      return "Named";
-
     case DispatchKey::Conjugate:
       return "Conjugate";
     case DispatchKey::Negative:
@@ -288,7 +285,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Python", c10::DispatchKey::Python},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
       {"Fake", c10::DispatchKey::Fake},
-      {"Named", c10::DispatchKey::Named},
       {"Conjugate", c10::DispatchKey::Conjugate},
       {"Negative", c10::DispatchKey::Negative},
       {"ZeroTensor", c10::DispatchKey::ZeroTensor},

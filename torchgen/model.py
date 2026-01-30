@@ -1917,7 +1917,6 @@ class BaseTy(Enum):
     ScalarType = auto()
     Tensor = auto()
     int = auto()
-    Dimname = auto()
     DimVector = auto()
     float = auto()
     str = auto()

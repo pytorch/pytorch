@@ -20,9 +20,7 @@ python test/run_test.py --cpp --verbose -i \
   cpp/extension_backend_test \
   cpp/lazy_tensor_test \
   cpp/tensor_iterator_test \
-  cpp/Dimname_test \
   cpp/Dict_test \
-  cpp/NamedTensor_test \
   cpp/cpu_generator_test \
   cpp/legacy_vmap_test \
   cpp/operators_test

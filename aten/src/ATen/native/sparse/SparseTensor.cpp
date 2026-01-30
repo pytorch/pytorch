@@ -12,7 +12,6 @@
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
-#include <ATen/NamedTensorUtils.h>
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
@@ -592,9 +591,7 @@ SparseTensor& copy_sparse_wrapper_(
     bool non_blocking) {
   // TODO: Once copy_ is fully migrated to use dispatcher, handle named
   // inference using dispatcher instead of doing it everywhere
-  auto maybe_outnames = namedinference::compute_broadcast_outnames(self, src);
   {
-    NoNamesGuard guard;
     if (!self.is_sparse() || !src.is_sparse()) {
       TORCH_CHECK(false,
           "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
@@ -604,7 +601,6 @@ SparseTensor& copy_sparse_wrapper_(
     }
     at::copy_sparse_to_sparse_(self, src, non_blocking);
   }
-  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }
 

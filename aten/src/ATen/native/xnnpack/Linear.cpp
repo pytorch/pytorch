@@ -135,8 +135,7 @@ Tensor run(
   Tensor output = mobile::empty_with_tail_padding(
       output_size,
       padded_input.options().dtype(),
-      padded_input.suggest_memory_format(),
-      padded_input.opt_names());
+      padded_input.suggest_memory_format());
 
   const xnn_status reshape_status = xnn_reshape_fully_connected_nc_f32(
       context.op.get(),                                   // operator

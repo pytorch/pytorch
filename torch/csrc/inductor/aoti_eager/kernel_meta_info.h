@@ -79,8 +79,8 @@ struct TensorMetadata {
 //   4. TENSOR_LIST_OPTIONAL: a list of optional tensors
 //   5. SCALAR: a scalar value
 // If we need to support more types in the future, we will add more types in the
-// ParameterTag enum. For example, we will extend the enum to support string,
-// Dimname and so on to support more types of input parameters of aten
+// ParameterTag enum. For example, we will extend the enum to support string
+// and so on to support more types of input parameters of aten
 // operations.
 enum ParameterTag {
   TENSOR,

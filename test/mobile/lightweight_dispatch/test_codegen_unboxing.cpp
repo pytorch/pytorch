@@ -8,10 +8,6 @@
 // Cover codegen'd unboxing logic for these types:
 //'Device',
 //'Device?',
-//'Dimname',
-//'Dimname[1]',
-//'Dimname[]',
-//'Dimname[]?',
 //'Generator?',
 //'Layout?',
 //'MemoryFormat',

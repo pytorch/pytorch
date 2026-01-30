@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Pool.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -226,7 +225,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
   IntArrayRef dilation,
   bool ceil_mode)
 {
-  NoNamesGuard guard;
 
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
@@ -239,10 +237,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
     padding,
     dilation,
     ceil_mode);
-
-  guard.reset();
-  namedinference::propagate_names(output, input);
-  namedinference::propagate_names(indices, input);
 
   return std::tuple<Tensor, Tensor>(output, indices);
 }

@@ -1,6 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -1058,7 +1057,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                                        IntArrayRef padding,
                                                        IntArrayRef dilation,
                                                        bool ceil_mode) {
-  NoNamesGuard guard;
 
   Tensor output = at::empty({0}, input.options(), MemoryFormat::Contiguous);
   Tensor indices = at::empty({0}, input.options().dtype(kLong), MemoryFormat::Contiguous);
@@ -1072,10 +1070,6 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_mps(const Tensor& input,
                                               ceil_mode,
                                               /*pooling_dims=*/3,
                                               "max_pool3d");
-
-  guard.reset();
-  namedinference::propagate_names(output, input);
-  namedinference::propagate_names(indices, input);
 
   return std::tuple<Tensor, Tensor>(output, indices);
 }

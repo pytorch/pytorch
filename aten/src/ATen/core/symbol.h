@@ -73,7 +73,6 @@ struct TORCH_API Symbol {
   static Symbol prim(const std::string & s);
   static Symbol user(const std::string & s);
   static Symbol caffe2(const std::string & s);
-  static Symbol dimname(const std::string & s);
   // TODO: eliminate me
   static Symbol scope(const std::string & s);
 
@@ -86,7 +85,6 @@ struct TORCH_API Symbol {
   bool is_onnx() const;
   bool is_user() const;
   bool is_caffe2() const;
-  bool is_dimname() const;
 
   // So we can switch on this
   constexpr operator unique_t() const noexcept {
@@ -132,7 +130,6 @@ inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualStri
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
 inline Symbol Symbol::user(const std::string & s) { return Symbol::fromQualString("user::" + s); }
 inline Symbol Symbol::caffe2(const std::string & s) { return Symbol::fromQualString("_caffe2::" + s); }
-inline Symbol Symbol::dimname(const std::string & s) { return Symbol::fromQualString("dimname::" + s); }
 
 } // namespace c10
 

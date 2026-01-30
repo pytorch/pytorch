@@ -9,7 +9,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/NamedTensor.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
