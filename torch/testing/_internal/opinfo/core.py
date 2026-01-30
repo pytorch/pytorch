@@ -110,7 +110,8 @@ class DecorateInfo:
         # Validate dtypes
         if self.dtypes is not None:
             for dtype in self.dtypes:
-                assert isinstance(dtype, torch.dtype)
+                if not isinstance(dtype, torch.dtype):
+                    raise AssertionError(f"Expected torch.dtype, got {type(dtype)}")
 
     def is_active(self, cls_name, test_name, device_type, dtype, param_kwargs):
         return (
@@ -162,23 +163,29 @@ class SampleInput:
         # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
         # SampleInput(input, *args, **kwargs) but not to mix the two forms
         if args is not None or kwargs is not None:
-            assert not var_args and not var_kwargs, """
-A SampleInput can be constructed "naturally" with *args and **kwargs or by
-explicitly setting the "args" and "kwargs" parameters, but the two
-methods of construction cannot be mixed!"""
+            if var_args or var_kwargs:
+                raise AssertionError(
+                    "A SampleInput can be constructed 'naturally' with *args and **kwargs or by "
+                    "explicitly setting the 'args' and 'kwargs' parameters, but the two "
+                    "methods of construction cannot be mixed!"
+                )
         elif var_args or var_kwargs:
-            assert (
+            if not (
                 output_process_fn_grad is None
                 and broadcasts_input is None
                 and name is None
-            ), """
-A SampleInput constructed "naturally" with *args and **kwargs
-cannot specify additional metadata in keyword arguments"""
+            ):
+                raise AssertionError(
+                    "A SampleInput constructed 'naturally' with *args and **kwargs "
+                    "cannot specify additional metadata in keyword arguments"
+                )
 
         self.args = args if args is not None else var_args
-        assert isinstance(self.args, tuple)
+        if not isinstance(self.args, tuple):
+            raise AssertionError(f"Expected args to be tuple, got {type(self.args)}")
         self.kwargs = kwargs if kwargs is not None else var_kwargs
-        assert isinstance(self.kwargs, dict)
+        if not isinstance(self.kwargs, dict):
+            raise AssertionError(f"Expected kwargs to be dict, got {type(self.kwargs)}")
 
         self.output_process_fn_grad = (
             output_process_fn_grad
@@ -743,7 +750,10 @@ class OpInfo:
     def __setattr__(self, name: str, value: Any) -> None:
         # TODO: After migration, start adding warnings here
         if name.startswith("dtypesIf") and name != "dtypesIf":
-            assert isinstance(value, (_dispatch_dtypes, type(None)))
+            if not isinstance(value, (_dispatch_dtypes, type(None))):
+                raise AssertionError(
+                    f"Expected _dispatch_dtypes or None, got {type(value)}"
+                )
             dev_name = name.removeprefix("dtypesIf").lower()
             self.dtypesIf[dev_name] = value
             return
@@ -934,12 +944,14 @@ class OpInfo:
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
 
-        assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
+        if self.dtypes is None:
+            raise AssertionError(f"OpInfo for {self.name} has no dtypes!")
 
         # Validates the dtypes are generated from the dispatch-related functions
         for name, val in self.dtypesIf.items():
             if val is not None:
-                assert isinstance(val, _dispatch_dtypes)
+                if not isinstance(val, _dispatch_dtypes):
+                    raise AssertionError(f"Expected _dispatch_dtypes, got {type(val)}")
                 self.dtypesIf[name] = set(val)
 
         if self.aten_name is None:
@@ -954,18 +966,20 @@ class OpInfo:
         if self.dynamic_dtypes:
             # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU
             # This is because, below we set dtypesIfCUDA to dtypes if they are None.
-            assert isinstance(self.dtypesIfCUDA, utils._dynamic_dispatch_dtypes), (
-                f"To use dynamic dtypes for operator {self.name}, "
-                "acquire the dtypes dynamically for argument `dtypesIfCUDA`."
-                "This is to ensure that CUDA dtypes are acquired correctly as they"
-                "differ from CPU dtypes occasionally"
-            )
-            assert isinstance(self.dtypesIfMPS, utils._dynamic_dispatch_dtypes), (
-                f"To use dynamic dtypes for operator {self.name}, "
-                "acquire the dtypes dynamically for argument `dtypesIfMPS`."
-                "This is to ensure that MPS dtypes are acquired correctly as they"
-                "differ from CPU dtypes occasionally"
-            )
+            if not isinstance(self.dtypesIfCUDA, utils._dynamic_dispatch_dtypes):
+                raise AssertionError(
+                    f"To use dynamic dtypes for operator {self.name}, "
+                    "acquire the dtypes dynamically for argument `dtypesIfCUDA`. "
+                    "This is to ensure that CUDA dtypes are acquired correctly as they "
+                    "differ from CPU dtypes occasionally"
+                )
+            if not isinstance(self.dtypesIfMPS, utils._dynamic_dispatch_dtypes):
+                raise AssertionError(
+                    f"To use dynamic dtypes for operator {self.name}, "
+                    "acquire the dtypes dynamically for argument `dtypesIfMPS`. "
+                    "This is to ensure that MPS dtypes are acquired correctly as they "
+                    "differ from CPU dtypes occasionally"
+                )
 
         self.dtypes = set(self.dtypes)
 
@@ -1142,58 +1156,60 @@ class OpInfo:
         if self.supports_gradgrad is None:
             self.supports_gradgrad = self.supports_autograd
         else:
-            assert not (self.supports_gradgrad and not self.supports_autograd), (
-                "supports_gradgrad refines the part of autograd is supported, so it should "
-                "not be set if supports_autograd is False"
-            )
+            if self.supports_gradgrad and not self.supports_autograd:
+                raise AssertionError(
+                    "supports_gradgrad refines the part of autograd is supported, so it should "
+                    "not be set if supports_autograd is False"
+                )
         if self.check_batched_grad is None:
             self.check_batched_grad = self.supports_autograd or self.supports_forward_ad
         else:
-            assert not (
-                self.check_batched_grad
-                and not (self.supports_autograd or self.supports_forward_ad)
-            ), (
-                "check_batched_grad refines the part of autograd that will be checked (by gradcheck), so "
-                "it should not be set if supports_autograd is False"
-            )
+            if self.check_batched_grad and not (
+                self.supports_autograd or self.supports_forward_ad
+            ):
+                raise AssertionError(
+                    "check_batched_grad refines the part of autograd that will be checked (by gradcheck), so "
+                    "it should not be set if supports_autograd is False"
+                )
         if self.check_batched_gradgrad is None:
             self.check_batched_gradgrad = self.supports_gradgrad
         else:
-            assert not (self.check_batched_gradgrad and not self.supports_gradgrad), (
-                "check_batched_gradgrad refines the part of autograd that will be checked (by "
-                "gradgradcheck), so it should not be set if either supports_gradgrad or supports_autograd "
-                "is False."
-            )
+            if self.check_batched_gradgrad and not self.supports_gradgrad:
+                raise AssertionError(
+                    "check_batched_gradgrad refines the part of autograd that will be checked (by "
+                    "gradgradcheck), so it should not be set if either supports_gradgrad or supports_autograd "
+                    "is False."
+                )
         if self.check_batched_forward_grad is None:
             self.check_batched_forward_grad = self.supports_forward_ad
         else:
-            assert not (
-                self.check_batched_forward_grad and not self.supports_forward_ad
-            ), (
-                "check_batched_forward_grad should only be used when supports_forward_ad "
-                "is True. It is used to disable the test in the specific cases "
-                "where the op supports forward ad but fails to compute "
-                "batched forward grad."
-            )
+            if self.check_batched_forward_grad and not self.supports_forward_ad:
+                raise AssertionError(
+                    "check_batched_forward_grad should only be used when supports_forward_ad "
+                    "is True. It is used to disable the test in the specific cases "
+                    "where the op supports forward ad but fails to compute "
+                    "batched forward grad."
+                )
 
         if self.check_inplace_batched_forward_grad is None:
             self.check_inplace_batched_forward_grad = self.check_batched_forward_grad
         else:
-            assert not (
+            if (
                 self.check_inplace_batched_forward_grad
                 and not self.check_batched_forward_grad
-            ), (
-                "check_batched_forward_grad should only be used when check_batched_forward_grad "
-                "is True. It is used to disable the test in the specific cases "
-                "where the op supports batched forward grad but fails to compute batched forward "
-                "grad for the inplace variant of the op."
-            )
+            ):
+                raise AssertionError(
+                    "check_batched_forward_grad should only be used when check_batched_forward_grad "
+                    "is True. It is used to disable the test in the specific cases "
+                    "where the op supports batched forward grad but fails to compute batched forward "
+                    "grad for the inplace variant of the op."
+                )
 
-        assert not (self.supports_fwgrad_bwgrad and not self.supports_autograd), (
-            "supports_fwgrad_bwgrad enables forward-over-backward gradgrad checks and should only be "
-            "True if backward ad is also checked, i.e., supports_forward_ad should be True.",
-            self.name,
-        )
+        if self.supports_fwgrad_bwgrad and not self.supports_autograd:
+            raise AssertionError(
+                "supports_fwgrad_bwgrad enables forward-over-backward gradgrad checks and should only be "
+                f"True if backward ad is also checked, i.e., supports_forward_ad should be True. ({self.name})"
+            )
 
         # Autograd flags that depend on both forward AD and backward AD
         if self.supports_inplace_autograd is None:
@@ -1201,14 +1217,15 @@ class OpInfo:
                 self.supports_autograd or self.supports_forward_ad
             )
         else:
-            assert not (
+            if (
                 self.supports_inplace_autograd
                 and not self.supports_autograd
                 and not self.supports_forward_ad
-            ), (
-                "supports_inplace_autograd refines the part of autograd that is supported, so "
-                "it should not be set if both supports_autograd and supports_forward_ad are False"
-            )
+            ):
+                raise AssertionError(
+                    "supports_inplace_autograd refines the part of autograd that is supported, so "
+                    "it should not be set if both supports_autograd and supports_forward_ad are False"
+                )
 
         if self.aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in self.aliases)  # type: ignore[assignment]
@@ -1833,13 +1850,28 @@ class ReductionOpInfo(OpInfo):
         **kwargs,
     ):
         self._original_reduction_args = locals().copy()
-        assert nan_policy in (None, "propagate", "omit")
+        if nan_policy not in (None, "propagate", "omit"):
+            raise AssertionError(
+                f"nan_policy must be None, 'propagate', or 'omit', got {nan_policy}"
+            )
 
         # These are mutually exclusive options
-        assert not (result_dtype and promotes_int_to_float)
-        assert not (result_dtype and promotes_int_to_int64)
-        assert not (result_dtype and complex_to_real)
-        assert not (promotes_int_to_float and promotes_int_to_int64)
+        if result_dtype and promotes_int_to_float:
+            raise AssertionError(
+                "result_dtype and promotes_int_to_float are mutually exclusive"
+            )
+        if result_dtype and promotes_int_to_int64:
+            raise AssertionError(
+                "result_dtype and promotes_int_to_int64 are mutually exclusive"
+            )
+        if result_dtype and complex_to_real:
+            raise AssertionError(
+                "result_dtype and complex_to_real are mutually exclusive"
+            )
+        if promotes_int_to_float and promotes_int_to_int64:
+            raise AssertionError(
+                "promotes_int_to_float and promotes_int_to_int64 are mutually exclusive"
+            )
 
         # Default sample_inputs_func for ReductionOpInfo which augments sample
         # inputs from sample_inputs_reduction with the args and kwargs from
@@ -2511,9 +2543,10 @@ class BinaryUfuncInfo(OpInfo):
             self.supports_one_python_scalar = True
 
         if self.supports_one_python_scalar:
-            assert supports_rhs_python_scalar, (
-                "Can't support lhs and rhs Python scalars but not rhs scalars!"
-            )
+            if not supports_rhs_python_scalar:
+                raise AssertionError(
+                    "Can't support lhs and rhs Python scalars but not rhs scalars!"
+                )
 
 
 # The following functions and classes are for testing elementwise unary operators.
@@ -3108,8 +3141,10 @@ class ForeachFuncInfo(OpInfo):
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
             # function.
-            assert foreach_method is None
-            assert torch_ref_method is None
+            if foreach_method is not None:
+                raise AssertionError("foreach_method must be None")
+            if torch_ref_method is not None:
+                raise AssertionError("torch_ref_method must be None")
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
 

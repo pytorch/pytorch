@@ -354,12 +354,9 @@ keep-runtime-typing = true
 "torch/distributed/**" = ["S101"]
 "torch/fx/**" = ["S101"]
 "torch/jit/**" = ["S101"]
-"torch/onnx/_internal/**" = ["S101"]
-"torch/onnx/_internal/exporter/_core.py" = []  # S101 migrated
-"torch/onnx/_internal/fx/passes/type_promotion.py" = []  # S101 migrated
-"torch/onnx/_internal/torchscript_exporter/symbolic_helper.py" = []  # S101 migrated
-"torch/onnx/_internal/torchscript_exporter/symbolic_opset9.py" = []  # S101 migrated
 "torch/testing/**" = ["S101"]
+"torch/testing/_internal/opinfo/core.py" = []  # S101 migrated
+"torch/testing/_internal/custom_op_db.py" = []  # S101 migrated
 "torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
 "torch/_export/db/examples/list_contains.py" = ["S101"]
 
