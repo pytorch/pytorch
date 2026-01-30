@@ -567,9 +567,7 @@ def check_model(
     def has_zero_dim(x):
         if not isinstance(x, tuple):
             x = (x,)
-        return any(
-            isinstance(t, torch.Tensor) and 0 in t.size() for t in x
-        )
+        return any(isinstance(t, torch.Tensor) and 0 in t.size() for t in x)
 
     # Allow assert_equal to be a custom function, instead of True or False, for
     # cases where differences may not indicate incorrectness.
