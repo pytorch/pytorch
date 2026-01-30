@@ -1647,7 +1647,15 @@ def invoke_and_store_as_constant(
             return x.as_python_constant()
         except AsPythonConstantNotImplementedError:
             unimplemented(
-                f"assume_constant_result: cannot convert arguments to Python constants for {name}"
+                gb_type="assume_constant_result argument conversion failed",
+                context=f"function {name}, variable type {type(x).__name__}",
+                explanation=f"Cannot convert argument of type {type(x).__name__} to a Python constant "
+                f"for function {name} marked with torch._dynamo.assume_constant_result. "
+                f"The variable tracker does not support constant conversion.",
+                hints=[
+                    "Remove torch._dynamo.assume_constant_result from this function",
+                    "Ensure all arguments passed to the function can be converted to constants",
+                ],
             )
 
     args = [convert(x) for x in args]
