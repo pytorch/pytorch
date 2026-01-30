@@ -2724,6 +2724,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ):
                         CompileEventLogger.compilation_metric(is_forward=False)
                         # See Note: [Backward graph lazy lowering]
+                        assert aot_config.bw_compiler is not None
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             copy.deepcopy(bw_module), placeholder_list
                         )
