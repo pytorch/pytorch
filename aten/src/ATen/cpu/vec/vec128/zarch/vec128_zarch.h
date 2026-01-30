@@ -414,6 +414,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return StoreHelper<U>::store(*this, ptr, count);
   }
 
+  C10_ALWAYS_INLINE operator vtype() const {
+    return _vec;
+  }
+
   C10_ALWAYS_INLINE const vtype& vec() const {
     return _vec;
   }
@@ -1480,10 +1484,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
  public:
   Vectorized() {}
 
-  explicit C10_ALWAYS_INLINE Vectorized(vinner_type v) : _vec{v} {}
+  C10_ALWAYS_INLINE Vectorized(const vtype &v) : _vec{v} {}
   Vectorized(const T& val) : _vec(val.val_) {}
 
   C10_ALWAYS_INLINE const vinner_type& vec() const {
+    return _vec;
+  }
+
+  C10_ALWAYS_INLINE const vinner_type& data() const {
     return _vec;
   }
 
@@ -1942,7 +1950,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
  public:
   Vectorized() {}
 
-  C10_ALWAYS_INLINE Vectorized(const vinner_type& v) : _vec{v} {}
+  C10_ALWAYS_INLINE Vectorized(const vtype& v) : _vec{v} {}
 
   template <typename U = T, std::enable_if_t<(sizeof(U) == 16), int> = 0>
   C10_ALWAYS_INLINE Vectorized(T s1) : _vec{s1.real(), s1.imag()} {}
@@ -1954,7 +1962,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   template <typename U = T, std::enable_if_t<(sizeof(U) == 8), int> = 0>
   C10_ALWAYS_INLINE Vectorized(T s) : Vectorized<T>(s, s) {}
 
-  C10_ALWAYS_INLINE operator vinner_type() const {
+  C10_ALWAYS_INLINE operator vtype() const {
     return _vec;
   }
 
