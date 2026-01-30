@@ -156,6 +156,8 @@ class Discrepancy:
     error_msg: str = ""
     scalar_args: tuple = ()  # Non-tensor args
     scalar_kwargs: dict = field(default_factory=dict)  # Non-tensor kwargs
+    aten_op: Any = None  # The actual aten op overload
+    variant: str = ""  # OpInfo variant name (e.g., "trunc_rounding")
 
 
 @dataclass
@@ -366,8 +368,9 @@ def compare_operator(
     strategy_query_time = 0.0
 
     for opinfo in opinfos:
-        variant = opinfo.variant_test_name or "(default)"
-        print(f"\n  Variant: {variant}")
+        variant = opinfo.variant_test_name
+        if variant:
+            print(f"\n  OpInfo variant: {variant}")
 
         op = opinfo.op
 
@@ -448,6 +451,9 @@ def compare_operator(
             has_rounding_mode = "rounding_mode" in sample.kwargs
             non_rounded_sample = None
             non_rounded_ground_truth = None
+            non_rounded_negated_sample = None
+            non_rounded_negated_tensors = None
+            non_rounded_negated_ground_truth = None
 
             if has_rounding_mode:
                 from torch.testing._internal.common_methods_invocations import SampleInput
@@ -472,9 +478,33 @@ def compare_operator(
 
                     if not isinstance(non_rounded_ground_truth, torch.Tensor):
                         non_rounded_sample = None
+                    else:
+                        # Also create non-rounded negated sample to catch sign-dependent
+                        # behavior that rounding masks
+                        non_rounded_negated_sample = create_fully_negated_sample(
+                            non_rounded_sample, tensors
+                        )
+                        non_rounded_negated_tensors = negate_all_tensors(tensors)
+
+                        if isinstance(non_rounded_negated_sample.input, torch.Tensor):
+                            non_rounded_negated_ground_truth = op(
+                                non_rounded_negated_sample.input,
+                                *non_rounded_negated_sample.args,
+                                **non_rounded_negated_sample.kwargs
+                            )
+                        else:
+                            non_rounded_negated_ground_truth = op(
+                                *non_rounded_negated_sample.input,
+                                *non_rounded_negated_sample.args,
+                                **non_rounded_negated_sample.kwargs
+                            )
+
+                        if not isinstance(non_rounded_negated_ground_truth, torch.Tensor):
+                            non_rounded_negated_sample = None
                 except Exception:
                     non_rounded_sample = None
                     non_rounded_ground_truth = None
+                    non_rounded_negated_sample = None
 
             # Get all possible input placement combinations (including Partial)
             input_placement_options = [
@@ -604,6 +634,16 @@ def compare_operator(
                             )
                             is_valid = is_valid and non_rounded_valid
 
+                        # Also check non-rounded negated to catch rounding-masked sign issues
+                        if is_valid and non_rounded_negated_sample and has_pmin_pmax(input_placements, output_placement):
+                            non_rounded_negated_combo = PlacementCombination(input_placements, output_placement)
+                            non_rounded_negated_valid, _ = validate_combination(
+                                op, non_rounded_negated_sample, non_rounded_negated_tensors,
+                                non_rounded_negated_combo, non_rounded_negated_ground_truth,
+                                world_size, mesh
+                            )
+                            is_valid = is_valid and non_rounded_negated_valid
+
                         combo_key = (
                             tuple(str(p) for p in input_placements),
                             str(output_placement)
@@ -628,6 +668,8 @@ def compare_operator(
                             discrepancy_type="false_negative",
                             scalar_args=scalar_args,
                             scalar_kwargs=scalar_kwargs,
+                            aten_op=aten_op,
+                            variant=variant,
                         ))
 
                 for combo_key in dtensor_rules:
@@ -641,6 +683,8 @@ def compare_operator(
                             discrepancy_type="false_positive",
                             scalar_args=scalar_args,
                             scalar_kwargs=scalar_kwargs,
+                            aten_op=aten_op,
+                            variant=variant,
                         ))
                     # (true positives already counted above)
 
@@ -680,49 +724,50 @@ def compare_operator(
 
     if stats.false_positives:
         print("\n--- DTENSOR INCORRECT (has rule but ground truth invalid) ---")
-        by_combo = defaultdict(list)
+        # Group by aten_op first, then by placement combo
+        by_op = defaultdict(lambda: defaultdict(list))
         for d in stats.false_positives:
+            op_name = str(d.aten_op) if d.aten_op else "(unknown)"
             key = (d.input_placements, d.output_placement)
-            by_combo[key].append(d)
+            by_op[op_name][key].append(d)
 
-        for (inp, out), discrepancies in sorted(by_combo.items(), key=str):
-            inp_str = ", ".join(inp)
-            print(f"\n  {inp_str} -> {out}")
-            for d in discrepancies[:3]:
-                extra = ""
-                if d.scalar_args or d.scalar_kwargs:
-                    parts = []
-                    if d.scalar_args:
-                        parts.append(f"args={d.scalar_args}")
+        for op_name in sorted(by_op.keys()):
+            print(f"\n  [{op_name}]")
+            for (inp, out), discrepancies in sorted(by_op[op_name].items(), key=str):
+                inp_str = ", ".join(inp)
+                print(f"    {inp_str} -> {out}")
+                for d in discrepancies[:3]:
+                    # Format shapes concisely: [4, 1], [4] instead of torch.Size([4, 1]), torch.Size([4])
+                    shapes_str = ", ".join(str(list(s)) for s in d.input_shapes)
+                    extra = ""
                     if d.scalar_kwargs:
-                        parts.append(f"kwargs={d.scalar_kwargs}")
-                    extra = f", {', '.join(parts)}"
-                print(f"    Sample {d.sample_idx}: shapes={d.input_shapes}{extra}")
-            if len(discrepancies) > 3:
-                print(f"    ... and {len(discrepancies) - 3} more")
+                        extra = f", {d.scalar_kwargs}"
+                    print(f"      Sample {d.sample_idx}: [{shapes_str}]{extra}")
+                if len(discrepancies) > 3:
+                    print(f"      ... and {len(discrepancies) - 3} more")
 
     if stats.false_negatives:
         print("\n--- DTENSOR MISSING (ground truth valid but no rule) ---")
-        by_combo = defaultdict(list)
+        # Group by aten_op first, then by placement combo
+        by_op = defaultdict(lambda: defaultdict(list))
         for d in stats.false_negatives:
+            op_name = str(d.aten_op) if d.aten_op else "(unknown)"
             key = (d.input_placements, d.output_placement)
-            by_combo[key].append(d)
+            by_op[op_name][key].append(d)
 
-        for (inp, out), discrepancies in sorted(by_combo.items(), key=str):
-            inp_str = ", ".join(inp)
-            print(f"\n  {inp_str} -> {out}")
-            for d in discrepancies[:3]:
-                extra = ""
-                if d.scalar_args or d.scalar_kwargs:
-                    parts = []
-                    if d.scalar_args:
-                        parts.append(f"args={d.scalar_args}")
+        for op_name in sorted(by_op.keys()):
+            print(f"\n  [{op_name}]")
+            for (inp, out), discrepancies in sorted(by_op[op_name].items(), key=str):
+                inp_str = ", ".join(inp)
+                print(f"    {inp_str} -> {out}")
+                for d in discrepancies[:3]:
+                    shapes_str = ", ".join(str(list(s)) for s in d.input_shapes)
+                    extra = ""
                     if d.scalar_kwargs:
-                        parts.append(f"kwargs={d.scalar_kwargs}")
-                    extra = f", {', '.join(parts)}"
-                print(f"    Sample {d.sample_idx}: shapes={d.input_shapes}{extra}")
-            if len(discrepancies) > 3:
-                print(f"    ... and {len(discrepancies) - 3} more")
+                        extra = f", {d.scalar_kwargs}"
+                    print(f"      Sample {d.sample_idx}: [{shapes_str}]{extra}")
+                if len(discrepancies) > 3:
+                    print(f"      ... and {len(discrepancies) - 3} more")
 
     # Cleanup
     _clear_sharding_prop_cache()
