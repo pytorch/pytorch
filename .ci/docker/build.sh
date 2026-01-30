@@ -343,6 +343,19 @@ case "$tag" in
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
+  pytorch-linux-jammy-cuda13.0-cudnn9-aarch64-py3.10-gcc13)
+    CUDA_VERSION=13.0.2
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=13
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    TRITON=yes
+    ACL=yes
+    OPENBLAS=yes
+    SKIP_LLVM_SRC_BUILD_INSTALL=yes
+    ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14)
     GCC_VERSION=14
     ;;
