@@ -967,8 +967,12 @@ class TestFP8Lowering(TestCase):
             )
 
         # Verify that Inductor chooses the correct scaling recipes
+        if (am, ak) == (1, 128):
+            check_scale_recipe_a = ScalingType.BlockWise1x128.value
+        else:
+            check_scale_recipe_a = ScalingType.BlockWise128x128.value
         FileCheck().check(
-            f"SCALE_RECIPE_A : tl.constexpr = {ScalingType.BlockWise1x128.value}"
+            f"SCALE_RECIPE_A : tl.constexpr = {check_scale_recipe_a}"
         ).run(code[0])
 
         if (bn, bk) == (1, 128):
