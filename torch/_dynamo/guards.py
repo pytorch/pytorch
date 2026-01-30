@@ -2649,6 +2649,72 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard), guard.user_stack
         )
 
+    def DEFAULT_DTYPE(self, guard: Guard) -> None:
+        """Guard on default dtype to prevent silent incorrectness when
+        torch.set_default_dtype() is called between compilations."""
+        assert guard.source is GuardSource.GLOBAL
+        current_dtype = torch.get_default_dtype()
+        code = [f"torch.get_default_dtype() == {current_dtype!r}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            lambda: torch.get_default_dtype() == current_dtype,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
+    def AUTOCAST_STATE(self, guard: Guard) -> None:
+        """Guard on autocast state to prevent silent incorrectness when
+        torch.autocast is enabled/disabled between compilations."""
+        assert guard.source is GuardSource.GLOBAL
+        # Capture current autocast state for common device types
+        cuda_enabled = torch.is_autocast_enabled("cuda") if torch.cuda.is_available() else False
+        cpu_enabled = torch.is_autocast_enabled("cpu")
+        code = [f"autocast_state_matches(cuda={cuda_enabled}, cpu={cpu_enabled})"]
+        self._set_guard_export_info(guard, code)
+
+        def check_autocast_state() -> bool:
+            current_cuda = torch.is_autocast_enabled("cuda") if torch.cuda.is_available() else False
+            current_cpu = torch.is_autocast_enabled("cpu")
+            return current_cuda == cuda_enabled and current_cpu == cpu_enabled
+
+        self.get_guard_manager(guard).add_lambda_guard(
+            check_autocast_state,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
+    def FLOAT32_MATMUL_PRECISION(self, guard: Guard) -> None:
+        """Guard on float32 matmul precision to prevent silent incorrectness when
+        torch.set_float32_matmul_precision() is called between compilations."""
+        assert guard.source is GuardSource.GLOBAL
+        current_precision = torch.get_float32_matmul_precision()
+        code = [f"torch.get_float32_matmul_precision() == {current_precision!r}"]
+        self._set_guard_export_info(guard, code)
+        self.get_guard_manager(guard).add_lambda_guard(
+            lambda: torch.get_float32_matmul_precision() == current_precision,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
+    def DYNAMO_CONFIG(self, guard: Guard) -> None:
+        """Guard on dynamo config hash to detect config changes between compilations.
+        This is opt-in via config.guard_on_config_hash to avoid excessive recompilations."""
+        assert guard.source is GuardSource.GLOBAL
+        import torch._dynamo.config as dynamo_config
+
+        current_hash = hash(frozenset(dynamo_config._config_dict().items()))
+        code = [f"dynamo_config_hash == {current_hash}"]
+        self._set_guard_export_info(guard, code)
+
+        def check_config_hash() -> bool:
+            return hash(frozenset(dynamo_config._config_dict().items())) == current_hash
+
+        self.get_guard_manager(guard).add_lambda_guard(
+            check_config_hash,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
     def SHAPE_ENV(self, guard: Guard) -> None:
         from torch._dynamo.output_graph import OutputGraphCommon
 
