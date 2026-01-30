@@ -3,9 +3,65 @@
 Utility functions for NVIDIA Universal GEMM.
 """
 
+from functools import lru_cache
 from typing import Any, Optional
 
+import torch
 from torch.nn.functional import ScalingType, SwizzleType
+
+
+@lru_cache(maxsize=1)
+def get_nvmatmul_gpu_enum():
+    """
+    Detect the current GPU and return the corresponding nvMatmulHeuristics enum.
+    Returns None if GPU cannot be detected or is not in the predefined list.
+    """
+    if not torch.cuda.is_available():
+        return None
+
+    try:
+        import nvMatmulHeuristics
+    except ImportError:
+        return None
+
+    device_name = torch.cuda.get_device_name(0).upper()
+
+    # Map device names to nvMatmulHeuristics GPU enums
+    # Priority: check specific models first, then fallback to architecture
+    gpu_mapping = {
+        # Blackwell
+        "B200": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.B200,
+        "GB200": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.GB200_NVL,
+        "GB300": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.GB300_NVL,
+        "RTX 5090": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.RTX_5090,
+        "RTX 5080": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.RTX_5080,
+        # Hopper
+        "H100 SXM": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.H100_SXM,
+        "H100 PCIE": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.H100_PCIE,
+        "H100 NVL": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.H100_NVL,
+        "H200": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.H200_SXM,
+        "H20": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.H20_SXM,
+        # Ada
+        "L40S": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.L40S,
+        "L40": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.L40,
+        "L20": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.L20,
+        "L4": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.L4,
+        "RTX 4090": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.RTX_4090,
+        # Ampere
+        "A100 SXM": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.A100_SXM_80GB,
+        "A100 PCIE": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.A100_PCIE_80GB,
+        "A100": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.A100_SXM_80GB,
+        "A40": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.A40_PCIE,
+        "A30": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.A30_PCIE,
+        "A10": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.A10_PCIE,
+        "RTX 3090": nvMatmulHeuristics.NvMatmulHeuristicsNvidiaGpu.RTX_3090,
+    }
+
+    for pattern, gpu_enum in gpu_mapping.items():
+        if pattern in device_name:
+            return gpu_enum
+
+    return None
 
 
 def to_cutlass_scale_mode(

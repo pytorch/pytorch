@@ -23,7 +23,6 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
 from torch._inductor.kernel_inputs import MMKernelInputs
-from torch._inductor.template_heuristics.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 
@@ -416,6 +415,11 @@ def _add_nv_gemm_choices_impl(
 
     max_configs = config.nvgemm_max_profiling_configs or len(kernels)
     if variant == GemmVariant.GEMM and mm_inputs is not None:
+        # Lazy import to avoid circular dependency
+        from torch._inductor.template_heuristics.nv_universal_gemm import (
+            get_nvgemm_heuristics,
+        )
+
         heuristics = get_nvgemm_heuristics()
         kernels = heuristics.filter_kernels(
             kernels, mm_inputs, max_configs, accumulator_type
