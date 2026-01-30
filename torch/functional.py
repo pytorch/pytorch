@@ -1255,8 +1255,8 @@ def tensordot(  # noqa: F811
     respectively, :func:`~torch.tensordot` computes
 
     .. math::
-        r_{i_0,...,i_{m-d}, i_d,...,i_n}
-          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} \times b_{k_0,...,k_{d-1}, i_d,...,i_n}.
+        r_{i_1,...,i_{m-d}, j_1,...,j_{n-d}}
+          = \sum_{k_1,...,k_d} a_{i_1,...,i_{m-d},k_1,...,k_d} \times b_{k_1,...,k_d, j_1,...,j_{n-d}}.
 
     When called with :attr:`dims` of the list form, the given dimensions will be contracted
     in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
