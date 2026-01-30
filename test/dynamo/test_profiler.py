@@ -368,10 +368,7 @@ def forward(self, arg0_1):
     @torch._dynamo.config.patch(dynamo_profiler=True)
     def test_function_trace_timing(self):
         """Test that inline function timing data is captured during compilation."""
-        from torch._dynamo.profiler import (
-            format_function_trace_timings_aggregated,
-            get_function_trace_timings,
-        )
+        from torch._dynamo.profiler import get_function_trace_timings
         from torch._guards import FunctionTraceTiming
 
         captured_timings = []
@@ -415,10 +412,6 @@ def forward(self, arg0_1):
         self.assertIn("helper_fn", func_names)
         self.assertIn("nested_helper", func_names)
         self.assertIn("main_fn", func_names)
-
-        # Verify formatting function works
-        formatted_agg = format_function_trace_timings_aggregated(captured_timings)
-        self.assertIn("Aggregated", formatted_agg)
 
     @torch._dynamo.config.patch(dynamo_profiler=True)
     def test_generate_pstats_from_timings(self):
@@ -480,7 +473,6 @@ def forward(self, arg0_1):
         import inspect
 
         from torch._dynamo.profiler import (
-            format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
             get_function_trace_timings,
         )
@@ -549,10 +541,6 @@ def forward(self, arg0_1):
         for t in trace_timings:
             self.assertLessEqual(t.tottime_ns, t.cumtime_ns)
 
-        # Verify aggregated formatting works
-        formatted = format_function_trace_timings_aggregated(trace_timings)
-        self.assertIn("nested_signature_calls", formatted)
-
         # Verify pstats generation works with caller edges
         stats = generate_pstats_from_timings(trace_timings)
         self.assertGreater(stats.total_calls, 2)
@@ -576,7 +564,6 @@ def forward(self, arg0_1):
         import inspect
 
         from torch._dynamo.profiler import (
-            format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
             get_function_trace_timings,
         )
@@ -675,10 +662,6 @@ def forward(self, arg0_1):
         self.assertIn("main_fn", main_fn_callers)  # recursive calls
         self.assertIn(None, main_fn_callers)  # first call has no caller in our tracking
 
-        # Print aggregated timings
-        print("\nAggregated timings:")
-        print(format_function_trace_timings_aggregated(trace_timings))
-
         # Generate pstats and verify
         stats = generate_pstats_from_timings(trace_timings)
         print("\nPSTATS:")
@@ -721,7 +704,6 @@ def forward(self, arg0_1):
         import inspect
 
         from torch._dynamo.profiler import (
-            format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
             get_function_trace_timings,
         )
@@ -818,10 +800,6 @@ def forward(self, arg0_1):
                 "fn_b",
                 "Recursive fn_cmn should be called by fn_b, not fn_cmn",
             )
-
-        # Print aggregated timings
-        print("\nAggregated timings:")
-        print(format_function_trace_timings_aggregated(trace_timings))
 
         # Generate pstats and verify
         stats = generate_pstats_from_timings(trace_timings)
@@ -932,29 +910,18 @@ def forward(self, arg0_1):
         )
         print(f"common_fn called from caller_b: 10 times, {time_from_b:.2f}ms cumtime")
 
-        # Save to /tmp for easy snakeviz access - generate both versions
-        # Version 1: Without call paths (aggregated by function)
+        # Save to /tmp for easy snakeviz access
         profile_path = "/tmp/dynamo_profile.prof"
         stats = generate_pstats_from_timings(trace_timings, profile_path)
 
-        # Version 2: With call paths (separate entries per call path)
-        # This makes snakeviz correctly show per-caller timing when drilling down
-        profile_path_with_paths = "/tmp/dynamo_profile_with_paths.prof"
-        stats_with_paths = generate_pstats_from_timings(
-            trace_timings, profile_path_with_paths, use_call_paths=True
-        )
-
         self.assertTrue(os.path.exists(profile_path))
-        self.assertTrue(os.path.exists(profile_path_with_paths))
         print(f"\nProfile saved to: {profile_path}")
-        print(f"Profile with call paths saved to: {profile_path_with_paths}")
         print("\nVisualize with:")
-        print("  snakeviz /tmp/dynamo_profile.prof  # aggregated view")
-        print("  snakeviz /tmp/dynamo_profile_with_paths.prof  # per-caller drill-down")
+        print("  snakeviz /tmp/dynamo_profile.prof")
 
-        # Print the call-path version to show it works
-        print("\nCall-path pstats output:")
-        stats_with_paths.sort_stats(SortKey.CUMULATIVE).print_stats()
+        # Print pstats output
+        print("\nPstats output:")
+        stats.sort_stats(SortKey.CUMULATIVE).print_stats()
 
         # Verify the file can be loaded and has correct caller edges
         import pstats

@@ -252,120 +252,6 @@ def _shorten_filename(filepath: str, max_len: int = 35) -> str:
     return ".." + short[-(max_len - 2) :]
 
 
-def format_function_trace_timings_aggregated(
-    timings: list[FunctionTraceTiming] | None = None,
-    sort_by: str = "cumtime",
-    top_n: int | None = None,
-) -> str:
-    """
-    Format function trace timing data aggregated by unique function.
-
-    This combines multiple calls to the same function into a single entry,
-    showing total cumtime, tottime, call count, and average time per call.
-    Similar to pstats aggregated view.
-
-    Args:
-        timings: List of FunctionTraceTiming objects. If None, fetches from current TracingContext.
-        sort_by: How to sort results. Options: "cumtime", "tottime", "count", "avg_time"
-        top_n: If provided, only show top N entries
-
-    Returns:
-        Formatted string with aggregated timing information.
-    """
-    if timings is None:
-        timings = get_function_trace_timings()
-
-    if not timings:
-        return "No function trace timing data available."
-
-    # Aggregate by (func_name, filename, firstlineno)
-    aggregated: dict[tuple[str, str, int], dict[str, Any]] = {}
-    for t in timings:
-        key = (t.func_name, t.filename, t.firstlineno)
-        if key not in aggregated:
-            aggregated[key] = {
-                "func_name": t.func_name,
-                "filename": t.filename,
-                "firstlineno": t.firstlineno,
-                "cumtime_ns": 0,
-                "tottime_ns": 0,
-                "bytecode_count": t.bytecode_count,
-                "call_count": 0,
-                "prim_count": 0,  # primitive (non-recursive) calls
-                "min_depth": t.inline_depth,
-                "max_depth": t.inline_depth,
-            }
-        agg = aggregated[key]
-        agg["tottime_ns"] += t.tottime_ns  # tottime always added (exclusive)
-        agg["call_count"] += 1
-        agg["min_depth"] = min(agg["min_depth"], t.inline_depth)
-        agg["max_depth"] = max(agg["max_depth"], t.inline_depth)
-
-        # Use the is_primitive_call flag to detect recursion (including indirect)
-        if t.is_primitive_call:
-            agg["prim_count"] += 1
-            # Only add cumtime for primitive calls to avoid double counting
-            agg["cumtime_ns"] += t.cumtime_ns
-
-    # Convert to list
-    agg_list = list(aggregated.values())
-
-    # Sort based on requested metric
-    if sort_by == "cumtime" or sort_by == "total_time":
-        agg_list.sort(key=lambda x: x["cumtime_ns"], reverse=True)
-    elif sort_by == "tottime":
-        agg_list.sort(key=lambda x: x["tottime_ns"], reverse=True)
-    elif sort_by == "count":
-        agg_list.sort(key=lambda x: x["call_count"], reverse=True)
-    elif sort_by == "avg_time":
-        agg_list.sort(key=lambda x: x["cumtime_ns"] / x["call_count"], reverse=True)
-
-    if top_n is not None:
-        agg_list = agg_list[:top_n]
-
-    # Format output - similar to pstats
-    lines = ["Function Trace Times (Aggregated):"]
-    lines.append("-" * 130)
-    lines.append(
-        f"{'ncalls':>9} {'tottime':>10} {'percall':>10} {'cumtime':>10} {'percall':>10}  {'filename:lineno(function)':<58}"
-    )
-    lines.append("-" * 130)
-
-    for agg in agg_list:
-        ncalls = agg["call_count"]
-        pcalls = agg["prim_count"]
-        tottime_s = agg["tottime_ns"] / 1e9
-        cumtime_s = agg["cumtime_ns"] / 1e9
-        # percall for cumtime uses primitive calls (like pstats)
-        percall_tot = tottime_s / ncalls if ncalls > 0 else 0
-        percall_cum = cumtime_s / pcalls if pcalls > 0 else 0
-
-        # Format ncalls as "total/prim" if there are recursive calls
-        if ncalls != pcalls:
-            ncalls_str = f"{ncalls}/{pcalls}"
-        else:
-            ncalls_str = str(ncalls)
-
-        short_path = _shorten_filename(agg["filename"], max_len=35)
-        func_loc = f"{short_path}:{agg['firstlineno']}({agg['func_name']})"
-        if len(func_loc) > 58:
-            func_loc = ".." + func_loc[-56:]
-
-        lines.append(
-            f"{ncalls_str:>9} {tottime_s:>10.6f} {percall_tot:>10.6f} {cumtime_s:>10.6f} {percall_cum:>10.6f}  {func_loc:<58}"
-        )
-
-    lines.append("-" * 130)
-    prim_calls = sum(agg["prim_count"] for agg in aggregated.values())
-    lines.append(
-        f"Unique functions: {len(aggregated)}, Total calls: {len(timings)} ({prim_calls} primitive)"
-    )
-    total_tottime_ms = sum(agg["tottime_ns"] for agg in aggregated.values()) / 1e6
-    lines.append(f"Total tottime: {total_tottime_ms:.2f}ms")
-
-    return "\n".join(lines)
-
-
 def _generate_pstats_with_call_paths(
     timings: list[FunctionTraceTiming],
     output_file: str | None = None,
@@ -489,7 +375,6 @@ def _generate_pstats_with_call_paths(
 def generate_pstats_from_timings(
     timings: list[FunctionTraceTiming],
     output_file: str | None = None,
-    use_call_paths: bool = False,
 ) -> pstats.Stats:
     """
     Generate a pstats.Stats-compatible object from function trace timings.
@@ -497,12 +382,12 @@ def generate_pstats_from_timings(
     This allows visualization with tools like snakeviz, pyprof2calltree, gprof2dot, etc.
     Includes proper tottime (exclusive), cumtime (inclusive), and caller-callee edges.
 
+    Function names are prefixed with their call path for proper drill-down in snakeviz
+    (e.g., "main->caller_a->common_fn" shows common_fn when called from caller_a).
+
     Args:
         timings: List of FunctionTraceTiming from Dynamo tracing
         output_file: If provided, save the stats to this file (can be loaded with pstats.Stats(file))
-        use_call_paths: If True, generate separate entries for each unique call path.
-            This makes snakeviz correctly show per-caller timing when drilling down.
-            Function names will be prefixed with their call path (e.g., "main->caller_a->common_fn").
 
     Returns:
         A pstats.Stats object that can be used for visualization
@@ -515,101 +400,7 @@ def generate_pstats_from_timings(
         stats.print_callers()  # Show who called each function
         stats.print_callees()  # Show what each function called
     """
-    import cProfile
-    import pstats
-
-    if use_call_paths:
-        return _generate_pstats_with_call_paths(timings, output_file)
-
-    # Aggregate timings by function and build caller edges
-    # pstats key format: (filename, lineno, funcname)
-    aggregated: dict[tuple[str, int, str], dict[str, Any]] = {}
-    # Track caller->callee edges: callers[callee_key][caller_key] = [nc, cc, tt, ct]
-    caller_edges: dict[
-        tuple[str, int, str], dict[tuple[str, int, str], list[float]]
-    ] = {}
-
-    for t in timings:
-        short_filename = _shorten_filename(t.filename, max_len=50)
-        key = (short_filename, t.firstlineno, t.func_name)
-
-        if key not in aggregated:
-            aggregated[key] = {
-                "ncalls": 0,  # total calls
-                "pcalls": 0,  # primitive (non-recursive) calls
-                "tottime": 0.0,
-                "cumtime": 0.0,
-            }
-            caller_edges[key] = {}
-
-        agg = aggregated[key]
-        agg["ncalls"] += 1
-        agg["tottime"] += t.tottime_ns / 1e9  # tottime is always added (exclusive)
-
-        # Use the is_primitive_call flag to detect recursion (including indirect)
-        if t.is_primitive_call:
-            agg["pcalls"] += 1
-            # Only add cumtime for primitive calls to avoid double counting
-            # The primitive call's cumtime already includes all recursive calls
-            agg["cumtime"] += t.cumtime_ns / 1e9
-
-        # Build caller edge if we have caller info
-        if t.caller_func_name is not None:
-            caller_short = _shorten_filename(t.caller_filename or "", max_len=50)
-            caller_key = (caller_short, t.caller_firstlineno or 0, t.caller_func_name)
-
-            if caller_key not in caller_edges[key]:
-                caller_edges[key][caller_key] = [0, 0, 0.0, 0.0]  # nc, cc, tt, ct
-
-            edge = caller_edges[key][caller_key]
-            edge[0] += 1  # nc (total calls from this caller)
-            if t.is_primitive_call:
-                edge[1] += 1  # cc (primitive calls)
-            edge[2] += t.tottime_ns / 1e9  # tt
-            edge[3] += t.cumtime_ns / 1e9  # ct
-
-    # Build the stats dict in pstats format
-    # Format: {(filename, lineno, funcname): (cc, nc, tottime, cumtime, callers)}
-    # cc = primitive calls, nc = total calls
-    # When cc != nc, pstats displays as "nc/cc" (e.g., "50/5" for recursive)
-    # callers format: {caller_key: (nc, cc, tt, ct)}
-    stats_dict: dict[
-        tuple[str, int, str], tuple[int, int, float, float, dict[Any, Any]]
-    ] = {}
-
-    for key, agg in aggregated.items():
-        # Convert caller edge lists to tuples
-        callers_dict = {
-            caller_key: tuple(edge_data)
-            for caller_key, edge_data in caller_edges[key].items()
-        }
-        stats_dict[key] = (
-            agg["pcalls"],  # cc (primitive/non-recursive calls)
-            agg["ncalls"],  # nc (total calls)
-            agg["tottime"],  # tottime (exclusive)
-            agg["cumtime"],  # cumtime (inclusive)
-            callers_dict,
-        )
-
-    # Create a Stats object
-    pr = cProfile.Profile()
-    pr.enable()
-    pr.disable()
-    stats = pstats.Stats(pr, stream=sys.stdout)
-
-    # Replace the stats with our data
-    stats.stats = stats_dict
-    stats.total_calls = sum(s[1] for s in stats_dict.values())
-    stats.prim_calls = sum(s[0] for s in stats_dict.values())
-    stats.total_tt = sum(s[2] for s in stats_dict.values())
-
-    if output_file:
-        stats.dump_stats(output_file)
-        _profiler_log.info(
-            "Saved pstats to %s. Visualize with: snakeviz %s", output_file, output_file
-        )
-
-    return stats
+    return _generate_pstats_with_call_paths(timings, output_file)
 
 
 def dump_dynamo_profiler_stats() -> None:
