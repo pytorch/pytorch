@@ -351,7 +351,6 @@ test_python_smoke_b200() {
   install_cutlass_api
   time python test/run_test.py \
     --include \
-      test_fused_attention \
       test_matmul_cuda \
       test_scaled_matmul_cuda \
       inductor/test_fp8 \
@@ -360,6 +359,7 @@ test_python_smoke_b200() {
       inductor/test_flex_flash \
       inductor/test_torchinductor \
       inductor/test_nv_universal_gemm \
+      inductor/test_fused_attention \
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running
   assert_git_not_dirty
