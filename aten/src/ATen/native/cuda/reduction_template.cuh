@@ -222,13 +222,13 @@ struct ReduceJitOp {
       value = thread_reduce<${output_vec_size}>(input_slice);
     }
 
+    if (config.should_block_y_reduce()) {
+      value = block_y_reduce<${output_vec_size}>(value, shared_memory);
+    }
     if (config.should_block_x_reduce()) {
       value = block_x_reduce<${output_vec_size}>(value, shared_memory);
     }
 
-    if (config.should_block_y_reduce()) {
-      value = block_y_reduce<${output_vec_size}>(value, shared_memory);
-    }
     using out_ptr_vec_t = Array<out_scalar_t*, ${output_vec_size}>;
     using offset_vec_t = Array<uint32_t, ${output_vec_size}>;
     offset_vec_t base_offsets;
@@ -318,7 +318,7 @@ struct ReduceJitOp {
       data -= shift;
       end += shift;
       if(threadIdx.x >= shift && threadIdx.x < align_elements && config.should_reduce_tail()){
-        value = reducer::reduce(value, data[threadIdx.x], threadIdx.x - shift);
+        value = reducer::reduce(value, c10::load(data + threadIdx.x), threadIdx.x - shift);
       }
       end -= align_elements;
       data += align_elements;
@@ -340,15 +340,11 @@ struct ReduceJitOp {
       value_list[i] = ident;
     }
 
-    scalar_t values[input_vec_size];
-
-    load_t *values_vector = reinterpret_cast<load_t*>(&values[0]);
-
     while (idx * input_vec_size + input_vec_size - 1 < end) {
-      *values_vector = reinterpret_cast<const load_t*>(data)[idx];
+      const auto values_vec = memory::load_vector<input_vec_size>(data, idx);
       #pragma unroll
       for (uint32_t i = 0; i < input_vec_size; i++) {
-        value_list[i] = reducer::reduce(value_list[i], values[i], shift + idx * input_vec_size + i);
+        value_list[i] = ops.reduce(value_list[i], values_vec.val[i], shift + idx * input_vec_size + i);
       }
       idx += stride;
     }
@@ -358,7 +354,7 @@ struct ReduceJitOp {
     if (config.should_reduce_tail()) {
       int idx = tail_start + threadIdx.x;
       if (idx < end) {
-        value_list[0] = reducer::reduce(value_list[0], data[idx], idx + shift);
+        value_list[0] = reducer::reduce(value_list[0], c10::load(data + idx), idx + shift);
       }
     }
 
@@ -379,7 +375,6 @@ struct ReduceJitOp {
 
     using arg_vec_t = Array<arg_t, output_vec_size>;
     using load_t = aligned_vector<scalar_t, output_vec_size>;
-    const load_t* data = reinterpret_cast<const load_t*>(data_);
 
     // Multiple accumulators to remove dependency between unrolled loops.
     arg_vec_t value_list[vt0];
@@ -397,7 +392,7 @@ struct ReduceJitOp {
     while (idx + (vt0 - 1) * stride < end) {
       #pragma unroll
       for (uint32_t i = 0; i < vt0; i++) {
-        values[i] = data[calc(idx + i * stride) / output_vec_size];
+        values[i] = memory::load_vector<output_vec_size>(data_, calc(idx + i * stride) / output_vec_size);
       }
       #pragma unroll
       for (uint32_t i = 0; i < vt0; i++) {
@@ -416,7 +411,7 @@ struct ReduceJitOp {
       if (idx >= end) {
         break;
       }
-      values[i] = data[calc(idx) / output_vec_size];
+      values[i] = memory::load_vector<output_vec_size>(data_, calc(idx) / output_vec_size);
       idx += stride;
     }
     idx = idx_;
