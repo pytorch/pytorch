@@ -308,6 +308,7 @@ dispatch_keys = [
     DispatchKey.SparseCsrMPS,
     DispatchKey.QuantizedCPU,
     DispatchKey.QuantizedCUDA,
+    DispatchKey.QuantizedXPU,
     DispatchKey.CompositeImplicitAutograd,
     DispatchKey.CompositeImplicitAutogradNestedTensor,
     DispatchKey.CompositeExplicitAutograd,

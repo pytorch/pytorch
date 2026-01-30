@@ -960,7 +960,7 @@
   dispatch:
     ZeroTensor, CPU, CUDA, MTIA, MPS: as_strided_tensorimpl
     Meta: as_strided_tensorimpl_meta_symint
-    QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
+    QuantizedCPU, QuantizedCUDA, QuantizedXPU: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False
   tags: core
@@ -2432,7 +2432,7 @@
     SparseMeta: empty_sparse_symint
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     SparseCsrMeta: empty_sparse_compressed_symint
-    QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
+    QuantizedCPU, QuantizedCUDA, QuantizedXPU, QuantizedMeta: empty_unknown_quantized
   tags: core
 
 - func: empty_permuted(SymInt[] size, int[] physical_layout, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2482,7 +2482,7 @@
 - func: _empty_affine_quantized(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
     CPU: empty_affine_quantized_other_backends_stub
-    QuantizedCPU, QuantizedCUDA: empty_affine_quantized
+    QuantizedCPU, QuantizedCUDA, QuantizedXPU: empty_affine_quantized
   autogen: _empty_affine_quantized.out
 
 # it's a factory function receiving a tensor argument, thus overriding explicitly
@@ -7089,7 +7089,7 @@
     SparseCPU, SparseCUDA, SparseMPS: clone_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: clone_sparse_compressed
     MkldnnCPU: mkldnn_clone
-    QuantizedCPU, QuantizedCUDA: quantized_clone
+    QuantizedCPU, QuantizedCUDA, QuantizedXPU: quantized_clone
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: clone_nested
   autogen: clone.out
   tags: [core, pointwise]
@@ -7873,7 +7873,7 @@
   variants: function, method
   dispatch:
     CPU, CUDA: dequantize_cpu_or_cuda
-    QuantizedCPU, QuantizedCUDA: dequantize_quantized
+    QuantizedCPU, QuantizedCUDA, QuantizedXPU: dequantize_quantized
   autogen: dequantize.self_out
 
 - func: dequantize.tensors(Tensor[] tensors) -> Tensor[]
@@ -7885,12 +7885,12 @@
 - func: q_scale(Tensor self) -> float
   variants: function, method
   dispatch:
-    QuantizedCPU, QuantizedCUDA: q_scale_quant
+    QuantizedCPU, QuantizedCUDA, QuantizedXPU: q_scale_quant
 
 - func: q_zero_point(Tensor self) -> int
   variants: function, method
   dispatch:
-    QuantizedCPU, QuantizedCUDA: q_zero_point_quant
+    QuantizedCPU, QuantizedCUDA, QuantizedXPU: q_zero_point_quant
 
 - func: q_per_channel_scales(Tensor self) -> Tensor
   variants: function, method
@@ -7932,7 +7932,7 @@
 - func: qscheme(Tensor self) -> QScheme
   variants: method
   dispatch:
-    QuantizedCPU, QuantizedCUDA: qscheme_quant
+    QuantizedCPU, QuantizedCUDA, QuantizedXPU: qscheme_quant
 
 - func: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -8364,7 +8364,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, MPS, MTIA: view
+    ZeroTensor, Meta, CPU, CUDA, QuantizedCPU, QuantizedCUDA, QuantizedXPU, MPS, MTIA: view
     MkldnnCPU: mkldnn_view
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: view_nested
   tags: core
