@@ -1,11 +1,14 @@
 # Owner(s): ["module: cuda"]
 
+import gc
 import sys
+import threading
 import warnings
 
 import torch
 import torch.nn.functional as F
-from torch.cuda.debug_streams import warn_on_null_stream_use
+from torch.autograd import Function
+from torch.cuda import warn_on_null_stream_use
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     NoTest,
@@ -21,11 +24,37 @@ if not TEST_CUDA:
     TestCase = NoTest  # noqa: F811
 
 
-def _warns(op):
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
+_warning_count = 0
+_original_warn = warnings.warn
+
+
+def _counting_warn(msg, *args, **kwargs):
+    global _warning_count
+    if "launched on NULL stream" in str(msg):
+        _warning_count += 1
+        return
+    return _original_warn(msg, *args, **kwargs)
+
+
+def _reset_warning_count():
+    global _warning_count
+    _warning_count = 0
+
+
+def _get_warning_count():
+    return _warning_count
+
+
+def _count_warnings(op, stream):
+    _reset_warning_count()
+    with torch.cuda.stream(stream):
         op()
-        return len(w) > 0
+    torch.cuda.synchronize()
+    return _get_warning_count()
+
+
+def _warns(op, stream):
+    return _count_warnings(op, stream) > 0
 
 
 OPS = [
@@ -303,39 +332,171 @@ OPS = [
 
 
 class TestCudaStreamsDebug(TestCase):
+    def setUp(self):
+        super().setUp()
+        warnings.warn = _counting_warn
+
+    def tearDown(self):
+        torch.cuda.synchronize()
+        warnings.warn = _original_warn
+        gc.collect()
+        super().tearDown()
+
     @parametrize("name,op", OPS)
     def test_null_stream_warns(self, name, op):
         with warn_on_null_stream_use():
-            with torch.cuda.stream(torch.cuda.default_stream()):
-                self.assertTrue(
-                    _warns(op), f"Expected warning for {name} on NULL stream"
-                )
+            self.assertTrue(
+                _warns(op, torch.cuda.default_stream()),
+                f"{name} should warn on NULL stream",
+            )
 
     @parametrize("name,op", OPS)
     def test_non_null_stream_no_warn(self, name, op):
         with warn_on_null_stream_use():
-            with torch.cuda.stream(torch.cuda.Stream()):
-                self.assertFalse(
-                    _warns(op), f"Unexpected warning for {name} on non-NULL stream"
+            self.assertFalse(
+                _warns(op, torch.cuda.Stream()),
+                f"{name} should not warn on non-NULL stream",
+            )
+
+
+class TestCudaStreamsDebugMultithreaded(TestCase):
+    def setUp(self):
+        super().setUp()
+        warnings.warn = _counting_warn
+
+    def tearDown(self):
+        torch.cuda.synchronize()
+        warnings.warn = _original_warn
+        gc.collect()
+        super().tearDown()
+
+    @parametrize("use_null_stream", [True, False])
+    def test_backward(self, use_null_stream):
+        warned = [False]
+        fwd_tid = [None]
+        bwd_tid = [None]
+
+        class NullStreamBackward(Function):
+            @staticmethod
+            def forward(ctx, x):
+                fwd_tid[0] = threading.get_ident()
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                bwd_tid[0] = threading.get_ident()
+                _reset_warning_count()
+                stream = (
+                    torch.cuda.default_stream()
+                    if use_null_stream
+                    else torch.cuda.Stream()
+                )
+                with torch.cuda.stream(stream):
+                    result = gO.clone()
+                torch.cuda.synchronize()
+                warned[0] = _get_warning_count() > 0
+                return result
+
+        with warn_on_null_stream_use():
+            inp = torch.rand(100, device="cuda", requires_grad=True)
+            NullStreamBackward.apply(inp).sum().backward()
+
+        torch.cuda.synchronize()
+        self.assertNotEqual(fwd_tid[0], bwd_tid[0])
+        self.assertEqual(warned[0], use_null_stream)
+
+    def test_local_context(self):
+        counts = []
+
+        def worker():
+            with warn_on_null_stream_use():
+                counts.append(
+                    _count_warnings(
+                        lambda: torch.randn(100, device="cuda"),
+                        torch.cuda.default_stream(),
+                    )
                 )
 
-    def test_autograd_inherits_forward_stream(self):
-        with warn_on_null_stream_use():
-            s1, s2 = torch.cuda.Stream(), torch.cuda.Stream()
-            with torch.cuda.stream(s1):
-                x = torch.randn(10, device="cuda", requires_grad=True)
-                loss = (x * 2).sum()
-            with torch.cuda.stream(s2):
-                self.assertFalse(_warns(loss.backward))
+        threads = [threading.Thread(target=worker) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
-            with torch.cuda.stream(torch.cuda.default_stream()):
-                y = torch.randn(10, device="cuda", requires_grad=True)
-                loss = (y * 2).sum()
-            with torch.cuda.stream(torch.cuda.Stream()):
-                self.assertTrue(_warns(loss.backward))
+        torch.cuda.synchronize()
+        self.assertGreaterEqual(sum(counts), 3)
+
+    def test_global_context(self):
+        counts = []
+
+        def worker():
+            counts.append(
+                _count_warnings(
+                    lambda: torch.randn(100, device="cuda"),
+                    torch.cuda.default_stream(),
+                )
+            )
+
+        with warn_on_null_stream_use():
+            threads = [threading.Thread(target=worker) for _ in range(3)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            torch.cuda.synchronize()
+
+        self.assertGreaterEqual(sum(counts), 3)
+
+    def test_outside_context(self):
+        results = []
+        start_bar = threading.Barrier(2)
+        end_bar = threading.Barrier(2)
+
+        def worker():
+            try:
+                start_bar.wait()
+                results.append(
+                    _warns(
+                        lambda: torch.randn(100, device="cuda"),
+                        torch.cuda.default_stream(),
+                    )
+                )
+                end_bar.wait()
+            except threading.BrokenBarrierError:
+                pass
+
+        t = threading.Thread(target=worker)
+        t.start()
+        try:
+            with warn_on_null_stream_use():
+                start_bar.wait()
+                torch.randn(10, device="cuda")
+                end_bar.wait()
+                torch.cuda.synchronize()
+        finally:
+            start_bar.abort()
+            end_bar.abort()
+            t.join()
+
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0])
+
+    def test_reentrance_same_thread(self):
+        def op():
+            return torch.randn(100, device="cuda")
+
+        null_stream = torch.cuda.default_stream()
+
+        with warn_on_null_stream_use():
+            self.assertTrue(_warns(op, null_stream))
+            with warn_on_null_stream_use():
+                self.assertTrue(_warns(op, null_stream))
+            self.assertTrue(_warns(op, null_stream))
+            torch.cuda.synchronize()
 
 
 instantiate_parametrized_tests(TestCudaStreamsDebug)
+instantiate_parametrized_tests(TestCudaStreamsDebugMultithreaded)
 
 
 if __name__ == "__main__":

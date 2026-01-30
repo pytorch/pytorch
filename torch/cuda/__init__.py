@@ -36,6 +36,7 @@ from .graphs import (
 )
 from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
+from ._debug_streams import warn_on_null_stream_use
 
 
 try:
@@ -2068,4 +2069,5 @@ __all__ = [
     "synchronize",
     "tunable",
     "utilization",
+    "warn_on_null_stream_use",
 ]

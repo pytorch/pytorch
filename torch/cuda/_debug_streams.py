@@ -4,16 +4,16 @@ r"""Utilities to warn about work launched on NULL CUDA streams."""
 from __future__ import annotations
 
 import ctypes
+import threading
 import warnings
 from typing import Optional
 
-from torch.cuda import current_stream, set_stream, Stream
-
-
-__all__ = ["warn_on_null_stream_use"]
 
 # Lazy import cupti to avoid import-time warning
 _cupti: Optional[object] = None
+
+# Lazy init the mode class to avoid importing torch.utils at module import time.
+_NULLStreamUseWarningMode = None
 
 
 def _get_cupti():
@@ -21,7 +21,7 @@ def _get_cupti():
     if _cupti is not None:
         return _cupti
     try:
-        from cupti import cupti
+        from cupti import cupti  # type: ignore[import]
 
         _cupti = cupti
     except ImportError:
@@ -39,13 +39,15 @@ _DRIVER_STREAM_MAP: Optional[dict] = None
 
 def _init_api_maps():
     global _RUNTIME_STREAM_MAP, _DRIVER_STREAM_MAP
+
     if _RUNTIME_STREAM_MAP is not None:
         return
 
+    _RUNTIME_STREAM_MAP = {}
+    _DRIVER_STREAM_MAP = {}
+
     cupti = _get_cupti()
     if cupti is None:
-        _RUNTIME_STREAM_MAP = {}
-        _DRIVER_STREAM_MAP = {}
         return
 
     runtime_apis = [
@@ -147,33 +149,29 @@ def _init_api_maps():
         ("cuStreamWaitEvent_ptsz", 0),
     ]
 
-    _RUNTIME_STREAM_MAP = {}
     for api_name, stream_idx in runtime_apis:
-        try:
-            cbid = getattr(cupti.runtime_api_trace_cbid, api_name)
-            _RUNTIME_STREAM_MAP[cbid] = stream_idx
-        except AttributeError:
-            pass
+        cbid = getattr(cupti.runtime_api_trace_cbid, api_name)
+        _RUNTIME_STREAM_MAP[cbid] = (stream_idx, api_name)
 
-    _DRIVER_STREAM_MAP = {}
     for api_name, stream_idx in driver_apis:
-        try:
-            cbid = getattr(cupti.driver_api_trace_cbid, api_name)
-            _DRIVER_STREAM_MAP[cbid] = stream_idx
-        except AttributeError:
-            pass
+        cbid = getattr(cupti.driver_api_trace_cbid, api_name)
+        _DRIVER_STREAM_MAP[cbid] = (stream_idx, api_name)
 
 
 def _is_null_stream_ptr(stream_ptr):
+    # stream_ptr can be None since ctypes returns None for
+    # NULL/nullptr values.
     return stream_ptr == 0 or stream_ptr is None
 
 
-def _check_null_stream(cbdata, stream_idx):
+def _check_null_stream(cbdata, stream_idx, func_name, mode):
     params_ptr = int(cbdata._data[0]["function_params"])
     params = ctypes.cast(params_ptr, ctypes.POINTER(ctypes.c_void_p))
     stream = params[stream_idx]
     if _is_null_stream_ptr(stream):
-        warnings.warn("Operation launched on NULL stream", UserWarning, stacklevel=4)
+        warnings.warn(
+            f"{mode}::{func_name} launched on NULL stream", UserWarning, stacklevel=4
+        )
 
 
 def _callback(_, domain, cbid, cbdata):
@@ -181,74 +179,104 @@ def _callback(_, domain, cbid, cbdata):
     if cbdata.callback_site != cupti.ApiCallbackSite.API_ENTER:
         return
     if domain == cupti.CallbackDomain.RUNTIME_API:
+        # pyrefly: ignore [not-iterable]
         if cbid in _RUNTIME_STREAM_MAP:
-            _check_null_stream(cbdata, _RUNTIME_STREAM_MAP[cbid])
+            # pyrefly: ignore [unsupported-operation]
+            stream_idx, func_name = _RUNTIME_STREAM_MAP[cbid]
+            _check_null_stream(cbdata, stream_idx, func_name, "Runtime")
     elif domain == cupti.CallbackDomain.DRIVER_API:
+        # pyrefly: ignore [not-iterable]
         if cbid in _DRIVER_STREAM_MAP:
-            _check_null_stream(cbdata, _DRIVER_STREAM_MAP[cbid])
+            # pyrefly: ignore [unsupported-operation]
+            stream_idx, func_name = _DRIVER_STREAM_MAP[cbid]
+            _check_null_stream(cbdata, stream_idx, func_name, "Driver")
 
 
-class _NULLStreamUseWarning:
-    def __init__(self):
-        self._subscriber = None
-        self._orig_stream = None
-        self._new_stream = None
+def _get_mode_class():
+    global _NULLStreamUseWarningMode
+    if _NULLStreamUseWarningMode is not None:
+        return _NULLStreamUseWarningMode
 
-    def __enter__(self):
-        cupti = _get_cupti()
-        if cupti is None:
-            return self
+    from torch.utils._python_dispatch import TorchDispatchMode
 
-        _init_api_maps()
-        self._orig_stream = current_stream()
-        # If the current stream in PyTorch is a NULL stream, move it away when
-        # the tool is enabled. This helps isolate use of the NULL stream which is
-        # dangerous since it could cause unexpected stream synchronizations and
-        # degrade performance.
-        if _is_null_stream_ptr(self._orig_stream.cuda_stream):
-            self._new_stream = Stream()
-            set_stream(self._new_stream)
-        self._enable_tool()
-        return self
+    class _NULLStreamUseWarningMode(TorchDispatchMode):
+        _ref_count: int = 0
+        _lock = threading.RLock()
+        _subscriber = None
+        _orig_stream: Optional[object] = None
+        _new_stream: Optional[object] = None
 
-    def __exit__(self, *args, **kwargs):
-        cupti = _get_cupti()
-        if cupti is None:
+        @classmethod
+        def _increment_ref_count(cls):
+            with cls._lock:
+                if cls._subscriber is None and cls._ref_count == 0:
+                    from torch.cuda import current_stream, set_stream, Stream
+
+                    _init_api_maps()
+                    # pyrefly: ignore [bad-assignment, missing-attribute, bad-argument-type]
+                    cls._orig_stream = current_stream()
+                    if _is_null_stream_ptr(cls._orig_stream.cuda_stream):
+                        cls._new_stream = Stream()
+                        set_stream(cls._new_stream)
+                    cls._subscribe_cupti()
+                cls._ref_count += 1
+
+        @classmethod
+        def _decrement_ref_count(cls):
+            with cls._lock:
+                cls._ref_count -= 1
+                if cls._ref_count <= 0:
+                    from torch.cuda import current_stream, set_stream
+
+                    cls._unsubscribe_cupti()
+                    if cls._new_stream is not None and cls._orig_stream is not None:
+                        if current_stream() == cls._new_stream:
+                            # pyrefly: ignore [bad-argument-type]
+                            set_stream(cls._orig_stream)
+
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            self._increment_ref_count()
+            out = func(*args, **(kwargs or {}))
+            self._decrement_ref_count()
+            return out
+
+        def __enter__(self):
+            self._increment_ref_count()
+            return super().__enter__()
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            super().__exit__(exc_type, exc_val, exc_tb)
+            self._decrement_ref_count()
             return False
-        if self._new_stream is not None and self._orig_stream is not None:
-            # User could have potentially updated the current stream themselves.
-            # In that case, we should not override it.
-            if current_stream().cuda_stream == self._new_stream.cuda_stream:
-                set_stream(self._orig_stream)
-        self._disable_tool()
-        return False
 
-    def _enable_tool(self):
-        cupti = _get_cupti()
-        if self._subscriber is not None:
-            return
-        try:
-            self._subscriber = cupti.subscribe(_callback, None)
-        except cupti.cuptiError as e:
-            if "MULTIPLE_SUBSCRIBERS" in str(e):
-                raise RuntimeError(
-                    "CUPTI subscriber already exists. Only one CUPTI callback "
-                    "subscriber is allowed at a time. This can happen if:\n"
-                    "  - Another warn_on_null_stream_use() context is active\n"
-                    "  - A profiler (nsys, ncu, nvprof) is attached\n"
-                    "  - PyTorch profiler is running\n"
-                    "  - Another tool is using CUPTI callbacks"
-                ) from e
-            raise
-        cupti.enable_domain(1, self._subscriber, cupti.CallbackDomain.RUNTIME_API)
-        cupti.enable_domain(1, self._subscriber, cupti.CallbackDomain.DRIVER_API)
+        @classmethod
+        def _subscribe_cupti(cls):
+            cupti = _get_cupti()
+            assert cls._subscriber is None  # noqa: S101
+            try:
+                cls._subscriber = cupti.subscribe(_callback, None)
+            except cupti.cuptiError as e:
+                if "MULTIPLE_SUBSCRIBERS" in str(e):
+                    raise RuntimeError(
+                        "CUPTI subscriber already exists. Only one CUPTI callback "
+                        "subscriber is allowed at a time. This can happen if:\n"
+                        "  - A profiler (nsys, ncu, nvprof) is attached\n"
+                        "  - PyTorch profiler is running\n"
+                        "  - Another tool is using CUPTI callbacks"
+                    ) from e
+                raise
+            cupti.enable_domain(1, cls._subscriber, cupti.CallbackDomain.RUNTIME_API)
+            cupti.enable_domain(1, cls._subscriber, cupti.CallbackDomain.DRIVER_API)
 
-    def _disable_tool(self):
-        cupti = _get_cupti()
-        if self._subscriber is None:
-            return
-        cupti.unsubscribe(self._subscriber)
-        self._subscriber = None
+        @classmethod
+        def _unsubscribe_cupti(cls):
+            cupti = _get_cupti()
+            assert cls._subscriber is not None  # noqa: S101
+            cupti.unsubscribe(cls._subscriber)
+            cls._subscriber = None  # pyrefly: ignore [bad-assignment]
+
+    _NULLStreamUseWarningMode = _NULLStreamUseWarningMode  # noqa: PLW0127
+    return _NULLStreamUseWarningMode
 
 
 def warn_on_null_stream_use():
@@ -260,7 +288,7 @@ def warn_on_null_stream_use():
 
     Example::
 
-        with torch.cuda.debug_streams.warn_on_null_stream_use():
+        with torch.cuda.warn_on_null_stream_use():
             # This will warn because default_stream() is the NULL stream
             with torch.cuda.stream(torch.cuda.default_stream()):
                 x = torch.randn(10, device="cuda")
@@ -276,4 +304,4 @@ def warn_on_null_stream_use():
         cannot be used simultaneously with profilers like nsys or the
         PyTorch profiler.
     """
-    return _NULLStreamUseWarning()
+    return _get_mode_class()()
