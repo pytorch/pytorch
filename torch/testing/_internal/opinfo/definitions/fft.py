@@ -12,7 +12,11 @@ from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
 )
-from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    MACOS_VERSION,
+    TEST_SCIPY,
+    TEST_WITH_ROCM,
+)
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
     ErrorInput,
@@ -291,6 +295,15 @@ op_db: list[OpInfo] = [
                 "test_complex_half_reference_testing",
                 device_type="cuda",
             ),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+                active_if=lambda _: MACOS_VERSION < 15.0,
+            ),
         ),
     ),
     SpectralFuncInfo(
@@ -344,6 +357,17 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         check_batched_grad=False,
         check_batched_gradgrad=False,
+        skips=(
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+                active_if=lambda _: MACOS_VERSION < 15.0,
+            ),
+        ),
     ),
     SpectralFuncInfo(
         "fft.rfft2",
@@ -386,6 +410,17 @@ op_db: list[OpInfo] = [
         decorators=[
             precisionOverride({torch.float: 1e-4}),
         ],
+        skips=(
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+                active_if=lambda _: MACOS_VERSION < 15.0,
+            ),
+        ),
     ),
     SpectralFuncInfo(
         "fft.ifft",
