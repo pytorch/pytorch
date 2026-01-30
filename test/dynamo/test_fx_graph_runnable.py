@@ -17,6 +17,7 @@ from torch.utils._triton import has_triton
 if torch.distributed.is_available():
     from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
     from torch.testing._internal.distributed.fake_pg import FakeStore
+    from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 if has_triton():
     import triton
@@ -396,6 +397,92 @@ class FxGraphRunnableTest(TestCase):
         x = torch.randn(2, 4, 16, 16)
         torch.compile(f)(x)
         self._exec_and_verify_payload()
+
+
+@unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Skip in fbcode/sandcastle")
+class TestFxGraphRunnableMultiProcessGroup(TestCase):
+    """
+    Tests for fx_graph_runnable generation with multiple process groups.
+    This is a separate test class to avoid adding requirements to existing tests.
+    Requires 4 GPUs for a 2x2 mesh configuration.
+    """
+
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "Torch distributed not available."
+    )
+    @skip_if_lt_x_gpu(4)
+    def test_multiple_process_groups(self):
+        """
+        Test that fx_graph_runnable correctly handles graphs with multiple
+        process groups (e.g., TP and DP groups in a 2x2 mesh configuration).
+        """
+        import tempfile
+
+        from torch._dynamo.repro.after_aot import generate_standalone_repro
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Set up fake distributed environment with 2x2 mesh (4 GPUs)
+        # Mesh layout: [[0, 1], [2, 3]]
+        # TP groups: [0, 1] and [2, 3] (size 2 each)
+        # DP groups: [0, 2] and [1, 3] (size 2 each)
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=4, store=store)
+
+        try:
+            # Create TP group (size 2) - ranks [0, 1]
+            tp_pg = dist.new_group([0, 1])
+            # Create DP group (size 2) - ranks [0, 2]
+            dp_pg = dist.new_group([0, 2])
+
+            torch._C._distributed_c10d._register_process_group("tp", tp_pg)
+            torch._C._distributed_c10d._register_process_group("dp", dp_pg)
+
+            # Function with collectives on multiple groups
+            def f(x):
+                # all_gather on tp group (size 2)
+                y = torch.ops._c10d_functional.all_gather_into_tensor(x, 2, "tp")
+                z = torch.ops._c10d_functional.wait_tensor(y)
+                # all_reduce on dp group (size 2)
+                w = torch.ops._c10d_functional.all_reduce(z, "sum", "dp")
+                v = torch.ops._c10d_functional.wait_tensor(w)
+                # Return tuple (required by inductor)
+                return (v * 2,)
+
+            # Create example input and trace the graph
+            args = [torch.randn(4, 4)]
+            gm = make_fx(f)(*args)
+
+            # Generate the standalone repro
+            repro = generate_standalone_repro(gm, args)
+            print(f"XXX REPRO:{repro}")
+
+            # Verify the repro contains expected content
+            self.assertIn("setup_fake_process_groups", repro)
+            self.assertIn("'tp'", repro)
+            self.assertIn("'dp'", repro)
+            self.assertIn("'size': 2", repro)
+
+            # Write to temp file and execute
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False
+            ) as tmp:
+                tmp.write(repro)
+                tmp.flush()
+                result = subprocess.run(
+                    [sys.executable, tmp.name],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                f"Generated repro failed to execute:\nSTDERR:\n{result.stderr}",
+            )
+
+        finally:
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":
