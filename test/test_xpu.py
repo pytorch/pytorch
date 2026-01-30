@@ -370,6 +370,10 @@ if __name__ == "__main__":
             RuntimeError, "expected other to be a torch.Event object"
         ):
             e3.elapsed_time(e1)
+        with self.assertRaisesRegex(
+            RuntimeError, "expected event to be a torch.Event object"
+        ):
+            s3.record_event(e1)
 
     def test_device_context_manager(self):
         prev_device = torch.xpu.current_device()

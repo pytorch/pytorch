@@ -1146,6 +1146,10 @@ print(t.is_pinned())
             RuntimeError, "expected other to be a torch.Event object"
         ):
             e3.elapsed_time(e1)
+        with self.assertRaisesRegex(
+            RuntimeError, "expected event to be a torch.Event object"
+        ):
+            s3.record_event(e1)
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
