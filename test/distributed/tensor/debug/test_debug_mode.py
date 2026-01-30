@@ -1104,7 +1104,7 @@ class TestDTensorDebugMode(TestCase):
 class TestDebugModeUtils(TestCase):
     """Test DebugMode with NCCL backend without using DTensor."""
 
-    def test_hash_empty_tenor(self):
+    def test_hash_empty_tensor(self):
         t = torch.tensor([])
         # hash tensor fn should not error out with empty tensor
         out = torch.utils._debug_mode.hash_tensor_fn(t)
