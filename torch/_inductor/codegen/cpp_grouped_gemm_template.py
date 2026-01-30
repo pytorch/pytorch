@@ -1,7 +1,7 @@
 import contextlib
 import logging
 from collections.abc import Callable
-from typing import Any, cast, Optional, TypeVar
+from typing import Any, Optional, TypeVar, cast
 from unittest.mock import patch
 
 import torch
@@ -25,9 +25,9 @@ from .cpp_gemm_template import (
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
-    create_epilogue_with_attr,
     DTYPE_TO_CPP,
     GemmBlocking,
+    create_epilogue_with_attr,
     get_gemm_template_output_and_compute_dtype,
 )
 
@@ -48,7 +48,7 @@ extern "C" {{export_declaration}}
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        #pragma omp for
+        #pragma omp for schedule(static, 1)
         for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
             {{ template.codegen_multi_threads_params()|indent(12, false) }}
 {%- else %}

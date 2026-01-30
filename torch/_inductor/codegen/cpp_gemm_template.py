@@ -4,7 +4,7 @@ import logging
 import math
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, cast, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union, cast
 from unittest.mock import patch
 
 import torch
@@ -21,23 +21,23 @@ from ..utils import (
     is_same_tensor,
     parallel_num_threads,
 )
-from ..virtualized import ops, V
+from ..virtualized import V, ops
 from .cpp import get_export_declaration
 from .cpp_micro_gemm import (
     CppMicroBrgemm,
     CppMicroGemm,
     CppMicroGemmAMX,
     CppMicroGemmFP32Vec,
+    LayoutType,
     create_micro_gemm,
     is_int8_woq_gemm_small_m_dim_corner_case,
-    LayoutType,
 )
 from .cpp_template import CppTemplate
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
-    create_epilogue_with_attr,
     DTYPE_TO_CPP,
     GemmBlocking,
+    create_epilogue_with_attr,
     get_gemm_template_output_and_compute_dtype,
 )
 
@@ -209,7 +209,7 @@ GEMM_TEMPLATE = r"""
 {%- if num_threads > 1 %}
     #pragma omp parallel num_threads({{num_threads}})
     {
-        #pragma omp for
+        #pragma omp for schedule(static, 1)
         for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
             {{ template.codegen_multi_threads_params()|indent(12, false) }}
 {%- else %}
@@ -290,7 +290,7 @@ GEMM_TEMPLATE = r"""
     }
 {%- if maybe_k_slicing %}
         if (num_Kt_blocks > 1) {
-            #pragma omp for
+            #pragma omp for schedule(static, 1)
             for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
                 {{ template.codegen_multi_threads_params()|indent(16, false) }}
                 for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {

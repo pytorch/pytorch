@@ -33,13 +33,13 @@ from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
+    TEST_MKL,
+    instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
     slowTest,
-    TEST_MKL,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -5251,7 +5251,7 @@ class CPUReproTests(TestCase):
             v,
         )
         compiler_mode = torch.compile(mod)
-        from torch.nn.attention import sdpa_kernel, SDPBackend
+        from torch.nn.attention import SDPBackend, sdpa_kernel
 
         context = contextlib.nullcontext if not is_inference else torch.no_grad
         with (
@@ -5839,26 +5839,15 @@ class CPUReproTests(TestCase):
     def test_max_autotune_bmm_omp_dynamic(self):
         # Simulate the issue where omp_set_dynamic(1) causes wrong results
         # when combined with max_autotune and specific threading.
-        # This requires finding the OpenMP library and calling the C function directly.
-
-        lib_names = ["omp", "gomp", "iomp5"]
-        lib_path = None
-        for name in lib_names:
-            path = ctypes.util.find_library(name)
-            if path:
-                lib_path = path
-                break
-
-        if not lib_path:
-            self.skipTest("OpenMP library not found")
+        # Use RTLD_GLOBAL to access the OpenMP library already loaded by PyTorch.
 
         try:
-            omp = ctypes.CDLL(lib_path)
+            omp = ctypes.CDLL("", ctypes.RTLD_GLOBAL)
         except OSError:
-            self.skipTest(f"Could not load OpenMP library: {lib_path}")
+            self.skipTest("Could not access OpenMP symbols from process")
 
-        if not hasattr(omp, "omp_set_dynamic"):
-            self.skipTest("omp_set_dynamic not found in OpenMP library")
+        if not hasattr(omp, "omp_set_dynamic") or not hasattr(omp, "omp_get_dynamic"):
+            self.skipTest("omp_set_dynamic/omp_get_dynamic not found in OpenMP library")
 
         def fn(x, y):
             return torch.bmm(x, y)
@@ -5874,6 +5863,8 @@ class CPUReproTests(TestCase):
         with config.patch({"max_autotune": True}):
             compiled_fn = torch.compile(fn)
 
+            # Save original dynamic threading state
+            original_dynamic = omp.omp_get_dynamic()
             # Set dynamic threading to 1 (enabled)
             # This simulates what cv2 import does
             omp.omp_set_dynamic(1)
@@ -5887,8 +5878,8 @@ class CPUReproTests(TestCase):
                     expected = fn(x, y)
                     torch.testing.assert_close(actual, expected)
             finally:
-                # Reset dynamic threading
-                omp.omp_set_dynamic(0)
+                # Restore original dynamic threading state
+                omp.omp_set_dynamic(original_dynamic)
 
 
 if __name__ == "__main__":
