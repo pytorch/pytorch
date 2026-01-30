@@ -1233,7 +1233,9 @@ class TestOptimRenewed(TestCase):
         [optim for optim in optim_db if "fused" in optim.supported_impls],
         dtypes=[torch.float32],
     )
-    def test_load_state_dict_preserves_step_as_float64(self, device, dtype, impl, optim_info):
+    def test_load_state_dict_preserves_step_as_float64(
+        self, device, dtype, impl, optim_info
+    ):
         optim_cls = optim_info.optim_cls
         opt_name = optim_cls.__name__
         if opt_name in ("SGD", "Adagrad") and impl == "capturable":
