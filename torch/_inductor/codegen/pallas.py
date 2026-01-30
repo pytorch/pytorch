@@ -974,6 +974,8 @@ class PallasKernel(SIMDKernel):
         # Check for ModularIndexing - this is NOT contiguous access
         # ModularIndexing is used for roll/wrap-around operations
         if index.has(ModularIndexing):
+            # Track which iteration variables are used before returning
+            self.used_iter_vars.update(self._get_used_iter_vars(index))
             # Generate actual index expression - iteration variables are already
             # defined as jnp.arange arrays, so we just convert to JAX code
             return self.kexpr(index)
