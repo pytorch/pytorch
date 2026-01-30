@@ -2131,14 +2131,67 @@ static Tensor _matmul_impl(
     }
 
     auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
+
+    // Optimization: If we have multiple batch dimensions, and flattening them would cause
+    // a large expansion in memory (due to broadcasting + non-contiguous read),
+    // resolve by iterating over the first batch dimension.
+    // This resolves https://github.com/pytorch/pytorch/issues/173904
+    if (output_shape.size() > 1) {
+      const int64_t dim0 = output_shape[0];
+      const int64_t ndim = output_shape.size();
+      const int64_t dim1_offset = ndim - batch_tensor1.size();
+      const int64_t dim2_offset = ndim - batch_tensor2.size();
+
+      if (has_out) {
+         DimVector full_out_shape = output_shape;
+         if (dim_tensor1 > 1) full_out_shape.push_back(n);
+         if (dim_tensor2 > 1) full_out_shape.push_back(p);
+         at::native::resize_output(out, full_out_shape);
+      }
+
+      std::vector<Tensor> results;
+      if (!has_out) {
+        results.reserve(dim0);
+      }
+      
+      Tensor unused;
+      for (int64_t i = 0; i < dim0; ++i) {
+         Tensor t1_sub = tensor1;
+         if (dim1_offset == 0) {
+            t1_sub = (batch_tensor1[0] == 1) ? tensor1.select(0, 0) : tensor1.select(0, i);
+         }
+
+         Tensor t2_sub = tensor2;
+         if (dim2_offset == 0) {
+            t2_sub = (batch_tensor2[0] == 1) ? tensor2.select(0, 0) : tensor2.select(0, i);
+         }
+
+         if (has_out) {
+             Tensor out_sub = out.select(0, i);
+             _matmul_impl(out_sub, t1_sub, t2_sub);
+         } else {
+             results.emplace_back(_matmul_impl(unused, t1_sub, t2_sub));
+         }
+      }
+
+      if (!has_out) {
+         return at::stack(results);
+      }
+      return out;
+    }
+
     const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
     // flatten expanded batches
     const auto tensor1_expand_size = [&output_shape, n, m1]{ DimVector ret(output_shape);
                                                              ret.append({n, m1});
                                                              return ret; }();
-    const auto tensor1_expanded = tensor1.expand(tensor1_expand_size)
-                                         .reshape({expand_batch_product, n, m1});
+    // We use a view to check if we can avoid copying the tensor in the reshape step
+    auto tensor1_expanded = tensor1.expand(tensor1_expand_size);
+    // If the reshape would force a copy (always happens if strides are incompatible), 
+    // we would have preferred the loop optimization above.
+    tensor1_expanded = tensor1_expanded.reshape({expand_batch_product, n, m1});
+
     // We need to treat the dim_tensor2 == 1 case separately as broadcasting would not convert
     // a vector of shape (n,) into a batch of matrices of shape (*, n, 1)
     auto vector_rhs = dim_tensor2 == 1;
@@ -2152,6 +2205,55 @@ static Tensor _matmul_impl(
       return ret;
     }();
     auto tensor2_expanded = tensor2.expand(tensor2_expand_size);
+
+    // Check if we should use a loop instead of the BMM approach to avoid
+    // significant memory expansion due to broadcasting.
+    // This happens when we have multiple batch dimensions and some of them
+    // are broadcasted (stride 0) while others are not, preventing a precise
+    // flatten of the batch dimensions without copying.
+    if (output_shape.size() > 1) {
+      const auto has_stride_0_batch = [](const Tensor& t, int64_t batch_dims) {
+        for (int64_t i = 0; i < batch_dims; ++i) {
+          if (t.stride(i) == 0 && t.size(i) > 1) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      const bool t1_broadcasts = has_stride_0_batch(tensor1_expanded, output_shape.size());
+      const bool t2_broadcasts = has_stride_0_batch(tensor2_expanded, output_shape.size());
+
+      // Threshold: 1MB
+      constexpr int64_t COPY_THRESHOLD = 1024 * 1024;
+      const int64_t size_bytes_t1 =
+          t1_broadcasts ? tensor1_expanded.numel() * tensor1_expanded.element_size() : 0;
+      const int64_t size_bytes_t2 =
+          t2_broadcasts ? tensor2_expanded.numel() * tensor2_expanded.element_size() : 0;
+
+      if (size_bytes_t1 > COPY_THRESHOLD || size_bytes_t2 > COPY_THRESHOLD) {
+        if (dim_tensor1 > 1) {
+          output_shape.push_back(n);
+        }
+        if (dim_tensor2 > 1) {
+          output_shape.push_back(p);
+        }
+        if (has_out) {
+          at::native::resize_output(out, output_shape);
+        } else {
+          out = at::empty(output_shape, tensor1.options());
+        }
+
+        const int64_t dim0 = output_shape[0];
+        for (int64_t i = 0; i < dim0; ++i) {
+          auto out_slice = out.select(0, i);
+          _matmul_impl(out_slice, tensor1_expanded.select(0, i), tensor2_expanded.select(0, i));
+        }
+        return out;
+      }
+    }
+
+    const auto tensor1_expanded_reshaped = tensor1_expanded.reshape({expand_batch_product, n, m1});
     if (vector_rhs) {
       tensor2_expanded = tensor2_expanded.reshape({expand_batch_product, m2}).unsqueeze(2);
     } else {
@@ -2167,14 +2269,14 @@ static Tensor _matmul_impl(
 
     if (!has_out) {
       if (vector_rhs) {
-        return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded).squeeze(-1), output_shape);
+        return at::_unsafe_view(tensor1_expanded_reshaped.bmm(tensor2_expanded).squeeze(-1), output_shape);
       } else {
-        return at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+        return at::_unsafe_view(tensor1_expanded_reshaped.bmm(tensor2_expanded), output_shape);
       }
     } else {
       at::native::resize_output(out, output_shape);
       auto reshaped_out = out.reshape({expand_batch_product, n, p});
-      at::bmm_out(reshaped_out, tensor1_expanded, tensor2_expanded);
+      at::bmm_out(reshaped_out, tensor1_expanded_reshaped, tensor2_expanded);
       if (vector_rhs) {
         reshaped_out = reshaped_out.squeeze(-1);
       }

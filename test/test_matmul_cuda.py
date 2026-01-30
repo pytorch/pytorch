@@ -110,6 +110,24 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_tf32 = True
         super().tearDown()
 
+    def test_matmul_4d_broadcast_memory_regression(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/173904
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        
+        M, K, N = 32, 32, 16
+        # Shape that involves mixed stride-0 broadcasting in batch dims
+        a = torch.randn(1, 128, 8, 1, K, device="cuda", dtype=torch.float32)
+        b = torch.randn(8, N, K, device="cuda", dtype=torch.float32)
+        
+        c = torch.matmul(a, b.mT)
+        
+        a_cpu = a.cpu()
+        b_cpu = b.cpu()
+        c_ref = torch.matmul(a_cpu, b_cpu.mT)
+        
+        self.assertEqual(c.cpu(), c_ref)
+
     def cublas_addmm(
         self,
         size: int,
