@@ -276,6 +276,7 @@ def create_synthetic_base_metadata(
     )
     assert m.subclass_tangent_meta is not None
     subclass_tangent_meta = [
+        # pyrefly: ignore[bad-argument-type]
         PlainTensorMeta(0, memory_format=x)
         for x in inner_mutated_tangents_memory_formats
     ] + m.subclass_tangent_meta[len(inner_mutated_tangents) :]
