@@ -2590,6 +2590,12 @@ class GuardBuilder(GuardBuilderBase):
         """Special guard to skip guards on empty hooks. This is controlled by skip_nnmodule_hook_guards"""
         if config.skip_nnmodule_hook_guards:
             # This is unsafe if you add/remove a hook on nn module variable
+            log.debug(
+                "Skipping NN module hooks guard for %s. This may cause silent "
+                "incorrectness if hooks are added/removed between compilations. "
+                "Set skip_nnmodule_hook_guards=False to guard on hooks.",
+                guard.name,
+            )
             return
         self.SEQUENCE_LENGTH(guard)
 
@@ -2893,6 +2899,12 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_MATCH(self, guard: Guard, value: Optional[Any] = None) -> None:
         if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
+            log.debug(
+                "Skipping FSDP module guard for %s. This may cause silent "
+                "incorrectness if FSDP module state changes between compilations. "
+                "Set UNSAFE_SKIP_FSDP_MODULE_GUARDS=0 to enable guards.",
+                guard.name,
+            )
             return
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
@@ -2978,7 +2990,7 @@ class GuardBuilder(GuardBuilderBase):
                 # guard overhead.
                 # For numpy tensors, since those are ephemeral, we don't have to
                 # insert aliasing guards on them
-                if not (
+                skip_aliasing_guard = (
                     config.skip_no_tensor_aliasing_guards_on_parameters
                     and (
                         istype(value, torch.nn.Parameter)
@@ -2986,7 +2998,18 @@ class GuardBuilder(GuardBuilderBase):
                             guard.originating_source
                         )
                     )
-                ) and not isinstance(guard.originating_source, NumpyTensorSource):
+                )
+                if skip_aliasing_guard:
+                    log.debug(
+                        "Skipping tensor aliasing guard for parameter %s. This may "
+                        "cause silent incorrectness if the same tensor is passed as "
+                        "multiple inputs. Set skip_no_tensor_aliasing_guards_on_parameters=False "
+                        "to enable aliasing guards.",
+                        tensor_name,
+                    )
+                if not skip_aliasing_guard and not isinstance(
+                    guard.originating_source, NumpyTensorSource
+                ):
                     # Keep track of all the tensor guard managers to insert
                     # NoAliasing check at the end.
                     self.no_tensor_aliasing_names.append(tensor_name)

@@ -170,10 +170,17 @@ def fake_tensor_unsupported(fn: Callable[[Any, list[Any], Any], R]) -> Any:
     return wrapper
 
 
+log = logging.getLogger(__name__)
+
+
 def device_from_inputs(example_inputs: Iterable[Any]) -> torch.device:
     for x in example_inputs:
         if hasattr(x, "device"):
             return x.device
+    log.debug(
+        "No device found in inputs, falling back to CPU. This may cause "
+        "silent incorrectness if the actual computation device differs."
+    )
     return torch.device("cpu")  # Default fallback
 
 
@@ -181,4 +188,8 @@ def dtype_from_inputs(example_inputs: Iterable[Any]) -> torch.dtype:
     for x in example_inputs:
         if hasattr(x, "dtype"):
             return x.dtype
+    log.debug(
+        "No dtype found in inputs, falling back to float32. This may cause "
+        "silent incorrectness if the actual dtype differs."
+    )
     return torch.float32  # Default fallback
