@@ -1883,17 +1883,6 @@ elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
-elif [[ "$TEST_CONFIG" == 'torchfuzz' ]]; then
-  echo "Running TorchFuzz..."
-  RANDOM_SEED=$((RANDOM * RANDOM))
-  echo "Using random start seed: $RANDOM_SEED"
-  # Run more seeds in periodic workflow
-  if [[ "$GITHUB_WORKFLOW" == "periodic" ]]; then
-    COUNT=10000
-  else
-    COUNT=100
-  fi
-  python tools/experimental/torchfuzz/fuzzer.py --start "$RANDOM_SEED" --count "$COUNT" -p 4 --template default
 elif [[ "$TEST_CONFIG" == 'quantization' ]]; then
   test_quantization
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then

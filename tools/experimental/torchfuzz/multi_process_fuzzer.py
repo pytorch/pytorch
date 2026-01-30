@@ -4,17 +4,12 @@ Multi-process fuzzer library that uses worker processes to execute fuzzer.py wit
 """
 
 import multiprocessing as mp
-import os
 import re
 import subprocess
 import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-
-
-# Get the directory containing this script (and fuzzer.py)
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 try:
@@ -105,11 +100,9 @@ def run_fuzzer_with_seed(
 
     try:
         # Run fuzzer.py with the specified seed and template
-        # Use absolute path to fuzzer.py to support running from any directory
-        fuzzer_path = os.path.join(_SCRIPT_DIR, "fuzzer.py")
         cmd = [
             sys.executable,
-            fuzzer_path,
+            "fuzzer.py",
             "--single",
             "--seed",
             str(seed),
