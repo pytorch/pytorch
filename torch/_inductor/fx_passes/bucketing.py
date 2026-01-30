@@ -514,7 +514,7 @@ def _pre_bucket_reduce_scatter(
     group_name: str,
 ) -> torch.Tensor:
     rs_ins_flattened = [x.view(group_size, -1) for x in rs_ins]
-    if torch._inductor.config.bucket_ops_rs_use_pg_alloc:
+    if torch._inductor.config.bucket_ops_use_pg_alloc:
         x = rs_ins[0]
         size = sum(t.numel() for t in rs_ins)
         dtype = x.dtype
@@ -557,7 +557,7 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
 
     # TODO - either use torch.cat or make sure inductor foreach codegen
     # fires more reliably
-    if torch._inductor.config.bucket_ops_ag_use_pg_alloc:
+    if torch._inductor.config.bucket_ops_use_pg_alloc:
         pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
         backend = pg._get_backend(new_rs_in.device)
         size = list(new_rs_in.shape)
@@ -673,7 +673,7 @@ def _pre_bucket_all_gather(
     ag_input_numel = sum(ins_split_sizes)
     device = ag_ins[0].device
 
-    if torch._inductor.config.bucket_ops_ag_use_pg_alloc:
+    if torch._inductor.config.bucket_ops_use_pg_alloc:
         pg = _resolve_process_group(group_name)  # type: ignore[arg-type]
         backend = pg._get_backend(device)
         size = ag_input_numel * group_size
