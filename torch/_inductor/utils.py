@@ -2052,6 +2052,72 @@ def use_blackwell_cutedsl_grouped_mm(
     return True
 
 
+def use_blackwell_cutedsl_scaled_grouped_mm(
+    mat_a: Any,
+    mat_b: Any,
+    layout: Layout,
+    a_is_2d: bool,
+    b_is_2d: bool,
+    offs: Optional[Any],
+    scale_a: Optional[Any],
+    scale_b: Optional[Any],
+    bias: Optional[Any],
+    scale_result: Optional[Any],
+) -> bool:
+    """
+    Returns True if we can use the blackwell blockscaled kernel for scaled grouped mm.
+    Required conditions (extends use_blackwell_cutedsl_grouped_mm):
+        1. All conditions from use_blackwell_cutedsl_grouped_mm
+        2. scale_a and scale_b must be present
+        3. Input dtypes must be FP8 (float8_e4m3fn or float8_e5m2)
+    """
+    # Only when scales are present
+    if scale_a is None or scale_b is None:
+        return False
+
+    # Reuse base checks
+    if not use_blackwell_cutedsl_grouped_mm(
+        mat_a, mat_b, layout, a_is_2d, b_is_2d, offs, bias, scale_result
+    ):
+        return False
+
+    # Scales must be static for CuTeDSL kernel specialization
+    if any(is_dynamic(x) for x in [scale_a, scale_b]):
+        return False
+
+    # Scales must be block-scaled (MXFP8) for CuTeDSL blockscaled kernel
+    if scale_a.get_dtype() != torch.float8_e8m0fnu:
+        return False
+    if scale_b.get_dtype() != torch.float8_e8m0fnu:
+        return False
+
+    # Scales must be 2D for block-scaled layout
+    if len(scale_a.get_size()) != 2:
+        return False
+    if len(scale_b.get_size()) != 2:
+        return False
+
+    # Check for supported dtypes (FP8/NVFP4)
+    a_dtype = mat_a.get_dtype()
+    b_dtype = mat_b.get_dtype()
+
+    supported_dtypes = OrderedSet(
+        [
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            # torch.float4_e2m1fn,  # If available in future
+        ]
+    )
+
+    if a_dtype not in supported_dtypes or b_dtype not in supported_dtypes:
+        return False
+
+    # Scales must be appropriate dtype (FP8E8M0FNU or similar)
+    # For now, accept same dtype as output or float8 types
+
+    return True
+
+
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 

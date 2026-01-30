@@ -25,6 +25,7 @@ from ..utils import (
     has_free_symbols,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
+    use_blackwell_cutedsl_scaled_grouped_mm,
     use_nv_universal_gemm_template,
     use_triton_template,
 )
@@ -140,6 +141,11 @@ triton_scaled_grouped_mm_template = TritonTemplate(
 cutedsl_grouped_mm_template = CuteDSLTemplate(
     name="grouped_gemm_cutedsl",
     source=load_kernel_template("cutedsl_mm_grouped"),
+)
+
+cutedsl_scaled_grouped_mm_template = CuteDSLTemplate(
+    name="scaled_grouped_gemm_cutedsl",
+    source=load_kernel_template("cutedsl_scaled_mm_grouped"),
 )
 
 
@@ -440,6 +446,38 @@ def _tuned_grouped_mm_common(
             input_nodes,
             accumulator_type=torch.float32,
         )
+
+    # Add CuTeDSL choice for scaled grouped MM
+    if scale_a is not None and use_blackwell_cutedsl_scaled_grouped_mm(
+        mat_a,
+        mat_b,
+        layout,
+        a_is_2d,
+        b_is_2d,
+        offs,
+        scale_a,
+        scale_b,
+        bias,
+        scale_result,
+    ):
+        # Determine sf_vec_size based on dtype
+        sf_vec_size = (
+            32 if mat_a.get_dtype() in {torch.float8_e4m3fn, torch.float8_e5m2} else 16
+        )
+
+        for config in get_groupgemm_configs():
+            kwargs = dict(
+                ACC_DTYPE="cutlass.Float32",
+                SF_VEC_SIZE=sf_vec_size,
+            )
+
+            cutedsl_scaled_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                **kwargs,
+                **asdict(config),
+            )
 
     input_gen_fns = {}
     if offs is not None:

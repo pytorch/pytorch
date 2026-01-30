@@ -150,6 +150,94 @@ class TestCuTeDSLGroupedGemm(InductorTestCase):
         self.assertEqual(c_compiled.dtype, dtype)
         torch.testing.assert_close(c_eager, c_compiled)
 
+    @parametrize("group_size", (2, 8))
+    @parametrize("M_hint", (256, 1024))
+    @parametrize("K", (64, 128))
+    @parametrize("N", (128, 256))
+    def test_scaled_grouped_gemm_basic(
+        self, group_size: int, M_hint: int, K: int, N: int
+    ):
+        """Test scaled grouped GEMM with FP8 inputs and BF16 output."""
+        device = "cuda"
+        dtype_input = torch.float8_e4m3fn
+        dtype_output = torch.bfloat16
+        dtype_scale = torch.float8_e8m0fnu
+
+        # Generate base inputs with alignment for FP8 blockscaled scales.
+        # CuTeDSL blockscaled path expects 128-row scale atom alignment.
+        alignment = 128
+        M_sizes = (
+            torch.randint(1, (M_hint // alignment) + 1, (group_size,), dtype=torch.int)
+            * alignment
+        )
+        M_total = torch.sum(M_sizes).item()
+
+        # Create FP8 input tensors
+        # A: (M_total, K) in row-major layout - stride[-1] == 1
+        A = torch.randn(int(M_total), K, dtype=dtype_output, device=device) * 0.1
+        A_fp8 = A.to(dtype_input)
+
+        # B: (group_size, K, N) in K-major (transposed) layout - stride[1] == 1
+        # The operator expects B to be transposed (K-major layout)
+        # Create in (G, N, K) layout first, then transpose to get (G, K, N) with K-major strides
+        # Do NOT call .contiguous() after transpose to preserve the K-major stride pattern
+        B_temp = (
+            torch.randn((group_size, N, K), dtype=dtype_output, device=device) * 0.01
+        )
+        B = B_temp.transpose(1, 2)  # Now (G, K, N) with stride[1]=1 (K-major)
+        B_fp8 = B.to(dtype_input)
+
+        # Create block-scaled scale factors (MXFP8 layout)
+        # For FP8 blockscaled, scales are float8_e8m0fnu with 2D shapes.
+        # scale_a: (round_up(M_total, 128), round_up(K/32, 4))
+        # scale_b: (group_size, blocked_scale_K * blocked_scale_N)
+        def round_up(x: int, multiple: int) -> int:
+            return ((x + multiple - 1) // multiple) * multiple
+
+        blocksize = 32
+        blocked_scale_k = round_up(K // blocksize, 4)
+        blocked_scale_n = round_up(N, 128)
+        scale_a_m = round_up(int(M_total), 128)
+        scale_a = torch.ones(
+            (scale_a_m, blocked_scale_k), dtype=dtype_scale, device=device
+        )
+        scale_b = torch.ones(
+            (group_size, blocked_scale_k * blocked_scale_n),
+            dtype=dtype_scale,
+            device=device,
+        )
+
+        # Build offsets
+        offsets = torch.cumsum(M_sizes, dim=0).to(dtype=torch.int32, device=device)
+
+        def scaled_grouped_gemm_fn(A_packed, B_batched, scale_a, scale_b, offs):
+            return torch._scaled_grouped_mm(
+                A_packed, B_batched, scale_a, scale_b, offs=offs, out_dtype=dtype_output
+            )
+
+        # Eager execution
+        c_eager = scaled_grouped_gemm_fn(A_fp8, B_fp8, scale_a, scale_b, offsets)
+
+        # Test with CuTeDSL backend
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "test_configs.autotune_choice_name_regex": "cutedsl",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            scaled_grouped_gemm_compiled = torch.compile(
+                scaled_grouped_gemm_fn, backend="inductor", dynamic=False
+            )
+            c_compiled = scaled_grouped_gemm_compiled(
+                A_fp8, B_fp8, scale_a, scale_b, offsets
+            )
+
+        self.assertEqual(c_eager.dtype, dtype_output)
+        self.assertEqual(c_compiled.dtype, dtype_output)
+        torch.testing.assert_close(c_eager, c_compiled, rtol=1e-2, atol=1e-2)
+
 
 if __name__ == "__main__":
     run_tests()
