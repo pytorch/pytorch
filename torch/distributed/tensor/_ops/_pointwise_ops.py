@@ -793,6 +793,73 @@ def common_pointwise_strategy(
                 redistribute_cost=redistribute_costs,
             )
         )
+
+    # For multiplicative linearity (linearity==2), also generate strategies where
+    # a non-followed input has Partial. This handles R * P(sum) -> P(sum) when
+    # the first input is followed (Replicate) but the second input has Partial.
+    if linearity == 2:
+        for other_idx, other_arg in enumerate(args_schema):
+            if other_idx == followed_strategy_index:
+                continue
+            if not isinstance(other_arg, OpStrategy):
+                continue
+
+            for other_spec in other_arg.strategies:
+                other_output_spec = other_spec.output_spec
+                for mesh_dim, placement in enumerate(other_output_spec.placements):
+                    if not isinstance(placement, Partial):
+                        continue
+                    if not (placement.is_partial("sum") or placement.is_partial("avg")):
+                        continue
+
+                    # Generate a strategy: followed input = Replicate, other input = Partial
+                    out_placements_list: list[Placement] = [Replicate()] * len(
+                        followed_strategy.strategies[0].output_spec.placements
+                    )
+                    out_placements_list[mesh_dim] = placement
+
+                    input_specs_list: list[DTensorSpec] = []
+                    redistribute_costs_list: list[list[float]] = []
+
+                    for input_idx, input_arg in enumerate(args_schema):
+                        if not isinstance(input_arg, OpStrategy):
+                            continue
+                        input_arg_spec = input_arg.strategies[0].output_spec
+
+                        if input_idx == other_idx:
+                            # This is the input with Partial
+                            target_placements_list: list[Placement] = [
+                                Replicate()
+                            ] * len(input_arg_spec.placements)
+                            target_placements_list[mesh_dim] = placement
+                            target_placements = tuple(target_placements_list)
+                        else:
+                            # Other inputs should be Replicate
+                            target_placements = tuple(
+                                Replicate() for _ in input_arg_spec.placements
+                            )
+
+                        target_spec = DTensorSpec(
+                            mesh=followed_strategy.mesh,
+                            placements=target_placements,
+                            tensor_meta=input_arg_spec.tensor_meta,
+                        )
+                        input_specs_list.append(target_spec)
+                        redistribute_costs_list.append(
+                            generate_redistribute_costs(input_arg, target_spec)
+                        )
+
+                    pointwise_strategy.strategies.append(
+                        OpSpec(
+                            output_specs=DTensorSpec(
+                                mesh=followed_strategy.mesh,
+                                placements=tuple(out_placements_list),
+                            ),
+                            input_specs=input_specs_list,
+                            redistribute_cost=redistribute_costs_list,
+                        )
+                    )
+
     return pointwise_strategy
 
 
