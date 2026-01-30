@@ -1428,7 +1428,7 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
-            # FP8 dtypes don't support isnan()/isinf(), so upcast to float first
+            # FP8 dtypes don't support isnan()/isinf(), so upcast to bfloat16 first
             dtype = buf.get_dtype()
             if dtype in (
                 torch.float8_e4m3fn,
@@ -1436,7 +1436,7 @@ class PythonWrapperCodegen(CodeGen):
                 torch.float8_e4m3fnuz,
                 torch.float8_e5m2fnuz,
             ):
-                check_expr = f"{name}.float()"
+                check_expr = f"{name}.bfloat16()"
             else:
                 check_expr = name
 
