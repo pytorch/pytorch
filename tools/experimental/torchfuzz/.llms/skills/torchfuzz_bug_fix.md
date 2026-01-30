@@ -15,12 +15,26 @@ Use this skill when:
 
 ## Prerequisites
 
-> **IMPORTANT:** Before running any tests, ask the user:
-> "Is there a conda environment name I need to activate before running tests?"
+> **🔴 CRITICAL - CONDA ENVIRONMENT CHECK:**
+> Before doing ANYTHING else, you MUST ask the user:
+> **"Is there a conda environment name I need to activate before running tests?"**
+> Do NOT proceed until you have the conda environment name. Store it and use it for ALL commands.
 
 > **IMPORTANT:** Use `git` for source control commands, not `sl` (Sapling).
 
 > **IMPORTANT:** Always activate conda environment before running `ghstack` (e.g., `conda activate <env_name> && ghstack`).
+
+## 🔄 Step-by-Step Reading Requirement
+
+> **🔴 CRITICAL - RE-READ BEFORE EACH STEP:**
+> After completing each step, you MUST re-read the NEXT step's instructions from this skill file before proceeding.
+> This ensures you follow the workflow correctly and don't skip important checks.
+>
+> **Pattern to follow:**
+> 1. Complete Step N
+> 2. Re-read Step N+1 from this skill file
+> 3. Execute Step N+1
+> 4. Repeat
 
 ---
 
@@ -39,8 +53,8 @@ Use this skill when:
 2. Run TorchFuzz with the specific seed using:
    ```bash
    python tools/experimental/torchfuzz/torchfuzz.py --seed <SEED>
-   ``` 
-   conda activat first. 
+   ```
+   conda activat first.
 3. Capture the output and failing program for analysis
 4. Proceed to Step 1 once you have the failing program and error details
 
@@ -62,7 +76,7 @@ Use this skill when:
 5. **DO NOT proceed to Step 2 until the test fails as expected**
 6. **I repeat: DO NOT proceed to Step 2 until the test fails as expected**
 7. Add `@unittest.expectedFailure` decorator to the test, then run the test to ensure it fails
-   
+
    > **Caveat:** Sometimes a test runs for both CPU and CUDA, but only one device fails. This can break CI because `@unittest.expectedFailure` is applied to both but only one actually fails. Ensure your test setup handles this case (e.g., skip the test on devices where it doesn't fail, or use device-specific expected failure decorators).
 
 8. Run the test again and **verify it PASSES** (shows as "expected failure" or "xfail")
@@ -118,7 +132,7 @@ Ask the user if they are satisfied with the summary and fix, or if they have con
 
 1. Create a new branch/commit and add the unit test to it (mark it as expected failure) (if you did not do that in step 0).
 2. Create another branch/commit on top of that and add the fix to it (removing the expected failure)
-   
+
    Include in the commit:
    - The fix summary (from Step 2)
    - PR Title
