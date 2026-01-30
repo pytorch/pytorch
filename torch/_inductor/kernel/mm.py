@@ -1001,6 +1001,16 @@ def tuned_scaled_mm(
         )
     )
 
+    # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
+
+        add_nv_universal_scaled_gemm_choices(
+            choices,
+            layout,
+            input_nodes,
+        )
+
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
         return autotune_select_algorithm(name, choices, input_nodes, layout)

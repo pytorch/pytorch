@@ -49,6 +49,62 @@ def _length(obj) -> int:
     return len(obj)
 
 
+def _get_expected_num_tensor_outputs(op: OpOverload) -> int:
+    """
+    Get the expected number of tensor outputs for an operator based on its schema.
+
+    Returns:
+        The number of tensor outputs expected. Returns 0 for ops that don't return tensors
+        (e.g., _linalg_check_errors). Returns 1 for single tensor return, and >1 for
+        tuple returns where each element is a tensor.
+    """
+    return_types = op._schema.returns
+    if len(return_types) == 0:
+        return 0
+
+    first_return = return_types[0]
+    if isinstance(first_return.type, torch.TensorType):
+        # Could be single tensor or tuple of tensors
+        return len(return_types)
+    elif isinstance(first_return.type, torch.ListType):
+        # List[Tensor] - we don't know the length at schema time, treat as 1
+        return 1
+    else:
+        # Not a tensor return type
+        return 0
+
+
+def _validate_tensor_meta_count(
+    op_schema: OpSchema,
+    tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
+) -> None:
+    """
+    Validate that the tensor_meta matches the expected number of outputs for the op.
+
+    Raises AssertionError if the count doesn't match, providing a helpful error message.
+    """
+    expected_outputs = _get_expected_num_tensor_outputs(op_schema.op)
+
+    # Compute actual count:
+    # - None means 0 outputs
+    # - TensorMeta (single instance) means 1 output
+    # - Sequence of TensorMeta means len(sequence) outputs
+    # Note: TensorMeta is a NamedTuple (subclass of tuple), so we must check for it first
+    if tensor_meta is None:
+        actual_outputs = 0
+    elif isinstance(tensor_meta, TensorMeta):
+        actual_outputs = 1
+    else:
+        actual_outputs = len(tensor_meta)
+
+    assert actual_outputs == expected_outputs, (
+        f"Tensor meta count mismatch for {op_schema.op}: "
+        f"expected {expected_outputs} tensor output(s) based on op schema, "
+        f"but _propagate_tensor_meta returned {actual_outputs}. "
+        f"This usually indicates a bug in fake tensor propagation for this op."
+    )
+
+
 class LocalLRUCache(threading.local):
     def __init__(self, user_function: Callable) -> None:
         self.cache = lru_cache(None)(user_function)
@@ -470,6 +526,10 @@ class ShardingPropagator:
         single_dim_strategy = self.op_single_dim_strategy_funcs.get(op_schema.op)
         op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
         if single_dim_strategy is not None or op_strategy_func is not None:
+            # Validate that tensor_meta count matches expected outputs from op schema.
+            # This catches bugs in fake tensor propagation early.
+            if single_dim_strategy is not None:
+                _validate_tensor_meta_count(op_schema, out_tensor_meta)
             """
             Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
             for the operator over a single mesh dimension,
@@ -486,13 +546,6 @@ class ShardingPropagator:
             if single_dim_strategy is not None:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
                 assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
-                # if we run into a case where we register a single-dim rule for an op that can't propagate tensor meta,
-                # we could loosen this assert, but it's better to fix gaps in tensor meta prop. We want to end up
-                # with the invariant that all DTensorSpec have a valid tensormeta, but many existing sharding rules
-                # skip this.  We try to enforce it for all newly added single-dim rules.
-                assert out_tensor_meta is not None, (
-                    f"_propagate_tensor_meta_non_cached returned None for {op_schema}, but tensor_meta is required"
-                )
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
