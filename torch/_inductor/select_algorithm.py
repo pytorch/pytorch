@@ -4177,7 +4177,9 @@ class AlgorithmSelectorCache(PersistentCache):
     ) -> None:
         flex_attention_filename = get_flex_attention_log_filename()
         # Support both flex_attention and flex_decoding
-        if not flex_attention_filename or ("flex_attention" not in name and "flex_decoding" not in name):
+        if not flex_attention_filename or (
+            "flex_attention" not in name and "flex_decoding" not in name
+        ):
             return
 
         if len(input_nodes) < 3:
@@ -4187,15 +4189,34 @@ class AlgorithmSelectorCache(PersistentCache):
         key_size = input_nodes[1].get_size()
         value_size = input_nodes[2].get_size()
 
-        B = query_size[0]
-        Hq = query_size[1]
-        seq_len_q = query_size[2]
-        qk_head_dim = query_size[3]
-        Hkv = key_size[1]
-        seq_len_kv = key_size[2]
-        v_head_dim = value_size[3]
+        # Handle both 4D (forward/backward) and 5D (decode) tensor formats
+        # 4D: [B, H, seq_len, head_dim]
+        # 5D: [B, H, 1, 1, head_dim] (decode mode has extra dimension)
+        if len(query_size) == 5:
+            # Decode mode with 5D tensors
+            B = query_size[0]
+            Hq = query_size[1]
+            # query_size[2] and query_size[3] are both 1 for decode
+            seq_len_q = query_size[2]  # This will be 1
+            qk_head_dim = query_size[4]  # Head dim is at index 4 for 5D
+            Hkv = key_size[1]
+            seq_len_kv = key_size[2]
+            v_head_dim = value_size[4] if len(value_size) == 5 else value_size[3]
+        else:
+            # Forward/backward mode with 4D tensors
+            B = query_size[0]
+            Hq = query_size[1]
+            seq_len_q = query_size[2]
+            qk_head_dim = query_size[3]
+            Hkv = key_size[1]
+            seq_len_kv = key_size[2]
+            v_head_dim = value_size[3]
 
-        kernel_type = "backward" if "backward" in name else ("decode" if "decoding" in name else "forward")
+        kernel_type = (
+            "backward"
+            if "backward" in name
+            else ("decode" if "decoding" in name else "forward")
+        )
         dims_key = str(
             (
                 kernel_type,
