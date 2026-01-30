@@ -888,14 +888,6 @@ def dump_compile_times() -> None:
     log.info(compile_times(repr="str", aggregate=True))
 
 
-# Re-export profiler functions from torch._dynamo.profiler for backward compatibility
-from torch._dynamo.profiler import (  # noqa: F401
-    format_function_trace_timings_aggregated,
-    generate_pstats_from_timings,
-    get_function_trace_timings,
-)
-
-
 tensortype_to_dtype = {
     torch.FloatTensor: (torch.float32, torch.float),
     torch.DoubleTensor: (torch.float64, torch.double),
