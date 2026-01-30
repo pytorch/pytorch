@@ -54,7 +54,8 @@ class PythonFile:
 
     @cached_property
     def omitted(self) -> OmittedLines:
-        assert self.linter_name is not None
+        if self.linter_name is None:
+            raise AssertionError("linter_name is None")
         return OmittedLines(self.lines, self.linter_name)
 
     @cached_property
