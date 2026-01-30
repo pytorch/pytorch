@@ -550,41 +550,42 @@ def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
 
     def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], Optional[str]]:
         """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
-        insts = list(dis.get_instructions(fn))
+        target_line = list(dis.findlinestarts(fn.__code__))[1][1]
+        insts = []
+        started = False
+        for instr in dis.get_instructions(fn):
+            if started and instr.starts_line:
+                break
+            if instr.line_number == target_line:
+                started = started or instr.starts_line
+                insts.append(instr.opname)
 
-        end_for_idx = [inst.opname for inst in insts].index("END_FOR")
+        end_for_idx = insts.index("END_FOR")
 
         # Extract pre_store_ops: opcodes from END_FOR+1 until first STORE_FAST
         idx = end_for_idx + 1
         pre_store_ops = []
-        while idx < len(insts) and insts[idx].opname != "STORE_FAST":
-            pre_store_ops.append(insts[idx].opname)
+        while idx < len(insts) and insts[idx] != "STORE_FAST":
+            pre_store_ops.append(insts[idx])
             idx += 1
 
         # Skip all STORE_FASTs to find post_store_op
-        while idx < len(insts) and insts[idx].opname == "STORE_FAST":
+        while idx < len(insts) and insts[idx] == "STORE_FAST":
             idx += 1
 
-        post_store_op = insts[idx].opname if idx < len(insts) else None
+        post_store_op = insts[idx] if idx < len(insts) else None
         return pre_store_ops, post_store_op
 
+    stored = extract_pattern(fn_stored)
+    discarded = extract_pattern(fn_discarded)
+    returned = extract_pattern(fn_returned)
+    consumed = extract_pattern(fn_consumed)
+
     return {
-        "stored": {
-            "pre_store_ops": extract_pattern(fn_stored)[0],
-            "post_store_op": None,
-        },
-        "discarded": {
-            "pre_store_ops": extract_pattern(fn_discarded)[0],
-            "post_store_op": None,
-        },
-        "returned": {
-            "pre_store_ops": extract_pattern(fn_returned)[0],
-            "post_store_op": extract_pattern(fn_returned)[1],
-        },
-        "consumed": {
-            "pre_store_ops": extract_pattern(fn_consumed)[0],
-            "post_store_op": extract_pattern(fn_consumed)[1],
-        },
+        "stored": {"pre_store_ops": stored[0], "post_store_op": stored[1]},
+        "discarded": {"pre_store_ops": discarded[0], "post_store_op": discarded[1]},
+        "returned": {"pre_store_ops": returned[0], "post_store_op": returned[1]},
+        "consumed": {"pre_store_ops": consumed[0], "post_store_op": []},
     }
 
 
@@ -596,7 +597,6 @@ class ComprehensionAnalysis:
         end_ip: Instruction pointer after all comprehension bytecode
         result_var: Name of result variable, or None if result stays on stack
         result_on_stack: True if result stays on stack (discarded, returned, or in expression)
-        result_disposition: What happens to result - "stored", "discarded", "returned", or "consumed"
         iterator_vars: Variables from LOAD_FAST_AND_CLEAR (need restoration)
         walrus_vars: Variables assigned via walrus operator (:=) inside comprehension
         captured_vars: Variables read from outer scope via LOAD_FAST inside comprehension
@@ -605,7 +605,6 @@ class ComprehensionAnalysis:
     end_ip: int
     result_var: Optional[str]
     result_on_stack: bool
-    result_disposition: str
     iterator_vars: list[str]
     walrus_vars: list[str]
     captured_vars: list[str]
@@ -4546,32 +4545,33 @@ class InstructionTranslatorBase(
             else None
         )
 
-        def matches(disposition: str) -> bool:
-            p = patterns[disposition]
-            return pre_store_ops == p["pre_store_ops"] and (
-                p["post_store_op"] is None or post_store_op == p["post_store_op"]
+        def matches(name: str) -> bool:
+            pat = patterns[name]
+            return pre_store_ops == pat["pre_store_ops"] and (
+                post_store_op == pat["post_store_op"] or not pat["post_store_op"]
             )
 
-        for disposition, result_on_stack in [
-            ("discarded", False),
-            ("returned", True),
-            ("consumed", True),
-            ("stored", False),
-        ]:
-            if matches(disposition):
-                return ComprehensionAnalysis(
-                    end_ip=scan_ip,
-                    result_var=self.instructions[store_fast_ip].argval
-                    if disposition == "stored"
-                    else None,
-                    result_on_stack=result_on_stack,
-                    result_disposition=disposition,
-                    iterator_vars=iterator_vars,
-                    walrus_vars=walrus_vars,
-                    captured_vars=captured_vars,
-                )
+        result_var: Optional[str] = None
+        if matches("stored"):
+            result_var = self.instructions[store_fast_ip].argval
+            result_on_stack = False
+        elif matches("discarded"):
+            result_var = None
+            result_on_stack = False
+        elif matches("returned") or pre_store_ops == patterns["consumed"]["pre_store_ops"]:
+            result_var = None
+            result_on_stack = True
+        else:
+            raise AssertionError("Comprehension does not match any known pattern")
 
-        raise AssertionError("Comprehension does not match any known pattern")
+        return ComprehensionAnalysis(
+            end_ip=scan_ip,
+            result_var=result_var,
+            result_on_stack=result_on_stack,
+            iterator_vars=iterator_vars,
+            walrus_vars=walrus_vars,
+            captured_vars=captured_vars,
+        )
 
     def _handle_comprehension_graph_break(self, inst: Instruction) -> None:
         """Handle graph break for a comprehension by skipping the comprehension bytecode.
@@ -4679,7 +4679,7 @@ class InstructionTranslatorBase(
         # Variables to pass to resume function
         vars_to_pass = (
             [analysis.result_var]
-            if analysis.result_disposition == "stored" and analysis.result_var
+            if analysis.result_var
             else []
         ) + analysis.walrus_vars
 
