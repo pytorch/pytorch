@@ -272,6 +272,12 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# Decompose registered functional custom ops to their out variants.
+# This enables CUDAGraph compatibility for custom ops that have registered
+# functional → out variant mappings via torch._library.functional_to_out.
+# See: torch/_inductor/fx_passes/decompose_functional_to_out.py
+decompose_functional_to_out = True
+
 # set to True to enable the back-to-back GEMM pass
 b2b_gemm_pass = False
 

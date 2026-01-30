@@ -352,6 +352,19 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
+
+    # Decompose registered functional custom ops to their out variants.
+    # This enables CUDAGraph compatibility for custom ops.
+    # Runs AFTER reinplace (to respect future Phase 2 marks) and
+    # BEFORE decompose_auto_functionalized.
+    if config.decompose_functional_to_out:
+        from torch._inductor.fx_passes.decompose_functional_to_out import (
+            decompose_functional_to_out,
+        )
+        GraphTransformObserver(gm, "decompose_functional_to_out").apply_graph_pass(
+            decompose_functional_to_out
+        )
+
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
     ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
