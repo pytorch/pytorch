@@ -551,30 +551,28 @@ def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
     def extract_pattern(fn: Callable[..., Any]) -> tuple[list[str], Optional[str]]:
         """Extract (pre_store_ops, post_store_op) from comprehension bytecode."""
         target_line = list(dis.findlinestarts(fn.__code__))[1][1]
-        insts = []
+        insts: list[str] = []
         started = False
         for instr in dis.get_instructions(fn):
             if started and instr.starts_line:
                 break
-            if instr.positions.lineno == target_line:
-                started = started or instr.starts_line
+            pos = instr.positions
+            if pos and pos.lineno == target_line:
+                started = started or bool(instr.starts_line)
                 insts.append(instr.opname)
 
-        end_for_idx = insts.index("END_FOR")
+        ops = insts[insts.index("END_FOR") + 1:]
+        idx = 0
 
-        # Extract pre_store_ops: opcodes from END_FOR+1 until first STORE_FAST
-        idx = end_for_idx + 1
         pre_store_ops = []
-        while idx < len(insts) and insts[idx] != "STORE_FAST":
-            pre_store_ops.append(insts[idx])
+        while idx < len(ops) and ops[idx] != "STORE_FAST":
+            pre_store_ops.append(ops[idx])
             idx += 1
 
-        # Skip all STORE_FASTs to find post_store_op
-        while idx < len(insts) and insts[idx] == "STORE_FAST":
+        while idx < len(ops) and ops[idx] == "STORE_FAST":
             idx += 1
 
-        post_store_op = insts[idx] if idx < len(insts) else None
-        return pre_store_ops, post_store_op
+        return pre_store_ops, ops[idx] if idx < len(ops) else None
 
     stored = extract_pattern(fn_stored)
     discarded = extract_pattern(fn_discarded)
@@ -4558,7 +4556,11 @@ class InstructionTranslatorBase(
         elif matches("discarded"):
             result_var = None
             result_on_stack = False
-        elif matches("returned") or pre_store_ops == patterns["consumed"]["pre_store_ops"]:
+            scan_ip = scan_ip + 1 if post_store_op else scan_ip
+        elif (
+            matches("returned")
+            or pre_store_ops == patterns["consumed"]["pre_store_ops"]
+        ):
             result_var = None
             result_on_stack = True
         else:
@@ -4678,9 +4680,7 @@ class InstructionTranslatorBase(
 
         # Variables to pass to resume function
         vars_to_pass = (
-            [analysis.result_var]
-            if analysis.result_var
-            else []
+            [analysis.result_var] if analysis.result_var else []
         ) + analysis.walrus_vars
 
         # If result stays on stack, push placeholder for resume function
