@@ -34,9 +34,17 @@ void softplus_kernel(
         auto threshold = threshold_.to<opmath_t>();
         gpu_kernel(iter, [beta, threshold] GPU_LAMBDA(scalar_t a) -> scalar_t {
           opmath_t aop = static_cast<opmath_t>(a);
-          return (aop * beta) > threshold
-              ? aop
-              : (::log1p(std::exp(aop * beta))) / beta;
+          opmath_t y = aop * beta;
+          if (y > threshold) {
+            return aop;
+          } else if (y <= opmath_t(0)) {
+            // For y <= 0, exp(y) won't overflow
+            return (::log1p(std::exp(y))) / beta;
+          } else {
+            // For 0 < y <= threshold, use numerically stable formula:
+            // log(1 + exp(y)) / beta = (y + log(1 + exp(-y))) / beta = x + log1p(exp(-y)) / beta
+            return aop + (::log1p(std::exp(-y))) / beta;
+          }
         });
       });
 }
@@ -59,9 +67,19 @@ void softplus_backward_kernel(
             [beta, threshold] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
               opmath_t aop = static_cast<opmath_t>(a);
               opmath_t bop = static_cast<opmath_t>(b);
-              opmath_t z = std::exp(bop * beta);
-              return (bop * beta) > threshold ? aop
-                                              : aop * z / (z + opmath_t(1.));
+              opmath_t y = bop * beta;
+              if (y > threshold) {
+                // sigmoid approaches 1
+                return aop;
+              } else if (y >= opmath_t(0)) {
+                // For y >= 0, use stable formula: sigmoid(y) = 1 / (1 + exp(-y))
+                opmath_t sigmoid = opmath_t(1.) / (opmath_t(1.) + std::exp(-y));
+                return aop * sigmoid;
+              } else {
+                // For y < 0, original formula is numerically stable
+                opmath_t z = std::exp(y);
+                return aop * z / (z + opmath_t(1.));
+              }
             });
       });
 }
