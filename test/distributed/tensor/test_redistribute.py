@@ -35,7 +35,6 @@ from torch.distributed.tensor._dtensor_spec import (
 from torch.distributed.tensor._redistribute import (
     _FlattenedTransformInfo,
     _gen_transform_infos,
-    _get_flattened_mesh_by_layout,
     _optimize_transform_infos,
     _TransformInfo,
     redistribute_local_tensor,
