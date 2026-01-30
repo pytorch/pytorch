@@ -506,6 +506,27 @@ def unimplemented_with_warning(
     )
 
 
+def warn_faketensor_fallback(e: Exception, context: str = "") -> None:
+    """Log a warning when falling back due to fake tensor issues.
+
+    This function logs a warning when the compilation falls back to eager mode
+    due to fake tensor related exceptions. This helps users understand when
+    silent incorrectness might occur due to fallback behavior.
+
+    Args:
+        e: The exception that caused the fallback
+        context: Additional context about where the fallback occurred
+    """
+    msg = f"Falling back to eager due to fake tensor issue: {e}"
+    if context:
+        msg = f"{context}: {msg}"
+    log.warning(
+        "%s. This may cause silent incorrectness if the eager and compiled "
+        "behavior differ. Set TORCH_LOGS='+dynamo' for more details.",
+        msg,
+    )
+
+
 def format_graph_break_message(
     gb_type: str,
     context: str,

@@ -14946,6 +14946,97 @@ class FallbackLoggingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(dtype, torch.float64)
 
 
+class GuardSkipLoggingTests(torch._dynamo.test_case.TestCase):
+    """Tests for guard skip behavior based on config settings."""
+
+    def test_skip_nnmodule_hook_guards_skips_when_true(self):
+        """Test that NN module hooks guards are skipped when config is True."""
+        import torch._dynamo.config as config
+        from torch._dynamo.guards import GuardBuilder
+
+        original_value = config.skip_nnmodule_hook_guards
+        try:
+            config.skip_nnmodule_hook_guards = True
+
+            mock_guard = mock.MagicMock()
+            mock_guard.name = "test_guard"
+
+            mock_check_fn_manager = mock.MagicMock()
+            builder = GuardBuilder.__new__(GuardBuilder)
+            builder.check_fn_manager = mock_check_fn_manager
+
+            with patch.object(builder, "SEQUENCE_LENGTH") as mock_seq_len:
+                builder.EMPTY_NN_MODULE_HOOKS_DICT(mock_guard)
+                # Should NOT call SEQUENCE_LENGTH when skipping
+                mock_seq_len.assert_not_called()
+        finally:
+            config.skip_nnmodule_hook_guards = original_value
+
+    def test_skip_nnmodule_hook_guards_does_not_skip_when_false(self):
+        """Test guards are not skipped when config is False."""
+        import torch._dynamo.config as config
+        from torch._dynamo.guards import GuardBuilder
+
+        original_value = config.skip_nnmodule_hook_guards
+        try:
+            config.skip_nnmodule_hook_guards = False
+
+            mock_guard = mock.MagicMock()
+            mock_guard.name = "test_guard"
+
+            mock_check_fn_manager = mock.MagicMock()
+            builder = GuardBuilder.__new__(GuardBuilder)
+            builder.check_fn_manager = mock_check_fn_manager
+
+            with patch.object(builder, "SEQUENCE_LENGTH") as mock_seq_len:
+                builder.EMPTY_NN_MODULE_HOOKS_DICT(mock_guard)
+                # Should call SEQUENCE_LENGTH, not skip
+                mock_seq_len.assert_called_once_with(mock_guard)
+        finally:
+            config.skip_nnmodule_hook_guards = original_value
+
+    def test_skip_fsdp_guards_skips_when_true(self):
+        """Test that FSDP guards are skipped when config is True."""
+        import torch._dynamo.config as config
+        from torch._dynamo.guards import GuardBuilder
+
+        original_value = config._unsafe_skip_fsdp_module_guards
+        try:
+            config._unsafe_skip_fsdp_module_guards = True
+
+            mock_guard = mock.MagicMock()
+            mock_guard.name = "test_fsdp_guard"
+            mock_guard.is_fsdp_module.return_value = True
+
+            mock_check_fn_manager = mock.MagicMock()
+            builder = GuardBuilder.__new__(GuardBuilder)
+            builder.check_fn_manager = mock_check_fn_manager
+
+            # TENSOR_MATCH should return early when FSDP guard is skipped
+            result = builder.TENSOR_MATCH(mock_guard)
+            # Verify is_fsdp_module was checked
+            mock_guard.is_fsdp_module.assert_called()
+        finally:
+            config._unsafe_skip_fsdp_module_guards = original_value
+
+
+class WarnFakeTensorFallbackTests(torch._dynamo.test_case.TestCase):
+    """Tests for warn_faketensor_fallback functionality."""
+
+    def test_warn_faketensor_fallback_logs_warning(self):
+        """Test that warn_faketensor_fallback logs appropriately."""
+        from torch._dynamo.exc import warn_faketensor_fallback
+
+        # Create a test exception
+        test_exception = RuntimeError("Test fake tensor error")
+
+        # Should not raise, just log
+        with patch("torch._dynamo.exc.log") as mock_log:
+            warn_faketensor_fallback(test_exception, context="test context")
+            # Verify logging was called
+            mock_log.warning.assert_called()
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
