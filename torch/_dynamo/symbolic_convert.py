@@ -556,7 +556,7 @@ def _get_comprehension_result_patterns() -> dict[str, dict[str, Any]]:
         for instr in dis.get_instructions(fn):
             if started and instr.starts_line:
                 break
-            if instr.line_number == target_line:
+            if instr.positions.lineno == target_line:
                 started = started or instr.starts_line
                 insts.append(instr.opname)
 
