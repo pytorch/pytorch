@@ -25956,6 +25956,16 @@ python_ref_db = [
             # Tests don't account for complex's type promotion semantics
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
+            # Seems to fail on M2 but not M4:
+            # Exception: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.skip("Platform-specific error"), 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float16,)
+            ),
+            DecorateInfo(
+                unittest.skip("Platform-specific error"), 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.float16,)
+            ),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
