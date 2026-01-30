@@ -146,8 +146,9 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   }
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  // Return empty tensor for attention weights - they are not used by the caller
-  return {std::move(final_out), at::Tensor()};
+  // Return empty tensor with correct shape for attention weights - they are not used by the caller
+  auto attn_weights = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
+  return {std::move(final_out), std::move(attn_weights)};
 }
 
 // Vector mode (One–pass variant)
@@ -216,8 +217,9 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
   });
   // reshape back to original dimension
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  // Return empty tensor for attention weights - they are not used by the caller
-  return {std::move(final_out), at::Tensor()};
+  // Return empty tensor with correct shape for attention weights - they are not used by the caller
+  auto attn_weights = at::empty({batchSize, num_head, qSize, maxSeqLength}, q_.options());
+  return {std::move(final_out), std::move(attn_weights)};
 }
 
 // Vector mode (Two–pass variant)
@@ -302,8 +304,9 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   });
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  // Return empty tensor for attention weights - they are not used by the caller
-  return {std::move(final_out), at::Tensor()};
+  // Return empty tensor with correct shape for attention weights - they are not used by the caller
+  auto attn_weights = at::empty({batchSize, num_heads, seq_len_q, N}, q_.options());
+  return {std::move(final_out), std::move(attn_weights)};
 }
 
 // Implementation 3: Full attention mode
@@ -404,8 +407,9 @@ static std::tuple<Tensor, Tensor> sdpa_full_attention_mps(const Tensor& q_,
   });
 
   auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  // Return empty tensor for attention weights - they are not used by the caller
-  return {std::move(final_out), at::Tensor()};
+  // Return empty tensor with correct shape for attention weights - they are not used by the caller
+  auto attn_weights = at::empty({batchSize, num_heads, qL, kL}, q_.options());
+  return {std::move(final_out), std::move(attn_weights)};
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& query,
