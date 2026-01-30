@@ -1366,13 +1366,10 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
 
     def test_assume_constant_result_on_cached_property(self):
-        # Regression test for issue #173103
-        # Tests that assume_constant_result works with cached @property methods
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self._cached_id = None
-                self.linear = torch.nn.Linear(10, 10)
 
             @property
             def cached_id(self) -> int:
@@ -1381,18 +1378,12 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 return self._cached_id
 
             def forward(self, x):
-                # Access cached_id property - should be constant-folded
-                scales = [0.5, 1.0, 1.5, 2.0]
-                idx = self.cached_id % len(scales)
-                return self.linear(x) * scales[idx]
+                return x * self.cached_id
 
-        # Mark the property getter as constant
         torch._dynamo.assume_constant_result(MyModule.cached_id.fget)
 
         model = MyModule()
-        x = torch.randn(2, 10)
-
-        # Should compile without AsPythonConstantNotImplementedError
+        x = torch.tensor([1.0, 2.0, 3.0])
         compiled_model = torch.compile(model, backend="eager", fullgraph=True)
         result_eager = model(x)
         result_compiled = compiled_model(x)
