@@ -127,25 +127,27 @@ def placements_equivalent(p1, p2, shape: tuple[int, ...]) -> bool:
     Shard(dim) is equivalent to Replicate() when shape[dim] == 1, because
     sharding a size-1 dimension produces the same result as replicating.
     """
-    if type(p1) == type(p2):
-        if isinstance(p1, Shard):
-            return p1.dim == p2.dim
-        if isinstance(p1, Partial):
-            return p1.reduce_op == p2.reduce_op
-        return True  # Both Replicate
 
-    # Check Shard vs Replicate equivalence for size-1 dims
     def is_trivial_shard(p):
         return isinstance(p, Shard) and p.dim < len(shape) and shape[p.dim] == 1
 
+    # Check if both are trivial shards (equivalent to each other and to Replicate)
+    if is_trivial_shard(p1) and is_trivial_shard(p2):
+        return True
+
+    # Check Shard vs Replicate equivalence for size-1 dims
     if isinstance(p1, Replicate) and is_trivial_shard(p2):
         return True
     if isinstance(p2, Replicate) and is_trivial_shard(p1):
         return True
 
-    # Two shards on different size-1 dims are also equivalent
-    if is_trivial_shard(p1) and is_trivial_shard(p2):
-        return True
+    # Same type comparisons
+    if type(p1) is type(p2):
+        if isinstance(p1, Shard):
+            return p1.dim == p2.dim
+        if isinstance(p1, Partial):
+            return p1.reduce_op == p2.reduce_op
+        return True  # Both Replicate
 
     return False
 
@@ -160,27 +162,46 @@ def has_equivalent_rule(
     Check if any rule in the set is equivalent to the given combo.
 
     Args:
-        combo_key: (input_placements, output_placement) tuple
-        rules: Set of (input_placements, output_placement) tuples
+        combo_key: (input_placements, output_placement) tuple where placements are strings
+        rules: Set of (input_placements, output_placement) tuples where placements are strings
         input_shapes: Shapes of input tensors
         output_shape: Shape of output tensor
     """
-    input_placements, output_placement = combo_key
+    input_placements_strs, output_placement_str = combo_key
+
+    # Parse combo placements
+    combo_input_placements = [parse_placement(s) for s in input_placements_strs]
+    combo_output_placement = parse_placement(output_placement_str)
+
+    if not all(combo_input_placements) or not combo_output_placement:
+        return False
+
     for rule_key in rules:
-        rule_inputs, rule_output = rule_key
-        if len(rule_inputs) != len(input_placements):
+        rule_input_strs, rule_output_str = rule_key
+        if len(rule_input_strs) != len(input_placements_strs):
+            continue
+
+        # Parse rule placements
+        rule_input_placements = [parse_placement(s) for s in rule_input_strs]
+        rule_output_placement = parse_placement(rule_output_str)
+
+        if not all(rule_input_placements) or not rule_output_placement:
             continue
 
         # Check all input placements match (considering equivalence)
         inputs_match = all(
             placements_equivalent(p1, p2, shape)
-            for p1, p2, shape in zip(input_placements, rule_inputs, input_shapes)
+            for p1, p2, shape in zip(
+                combo_input_placements, rule_input_placements, input_shapes
+            )
         )
         if not inputs_match:
             continue
 
         # Check output placement matches (considering equivalence)
-        if placements_equivalent(output_placement, rule_output, output_shape):
+        if placements_equivalent(
+            combo_output_placement, rule_output_placement, output_shape
+        ):
             return True
 
     return False
