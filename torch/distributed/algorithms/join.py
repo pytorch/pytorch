@@ -336,6 +336,12 @@ class Join:
         # Schedule an all-reduce to indicate that the caller has not yet joined
         ones = torch.ones(1, device=device)
         work = dist.all_reduce(ones, group=process_group, async_op=True)
+        if (
+            work is not None
+            and isinstance(device, torch.device)
+            and "xpu" == device.type
+        ):
+            work.wait()
 
         if join_config.throw_on_early_termination:
             # Check if uneven inputs have been detected
