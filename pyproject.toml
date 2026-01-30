@@ -348,43 +348,43 @@ keep-runtime-typing = true
 "test/**" = [
     "S101"
 ]
+"torchgen/model.py" = []  # S101 migrated
+"torchgen/gen.py" = []  # S101 migrated
+"torchgen/gen_functionalization_type.py" = []  # S101 migrated
+"torchgen/gen_backend_stubs.py" = []  # S101 migrated
+"torchgen/static_runtime/generator.py" = []  # S101 migrated
+"torchgen/native_function_generation.py" = []  # S101 migrated
+"torchgen/dest/lazy_ir.py" = []  # S101 migrated
+"torchgen/_autoheuristic/ah_tree.py" = []  # S101 migrated
+"torchgen/selective_build/selector.py" = []  # S101 migrated
+"torchgen/dest/register_dispatch_key.py" = []  # S101 migrated
+"torchgen/utils.py" = []  # S101 migrated
+"torchgen/api/functionalization.py" = []  # S101 migrated
+"torchgen/api/autograd.py" = []  # S101 migrated
+"torchgen/gen_lazy_tensor.py" = []  # S101 migrated
+"torchgen/gen_aoti_c_shim.py" = []  # S101 migrated
+"torchgen/dest/ufunc.py" = []  # S101 migrated
 "torchgen/**" = [
     "S101"
 ]
 "torch/_dynamo/**" = ["S101"]
-"torch/_export/**" = ["S101"]
 "torch/_functorch/**" = ["S101"]
-"torch/_higher_order_ops/associative_scan.py" = ["S101"]
-"torch/_higher_order_ops/base_hop.py" = ["S101"]
-"torch/_higher_order_ops/cond.py" = ["S101"]
-"torch/_higher_order_ops/effects.py" = ["S101"]
-"torch/_higher_order_ops/executorch_call_delegate.py" = ["S101"]
-"torch/_higher_order_ops/flat_apply.py" = ["S101"]
-"torch/_higher_order_ops/flex_attention.py" = ["S101"]
-"torch/_higher_order_ops/invoke_subgraph.py" = ["S101"]
-"torch/_higher_order_ops/partitioner.py" = ["S101"]
-"torch/_higher_order_ops/print.py" = ["S101"]
-"torch/_higher_order_ops/run_const_graph.py" = ["S101"]
-"torch/_higher_order_ops/scan.py" = ["S101"]
-"torch/_higher_order_ops/schema.py" = ["S101"]
-"torch/_higher_order_ops/strict_mode.py" = ["S101"]
-"torch/_higher_order_ops/torchbind.py" = ["S101"]
-"torch/_higher_order_ops/while_loop.py" = ["S101"]
-"torch/_higher_order_ops/wrap.py" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
 "torch/fx/**" = ["S101"]
 "torch/jit/**" = ["S101"]
 "torch/onnx/_internal/**" = ["S101"]
 "torch/testing/**" = ["S101"]
+"torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
+"torch/_export/db/examples/list_contains.py" = ["S101"]
+"tools/autograd/gen_variable_type.py" = []  # S101 migrated
+"tools/autograd/load_derivatives.py" = []  # S101 migrated
 "tools/**" = [
     "S101"
 ]
 "functorch/**" = [
     "S101"
 ]
-"android/pytorch_android/generate_test_torchscripts.py" = ["S101"]
-".github/scripts/test_trymerge.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
