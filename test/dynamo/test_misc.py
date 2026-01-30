@@ -15020,6 +15020,70 @@ class GuardSkipLoggingTests(torch._dynamo.test_case.TestCase):
             config._unsafe_skip_fsdp_module_guards = original_value
 
 
+class GlobalStateGuardTests(torch._dynamo.test_case.TestCase):
+    """Tests for global state guards that prevent silent incorrectness."""
+
+    def test_default_dtype_guard_detects_change(self):
+        """Test that changing default dtype triggers recompilation."""
+        original_dtype = torch.get_default_dtype()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x + torch.tensor(1.0)
+
+        try:
+            torch.set_default_dtype(torch.float32)
+            x = torch.randn(10)
+            result1 = fn(x)
+
+            # Change default dtype
+            torch.set_default_dtype(torch.float64)
+            x2 = torch.randn(10)
+            # This should trigger recompilation due to dtype guard
+            result2 = fn(x2)
+        finally:
+            torch.set_default_dtype(original_dtype)
+
+    def test_autocast_state_guard_detects_change(self):
+        """Test that changing autocast state triggers recompilation."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x * 2
+
+        x = torch.randn(10, device="cuda")
+
+        # Run without autocast
+        result1 = fn(x)
+
+        # Run with autocast - should trigger recompilation
+        with torch.autocast("cuda"):
+            result2 = fn(x)
+
+    def test_float32_matmul_precision_guard_detects_change(self):
+        """Test that changing float32 matmul precision triggers recompilation."""
+        original_precision = torch.get_float32_matmul_precision()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a, b):
+            return torch.matmul(a, b)
+
+        try:
+            torch.set_float32_matmul_precision("highest")
+            a = torch.randn(10, 10)
+            b = torch.randn(10, 10)
+            result1 = fn(a, b)
+
+            # Change precision
+            torch.set_float32_matmul_precision("medium")
+            # This should trigger recompilation
+            result2 = fn(a, b)
+        finally:
+            torch.set_float32_matmul_precision(original_precision)
+
+
 class WarnFakeTensorFallbackTests(torch._dynamo.test_case.TestCase):
     """Tests for warn_faketensor_fallback functionality."""
 
