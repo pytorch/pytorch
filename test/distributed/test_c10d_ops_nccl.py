@@ -28,7 +28,6 @@ from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_nccl,
     requires_nccl_version,
-    sm_is_or_higher_than,
 )
 from torch.testing._internal.common_utils import (
     run_tests,
