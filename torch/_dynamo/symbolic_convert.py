@@ -4862,18 +4862,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         tc = TracingContext.get()
         if tc.profiler_state is None:
             from torch._guards import DynamoProfilerState
+
             tc.profiler_state = DynamoProfilerState()
 
         code = func.get_code()
 
         # Get caller info and full call stack before we push ourselves
-        caller_info = TracingContext.get_current_caller()
-        call_stack = TracingContext.get_current_call_stack()
+        caller_info = tc.profiler_state.get_current_caller()
+        call_stack = tc.profiler_state.get_call_stack()
 
         # Push ourselves onto the timing stack BEFORE building the tracer
         # so that build_inline_tracer overhead is included in this function's time
         trace_start_ns = time.time_ns()
-        is_primitive_call = TracingContext.push_trace_timing(
+        is_primitive_call = tc.profiler_state.push(
             code.co_name, code.co_filename, code.co_firstlineno, trace_start_ns
         )
 
@@ -4886,7 +4887,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return result
         finally:
             # Pop ourselves from the timing stack
-            stack_entry = TracingContext.pop_trace_timing()
+            stack_entry = tc.profiler_state.pop()
             trace_end_ns = time.time_ns()
 
             # Record timing for successful traces
@@ -4908,10 +4909,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     is_primitive_call=is_primitive_call,
                     call_stack=call_stack,
                 )
-                TracingContext.record_function_trace_timing(timing)
+                tc.profiler_state.record_timing(timing)
 
                 # Add our cumtime to the parent's child_time accumulator
-                TracingContext.add_child_time_to_parent(cumtime_ns)
+                tc.profiler_state.add_child_time(cumtime_ns)
 
     @staticmethod
     def check_inlineable(
@@ -5129,14 +5130,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
             log.debug(msg)
+            # bubble up the exception to the parent frame.
             raise
         except Unsupported as e:
+            # If this graph break has skip_frame set, unset it
+            # since it refers to the current frame and not the parent.
             e.skip_frame = False
             raise
         except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
         finally:
+            # Pass inlined tx's error_on_graph_break to parent.
+            # Deals with the case where the parent's error_on_graph_break is True
+            # while the inlined tx's error_on_graph_break was set to False.
             parent.error_on_graph_break = self.error_on_graph_break
             parent.is_child_tracer_active = False
 

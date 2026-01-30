@@ -220,7 +220,10 @@ def get_function_trace_timings() -> list[FunctionTraceTiming] | None:
 
     Returns None if no TracingContext is active.
     """
-    return TracingContext.get_function_trace_timings()
+    tc = TracingContext.try_get()
+    if tc is None or tc.profiler_state is None:
+        return None
+    return tc.profiler_state.get_timings()
 
 
 def _shorten_filename(filepath: str, max_len: int = 35) -> str:
@@ -366,7 +369,7 @@ def format_function_trace_timings_aggregated(
 def _generate_pstats_with_call_paths(
     timings: list[FunctionTraceTiming],
     output_file: str | None = None,
-) -> "pstats.Stats":
+) -> pstats.Stats:
     """
     Generate pstats with call paths encoded in function names.
 
@@ -487,7 +490,7 @@ def generate_pstats_from_timings(
     timings: list[FunctionTraceTiming],
     output_file: str | None = None,
     use_call_paths: bool = False,
-) -> "pstats.Stats":
+) -> pstats.Stats:
     """
     Generate a pstats.Stats-compatible object from function trace timings.
 
@@ -613,7 +616,11 @@ def dump_dynamo_profiler_stats() -> None:
     """Dump dynamo profiler stats if enabled."""
     from torch._dynamo import config
 
-    timings = TracingContext.get_function_trace_timings()
+    tc = TracingContext.try_get()
+    if tc is None or tc.profiler_state is None:
+        return
+
+    timings = tc.profiler_state.get_timings()
     if not timings:
         return
 

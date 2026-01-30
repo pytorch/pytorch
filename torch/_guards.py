@@ -950,8 +950,8 @@ class FunctionTraceTiming:
 
 
 @dataclass
-class _TraceTimingStackEntry:
-    """Stack entry for tracking inline function timing."""
+class ProfilerStackEntry:
+    """Stack entry for tracking function timing in the Dynamo profiler."""
 
     func_name: str
     filename: str
@@ -965,7 +965,7 @@ class DynamoProfilerState:
 
     def __init__(self) -> None:
         self.timings: list[FunctionTraceTiming] = []
-        self.stack: list[_TraceTimingStackEntry] = []
+        self.stack: list[ProfilerStackEntry] = []
 
     def record_timing(self, timing: FunctionTraceTiming) -> None:
         """Record timing data for a traced function."""
@@ -991,7 +991,7 @@ class DynamoProfilerState:
             for entry in self.stack
         )
         self.stack.append(
-            _TraceTimingStackEntry(
+            ProfilerStackEntry(
                 func_name=func_name,
                 filename=filename,
                 firstlineno=firstlineno,
@@ -1001,7 +1001,7 @@ class DynamoProfilerState:
         )
         return is_primitive
 
-    def pop(self) -> _TraceTimingStackEntry | None:
+    def pop(self) -> ProfilerStackEntry | None:
         """Pop the top entry from the timing stack."""
         if self.stack:
             return self.stack.pop()
@@ -1022,8 +1022,7 @@ class DynamoProfilerState:
     def get_call_stack(self) -> tuple[tuple[str, str, int], ...]:
         """Get the full current call stack as tuple of (func_name, filename, firstlineno)."""
         return tuple(
-            (entry.func_name, entry.filename, entry.firstlineno)
-            for entry in self.stack
+            (entry.func_name, entry.filename, entry.firstlineno) for entry in self.stack
         )
 
 
@@ -1225,66 +1224,6 @@ class TracingContext:
         if tc is None:
             return None
         return tc.traced_code
-
-    @staticmethod
-    def record_function_trace_timing(timing: FunctionTraceTiming) -> None:
-        """Record timing data for an inlined function trace."""
-        tc = TracingContext.try_get()
-        if tc is not None and tc.profiler_state is not None:
-            tc.profiler_state.record_timing(timing)
-
-    @staticmethod
-    def get_function_trace_timings() -> list[FunctionTraceTiming] | None:
-        """Get timing data for all inlined function traces."""
-        tc = TracingContext.try_get()
-        if tc is None or tc.profiler_state is None:
-            return None
-        return tc.profiler_state.get_timings()
-
-    @staticmethod
-    def push_trace_timing(
-        func_name: str, filename: str, firstlineno: int, start_time_ns: int
-    ) -> bool:
-        """Push a new entry onto the inline timing stack.
-
-        Returns True if this is a primitive (non-recursive) call, i.e., the function
-        does not already appear anywhere in the call stack.
-        """
-        tc = TracingContext.try_get()
-        if tc is not None and tc.profiler_state is not None:
-            return tc.profiler_state.push(func_name, filename, firstlineno, start_time_ns)
-        return True
-
-    @staticmethod
-    def pop_trace_timing() -> _TraceTimingStackEntry | None:
-        """Pop the top entry from the inline timing stack."""
-        tc = TracingContext.try_get()
-        if tc is not None and tc.profiler_state is not None:
-            return tc.profiler_state.pop()
-        return None
-
-    @staticmethod
-    def add_child_time_to_parent(child_cumtime_ns: int) -> None:
-        """Add the child's cumulative time to the parent's child_time accumulator."""
-        tc = TracingContext.try_get()
-        if tc is not None and tc.profiler_state is not None:
-            tc.profiler_state.add_child_time(child_cumtime_ns)
-
-    @staticmethod
-    def get_current_caller() -> tuple[str, str, int] | None:
-        """Get the current caller (top of stack) as (func_name, filename, firstlineno)."""
-        tc = TracingContext.try_get()
-        if tc is not None and tc.profiler_state is not None:
-            return tc.profiler_state.get_current_caller()
-        return None
-
-    @staticmethod
-    def get_current_call_stack() -> tuple[tuple[str, str, int], ...]:
-        """Get the full current call stack as tuple of (func_name, filename, firstlineno)."""
-        tc = TracingContext.try_get()
-        if tc is not None and tc.profiler_state is not None:
-            return tc.profiler_state.get_call_stack()
-        return ()
 
 
 @contextmanager

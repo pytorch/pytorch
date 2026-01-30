@@ -370,8 +370,9 @@ def forward(self, arg0_1):
         """Test that inline function timing data is captured during compilation."""
         from torch._dynamo.profiler import (
             format_function_trace_timings_aggregated,
+            get_function_trace_timings,
         )
-        from torch._guards import FunctionTraceTiming, TracingContext
+        from torch._guards import FunctionTraceTiming
 
         captured_timings = []
 
@@ -385,7 +386,7 @@ def forward(self, arg0_1):
             return nested_helper(x)
 
         def timing_capturing_backend(gm, example_inputs):
-            timings = TracingContext.get_function_trace_timings()
+            timings = get_function_trace_timings()
             if timings:
                 captured_timings.extend(timings)
             return gm.forward
@@ -425,8 +426,10 @@ def forward(self, arg0_1):
         import pstats
         import tempfile
 
-        from torch._dynamo.profiler import generate_pstats_from_timings
-        from torch._guards import TracingContext
+        from torch._dynamo.profiler import (
+            generate_pstats_from_timings,
+            get_function_trace_timings,
+        )
 
         trace_timings = []
 
@@ -437,7 +440,7 @@ def forward(self, arg0_1):
             return helper_fn(x)
 
         def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_function_trace_timings()
+            timings = get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -479,8 +482,8 @@ def forward(self, arg0_1):
         from torch._dynamo.profiler import (
             format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
+            get_function_trace_timings,
         )
-        from torch._guards import TracingContext
 
         def sample_function(a, b, c=10):
             """Sample function to inspect."""
@@ -515,7 +518,7 @@ def forward(self, arg0_1):
         trace_timings = []
 
         def timing_capturing_backend(gm, example_inputs):
-            timings = TracingContext.get_function_trace_timings()
+            timings = get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -575,8 +578,8 @@ def forward(self, arg0_1):
         from torch._dynamo.profiler import (
             format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
+            get_function_trace_timings,
         )
-        from torch._guards import TracingContext
 
         trace_timings = []
 
@@ -622,7 +625,7 @@ def forward(self, arg0_1):
             return a + b + main_fn(x, depth - 1)
 
         def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_function_trace_timings()
+            timings = get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -660,12 +663,15 @@ def forward(self, arg0_1):
         # Verify tottime <= cumtime for all entries
         for t in trace_timings:
             self.assertLessEqual(
-                t.tottime_ns, t.cumtime_ns,
-                f"{t.func_name}: tottime ({t.tottime_ns}) > cumtime ({t.cumtime_ns})"
+                t.tottime_ns,
+                t.cumtime_ns,
+                f"{t.func_name}: tottime ({t.tottime_ns}) > cumtime ({t.cumtime_ns})",
             )
 
         # Verify caller info for main_fn (should be called by itself for recursive calls)
-        main_fn_callers = {t.caller_func_name for t in trace_timings if t.func_name == "main_fn"}
+        main_fn_callers = {
+            t.caller_func_name for t in trace_timings if t.func_name == "main_fn"
+        }
         self.assertIn("main_fn", main_fn_callers)  # recursive calls
         self.assertIn(None, main_fn_callers)  # first call has no caller in our tracking
 
@@ -687,7 +693,11 @@ def forward(self, arg0_1):
         # Verify the key invariant: sum of all tottime should equal the root main_fn's cumtime
         total_tottime_ns = sum(t.tottime_ns for t in trace_timings)
         # The root main_fn call is the one with no caller (or depth 1)
-        root_main_fn = next(t for t in trace_timings if t.func_name == "main_fn" and t.caller_func_name is None)
+        root_main_fn = next(
+            t
+            for t in trace_timings
+            if t.func_name == "main_fn" and t.caller_func_name is None
+        )
 
         print(f"\nTotal tottime: {total_tottime_ns / 1e6:.2f}ms")
         print(f"Root main_fn cumtime: {root_main_fn.cumtime_ns / 1e6:.2f}ms")
@@ -697,7 +707,7 @@ def forward(self, arg0_1):
             total_tottime_ns / 1e6,
             root_main_fn.cumtime_ns / 1e6,
             delta=50.0,  # Allow 50ms tolerance for longer runs
-            msg="Sum of tottime should equal root main_fn's cumtime"
+            msg="Sum of tottime should equal root main_fn's cumtime",
         )
 
     @torch._dynamo.config.patch(dynamo_profiler=True)
@@ -713,8 +723,8 @@ def forward(self, arg0_1):
         from torch._dynamo.profiler import (
             format_function_trace_timings_aggregated,
             generate_pstats_from_timings,
+            get_function_trace_timings,
         )
-        from torch._guards import TracingContext
 
         trace_timings = []
 
@@ -754,7 +764,7 @@ def forward(self, arg0_1):
             return fn_a(result, depth)
 
         def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_function_trace_timings()
+            timings = get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -794,13 +804,20 @@ def forward(self, arg0_1):
         recursive_cmn_calls = [t for t in fn_cmn_calls if not t.is_primitive_call]
 
         # Only the first call to fn_cmn should be primitive
-        self.assertEqual(len(primitive_cmn_calls), 1, "Only root fn_cmn should be primitive")
-        self.assertEqual(len(recursive_cmn_calls), 10, "10 calls should be detected as recursive")
+        self.assertEqual(
+            len(primitive_cmn_calls), 1, "Only root fn_cmn should be primitive"
+        )
+        self.assertEqual(
+            len(recursive_cmn_calls), 10, "10 calls should be detected as recursive"
+        )
 
         # Verify the recursive calls have fn_b as their caller (not fn_cmn)
         for t in recursive_cmn_calls:
-            self.assertEqual(t.caller_func_name, "fn_b",
-                            "Recursive fn_cmn should be called by fn_b, not fn_cmn")
+            self.assertEqual(
+                t.caller_func_name,
+                "fn_b",
+                "Recursive fn_cmn should be called by fn_b, not fn_cmn",
+            )
 
         # Print aggregated timings
         print("\nAggregated timings:")
@@ -823,7 +840,7 @@ def forward(self, arg0_1):
             total_tottime_ns / 1e6,
             root_cmn.cumtime_ns / 1e6,
             delta=50.0,
-            msg="Sum of tottime should equal root fn_cmn's cumtime"
+            msg="Sum of tottime should equal root fn_cmn's cumtime",
         )
 
     @torch._dynamo.config.patch(dynamo_profiler=True)
@@ -841,7 +858,6 @@ def forward(self, arg0_1):
         import os
 
         from torch._dynamo.profiler import generate_pstats_from_timings
-        from torch._guards import TracingContext
 
         trace_timings = []
 
@@ -877,7 +893,7 @@ def forward(self, arg0_1):
             return result
 
         def timing_backend(gm, example_inputs):
-            timings = TracingContext.get_function_trace_timings()
+            timings = get_function_trace_timings()
             if timings:
                 trace_timings.extend(timings)
             return gm.forward
@@ -893,17 +909,27 @@ def forward(self, arg0_1):
 
         # Verify expected call distribution
         common_fn_timings = [t for t in trace_timings if t.func_name == "common_fn"]
-        from_caller_a = [t for t in common_fn_timings if t.caller_func_name == "caller_a"]
-        from_caller_b = [t for t in common_fn_timings if t.caller_func_name == "caller_b"]
+        from_caller_a = [
+            t for t in common_fn_timings if t.caller_func_name == "caller_a"
+        ]
+        from_caller_b = [
+            t for t in common_fn_timings if t.caller_func_name == "caller_b"
+        ]
 
-        self.assertEqual(len(from_caller_a), 30, "common_fn should be called 30 times from caller_a")
-        self.assertEqual(len(from_caller_b), 10, "common_fn should be called 10 times from caller_b")
+        self.assertEqual(
+            len(from_caller_a), 30, "common_fn should be called 30 times from caller_a"
+        )
+        self.assertEqual(
+            len(from_caller_b), 10, "common_fn should be called 10 times from caller_b"
+        )
 
         # Calculate per-caller timing
         time_from_a = sum(t.cumtime_ns for t in from_caller_a) / 1e6
         time_from_b = sum(t.cumtime_ns for t in from_caller_b) / 1e6
 
-        print(f"\ncommon_fn called from caller_a: 30 times, {time_from_a:.2f}ms cumtime")
+        print(
+            f"\ncommon_fn called from caller_a: 30 times, {time_from_a:.2f}ms cumtime"
+        )
         print(f"common_fn called from caller_b: 10 times, {time_from_b:.2f}ms cumtime")
 
         # Save to /tmp for easy snakeviz access - generate both versions
@@ -932,6 +958,7 @@ def forward(self, arg0_1):
 
         # Verify the file can be loaded and has correct caller edges
         import pstats
+
         loaded = pstats.Stats(profile_path)
 
         # Print callers to show per-caller breakdown
@@ -957,6 +984,7 @@ def forward(self, arg0_1):
         sys.stdout = captured = io.StringIO()
 
         try:
+
             @torch.compile(backend="eager")
             def compiled_fn(x):
                 return main_fn(x)

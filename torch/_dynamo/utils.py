@@ -77,7 +77,7 @@ from torch._C import (
 )
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
-from torch._guards import CompileId, FunctionTraceTiming, Source, TracingContext
+from torch._guards import CompileId, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
     justknobs_check,
