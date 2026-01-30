@@ -1428,9 +1428,21 @@ class PythonWrapperCodegen(CodeGen):
             if isinstance(buf, (sympy.Expr, ir.TorchBindObject)):
                 continue
 
-            line = f"assert not {name}.isnan().any().item()"
+            # FP8 dtypes don't support isnan()/isinf(), so upcast to float first
+            dtype = buf.get_dtype()
+            if dtype in (
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
+                torch.float8_e4m3fnuz,
+                torch.float8_e5m2fnuz,
+            ):
+                check_expr = f"{name}.float()"
+            else:
+                check_expr = name
+
+            line = f"assert not {check_expr}.isnan().any().item()"
             self.prefix.writeline(line)
-            line = f"assert not {name}.isinf().any().item()"
+            line = f"assert not {check_expr}.isinf().any().item()"
             self.prefix.writeline(line)
 
     def write_async_compile_wait(self) -> None:
