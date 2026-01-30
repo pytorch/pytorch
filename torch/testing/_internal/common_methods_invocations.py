@@ -837,7 +837,8 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
 
     for start, end, step in samples:
         if start is None:
-            assert step is None
+            if step is not None:
+                raise AssertionError("Expected step to be None when start is None")
             # Pass end as positional arg
             yield SampleInput(end, kwargs={"dtype": dtype, "device": device})
             # (Similar to) calling torch.arange(end=3)
@@ -3889,7 +3890,8 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
     # we rely `torch.nn.grad` implementation (which is tested in test_nn.py)
     # for floating dtypes.
 
-    assert fn is not None
+    if fn is None:
+        raise AssertionError("Expected fn to not be None")
 
     grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input,
                    torch.nn.functional.conv_transpose2d: torch.nn.grad.conv2d_input,
@@ -5364,7 +5366,8 @@ def sample_inputs_index_reduce(op_info, device, dtype, requires_grad, **kwargs):
     shapes = [((), ()), ((1,), (1,)), ((S, S), (S, M)), ((S, S, S), (S, M, S))]
     include_selfs = (True, False)
     reduce = op_info.variant_test_name
-    assert reduce in ('prod', 'mean', 'amin', 'amax')
+    if reduce not in ('prod', 'mean', 'amin', 'amax'):
+        raise AssertionError(f"Expected reduce to be one of 'prod', 'mean', 'amin', 'amax', got {reduce!r}")
 
     for shape, include_self in product(shapes, include_selfs):
         self_shape, src_shape = shape
@@ -5913,7 +5916,8 @@ def _squeeze_ref(x, axis=None):
     return np.squeeze(x, axis)
 
 def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
-    assert mode in ('constant', 'reflect', 'replicate', 'circular')
+    if mode not in ('constant', 'reflect', 'replicate', 'circular'):
+        raise AssertionError(f"Expected mode to be one of 'constant', 'reflect', 'replicate', 'circular', got {mode!r}")
     if mode in ['reflect', 'replicate']:
         cases: tuple = (  # ignore
             ((1, 3), (1, 2)),
@@ -6529,7 +6533,8 @@ def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
         return make_tensor(shape, dtype=dtype, device=device, low=-1, high=+1, requires_grad=requires_grad)
 
     def prod_zeros(dim_select):
-        assert len(dim_select) == 2
+        if len(dim_select) != 2:
+            raise AssertionError(f"Expected len(dim_select) to be 2, got {len(dim_select)}")
         result = make_arg(3 * (S,))
         result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
         result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
@@ -9786,7 +9791,8 @@ class foreach_inputs_sample_func:
         return kwargs
 
     def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
-        assert "num_input_tensors" not in kwargs
+        if "num_input_tensors" in kwargs:
+            raise AssertionError("num_input_tensors should not be in kwargs")
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
@@ -9823,7 +9829,8 @@ class foreach_inputs_sample_func:
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors_specified = "num_input_tensors" in kwargs
         num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
-        assert isinstance(num_input_tensors, list)
+        if not isinstance(num_input_tensors, list):
+            raise AssertionError(f"Expected num_input_tensors to be a list, got {type(num_input_tensors)}")
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         _foreach_inputs_kwargs["zero_size"] = False
@@ -9885,7 +9892,8 @@ class foreach_max_sample_func(foreach_inputs_sample_func):
 
 class foreach_norm_sample_func(foreach_inputs_sample_func):
     def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
-        assert "num_input_tensors" not in kwargs
+        if "num_input_tensors" in kwargs:
+            raise AssertionError("num_input_tensors should not be in kwargs")
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         for ord in (0, 1, 2, -1, -2, float('inf'), float('-inf')):
@@ -9897,7 +9905,8 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
 
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors = kwargs.pop("num_input_tensors", foreach_num_tensors)
-        assert isinstance(num_input_tensors, list)
+        if not isinstance(num_input_tensors, list):
+            raise AssertionError(f"Expected num_input_tensors to be a list, got {type(num_input_tensors)}")
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         _allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
@@ -9952,7 +9961,8 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         return dtype in integral_types_and(torch.bool) and opinfo.ref == torch.addcmul
 
     def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
-        assert "num_input_tensors" not in kwargs
+        if "num_input_tensors" in kwargs:
+            raise AssertionError("num_input_tensors should not be in kwargs")
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         # zero_size tensor
@@ -9968,7 +9978,8 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
     def __call__(self, opinfo, device, dtype, requires_grad, **kwargs):
         num_input_tensors_specified = "num_input_tensors" in kwargs
         num_input_tensors = kwargs.pop("num_input_tensors") if num_input_tensors_specified else foreach_num_tensors
-        assert isinstance(num_input_tensors, list)
+        if not isinstance(num_input_tensors, list):
+            raise AssertionError(f"Expected num_input_tensors to be a list, got {type(num_input_tensors)}")
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
@@ -10000,7 +10011,8 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
                 else:
                     kwargs["value"] = rightmost_arg
                 kwargs.update(self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype))
-                assert len(args) == 2, f"{len(args)=}"
+                if len(args) != 2:
+                    raise AssertionError(f"Expected len(args) == 2, got {len(args)}")
                 sample = ForeachSampleInput(input, *args, **kwargs)
                 yield sample
                 if rightmost_arg_type == ForeachRightmostArgType.TensorList:
@@ -11884,7 +11896,8 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
         return np.stack(split_ret).reshape(orig_shape)
 
 def reference_hash_tensor(tensor, dim=(), keepdim=False, mode=0):
-    assert mode == 0, "Only mode=0 (xor_sum) is supported right now"
+    if mode != 0:
+        raise AssertionError(f"Only mode=0 (xor_sum) is supported right now, got mode={mode}")
 
     dtype = tensor.dtype
     if dtype.kind == 'f':
@@ -11937,7 +11950,8 @@ def reference_std_var(f):
 
     @wraps(g)
     def wrapper(x: npt.NDArray, *args, **kwargs):
-        assert not ('unbiased' in kwargs and 'correction' in kwargs)
+        if 'unbiased' in kwargs and 'correction' in kwargs:
+            raise AssertionError("Cannot specify both 'unbiased' and 'correction' in kwargs")
 
         if 'unbiased' in kwargs:
             kwargs['ddof'] = int(kwargs.pop('unbiased'))
@@ -27455,8 +27469,10 @@ def index_variable(shape, max_indices, device=torch.device('cpu')):
     return torch.testing.make_tensor(*shape, dtype=torch.long, device=device, low=0, high=max_indices)
 
 def gather_variable(shape, index_dim, max_indices, duplicate=False, device=torch.device('cpu')):
-    assert len(shape) == 2
-    assert index_dim < 2
+    if len(shape) != 2:
+        raise AssertionError(f"Expected len(shape) == 2, got {len(shape)}")
+    if index_dim >= 2:
+        raise AssertionError(f"Expected index_dim < 2, got {index_dim}")
     batch_dim = 1 - index_dim
     index = torch.zeros(*shape, dtype=torch.long, device=device)
     for i in range(shape[index_dim]):
@@ -27470,7 +27486,8 @@ def bernoulli_scalar():
     return torch.tensor(0, dtype=torch.bool).bernoulli_()
 
 def mask_not_all_zeros(shape):
-    assert len(shape) > 0
+    if len(shape) <= 0:
+        raise AssertionError(f"Expected len(shape) > 0, got {len(shape)}")
     while True:
         result = torch.randn(shape).gt(0)
         if result.sum() > 0:
@@ -27491,7 +27508,8 @@ def skipOps(test_case_name, base_test_name, to_skip):
         op_name, variant_name, device_type, dtypes, expected_failure = xfail
         matching_opinfos = [o for o in all_opinfos
                             if o.name == op_name and o.variant_test_name == variant_name]
-        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
+        if len(matching_opinfos) < 1:
+            raise AssertionError(f"Couldn't find OpInfo for {xfail}")
         for op in matching_opinfos:
             decorators = list(op.decorators)
             if expected_failure:

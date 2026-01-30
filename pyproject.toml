@@ -348,25 +348,32 @@ keep-runtime-typing = true
 "test/**" = [
     "S101"
 ]
-"torchgen/**" = [
-    "S101"
-]
 "torch/_dynamo/**" = ["S101"]
 "torch/_functorch/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
 "torch/fx/**" = ["S101"]
 "torch/jit/**" = ["S101"]
-"torch/onnx/_internal/**" = ["S101"]
 "torch/testing/**" = ["S101"]
+"torch/testing/_internal/opinfo/core.py" = []  # S101 migrated
+"torch/testing/_internal/custom_op_db.py" = []  # S101 migrated
+"torch/testing/_internal/common_methods_invocations.py" = []  # S101 migrated
+"torch/testing/_internal/opinfo/definitions/nested.py" = []  # S101 migrated
+"torch/testing/_internal/common_quantized.py" = []  # S101 migrated
+"torch/testing/_internal/common_nn.py" = []  # S101 migrated
+"torch/testing/_internal/common_quantization.py" = []  # S101 migrated
+"torch/testing/_internal/common_distributed.py" = []  # S101 migrated
+"torch/testing/_internal/common_fsdp.py" = []  # S101 migrated
+"torch/testing/_internal/composite_compliance.py" = []  # S101 migrated
+"torch/testing/_internal/two_tensor.py" = []  # S101 migrated
+"torch/testing/_internal/distributed/_tensor/common_dtensor.py" = []  # S101 migrated
+"torch/testing/_internal/hypothesis_utils.py" = []  # S101 migrated
+"torch/testing/_internal/optests/generate_tests.py" = []  # S101 migrated
+"torch/testing/_internal/opinfo/refs.py" = []  # S101 migrated
+"torch/testing/_internal/subclasses.py" = []  # S101 migrated
+"torch/testing/_internal/common_optimizers.py" = []  # S101 migrated
 "torch/_export/db/examples/dynamic_shape_assert.py" = ["S101"]
 "torch/_export/db/examples/list_contains.py" = ["S101"]
-"tools/**" = [
-    "S101"
-]
-"functorch/**" = [
-    "S101"
-]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
