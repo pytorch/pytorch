@@ -2871,7 +2871,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 try:
                     M, K = input_nodes[-2].get_size()[:2]
                     N = input_nodes[-1].get_size()[-1]
-                    append_to_log(mm_file_name, {"invoke": str((M, K, N)), "kernel_type": name})
+                    append_to_log(
+                        mm_file_name, {"invoke": str((M, K, N)), "kernel_type": name}
+                    )
                 except (ValueError, IndexError):
                     # Skip logging if inputs don't match MM pattern
                     pass
@@ -4174,7 +4176,8 @@ class AlgorithmSelectorCache(PersistentCache):
         name: str, input_nodes: list[ir.IRNode], timings: dict[ChoiceCaller, float]
     ) -> None:
         flex_attention_filename = get_flex_attention_log_filename()
-        if not flex_attention_filename or "flex_attention" not in name:
+        # Support both flex_attention and flex_decoding
+        if not flex_attention_filename or ("flex_attention" not in name and "flex_decoding" not in name):
             return
 
         if len(input_nodes) < 3:
@@ -4192,7 +4195,7 @@ class AlgorithmSelectorCache(PersistentCache):
         seq_len_kv = key_size[2]
         v_head_dim = value_size[3]
 
-        kernel_type = "backward" if "backward" in name else "forward"
+        kernel_type = "backward" if "backward" in name else ("decode" if "decoding" in name else "forward")
         dims_key = str(
             (
                 kernel_type,
