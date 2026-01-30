@@ -433,6 +433,9 @@ class FrameSummaryVariable(VariableTracker):
         super().__init__(**kwargs)
         self.frame_summary = frame_summary
 
+    def python_type(self) -> type:
+        return traceback.FrameSummary
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "lineno":
             return variables.ConstantVariable.create(self.frame_summary.lineno)
@@ -483,7 +486,7 @@ class TracebackVariable(VariableTracker):
             return [self.frame_summary]
         return [self.frame_summary] + self.tb_next.extract_tb()
 
-    def has_reference_cycle(self, tb: "TracebackVariable") -> bool:
+    def has_reference_cycle(self, tb: VariableTracker) -> bool:
         # checks if `tb` is in the chain of tb_next starting from `self`
         curr_tb: TracebackVariable | ConstantVariable = self
         while istype(curr_tb, TracebackVariable):
@@ -505,7 +508,7 @@ class TracebackVariable(VariableTracker):
         if name == "tb_next":
             if not self.is_valid_traceback(val):
                 raise_observed_exception(TypeError, tx)
-            assert isinstance(val, TracebackVariable)
+            assert isinstance(val, (TracebackVariable, ConstantVariable))
             if self.has_reference_cycle(val) or (
                 istype(val, TracebackVariable) and val.has_reference_cycle(self)
             ):
@@ -579,7 +582,7 @@ class ExceptionVariable(VariableTracker):
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
 
-    def set_context(self, context: "ExceptionVariable") -> None:
+    def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -617,7 +620,8 @@ class ExceptionVariable(VariableTracker):
 
         name = name_var.as_python_constant()
         if name == "__context__":
-            assert isinstance(val, ExceptionVariable)
+            # Constant can be either an Exceptior or None
+            assert isinstance(val, (ExceptionVariable, ConstantVariable))
             self.set_context(val)
         elif name == "__cause__":
             if val.is_constant_none() or isinstance(
@@ -1474,6 +1478,35 @@ class MethodWrapperVariable(VariableTracker):
                     "Make sure your call to type.__dict__['__annotations__'] only has "
                     "one positional argument (no keyword arguments).",
                     "Make sure the argument to type.__dict__['__annotations__'] is a constant "
+                    "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        elif (self_obj is type.__dict__["__mro__"] and wrapper_name == "__get__") or (
+            self_obj is type.__dict__["__dict__"] and wrapper_name == "__get__"
+        ):
+            from .builder import SourcelessBuilder
+
+            if len(args) == 1 and not kwargs:
+                try:
+                    return SourcelessBuilder.create(
+                        tx, self.method_wrapper(args[0].as_python_constant())
+                    )
+                except AsPythonConstantNotImplementedError:
+                    pass
+
+            attr_name = (
+                "__mro__" if self_obj is type.__dict__["__mro__"] else "__dict__"
+            )
+            unimplemented(
+                gb_type=f"unsupported type.__dict__['{attr_name}'].__get__ call",
+                context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
+                explanation=f"`torch.compile` only supports calling type.__dict__['{attr_name}'].__get__ "
+                "on a single constant argument (i.e. a type).",
+                hints=[
+                    f"Make sure your call to type.__dict__['{attr_name}'].__get__ only has "
+                    "one positional argument (no keyword arguments).",
+                    f"Make sure the argument to type.__dict__['{attr_name}'].__get__ is a constant "
                     "(i.e. type). For example, `object`, `int`, `MyCustomClass`.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
