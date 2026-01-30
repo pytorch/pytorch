@@ -90,6 +90,26 @@ def has_any_partial(input_placements, output_placement) -> bool:
     return False
 
 
+def _parse_placement(s: str):
+    """Parse a placement string back to a placement object.
+
+    Placement strings are: R, S(dim), P(reduce_op)
+    """
+    import re
+    s = s.strip()
+    if s == "R":
+        return Replicate()
+    elif s.startswith("S("):
+        m = re.match(r"S\((\d+)\)", s)
+        if m:
+            return Shard(int(m.group(1)))
+    elif s.startswith("P("):
+        m = re.match(r"P\((\w+)\)", s)
+        if m:
+            return Partial(m.group(1))
+    return None
+
+
 def negate_scalar_tensors(tensors: list) -> list:
     """Return a new list with scalar tensors negated."""
     result = []
@@ -338,9 +358,20 @@ def compare_operator(
     world_size: int = 2,
     max_samples: int = None,
     verbose: bool = False,
+    incorrect_only: bool = False,
 ):
     """
     Compare DTensor's sharding rules against ground truth for an operator.
+
+    Args:
+        op_name: Name of the operator to test
+        device: Device to run on
+        dtype: Data type for tensors
+        world_size: Simulated world size
+        max_samples: Maximum number of samples to test per OpInfo
+        verbose: Print detailed output
+        incorrect_only: If True, only test DTensor's claimed rules for correctness.
+            Skips exhaustive search for missing rules (much faster).
     """
     # Check if op should be skipped
     if op_name in SKIP_OPS:
@@ -592,7 +623,7 @@ def compare_operator(
                         print(f"        Error querying op_strategy: {e}")
             strategy_query_time += time.time() - strategy_start
 
-            # Compute ground truth for all combinations
+            # Compute ground truth validation
             ground_truth_valid = set()  # Set of (input_placements, output_placement) strings
 
             gt_start = time.time()
@@ -601,56 +632,70 @@ def compare_operator(
             with LocalTensorMode(frozenset(range(world_size))):
                 mesh = init_device_mesh(device, (world_size,))
 
-                for input_placements in itertools.product(*input_placement_options):
-                    if is_fully_replicated(input_placements):
-                        continue
+                if incorrect_only:
+                    # Fast mode: only test DTensor's claimed rules
+                    combinations_to_test = []
+                    for combo_key in dtensor_rules:
+                        input_plc_strs, output_plc_str = combo_key
+                        # Parse placement strings back to objects
+                        input_plcs = tuple(_parse_placement(s) for s in input_plc_strs)
+                        output_plc = _parse_placement(output_plc_str)
+                        if input_plcs and output_plc:
+                            combinations_to_test.append((input_plcs, output_plc, combo_key))
+                else:
+                    # Full mode: test all possible combinations
+                    combinations_to_test = []
+                    for input_placements in itertools.product(*input_placement_options):
+                        if is_fully_replicated(input_placements):
+                            continue
+                        for output_placement in output_placement_options:
+                            combo_key = (
+                                tuple(str(p) for p in input_placements),
+                                str(output_placement)
+                            )
+                            combinations_to_test.append((input_placements, output_placement, combo_key))
 
-                    for output_placement in output_placement_options:
-                        total_combinations += 1
-                        combo = PlacementCombination(input_placements, output_placement)
+                for input_placements, output_placement, combo_key in combinations_to_test:
+                    total_combinations += 1
+                    combo = PlacementCombination(input_placements, output_placement)
 
-                        # Validate using ground truth, passing pre-created mesh
-                        is_valid, error_msg = validate_combination(
-                            op, sample, tensors, combo, ground_truth, world_size, mesh
+                    # Validate using ground truth, passing pre-created mesh
+                    is_valid, error_msg = validate_combination(
+                        op, sample, tensors, combo, ground_truth, world_size, mesh
+                    )
+
+                    # For P(min)/P(max) combinations, also test with fully negated inputs
+                    # to catch sign-dependent behavior (e.g., R / P(max) -> P(max))
+                    if is_valid and fully_negated_sample and has_pmin_pmax(input_placements, output_placement):
+                        negated_combo = PlacementCombination(input_placements, output_placement)
+                        negated_valid, _ = validate_combination(
+                            op, fully_negated_sample, fully_negated_tensors, negated_combo,
+                            fully_negated_ground_truth, world_size, mesh
                         )
+                        is_valid = is_valid and negated_valid
 
-                        # For P(min)/P(max) combinations, also test with fully negated inputs
-                        # to catch sign-dependent behavior (e.g., R / P(max) -> P(max))
-                        if is_valid and fully_negated_sample and has_pmin_pmax(input_placements, output_placement):
-                            negated_combo = PlacementCombination(input_placements, output_placement)
-                            negated_valid, _ = validate_combination(
-                                op, fully_negated_sample, fully_negated_tensors, negated_combo,
-                                fully_negated_ground_truth, world_size, mesh
-                            )
-                            is_valid = is_valid and negated_valid
-
-                        # For samples with rounding_mode, check if the non-rounded version also passes
-                        # If rounded passes but non-rounded fails, the rounding is masking real differences
-                        if is_valid and non_rounded_sample and has_any_partial(input_placements, output_placement):
-                            non_rounded_combo = PlacementCombination(input_placements, output_placement)
-                            non_rounded_valid, _ = validate_combination(
-                                op, non_rounded_sample, tensors, non_rounded_combo,
-                                non_rounded_ground_truth, world_size, mesh
-                            )
-                            is_valid = is_valid and non_rounded_valid
-
-                        # Also check non-rounded negated to catch rounding-masked sign issues
-                        if is_valid and non_rounded_negated_sample and has_pmin_pmax(input_placements, output_placement):
-                            non_rounded_negated_combo = PlacementCombination(input_placements, output_placement)
-                            non_rounded_negated_valid, _ = validate_combination(
-                                op, non_rounded_negated_sample, non_rounded_negated_tensors,
-                                non_rounded_negated_combo, non_rounded_negated_ground_truth,
-                                world_size, mesh
-                            )
-                            is_valid = is_valid and non_rounded_negated_valid
-
-                        combo_key = (
-                            tuple(str(p) for p in input_placements),
-                            str(output_placement)
+                    # For samples with rounding_mode, check if the non-rounded version also passes
+                    # If rounded passes but non-rounded fails, the rounding is masking real differences
+                    if is_valid and non_rounded_sample and has_any_partial(input_placements, output_placement):
+                        non_rounded_combo = PlacementCombination(input_placements, output_placement)
+                        non_rounded_valid, _ = validate_combination(
+                            op, non_rounded_sample, tensors, non_rounded_combo,
+                            non_rounded_ground_truth, world_size, mesh
                         )
+                        is_valid = is_valid and non_rounded_valid
 
-                        if is_valid:
-                            ground_truth_valid.add(combo_key)
+                    # Also check non-rounded negated to catch rounding-masked sign issues
+                    if is_valid and non_rounded_negated_sample and has_pmin_pmax(input_placements, output_placement):
+                        non_rounded_negated_combo = PlacementCombination(input_placements, output_placement)
+                        non_rounded_negated_valid, _ = validate_combination(
+                            op, non_rounded_negated_sample, non_rounded_negated_tensors,
+                            non_rounded_negated_combo, non_rounded_negated_ground_truth,
+                            world_size, mesh
+                        )
+                        is_valid = is_valid and non_rounded_negated_valid
+
+                    if is_valid:
+                        ground_truth_valid.add(combo_key)
             ground_truth_time += time.time() - gt_start
 
             # Compare ground truth vs DTensor rules
@@ -779,11 +824,39 @@ def compare_operator(
     return stats
 
 
+def get_registered_op_names():
+    """Get all op names that have DTensor sharding rules and also have OpInfo."""
+    from torch.distributed.tensor._api import DTensor
+
+    propagator = DTensor._op_dispatcher.sharding_propagator
+
+    # Get all registered aten ops
+    all_registered = (
+        set(propagator.op_single_dim_strategy_funcs.keys()) |
+        set(propagator.op_strategy_funcs.keys())
+    )
+
+    # Extract base names (aten.mul.Tensor -> mul)
+    base_names = set()
+    for op in all_registered:
+        parts = str(op).split('.')
+        if len(parts) >= 2:
+            base_names.add(parts[1])
+
+    # Find which ones have OpInfo
+    opinfo_names = set(op.name for op in op_db)
+    return sorted(base_names & opinfo_names)
+
+
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Compare DTensor rules against ground truth")
-    parser.add_argument("--op", default="add", help="Operator name to compare")
+    parser.add_argument("--op", default=None, help="Operator name to compare")
+    parser.add_argument("--all-registered", action="store_true",
+                        help="Test all ops with DTensor sharding rules registered")
+    parser.add_argument("--incorrect-only", action="store_true",
+                        help="Only test DTensor's claimed rules (faster, skips missing detection)")
     parser.add_argument("--device", default="cpu", help="Device to use")
     parser.add_argument("--dtype", default="float32", help="Dtype to use")
     parser.add_argument("--world-size", type=int, default=2, help="Simulated world size")
@@ -799,15 +872,72 @@ if __name__ == "__main__":
     }
     dtype = dtype_map.get(args.dtype, torch.float32)
 
-    print(f"Comparing operator: {args.op}")
-    print(f"Device: {args.device}, Dtype: {dtype}")
-    print("=" * 70)
+    if args.all_registered:
+        # Test all ops with registered sharding rules
+        op_names = get_registered_op_names()
+        print(f"Testing {len(op_names)} ops with DTensor sharding rules")
+        if args.incorrect_only:
+            print("Mode: incorrect-only (fast)")
+        print(f"Device: {args.device}, Dtype: {dtype}")
+        print("=" * 70)
 
-    compare_operator(
-        args.op,
-        args.device,
-        dtype,
-        args.world_size,
-        args.max_samples,
-        args.verbose,
-    )
+        total_stats = ComparisonStats()
+        ops_with_errors = []
+
+        for i, op_name in enumerate(op_names):
+            if op_name in SKIP_OPS:
+                continue
+
+            print(f"\n[{i+1}/{len(op_names)}] {op_name}")
+            try:
+                stats = compare_operator(
+                    op_name,
+                    args.device,
+                    dtype,
+                    args.world_size,
+                    args.max_samples,
+                    args.verbose,
+                    args.incorrect_only,
+                )
+                total_stats.true_positives += stats.true_positives
+                total_stats.false_positives.extend(stats.false_positives)
+                total_stats.false_negatives.extend(stats.false_negatives)
+
+                if stats.false_positives:
+                    ops_with_errors.append((op_name, len(stats.false_positives)))
+            except Exception as e:
+                print(f"  Error: {e}")
+
+        # Final summary
+        print("\n" + "=" * 70)
+        print("OVERALL SUMMARY")
+        print("=" * 70)
+        print(f"Total ops tested: {len(op_names)}")
+        print(f"Total true positives: {total_stats.true_positives}")
+        print(f"Total incorrect rules: {len(total_stats.false_positives)}")
+        if not args.incorrect_only:
+            print(f"Total missing rules: {len(total_stats.false_negatives)}")
+
+        if ops_with_errors:
+            print(f"\nOps with INCORRECT rules ({len(ops_with_errors)}):")
+            for op_name, count in sorted(ops_with_errors, key=lambda x: -x[1]):
+                print(f"  {op_name}: {count}")
+
+    else:
+        # Test a single operator
+        op_name = args.op or "add"
+        print(f"Comparing operator: {op_name}")
+        if args.incorrect_only:
+            print("Mode: incorrect-only (fast)")
+        print(f"Device: {args.device}, Dtype: {dtype}")
+        print("=" * 70)
+
+        compare_operator(
+            op_name,
+            args.device,
+            dtype,
+            args.world_size,
+            args.max_samples,
+            args.verbose,
+            args.incorrect_only,
+        )
