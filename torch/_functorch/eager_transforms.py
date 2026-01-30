@@ -1424,7 +1424,7 @@ def grad_and_value_impl(
     has_aux: bool,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-) -> tuple[Any, tuple[Any, Any]] | tuple[Any, Any]:
+) -> tuple[Any, Any]:
     with grad_increment_nesting() as level:
         output, aux, grad_input = None, None, None
         # See NOTE [grad and vjp interaction with no_grad]
