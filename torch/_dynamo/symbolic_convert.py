@@ -4858,6 +4858,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return tracer.inline_call_()
 
         # Profiler enabled: collect timing data
+        # Ensure profiler state is initialized
+        tc = TracingContext.get()
+        if tc.profiler_state is None:
+            from torch._guards import DynamoProfilerState
+            tc.profiler_state = DynamoProfilerState()
+
         code = func.get_code()
 
         # Get caller info and full call stack before we push ourselves
